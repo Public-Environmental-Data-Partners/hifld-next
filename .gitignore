@@ -1,0 +1,21 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Docker volumes data (optional - you may want to keep these)
+# Uncomment if you don't want to track volume data
+# postgres_data/
+# geoserver_data/
+# seaweedfs_*_data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
