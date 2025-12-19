@@ -3,7 +3,8 @@ import { datasetsTable, type Dataset, type NewDataset } from "@/db/schema";
 import { eq, like, or, sql } from "drizzle-orm";
 
 // GeoServer configuration from environment
-const GEOSERVER_URL = process.env.GEOSERVER_URL || "http://localhost:8080/geoserver";
+const GEOSERVER_URL =
+  process.env.GEOSERVER_URL || "http://localhost:8080/geoserver";
 const GEOSERVER_USER = process.env.GEOSERVER_USER || "admin";
 const GEOSERVER_PASSWORD = process.env.GEOSERVER_PASSWORD || "geoserver";
 const GEOSERVER_WORKSPACE = process.env.GEOSERVER_WORKSPACE || "hifld";
@@ -13,7 +14,7 @@ const GEOSERVER_WORKSPACE = process.env.GEOSERVER_WORKSPACE || "hifld";
 function toDockerHostUrl(url: string): string {
   // Replace localhost with host.docker.internal for Docker access
   let dockerUrl = url.replace(/localhost/g, "host.docker.internal");
-  
+
   // Also handle filer URL format if present (convert /buckets/ path)
   // The filer URL format is http://localhost:8888/buckets/hifld/...
   // We keep this format as GeoServer can access via HTTP
@@ -50,7 +51,9 @@ export async function getDatasetById(id: number): Promise<Dataset | undefined> {
 }
 
 // Get a single dataset by name
-export async function getDatasetByName(name: string): Promise<Dataset | undefined> {
+export async function getDatasetByName(
+  name: string
+): Promise<Dataset | undefined> {
   const results = await db
     .select()
     .from(datasetsTable)
@@ -118,7 +121,9 @@ function getGeoServerAuthHeader(): string {
 }
 
 // Check if GeoServer workspace exists
-export async function checkWorkspaceExists(workspace: string): Promise<boolean> {
+export async function checkWorkspaceExists(
+  workspace: string
+): Promise<boolean> {
   try {
     const response = await fetch(
       `${GEOSERVER_URL}/rest/workspaces/${workspace}`,
@@ -137,7 +142,9 @@ export async function checkWorkspaceExists(workspace: string): Promise<boolean> 
 }
 
 // Create GeoServer workspace if it doesn't exist
-export async function ensureWorkspaceExists(workspace: string): Promise<boolean> {
+export async function ensureWorkspaceExists(
+  workspace: string
+): Promise<boolean> {
   const exists = await checkWorkspaceExists(workspace);
   if (exists) return true;
 
@@ -161,7 +168,9 @@ export async function ensureWorkspaceExists(workspace: string): Promise<boolean>
 }
 
 // Create a PMTiles store in GeoServer
-export async function createPMTilesStore(config: GeoServerStoreConfig): Promise<boolean> {
+export async function createPMTilesStore(
+  config: GeoServerStoreConfig
+): Promise<boolean> {
   await ensureWorkspaceExists(config.workspace);
 
   try {
@@ -178,9 +187,7 @@ export async function createPMTilesStore(config: GeoServerStoreConfig): Promise<
             name: config.storeName,
             type: "PMTiles",
             connectionParameters: {
-              entry: [
-                { "@key": "url", "$": config.pmtilesUrl },
-              ],
+              entry: [{ "@key": "url", $: config.pmtilesUrl }],
             },
           },
         }),
@@ -219,8 +226,8 @@ export async function createGeoParquetStore(
             enabled: true,
             connectionParameters: {
               entry: [
-                { "@key": "dbtype", "$": "geoparquet" },
-                { "@key": "uri", "$": dockerUrl },
+                { "@key": "dbtype", $: "geoparquet" },
+                { "@key": "uri", $: dockerUrl },
               ],
             },
           },
@@ -233,9 +240,57 @@ export async function createGeoParquetStore(
   }
 }
 
-// Publish a layer from a store
-export async function publishLayer(config: GeoServerLayerConfig): Promise<boolean> {
+// Get available feature types from a store
+async function getAvailableFeatureTypes(
+  workspace: string,
+  storeName: string
+): Promise<string[]> {
   try {
+    const response = await fetch(
+      `${GEOSERVER_URL}/rest/workspaces/${workspace}/datastores/${storeName}/featuretypes.json?list=available`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: getGeoServerAuthHeader(),
+          Accept: "application/json",
+        },
+      }
+    );
+    if (response.ok) {
+      const data = await response.json();
+      if (data.list && data.list.string) {
+        return Array.isArray(data.list.string)
+          ? data.list.string
+          : [data.list.string];
+      }
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+// Publish a layer from a store
+export async function publishLayer(
+  config: GeoServerLayerConfig
+): Promise<boolean> {
+  try {
+    // Get available native names from the store
+    const availableTypes = await getAvailableFeatureTypes(
+      config.workspace,
+      config.storeName
+    );
+
+    // Use the first available type as native name, or convert hyphens to underscores
+    let nativeName = config.layerName.replace(/-/g, "_");
+    if (availableTypes.length > 0) {
+      // Prefer an exact match or the first available
+      const exactMatch = availableTypes.find(
+        (t) => t === nativeName || t === config.layerName
+      );
+      nativeName = exactMatch || availableTypes[0];
+    }
+
     const response = await fetch(
       `${GEOSERVER_URL}/rest/workspaces/${config.workspace}/datastores/${config.storeName}/featuretypes`,
       {
@@ -247,7 +302,7 @@ export async function publishLayer(config: GeoServerLayerConfig): Promise<boolea
         body: JSON.stringify({
           featureType: {
             name: config.layerName,
-            nativeName: config.layerName,
+            nativeName: nativeName,
             enabled: true,
           },
         }),
@@ -262,6 +317,11 @@ export async function publishLayer(config: GeoServerLayerConfig): Promise<boolea
 // Get the OGC Feature API URL for a layer
 export function getFeatureApiUrl(workspace: string, layerName: string): string {
   return `${GEOSERVER_URL}/${workspace}/ogc/features/v1/collections/${layerName}`;
+}
+
+// Get the OWS (WMS/WFS) service endpoint URL for a specific layer
+export function getOwsUrl(workspace: string, layerName: string): string {
+  return `${GEOSERVER_URL}/${workspace}/${layerName}/ows`;
 }
 
 // Register a dataset in the catalog and optionally add to GeoServer
@@ -282,13 +342,15 @@ export async function registerDataset(
       storeName,
       data.geoparquetUrl
     );
-    
+
     if (storeCreated) {
       geoserverSuccess = await publishLayer({
         workspace,
         storeName,
         layerName,
       });
+    } else {
+      throw new Error("Failed to create store");
     }
   }
 
@@ -298,7 +360,9 @@ export async function registerDataset(
     geoserverWorkspace: workspace,
     geoserverStore: storeName,
     geoserverLayer: layerName,
-    featureUrl: geoserverSuccess ? getFeatureApiUrl(workspace, layerName) : undefined,
+    featureUrl: geoserverSuccess
+      ? getFeatureApiUrl(workspace, layerName)
+      : undefined,
     status: geoserverSuccess ? "ready" : data.status,
   });
 
@@ -340,4 +404,3 @@ export async function getDatasetStats(): Promise<{
 
   return stats;
 }
-

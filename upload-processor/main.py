@@ -49,7 +49,7 @@ class ProcessResponse(BaseModel):
 def load_parquet(url: str) -> gpd.GeoDataFrame:
     """
     Load a parquet file directly using geopandas.
-    
+
     GeoPandas/PyArrow can read directly from:
     - gs:// URLs (Google Cloud Storage) - uses anonymous access for public buckets
     - s3:// URLs (AWS S3)
@@ -57,53 +57,59 @@ def load_parquet(url: str) -> gpd.GeoDataFrame:
     - Local file paths
     """
     logger.info(f"Loading parquet from: {url}")
-    
+
     if url.startswith("gs://"):
         # Use pyarrow with anonymous credentials for public GCS buckets
         import pyarrow.parquet as pq
         from pyarrow import fs
         import pandas as pd
         from shapely import wkb
-        
+
         # Parse gs://bucket/path
         parts = url[5:].split("/", 1)
         bucket = parts[0]
         path = parts[1] if len(parts) > 1 else ""
-        
+
         # Create anonymous GCS filesystem
         gcs = fs.GcsFileSystem(anonymous=True)
-        
+
         # Read parquet to pandas DataFrame
         table = pq.read_table(f"{bucket}/{path}", filesystem=gcs)
         df = table.to_pandas()
-        
+
         # Find geometry column (usually 'geometry' or 'geom')
         geom_col = None
-        for col in ['geometry', 'geom', 'the_geom', 'shape']:
+        for col in ["geometry", "geom", "the_geom", "shape"]:
             if col in df.columns:
                 geom_col = col
                 break
-        
+
         if geom_col is None:
             # Look for WKB binary columns
             for col in df.columns:
-                if df[col].dtype == 'object' and len(df) > 0:
+                if df[col].dtype == "object" and len(df) > 0:
                     sample = df[col].iloc[0]
                     if isinstance(sample, bytes):
                         geom_col = col
                         break
-        
+
         if geom_col is not None:
             # Convert WKB to shapely geometries
-            df['geometry'] = df[geom_col].apply(lambda x: wkb.loads(x) if isinstance(x, bytes) else x)
-            if geom_col != 'geometry':
+            df["geometry"] = df[geom_col].apply(
+                lambda x: wkb.loads(x) if isinstance(x, bytes) else x
+            )
+            if geom_col != "geometry":
                 df = df.drop(columns=[geom_col])
-            gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
+            gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
         else:
             # No geometry found, create empty geometry
             logger.warning("No geometry column found, creating empty geometries")
-            gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy([0]*len(df), [0]*len(df)), crs="EPSG:4326")
-        
+            gdf = gpd.GeoDataFrame(
+                df,
+                geometry=gpd.points_from_xy([0] * len(df), [0] * len(df)),
+                crs="EPSG:4326",
+            )
+
         logger.info(f"Loaded {len(gdf)} features from GCS")
         return gdf
     else:
@@ -204,6 +210,27 @@ async def process_dataset(request: ProcessRequest):
                 gdf = gdf.set_crs("EPSG:4326")
             elif gdf.crs != "EPSG:4326":
                 gdf = gdf.to_crs("EPSG:4326")
+
+            # Ensure 'id' column exists (required by GeoServer's GeoParquet plugin)
+            if "id" not in gdf.columns:
+                # Try to use an existing ID-like column
+                id_candidates = ["OBJECTID", "FID", "fid", "GlobalID", "gid", "ogc_fid"]
+                id_col = None
+                for candidate in id_candidates:
+                    if candidate in gdf.columns:
+                        id_col = candidate
+                        break
+
+                if id_col:
+                    gdf["id"] = gdf[id_col]
+                    logger.info(f"Using '{id_col}' as 'id' column")
+                else:
+                    gdf["id"] = range(1, len(gdf) + 1)
+                    logger.info("Created sequential 'id' column")
+
+            # Move 'id' column to the front
+            cols = ["id"] + [c for c in gdf.columns if c != "id"]
+            gdf = gdf[cols]
 
             # 3. Create optimized GeoParquet
             logger.info(f"Processing {request.name}: creating GeoParquet...")

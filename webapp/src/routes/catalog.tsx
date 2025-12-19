@@ -42,10 +42,36 @@ import {
 import { getDatasets, getDatasetStats } from "@/lib/datasets";
 import type { Dataset } from "@/db/schema";
 
-const fetchDatasets = createServerFn({ method: "GET" })
-  .inputValidator((search: string | undefined) => search)
-  .handler(async ({ data: search }) => {
-    return getDatasets(search);
+// Client-side URL generators for direct GeoServer access
+const GEOSERVER_BASE_URL = "http://localhost:8080/geoserver";
+
+function getWfsUrl(workspace: string, layerName: string): string {
+  // Dataset-specific WFS virtual service
+  return `${GEOSERVER_BASE_URL}/${workspace}/${layerName}/wfs`;
+}
+
+function getWmsUrl(workspace: string, layerName: string): string {
+  // Dataset-specific WMS virtual service
+  return `${GEOSERVER_BASE_URL}/${workspace}/${layerName}/wms`;
+}
+
+function getFullLayerName(workspace: string, layerName: string): string {
+  return `${workspace}:${layerName}`;
+}
+
+const fetchDatasets = createServerFn({ method: "GET" }).handler(async () => {
+  return getDatasets(undefined);
+});
+
+const searchDatasets = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown): string => {
+    if (typeof input === "string") {
+      return input.trim();
+    }
+    return "";
+  })
+  .handler(async ({ data }) => {
+    return getDatasets(data || undefined);
   });
 
 const fetchStats = createServerFn({ method: "GET" }).handler(async () => {
@@ -59,7 +85,16 @@ export const Route = createFileRoute("/catalog")({
       fetchDatasets(),
       fetchStats(),
     ]);
-    return { datasets, stats };
+    return {
+      datasets: datasets || [],
+      stats: stats || {
+        total: 0,
+        ready: 0,
+        pending: 0,
+        processing: 0,
+        error: 0,
+      },
+    };
   },
 });
 
@@ -108,6 +143,20 @@ function DatasetCard({ dataset }: { dataset: Dataset }) {
     .replace(/&nbsp;/g, " ")
     .trim();
 
+  // Generate GeoServer URLs if workspace and layer are available
+  const wfsUrl =
+    dataset.geoserverWorkspace && dataset.geoserverLayer
+      ? getWfsUrl(dataset.geoserverWorkspace, dataset.geoserverLayer)
+      : null;
+  const wmsUrl =
+    dataset.geoserverWorkspace && dataset.geoserverLayer
+      ? getWmsUrl(dataset.geoserverWorkspace, dataset.geoserverLayer)
+      : null;
+  const fullLayerName =
+    dataset.geoserverWorkspace && dataset.geoserverLayer
+      ? getFullLayerName(dataset.geoserverWorkspace, dataset.geoserverLayer)
+      : null;
+
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -139,11 +188,17 @@ function DatasetCard({ dataset }: { dataset: Dataset }) {
                   GeoParquet
                 </Badge>
               )}
-              {dataset.featureUrl && (
-                <Badge variant="secondary" className="text-xs">
-                  <Globe className="h-3 w-3 mr-1" />
-                  WFS
-                </Badge>
+              {dataset.geoserverWorkspace && dataset.geoserverLayer && (
+                <>
+                  <Badge variant="secondary" className="text-xs">
+                    <Globe className="h-3 w-3 mr-1" />
+                    WFS
+                  </Badge>
+                  <Badge variant="secondary" className="text-xs">
+                    <Map className="h-3 w-3 mr-1" />
+                    WMS
+                  </Badge>
+                </>
               )}
             </div>
           </CardContent>
@@ -198,7 +253,8 @@ function DatasetCard({ dataset }: { dataset: Dataset }) {
 
             {(dataset.pmtilesUrl ||
               dataset.geoparquetUrl ||
-              dataset.featureUrl) && (
+              wfsUrl ||
+              wmsUrl) && (
               <>
                 <Separator />
                 <div>
@@ -253,22 +309,59 @@ function DatasetCard({ dataset }: { dataset: Dataset }) {
                         </div>
                       </div>
                     )}
-                    {dataset.featureUrl && (
+                    {wfsUrl && fullLayerName && (
                       <div className="flex items-start gap-2 p-3 rounded-md border">
                         <Globe className="h-4 w-4 shrink-0 mt-0.5" />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium mb-1">
-                            OGC Features API
+                            WFS (Feature Service)
                           </p>
                           <p className="text-xs text-muted-foreground break-all">
-                            {dataset.featureUrl}
+                            {wfsUrl}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Layer:{" "}
+                            <code className="bg-muted px-1 rounded">
+                              {fullLayerName}
+                            </code>
                           </p>
                         </div>
                         <div className="flex shrink-0 gap-1">
-                          <CopyButton value={dataset.featureUrl} label="URL" />
+                          <CopyButton value={wfsUrl} label="URL" />
                           <Button variant="ghost" size="sm" asChild>
                             <a
-                              href={dataset.featureUrl}
+                              href={`${wfsUrl}?service=WFS&request=GetCapabilities`}
+                              target="_blank"
+                              rel="noopener"
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    {wmsUrl && fullLayerName && (
+                      <div className="flex items-start gap-2 p-3 rounded-md border">
+                        <Map className="h-4 w-4 shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium mb-1">
+                            WMS (Map Service)
+                          </p>
+                          <p className="text-xs text-muted-foreground break-all">
+                            {wmsUrl}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Layer:{" "}
+                            <code className="bg-muted px-1 rounded">
+                              {fullLayerName}
+                            </code>
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 gap-1">
+                          <CopyButton value={wmsUrl} label="URL" />
+                          <Button variant="ghost" size="sm" asChild>
+                            <a
+                              href={`${wmsUrl}?service=WMS&request=GetCapabilities`}
                               target="_blank"
                               rel="noopener"
                             >
@@ -299,15 +392,29 @@ function DatasetCard({ dataset }: { dataset: Dataset }) {
 function CatalogPage() {
   const { datasets: initialDatasets, stats } = Route.useLoaderData();
   const [searchQuery, setSearchQuery] = useState("");
-  const [datasets, setDatasets] = useState<Dataset[]>(initialDatasets);
+  const [datasets, setDatasets] = useState<Dataset[]>(initialDatasets || []);
   const [isSearching, setIsSearching] = useState(false);
+
+  const safeStats = stats || {
+    total: 0,
+    ready: 0,
+    pending: 0,
+    processing: 0,
+    error: 0,
+  };
 
   const handleSearch = async (query: string) => {
     setSearchQuery(query);
     setIsSearching(true);
     try {
-      const results = await fetchDatasets({ data: query || undefined });
-      setDatasets(results);
+      const trimmedQuery = query.trim();
+      const results = trimmedQuery
+        ? await searchDatasets({ data: trimmedQuery })
+        : await fetchDatasets();
+      setDatasets(results || []);
+    } catch (error) {
+      console.error("Search error:", error);
+      setDatasets([]);
     } finally {
       setIsSearching(false);
     }
@@ -331,7 +438,7 @@ function CatalogPage() {
               <div className="text-muted-foreground mb-2">
                 <Database className="h-8 w-8" />
               </div>
-              <CardTitle className="text-3xl">{stats.total}</CardTitle>
+              <CardTitle className="text-3xl">{safeStats.total}</CardTitle>
               <CardDescription>Total Datasets</CardDescription>
             </CardHeader>
           </Card>
@@ -341,7 +448,7 @@ function CatalogPage() {
                 <Check className="h-8 w-8" />
               </div>
               <CardTitle className="text-3xl text-green-600">
-                {stats.ready}
+                {safeStats.ready}
               </CardTitle>
               <CardDescription>Ready</CardDescription>
             </CardHeader>
@@ -352,7 +459,7 @@ function CatalogPage() {
                 <Loader2 className="h-8 w-8" />
               </div>
               <CardTitle className="text-3xl text-yellow-600">
-                {stats.pending + stats.processing}
+                {safeStats.pending + safeStats.processing}
               </CardTitle>
               <CardDescription>Processing</CardDescription>
             </CardHeader>
