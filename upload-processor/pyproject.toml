@@ -20,6 +20,7 @@ dependencies = [
     "sqlglot[rs]>=28.1.0",
     "duckdb>=1.4.2",
     "geopandas>=1.1.1",
+    "aiobotocore>=3.0.0",
 ]
 
 [project.optional-dependencies]

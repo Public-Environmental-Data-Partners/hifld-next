@@ -49,8 +49,6 @@ services:
       - "${GEOSERVER_PORT:-8080}:8080"
     volumes:
       - geoserver_data:/var/local/geoserver
-      # Mount SeaweedFS data if needed for GeoServer to access files
-      - seaweedfs_volume_data:/mnt/seaweedfs:ro
     depends_on:
       geoserver-postgres:
         condition: service_healthy
@@ -58,6 +56,8 @@ services:
     # For Cloud SQL, remove this dependency and configure connection manually
     networks:
       - hifld-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/geoserver"]
       interval: 30s
@@ -96,10 +96,12 @@ services:
   seaweedfs-filer:
     image: chrislusf/seaweedfs:latest
     container_name: hifld-seaweedfs-filer
-    command: filer -master=seaweedfs-master:9333
+    command: filer -master=seaweedfs-master:9333 -s3
     ports:
-      - "8888:8888"
+      - "8888:8888" # Filer HTTP API
       - "8333:8333" # S3 API port
+    volumes:
+      - seaweedfs_filer_data:/data
     depends_on:
       - seaweedfs-master
       - seaweedfs-volume
@@ -114,6 +116,8 @@ volumes:
   seaweedfs_master_data:
     driver: local
   seaweedfs_volume_data:
+    driver: local
+  seaweedfs_filer_data:
     driver: local
 
 networks:

@@ -1,0 +1,3 @@
+# Dataset import script dependencies
+httpx>=0.27.0
+

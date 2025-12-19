@@ -9,18 +9,32 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as CatalogRouteImport } from './routes/catalog'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiDatasetsRouteImport } from './routes/api/datasets'
 import { Route as DemoStartServerFuncsRouteImport } from './routes/demo/start.server-funcs'
 import { Route as DemoStartApiRequestRouteImport } from './routes/demo/start.api-request'
 import { Route as DemoApiNamesRouteImport } from './routes/demo/api.names'
+import { Route as ApiDatasetsStatsRouteImport } from './routes/api/datasets.stats'
+import { Route as ApiDatasetsIdRouteImport } from './routes/api/datasets.$id'
 import { Route as DemoStartSsrIndexRouteImport } from './routes/demo/start.ssr.index'
 import { Route as DemoStartSsrSpaModeRouteImport } from './routes/demo/start.ssr.spa-mode'
 import { Route as DemoStartSsrFullSsrRouteImport } from './routes/demo/start.ssr.full-ssr'
 import { Route as DemoStartSsrDataOnlyRouteImport } from './routes/demo/start.ssr.data-only'
 
+const CatalogRoute = CatalogRouteImport.update({
+  id: '/catalog',
+  path: '/catalog',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDatasetsRoute = ApiDatasetsRouteImport.update({
+  id: '/api/datasets',
+  path: '/api/datasets',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DemoStartServerFuncsRoute = DemoStartServerFuncsRouteImport.update({
@@ -37,6 +51,16 @@ const DemoApiNamesRoute = DemoApiNamesRouteImport.update({
   id: '/demo/api/names',
   path: '/demo/api/names',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDatasetsStatsRoute = ApiDatasetsStatsRouteImport.update({
+  id: '/stats',
+  path: '/stats',
+  getParentRoute: () => ApiDatasetsRoute,
+} as any)
+const ApiDatasetsIdRoute = ApiDatasetsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiDatasetsRoute,
 } as any)
 const DemoStartSsrIndexRoute = DemoStartSsrIndexRouteImport.update({
   id: '/demo/start/ssr/',
@@ -61,6 +85,10 @@ const DemoStartSsrDataOnlyRoute = DemoStartSsrDataOnlyRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/catalog': typeof CatalogRoute
+  '/api/datasets': typeof ApiDatasetsRouteWithChildren
+  '/api/datasets/$id': typeof ApiDatasetsIdRoute
+  '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/demo/api/names': typeof DemoApiNamesRoute
   '/demo/start/api-request': typeof DemoStartApiRequestRoute
   '/demo/start/server-funcs': typeof DemoStartServerFuncsRoute
@@ -71,6 +99,10 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/catalog': typeof CatalogRoute
+  '/api/datasets': typeof ApiDatasetsRouteWithChildren
+  '/api/datasets/$id': typeof ApiDatasetsIdRoute
+  '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/demo/api/names': typeof DemoApiNamesRoute
   '/demo/start/api-request': typeof DemoStartApiRequestRoute
   '/demo/start/server-funcs': typeof DemoStartServerFuncsRoute
@@ -82,6 +114,10 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/catalog': typeof CatalogRoute
+  '/api/datasets': typeof ApiDatasetsRouteWithChildren
+  '/api/datasets/$id': typeof ApiDatasetsIdRoute
+  '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/demo/api/names': typeof DemoApiNamesRoute
   '/demo/start/api-request': typeof DemoStartApiRequestRoute
   '/demo/start/server-funcs': typeof DemoStartServerFuncsRoute
@@ -94,6 +130,10 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/catalog'
+    | '/api/datasets'
+    | '/api/datasets/$id'
+    | '/api/datasets/stats'
     | '/demo/api/names'
     | '/demo/start/api-request'
     | '/demo/start/server-funcs'
@@ -104,6 +144,10 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/catalog'
+    | '/api/datasets'
+    | '/api/datasets/$id'
+    | '/api/datasets/stats'
     | '/demo/api/names'
     | '/demo/start/api-request'
     | '/demo/start/server-funcs'
@@ -114,6 +158,10 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/catalog'
+    | '/api/datasets'
+    | '/api/datasets/$id'
+    | '/api/datasets/stats'
     | '/demo/api/names'
     | '/demo/start/api-request'
     | '/demo/start/server-funcs'
@@ -125,6 +173,8 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CatalogRoute: typeof CatalogRoute
+  ApiDatasetsRoute: typeof ApiDatasetsRouteWithChildren
   DemoApiNamesRoute: typeof DemoApiNamesRoute
   DemoStartApiRequestRoute: typeof DemoStartApiRequestRoute
   DemoStartServerFuncsRoute: typeof DemoStartServerFuncsRoute
@@ -136,11 +186,25 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/catalog': {
+      id: '/catalog'
+      path: '/catalog'
+      fullPath: '/catalog'
+      preLoaderRoute: typeof CatalogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/datasets': {
+      id: '/api/datasets'
+      path: '/api/datasets'
+      fullPath: '/api/datasets'
+      preLoaderRoute: typeof ApiDatasetsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/demo/start/server-funcs': {
@@ -163,6 +227,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/demo/api/names'
       preLoaderRoute: typeof DemoApiNamesRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/api/datasets/stats': {
+      id: '/api/datasets/stats'
+      path: '/stats'
+      fullPath: '/api/datasets/stats'
+      preLoaderRoute: typeof ApiDatasetsStatsRouteImport
+      parentRoute: typeof ApiDatasetsRoute
+    }
+    '/api/datasets/$id': {
+      id: '/api/datasets/$id'
+      path: '/$id'
+      fullPath: '/api/datasets/$id'
+      preLoaderRoute: typeof ApiDatasetsIdRouteImport
+      parentRoute: typeof ApiDatasetsRoute
     }
     '/demo/start/ssr/': {
       id: '/demo/start/ssr/'
@@ -195,8 +273,24 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface ApiDatasetsRouteChildren {
+  ApiDatasetsIdRoute: typeof ApiDatasetsIdRoute
+  ApiDatasetsStatsRoute: typeof ApiDatasetsStatsRoute
+}
+
+const ApiDatasetsRouteChildren: ApiDatasetsRouteChildren = {
+  ApiDatasetsIdRoute: ApiDatasetsIdRoute,
+  ApiDatasetsStatsRoute: ApiDatasetsStatsRoute,
+}
+
+const ApiDatasetsRouteWithChildren = ApiDatasetsRoute._addFileChildren(
+  ApiDatasetsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CatalogRoute: CatalogRoute,
+  ApiDatasetsRoute: ApiDatasetsRouteWithChildren,
   DemoApiNamesRoute: DemoApiNamesRoute,
   DemoStartApiRequestRoute: DemoStartApiRequestRoute,
   DemoStartServerFuncsRoute: DemoStartServerFuncsRoute,
