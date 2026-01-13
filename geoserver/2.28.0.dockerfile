@@ -20,16 +20,22 @@ RUN unzip -q /tmp/geoserver.zip -d /usr/share/geoserver && \
 COPY binaries/2.28.0/geoserver-2.28-SNAPSHOT-geoparquet-plugin.zip /tmp/geoparquet-plugin.zip
 COPY binaries/2.28.0/geoserver-2.28-SNAPSHOT-pmtiles-store-plugin.zip /tmp/pmtiles-plugin.zip
 COPY binaries/2.28.0/geoserver-2.28-SNAPSHOT-jdbcconfig-plugin.zip /tmp/jdbcconfig-plugin.zip
+COPY binaries/2.28.0/geoserver-2.28-SNAPSHOT-ogcapi-features-plugin.zip /tmp/ogcapi-features-plugin.zip
+COPY binaries/2.28.0/geoserver-2.28.0-geopkg-output-plugin.zip /tmp/geopkg-output-plugin.zip
 
 # Extract and install plugins
-RUN mkdir -p /tmp/geoparquet-extract /tmp/pmtiles-extract /tmp/jdbcconfig-extract && \
+RUN mkdir -p /tmp/geoparquet-extract /tmp/pmtiles-extract /tmp/jdbcconfig-extract /tmp/ogcapi-features-extract /tmp/geopkg-output-extract && \
     unzip -q /tmp/geoparquet-plugin.zip -d /tmp/geoparquet-extract && \
     unzip -q /tmp/pmtiles-plugin.zip -d /tmp/pmtiles-extract && \
     unzip -q /tmp/jdbcconfig-plugin.zip -d /tmp/jdbcconfig-extract && \
+    unzip -q /tmp/ogcapi-features-plugin.zip -d /tmp/ogcapi-features-extract && \
+    unzip -q /tmp/geopkg-output-plugin.zip -d /tmp/geopkg-output-extract && \
     # Copy .jar files to GeoServer lib directory
     find /tmp/geoparquet-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
     find /tmp/pmtiles-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
     find /tmp/jdbcconfig-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
+    find /tmp/ogcapi-features-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
+    find /tmp/geopkg-output-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
     rm -rf /tmp/*.zip /tmp/*-extract
 
 # Copy entrypoint script (before user creation so root can chmod)

@@ -2,6 +2,27 @@
 # Copy .env.example to .env and configure your settings
 
 services:
+  # PostgreSQL database for dataset-api metadata
+  # Stores collections, datasets, formats, and sources metadata
+  dataset-api-postgres:
+    image: postgres:17-alpine
+    container_name: hifld-dataset-api-postgres
+    environment:
+      POSTGRES_DB: ${DATASET_API_POSTGRES_DB:-hifld_datasets}
+      POSTGRES_USER: ${DATASET_API_POSTGRES_USER:-hifld}
+      POSTGRES_PASSWORD: ${DATASET_API_POSTGRES_PASSWORD:-hifld_dev}
+    volumes:
+      - dataset_api_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${DATASET_API_POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATASET_API_POSTGRES_USER:-hifld}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hifld-network
+
   # PostgreSQL database for GeoServer (optional - comment out if using Cloud SQL or external DB)
   # To use GCP Cloud SQL, comment out this service and configure GeoServer to connect
   # to your Cloud SQL instance using the DB_* environment variables below
@@ -109,6 +130,8 @@ services:
       - hifld-network
 
 volumes:
+  dataset_api_postgres_data:
+    driver: local
   postgres_data:
     driver: local
   geoserver_data:

@@ -82,7 +82,7 @@ JAVA_OPTS=-Xms512m -Xmx2048m -Djava.awt.headless=true
    ```
 
 2. Start services (PostgreSQL service will be skipped if not needed):
-   ```bash
+```bash
    docker compose up -d geoserver seaweedfs-master seaweedfs-volume seaweedfs-filer
    ```
 

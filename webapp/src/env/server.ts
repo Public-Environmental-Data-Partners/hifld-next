@@ -3,7 +3,7 @@ import { z } from "zod";
 
 export const env = createEnv({
   server: {
-    DATABASE_URL: z.url(),
+    // No server environment variables needed - all backend logic moved to dataset-api
   },
   runtimeEnv: process.env,
 });

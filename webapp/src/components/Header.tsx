@@ -37,12 +37,12 @@ export default function Header() {
                 Home
               </Link>
               <Link
-                to="/catalog"
+                to="/collections"
                 onClick={() => setOpen(false)}
                 className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium hover:bg-accent"
               >
                 <Database className="h-4 w-4" />
-                Dataset Catalog
+                Collections
               </Link>
             </nav>
           </SheetContent>
@@ -50,8 +50,8 @@ export default function Header() {
 
         <Link to="/" className="font-semibold">
           HIFLD Catalog
-        </Link>
-      </div>
+              </Link>
+            </div>
     </header>
   );
 }

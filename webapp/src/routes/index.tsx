@@ -15,9 +15,9 @@ function HomePage() {
   const features = [
     {
       icon: <Database className="h-8 w-8" />,
-      title: "Dataset Catalog",
+      title: "Collections",
       description:
-        "Browse and search geospatial datasets with detailed metadata and connection information.",
+        "Browse and search geospatial datasets organized by collection with detailed metadata and connection information.",
     },
     {
       icon: <Map className="h-8 w-8" />,
@@ -40,15 +40,15 @@ function HomePage() {
         <div className="text-center space-y-4">
           <h1 className="text-4xl font-bold tracking-tight">
             HIFLD Open Data
-          </h1>
+            </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
             Access Homeland Infrastructure Foundation-Level Data as GeoParquet,
             PMTiles, and OGC Feature API services.
           </p>
           <div className="pt-4">
             <Button asChild size="lg">
-              <Link to="/catalog">
-                Browse Catalog
+              <Link to="/collections">
+                Browse Collections
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>
@@ -81,13 +81,13 @@ function HomePage() {
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between p-3 rounded-md border">
               <div>
-                <p className="font-medium">Dataset Catalog</p>
+                <p className="font-medium">Collections</p>
                 <p className="text-sm text-muted-foreground">
-                  Browse all available datasets
+                  Browse datasets by collection
                 </p>
               </div>
               <Button variant="outline" asChild>
-                <Link to="/catalog">View</Link>
+                <Link to="/collections">View</Link>
               </Button>
             </div>
             <div className="flex items-center justify-between p-3 rounded-md border">

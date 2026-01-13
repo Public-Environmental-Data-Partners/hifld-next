@@ -6,6 +6,7 @@ export const Route = createFileRoute("/api/datasets/stats")({
   server: {
     handlers: {
       // GET /api/datasets/stats - Get dataset statistics
+      // Proxies to dataset-api
       GET: async () => {
         const stats = await getDatasetStats();
         return json(stats);

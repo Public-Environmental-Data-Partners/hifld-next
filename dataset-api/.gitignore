@@ -1,0 +1,11 @@
+# Python cache and virtual environment
+__pycache__/
+.venv
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Local database
+local.db
