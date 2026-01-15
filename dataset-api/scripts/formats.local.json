@@ -1,0 +1,21 @@
+[
+  {
+    "format_type": "geoparquet",
+    "name": "GeoParquet",
+    "description": "GeoParquet format for efficient spatial data storage and analysis",
+    "mime_type": "application/parquet"
+  },
+  {
+    "format_type": "pmtiles",
+    "name": "PMTiles",
+    "description": "PMTiles format for tile serving and web mapping",
+    "mime_type": "application/x-protobuf"
+  },
+  {
+    "format_type": "geoserver",
+    "name": "GeoServer",
+    "description": "GeoServer service providing multiple OGC-compliant interfaces (WFS, WMS, OGC API Features, GeoPackage export)",
+    "mime_type": null
+  }
+]
+

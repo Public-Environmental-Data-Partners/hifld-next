@@ -5,7 +5,7 @@ GEOSERVER_DATA_DIR="${GEOSERVER_DATA_DIR:-/var/local/geoserver}"
 GEOSERVER_LIB="/usr/share/geoserver/webapps/geoserver/WEB-INF/lib"
 
 # Configure JDBCConfig if database environment variables are set
-if [ -n "$DB_HOST" ] && [ -n "$DB_NAME" ]; then
+if [ -n "$JDBC_URL" ] || { [ -n "$DB_HOST" ] && [ -n "$DB_NAME" ]; }; then
   echo "Configuring JDBCConfig for PostgreSQL..."
   
   JDBCCONFIG_DIR="$GEOSERVER_DATA_DIR/jdbcconfig"
@@ -22,35 +22,44 @@ if [ -n "$DB_HOST" ] && [ -n "$DB_NAME" ]; then
     echo "Warning: JDBCConfig jar not found"
   fi
   
-  # Check if database is already initialized by checking for the 'object' table
-  echo "Checking if JDBCConfig database is already initialized..."
-  DB_INITIALIZED="false"
-  if PGPASSWORD="${DB_PASSWORD:-geoserver}" psql -h "${DB_HOST}" -p "${DB_PORT:-5432}" -U "${DB_USER:-geoserver}" -d "${DB_NAME}" -c "SELECT 1 FROM object LIMIT 1" > /dev/null 2>&1; then
-    echo "Database already initialized, skipping initdb"
-    DB_INITIALIZED="true"
+  # Construct JDBC URL from individual components or use provided URL
+  if [ -n "$JDBC_URL" ]; then
+    # JDBC URL provided directly, use as-is
+    DB_USER="${DB_USER:-}"
+    DB_PASSWORD="${DB_PASSWORD:-}"
+    echo "Using provided JDBC URL"
   else
-    echo "Database not initialized, will run initdb"
+    # Build JDBC URL from individual components
+    JDBC_URL="jdbc:postgresql://${DB_HOST}:${DB_PORT:-5432}/${DB_NAME}"
+    
+    # Add any additional connection parameters
+    if [ -n "$DB_PARAMS" ]; then
+      JDBC_URL="${JDBC_URL}?${DB_PARAMS}"
+    fi
+    
+    DB_USER="${DB_USER:-geoserver}"
+    DB_PASSWORD="${DB_PASSWORD:-geoserver}"
+    
+    echo "Built JDBC URL from components: ${JDBC_URL}"
+    echo "User: ${DB_USER}"
   fi
   
-  # Create jdbcconfig.properties
-  # Set initdb=true only if database is not initialized
-  # Set import=true only on first run (when database is empty)
-  if [ "$DB_INITIALIZED" = "true" ]; then
-    INITDB="false"
-    IMPORT="false"
-  else
-    INITDB="true"
-    IMPORT="true"
-  fi
+  # Set initdb and import flags
+  # Use environment variables to control initialization (default to false to avoid recreating tables)
+  # On first deployment, set JDBCCONFIG_INITDB=true in Cloud Run
+  INITDB="${JDBCCONFIG_INITDB:-false}"
+  IMPORT="${JDBCCONFIG_IMPORT:-false}"
+  
+  echo "JDBCConfig initialization settings: initdb=$INITDB, import=$IMPORT"
   
   cat > "$JDBCCONFIG_DIR/jdbcconfig.properties" << EOF
 enabled=true
 initdb=${INITDB}
 import=${IMPORT}
-jdbcUrl=jdbc:postgresql://${DB_HOST}:${DB_PORT:-5432}/${DB_NAME}
+jdbcUrl=${JDBC_URL}
 driverClassName=org.postgresql.Driver
-username=${DB_USER:-geoserver}
-password=${DB_PASSWORD:-geoserver}
+username=${DB_USER}
+password=${DB_PASSWORD}
 pool.minIdle=1
 pool.maxActive=10
 pool.poolPreparedStatements=true

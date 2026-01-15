@@ -1,8 +1,8 @@
-"""Initial schema with collections, datasets, formats, and sources
+"""init datasets
 
-Revision ID: 9358346313b3
+Revision ID: 28b71e5cfc45
 Revises: 
-Create Date: 2025-12-31 00:18:35.956602
+Create Date: 2026-01-15 14:09:27.906492
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = '9358346313b3'
+revision: str = '28b71e5cfc45'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -56,10 +56,9 @@ def upgrade() -> None:
     op.create_table('datasets',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-    sa.Column('alias', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('description', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+    sa.Column('tags', sa.JSON(), nullable=True),
     sa.Column('collection_id', sa.Integer(), nullable=True),
-    sa.Column('type', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.ForeignKeyConstraint(['collection_id'], ['collections.id'], ),
@@ -70,7 +69,6 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('dataset_id', sa.Integer(), nullable=False),
     sa.Column('format_id', sa.Integer(), nullable=False),
-    sa.Column('description', sqlmodel.sql.sqltypes.AutoString(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.ForeignKeyConstraint(['dataset_id'], ['datasets.id'], ),
@@ -82,6 +80,7 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('dataset_format_id', sa.Integer(), nullable=False),
     sa.Column('storage_location_id', sa.Integer(), nullable=False),
+    sa.Column('version', sa.Integer(), nullable=False),
     sa.Column('source_type', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('location', sa.JSON(), nullable=False),
     sa.Column('source_metadata', sa.JSON(), nullable=True),
@@ -89,7 +88,8 @@ def upgrade() -> None:
     sa.Column('updated_at', sa.DateTime(), nullable=False),
     sa.ForeignKeyConstraint(['dataset_format_id'], ['dataset_formats.id'], ),
     sa.ForeignKeyConstraint(['storage_location_id'], ['storage_locations.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('id'),
+    sa.UniqueConstraint('dataset_format_id', 'storage_location_id', 'version', name='uq_source_version')
     )
     # ### end Alembic commands ###
 

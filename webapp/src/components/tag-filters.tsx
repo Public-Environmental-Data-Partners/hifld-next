@@ -1,0 +1,120 @@
+import { Badge } from "@/components/ui/badge";
+import { X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { MultiSelect } from "@/components/ui/multi-select";
+
+export interface TagFilter {
+  key: string;
+  value: string;
+  label?: string;
+}
+
+export interface TagFiltersProps {
+  availableTags: Record<string, string[]>;
+  selectedFilters: TagFilter[];
+  onFilterChange: (key: string, values: string[]) => void;
+  className?: string;
+  tagKeyLabels?: Record<string, string>; // Optional custom labels for tag keys
+}
+
+export function TagFilters({
+  availableTags,
+  selectedFilters,
+  onFilterChange,
+  className,
+  tagKeyLabels = {},
+}: TagFiltersProps) {
+  // Format tag key for display (convert snake_case to Title Case if no custom label)
+  const getTagKeyLabel = (key: string): string => {
+    if (tagKeyLabels[key]) {
+      return tagKeyLabels[key];
+    }
+    // Convert snake_case to Title Case
+    return key
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
+
+  // Group selected filters by key
+  const selectedByKey = selectedFilters.reduce(
+    (acc, filter) => {
+      if (!acc[filter.key]) {
+        acc[filter.key] = [];
+      }
+      acc[filter.key].push(filter.value);
+      return acc;
+    },
+    {} as Record<string, string[]>
+  );
+
+  if (Object.keys(availableTags).length === 0) {
+    return null;
+  }
+
+  // Get unique tag keys, sorted alphabetically for consistent display
+  const tagKeys = Object.keys(availableTags).sort();
+
+  return (
+    <div className={cn("space-y-4", className)}>
+      {/* Show selected filters with remove buttons */}
+      {selectedFilters.length > 0 && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-sm text-muted-foreground mr-2">
+            Active filters:
+          </span>
+          {selectedFilters.map((filter) => {
+            const label = getTagKeyLabel(filter.key);
+            return (
+              <Badge
+                key={`${filter.key}-${filter.value}`}
+                variant="default"
+                className="cursor-pointer hover:bg-primary/80 gap-1 pr-1"
+                onClick={() => {
+                  const currentValues = selectedByKey[filter.key] || [];
+                  const newValues = currentValues.filter(
+                    (v) => v !== filter.value
+                  );
+                  onFilterChange(filter.key, newValues);
+                }}
+              >
+                {label}: {filter.value}
+                <X className="h-3 w-3" />
+              </Badge>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Show multi-select dropdowns for each unique tag key */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {tagKeys.map((key) => {
+          const values = availableTags[key];
+          if (values.length === 0) return null;
+
+          const label = getTagKeyLabel(key);
+          const selectedValues = selectedByKey[key] || [];
+          const options = values.map((value) => ({
+            label: value,
+            value: value,
+          }));
+
+          return (
+            <div key={key} className="space-y-2">
+              <label className="text-sm font-medium text-foreground">
+                {label}
+              </label>
+              <MultiSelect
+                options={options}
+                selected={selectedValues}
+                onChange={(newValues) => onFilterChange(key, newValues)}
+                placeholder={`Select ${label.toLowerCase()}...`}
+                maxDisplay={2}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

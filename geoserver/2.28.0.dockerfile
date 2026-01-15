@@ -4,7 +4,7 @@ FROM eclipse-temurin:17-jre
 # Set working directory
 WORKDIR /usr/share/geoserver
 
-# Install unzip, curl for health checks, and postgresql-client for DB checks
+# Install unzip, curl for health checks, and postgresql-client for schema checks
 RUN apt-get update && \
     apt-get install -y unzip curl postgresql-client && \
     rm -rf /var/lib/apt/lists/*
@@ -23,6 +23,12 @@ COPY binaries/2.28.0/geoserver-2.28-SNAPSHOT-jdbcconfig-plugin.zip /tmp/jdbcconf
 COPY binaries/2.28.0/geoserver-2.28-SNAPSHOT-ogcapi-features-plugin.zip /tmp/ogcapi-features-plugin.zip
 COPY binaries/2.28.0/geoserver-2.28.0-geopkg-output-plugin.zip /tmp/geopkg-output-plugin.zip
 
+# Download PostgreSQL JDBC driver (required for JDBCConfig)
+RUN curl -fsSL https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar -o /tmp/postgresql-jdbc.jar && \
+    # Verify the JAR is valid
+    unzip -t /tmp/postgresql-jdbc.jar > /dev/null && \
+    echo "PostgreSQL JDBC driver downloaded and verified successfully"
+
 # Extract and install plugins
 RUN mkdir -p /tmp/geoparquet-extract /tmp/pmtiles-extract /tmp/jdbcconfig-extract /tmp/ogcapi-features-extract /tmp/geopkg-output-extract && \
     unzip -q /tmp/geoparquet-plugin.zip -d /tmp/geoparquet-extract && \
@@ -36,7 +42,9 @@ RUN mkdir -p /tmp/geoparquet-extract /tmp/pmtiles-extract /tmp/jdbcconfig-extrac
     find /tmp/jdbcconfig-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
     find /tmp/ogcapi-features-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
     find /tmp/geopkg-output-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
-    rm -rf /tmp/*.zip /tmp/*-extract
+    # Copy PostgreSQL JDBC driver to GeoServer lib
+    cp /tmp/postgresql-jdbc.jar webapps/geoserver/WEB-INF/lib/ && \
+    rm -rf /tmp/*.zip /tmp/*.jar /tmp/*-extract
 
 # Copy entrypoint script (before user creation so root can chmod)
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

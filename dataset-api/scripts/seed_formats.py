@@ -6,22 +6,35 @@ This creates default format types (e.g., geoparquet, pmtiles, ogc_feature) that
 can be used across all datasets.
 
 Usage:
-    python -m scripts.seed_formats
+    python -m scripts.seed_formats [--config PATH]
     # or
-    uv run python -m scripts.seed_formats
+    uv run python -m scripts.seed_formats --config gs://bucket/config/formats.json
 """
 
+import argparse
 import sys
 from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from typing import TypedDict, Optional
 from database.db import get_db_session
-from models.dataset import Format
+from models.dataset import Format, FormatType
+from scripts.config_loader import load_json_config
 from sqlmodel import Session, select
 
-# Default format definitions
+
+class FormatConfig(TypedDict):
+    """Type definition for format configuration."""
+
+    format_type: FormatType
+    name: str
+    description: str
+    mime_type: Optional[str]
+
+
+# Default format definitions (fallback if no config provided)
 DEFAULT_FORMATS = [
     {
         "format_type": "geoparquet",
@@ -44,11 +57,11 @@ DEFAULT_FORMATS = [
 ]
 
 
-def seed_formats(db: Session) -> dict[str, int]:
+def seed_formats(db: Session, formats: list[FormatConfig]) -> dict[str, int]:
     """Seed format definitions into the database."""
     results = {"created": 0, "existing": 0}
 
-    for format_data in DEFAULT_FORMATS:
+    for format_data in formats:
         # Check if format already exists
         statement = select(Format).where(
             Format.format_type == format_data["format_type"]
@@ -78,11 +91,41 @@ def seed_formats(db: Session) -> dict[str, int]:
 
 def main():
     """Main entry point."""
+    parser = argparse.ArgumentParser(description="Seed format definitions")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to JSON config file (local or gs:// URL). Defaults to formats.local.json in script directory.",
+    )
+    args = parser.parse_args()
+
+    # Determine config path
+    if args.config:
+        config_path = args.config
+    else:
+        # Default to local config file
+        default_config = Path(__file__).parent / "formats.local.json"
+        if default_config.exists():
+            config_path = str(default_config)
+        else:
+            print(
+                "No config file provided and formats.local.json not found. Using defaults."
+            )
+            formats = DEFAULT_FORMATS
+            config_path = None
+
+    if config_path:
+        print(f"Loading formats from: {config_path}")
+        formats = load_json_config(config_path)
+    else:
+        formats = DEFAULT_FORMATS
+
     print("Seeding format definitions...")
 
     db = get_db_session()
     try:
-        results = seed_formats(db)
+        results = seed_formats(db, formats)
 
         print("\nSummary:")
         print(f"  Created: {results['created']}")

@@ -59,10 +59,14 @@ export function DatasetDetailDialog({
   return (
     <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
       <DialogHeader className="flex-shrink-0">
-        <DialogTitle className="break-words">{dataset.alias}</DialogTitle>
-        <DialogDescription className="font-mono break-all text-xs">
-          {dataset.name}
-        </DialogDescription>
+        <DialogTitle className="break-words">{dataset.name}</DialogTitle>
+        {dataset.tags && Object.keys(dataset.tags).length > 0 && (
+          <DialogDescription className="font-mono break-all text-xs">
+            {Object.entries(dataset.tags)
+              .map(([key, value]) => `${key}: ${value}`)
+              .join(", ")}
+          </DialogDescription>
+        )}
       </DialogHeader>
 
       <div className="flex-1 overflow-y-auto min-h-0">
@@ -78,13 +82,35 @@ export function DatasetDetailDialog({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <p className="text-sm text-muted-foreground mb-1">Type</p>
-              <p className="font-medium break-words">{dataset.type}</p>
-            </div>
-            <div>
               <p className="text-sm text-muted-foreground mb-1">Status</p>
               <Badge variant="default">ready</Badge>
             </div>
+            {dataset.tags &&
+              Object.entries(dataset.tags).map(([key, value]) => {
+                const label = key
+                  .split("_")
+                  .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+                  .join(" ");
+
+                return (
+                  <div key={key}>
+                    <p className="text-sm text-muted-foreground mb-1">
+                      {label}
+                    </p>
+                    {Array.isArray(value) ? (
+                      <div className="flex flex-wrap gap-1">
+                        {value.map((v: string, idx: number) => (
+                          <Badge key={idx} variant="outline">
+                            {v}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="font-medium break-words">{String(value)}</p>
+                    )}
+                  </div>
+                );
+              })}
             {featureCount && (
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Features</p>
@@ -121,7 +147,11 @@ export function DatasetDetailDialog({
                       geoparquetUrl={geoparquetUrl}
                       selectedSource={selectedSources["geoparquet"] || null}
                       onSourceChange={(storageLocationId, version) => {
-                        onSourceChange("geoparquet", storageLocationId, version);
+                        onSourceChange(
+                          "geoparquet",
+                          storageLocationId,
+                          version
+                        );
                       }}
                     />
                   )}
@@ -153,4 +183,3 @@ export function DatasetDetailDialog({
     </DialogContent>
   );
 }
-

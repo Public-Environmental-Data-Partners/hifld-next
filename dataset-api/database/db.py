@@ -7,15 +7,30 @@ from config import config
 DATABASE_URL = config.DATABASE_URL
 
 # Create engine with appropriate settings
-engine = create_engine(
-    DATABASE_URL,
-    echo=config.DATABASE_ECHO,
-    connect_args={"check_same_thread": False} if config.is_sqlite() else {},
-    # PostgreSQL connection pooling settings
-    pool_size=5 if config.is_postgres() else None,
-    max_overflow=10 if config.is_postgres() else None,
-    pool_pre_ping=True if config.is_postgres() else False,
-)
+if config.is_sqlite():
+    engine = create_engine(
+        DATABASE_URL,
+        echo=config.DATABASE_ECHO,
+        connect_args={
+            "check_same_thread": False,
+            "timeout": 30.0,  # 30 second timeout for SQLite operations
+        },
+        pool_pre_ping=True,  # Verify connections before using
+    )
+else:
+    # PostgreSQL with connection pooling
+    engine = create_engine(
+        DATABASE_URL,
+        echo=config.DATABASE_ECHO,
+        pool_size=10,  # Increased from 5 to handle more concurrent requests
+        max_overflow=20,  # Increased from 10
+        pool_pre_ping=True,  # Verify connections before using
+        pool_recycle=3600,  # Recycle connections after 1 hour
+        connect_args={
+            "connect_timeout": 10,  # 10 second connection timeout
+            "options": "-c statement_timeout=30000",  # 30 second query timeout
+        },
+    )
 
 
 def get_db():

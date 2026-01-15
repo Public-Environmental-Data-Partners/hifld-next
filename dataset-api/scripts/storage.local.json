@@ -1,0 +1,21 @@
+[
+  {
+    "name": "SeaweedFS Local",
+    "backend_type": "s3",
+    "description": "Local SeaweedFS instance for development (S3-compatible)",
+    "config": {
+      "base_url": "http://localhost:8888",
+      "bucket": "hifld"
+    }
+  },
+  {
+    "name": "GeoServer Local",
+    "backend_type": "geoserver",
+    "description": "Local GeoServer instance for spatial data services",
+    "config": {
+      "base_url": "http://localhost:8080/geoserver",
+      "workspace": "hifld"
+    }
+  }
+]
+

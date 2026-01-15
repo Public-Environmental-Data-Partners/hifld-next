@@ -20,27 +20,31 @@ import {
 export type { Dataset, DatasetWithUrls };
 
 // Get all datasets with optional search (returns datasets with URLs)
+// Wrapper for server function - can be called from loaders or components
 export async function getDatasets(search?: string): Promise<DatasetWithUrls[]> {
-  return apiGetDatasets(search, true);
+  return apiGetDatasets({ data: { search, includeUrls: true } });
 }
 
 // Get a single dataset by ID (with URLs)
+// Wrapper for server function - can be called from loaders or components
 export async function getDatasetById(
   id: number
 ): Promise<DatasetWithUrls | undefined> {
-  const dataset = await apiGetDatasetById(id, true);
+  const dataset = await apiGetDatasetById({ data: { id, includeUrls: true } });
   return dataset || undefined;
 }
 
 // Get a single dataset by name (with URLs)
+// Wrapper for server function - can be called from loaders or components
 export async function getDatasetByName(
   name: string
 ): Promise<DatasetWithUrls | undefined> {
-  const datasets = await apiGetDatasets(name, true);
+  const datasets = await apiGetDatasets({ data: { search: name, includeUrls: true } });
   return datasets.find((d) => d.name === name);
 }
 
 // Get dataset statistics
+// Wrapper for server function - can be called from loaders or components
 export async function getDatasetStats(): Promise<{
   total: number;
   ready: number;

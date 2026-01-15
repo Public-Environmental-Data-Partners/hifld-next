@@ -1,5 +1,4 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { createServerFn } from "@tanstack/react-start";
 import { Database, ArrowRight, Folder } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,14 +10,9 @@ import {
 } from "@/components/ui/card";
 import { getCollections } from "@/lib/api-client";
 
-// Server function to fetch collections
-const fetchCollections = createServerFn({ method: "GET" }).handler(async () => {
-  return getCollections();
-});
-
 export const Route = createFileRoute("/collections/")({
   loader: async () => {
-    const collections = await fetchCollections();
+    const collections = await getCollections();
     return { collections };
   },
   component: CollectionsListPage,

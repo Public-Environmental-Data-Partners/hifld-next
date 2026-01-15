@@ -36,14 +36,15 @@ from models.dataset import (
     Collection,
     StorageLocation,
     FileLocation,
+    GeoServerLocation,
     SpatialDatasetFileMetadata,
+    Format,
 )
 from services.datasets import DatasetService
 from services.collections import CollectionService
 from services.geoserver import GeoServerClient
 from processing.processor import process_dataset as process_dataset_func
 from storage.storage_client import create_storage_client
-from models.dataset import Format
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,7 +53,7 @@ logging.basicConfig(
 logger = logging.getLogger("import-inventory")
 
 # Default paths
-DEFAULT_INVENTORY_PATH = Path(__file__) / "inventory.csv"
+DEFAULT_INVENTORY_PATH = Path(__file__).parent / "inventory_categorized.csv"
 
 
 def clean_description(description: str) -> str:
@@ -173,31 +174,56 @@ async def import_dataset(
     storage_location: StorageLocation,
     storage: Any,
     add_to_geoserver: bool = True,
+    skip_existing: bool = False,
 ) -> Dict[str, Any]:
     """
     Import a single dataset: process it and create database entries.
     """
-    name = dataset.get("name", "").strip()
-    alias = dataset.get("alias", "").strip() or name
+    inventory_name = dataset.get("name", "").strip()  # Original name from inventory
+    alias = dataset.get("alias", "").strip() or inventory_name  # Human-readable name
     description = clean_description(dataset.get("description", ""))
-    dataset_type = dataset.get("type", "Point").strip()
     parquet_url = dataset.get("parquet_url", "").strip()
 
     dataset_service = DatasetService(db)
 
-    # Check if dataset already exists - if so, delete it to allow reprocessing
-    existing = dataset_service.get_dataset_by_name(name)
+    # Check if dataset already exists (by human-readable name)
+    existing = dataset_service.get_dataset_by_name(alias)
     if existing:
-        logger.info(
-            f"  → Dataset '{name}' already exists, deleting for reprocessing..."
-        )
-        dataset_service.delete_dataset(existing.id)
-        logger.info(f"  → Deleted existing dataset '{name}' (ID: {existing.id})")
+        if skip_existing:
+            logger.info(f"  → Dataset '{alias}' already exists, skipping...")
+            return {"skipped": True, "dataset_id": existing.id, "name": alias}
+        else:
+            logger.info(
+                f"  → Dataset '{alias}' already exists, deleting for reprocessing..."
+            )
+            try:
+                dataset_service.delete_dataset(existing.id)
+                logger.info(
+                    f"  → Deleted existing dataset '{alias}' (ID: {existing.id})"
+                )
+            except Exception as e:
+                logger.warning(f"  → Failed to delete existing dataset: {e}")
+                # Rollback the session to recover from any errors
+                db.rollback()
+                # Try to delete again with a fresh transaction
+                try:
+                    dataset_service.delete_dataset(existing.id)
+                    logger.info(
+                        f"  → Successfully deleted existing dataset '{alias}' after retry"
+                    )
+                except Exception as e2:
+                    logger.error(
+                        f"  → Failed to delete existing dataset after retry: {e2}"
+                    )
+                    db.rollback()
+                    raise Exception(
+                        f"Could not delete existing dataset '{alias}': {e2}"
+                    )
 
     # Step 1: Process the parquet file
     logger.info(f"  → Processing parquet from {parquet_url}...")
     process_result = await process_dataset_func(
-        name=name,
+        name=inventory_name,  # Use inventory name for file processing
         parquet_url=parquet_url,
         storage=storage,
     )
@@ -207,12 +233,30 @@ async def import_dataset(
 
     # Step 2: Create dataset record
     logger.info("  → Creating dataset record...")
+    # Build tags: include inventory name, geometry type, and categories for searchability
+    tags = {}
+    if inventory_name:
+        tags["inventory_name"] = inventory_name
+    geometry_type = process_result.get("geometry_type")
+    if geometry_type:
+        tags["geometry_type"] = geometry_type
+    category_str = dataset.get("category", "").strip()
+    if category_str:
+        # Support multiple categories: comma-separated or plus-separated
+        # e.g., "boundaries,water supply" or "boundaries+water supply"
+        categories = [
+            cat.strip()
+            for cat in category_str.replace("+", ",").split(",")
+            if cat.strip()
+        ]
+        if categories:
+            tags["categories"] = categories
+
     dataset_obj = dataset_service.create_dataset(
-        name=name,
-        alias=alias,
-        type=dataset_type,
+        name=alias,  # Use human-readable alias as the name
         description=description,
         collection_id=collection.id,
+        tags=tags if tags else None,
     )
 
     # Step 3: Add formats and sources
@@ -228,17 +272,42 @@ async def import_dataset(
         )
         formats_created.append(geoparquet_format)
 
-        # Extract path from URL (e.g., "http://localhost:8888/buckets/hifld/datasets/name/name.parquet" -> "datasets/name/name.parquet")
+        # Extract path from URL
+        # For GCS: "https://storage.googleapis.com/bucket/path" -> "path"
+        # For SeaweedFS: "http://localhost:8888/buckets/bucket/path" -> "path"
         geoparquet_url = process_result["geoparquet_url"]
         if "/buckets/" in geoparquet_url:
+            # SeaweedFS format: /buckets/{bucket}/{path}
             path = geoparquet_url.split("/buckets/")[1].split("/", 1)[1]
+        elif "storage.googleapis.com" in geoparquet_url:
+            # GCS format: https://storage.googleapis.com/{bucket}/{path}
+            # Extract path after bucket name
+            parts = geoparquet_url.split("storage.googleapis.com/")[1].split("/", 1)
+            if len(parts) > 1:
+                path = parts[1]  # Path after bucket name
+            else:
+                path = None
         else:
             # Fallback: try to extract path from URL
-            path = (
-                geoparquet_url.split(storage_location.config.base_url)[1].lstrip("/")
-                if storage_location.config and storage_location.config.base_url
-                else None
+            base_url = (
+                storage_location.config.get("base_url")
+                if isinstance(storage_location.config, dict)
+                else getattr(storage_location.config, "base_url", None)
             )
+            if base_url and base_url in geoparquet_url:
+                # Remove base_url and bucket from path
+                remaining = geoparquet_url.split(base_url)[1].lstrip("/")
+                bucket = (
+                    storage_location.config.get("bucket")
+                    if isinstance(storage_location.config, dict)
+                    else getattr(storage_location.config, "bucket", None)
+                )
+                if bucket and remaining.startswith(f"{bucket}/"):
+                    path = remaining.split("/", 1)[1]
+                else:
+                    path = remaining
+            else:
+                path = None
 
         if path:
             # Add source for GeoParquet
@@ -251,9 +320,12 @@ async def import_dataset(
                     SpatialDatasetFileMetadata(
                         feature_count=process_result.get("feature_count"),
                         bounds=parse_bounds(process_result.get("bounds")),
+                        geometry_type=process_result.get("geometry_type"),
                         mime_type="application/parquet",
                     ).model_dump()
                     if process_result.get("feature_count")
+                    or process_result.get("geometry_type")
+                    or process_result.get("bounds")
                     else None
                 ),
             )
@@ -269,15 +341,41 @@ async def import_dataset(
         formats_created.append(pmtiles_format)
 
         # Extract path from URL
+        # For GCS: "https://storage.googleapis.com/bucket/path" -> "path"
+        # For SeaweedFS: "http://localhost:8888/buckets/bucket/path" -> "path"
         pmtiles_url = process_result["pmtiles_url"]
         if "/buckets/" in pmtiles_url:
+            # SeaweedFS format: /buckets/{bucket}/{path}
             path = pmtiles_url.split("/buckets/")[1].split("/", 1)[1]
+        elif "storage.googleapis.com" in pmtiles_url:
+            # GCS format: https://storage.googleapis.com/{bucket}/{path}
+            # Extract path after bucket name
+            parts = pmtiles_url.split("storage.googleapis.com/")[1].split("/", 1)
+            if len(parts) > 1:
+                path = parts[1]  # Path after bucket name
+            else:
+                path = None
         else:
-            path = (
-                pmtiles_url.split(storage_location.config.base_url)[1].lstrip("/")
-                if storage_location.config and storage_location.config.base_url
-                else None
+            # Fallback: try to extract path from URL
+            base_url = (
+                storage_location.config.get("base_url")
+                if isinstance(storage_location.config, dict)
+                else getattr(storage_location.config, "base_url", None)
             )
+            if base_url and base_url in pmtiles_url:
+                # Remove base_url and bucket from path
+                remaining = pmtiles_url.split(base_url)[1].lstrip("/")
+                bucket = (
+                    storage_location.config.get("bucket")
+                    if isinstance(storage_location.config, dict)
+                    else getattr(storage_location.config, "bucket", None)
+                )
+                if bucket and remaining.startswith(f"{bucket}/"):
+                    path = remaining.split("/", 1)[1]
+                else:
+                    path = remaining
+            else:
+                path = None
 
         if path:
             # Add source for PMTiles
@@ -288,6 +386,7 @@ async def import_dataset(
                 location=FileLocation(path=path).model_dump(),
                 source_metadata=SpatialDatasetFileMetadata(
                     mime_type="application/x-protobuf",
+                    geometry_type=process_result.get("geometry_type"),
                 ).model_dump(),
             )
 
@@ -323,7 +422,7 @@ async def import_dataset(
                     # Generate version-specific store name
                     # Use the geoparquet's storage location and version for naming
                     store_name = geoserver_client.get_versioned_store_name(
-                        name,
+                        inventory_name,
                         storage_location.id,  # Cloud storage location ID
                         geoparquet_source_created.version,
                     )
@@ -356,29 +455,47 @@ async def import_dataset(
 
                             # Create GeoServer source entry
                             # The version matches the geoparquet source version
+                            # Get metadata from process_result (original source) or geoparquet source
+                            # source_metadata is stored as a dict in the DB, so access it as a dict
+                            geoparquet_metadata = (
+                                geoparquet_source_created.source_metadata
+                            )
+                            if isinstance(geoparquet_metadata, dict):
+                                # Already a dict from DB
+                                feature_count = geoparquet_metadata.get(
+                                    "feature_count"
+                                ) or process_result.get("feature_count")
+                                bounds = geoparquet_metadata.get(
+                                    "bounds"
+                                ) or parse_bounds(process_result.get("bounds"))
+                                geometry_type = geoparquet_metadata.get(
+                                    "geometry_type"
+                                ) or process_result.get("geometry_type")
+                            else:
+                                # Fallback to process_result if metadata is None or unexpected type
+                                feature_count = process_result.get("feature_count")
+                                bounds = parse_bounds(process_result.get("bounds"))
+                                geometry_type = process_result.get("geometry_type")
+
                             geoserver_source = dataset_service.add_format_source(
                                 dataset_format_id=geoserver_format.id,
                                 storage_location_id=geoserver_storage.id,
                                 source_type="service",
-                                location={
-                                    "workspace": workspace,
-                                    "store_name": store_name,
-                                    "layer_name": layer_name,
-                                },
-                                source_metadata={
-                                    "source_geoparquet_id": geoparquet_source_created.id,
-                                    "source_geoparquet_version": geoparquet_source_created.version,
-                                    "source_storage_location_id": storage_location.id,
-                                    "wfs_url": geoserver_client.get_wfs_url(
-                                        workspace, layer_name
-                                    ),
-                                    "wms_url": geoserver_client.get_wms_url(
-                                        workspace, layer_name
-                                    ),
-                                    "feature_api_url": geoserver_client.get_feature_api_url(
-                                        workspace, layer_name
-                                    ),
-                                },
+                                location=GeoServerLocation(
+                                    workspace=workspace,
+                                    store_name=store_name,
+                                    layer_name=layer_name,
+                                ).model_dump(),
+                                source_metadata=(
+                                    SpatialDatasetFileMetadata(
+                                        version="v1",
+                                        feature_count=feature_count,
+                                        bounds=bounds,
+                                        geometry_type=geometry_type,
+                                    ).model_dump()
+                                    if feature_count or bounds or geometry_type
+                                    else None
+                                ),
                             )
                             logger.info(
                                 f"  ✓ Created GeoServer source (version {geoserver_source.version})"
@@ -392,7 +509,7 @@ async def import_dataset(
             logger.warning(f"  ⚠ GeoServer registration error: {e}")
 
     return {
-        "name": name,
+        "name": alias,
         "dataset_id": dataset_obj.id,
         "geoparquet_url": process_result.get("geoparquet_url"),
         "pmtiles_url": process_result.get("pmtiles_url"),
@@ -409,6 +526,7 @@ async def import_datasets(
     storage: Any,
     dry_run: bool = False,
     add_to_geoserver: bool = True,
+    skip_existing: bool = False,
 ) -> Dict[str, Any]:
     """Import datasets from inventory."""
     results = {
@@ -444,11 +562,18 @@ async def import_datasets(
         try:
             logger.info(f"[{i+1}/{len(datasets)}] Processing: {name} ({alias})")
             result = await import_dataset(
-                db, dataset, collection, storage_location, storage, add_to_geoserver
+                db,
+                dataset,
+                collection,
+                storage_location,
+                storage,
+                add_to_geoserver,
+                skip_existing,
             )
 
             if result.get("skipped"):
                 results["skipped"] += 1
+                logger.info(f"  → Skipped: {name}")
             else:
                 results["success"] += 1
                 logger.info(f"  ✓ Success: Dataset ID {result.get('dataset_id')}")
@@ -458,17 +583,54 @@ async def import_datasets(
             error_msg = f"{name}: {str(e)}"
             results["errors"].append(error_msg)
             logger.error(f"  ✗ Failed: {error_msg}")
+            # Continue processing other datasets instead of stopping
+            continue
 
     return results
 
 
-def load_inventory(inventory_path: Path) -> List[Dict[str, str]]:
-    """Load datasets from inventory CSV file."""
-    if not inventory_path.exists():
+def load_inventory(inventory_path: str | Path) -> List[Dict[str, str]]:
+    """Load datasets from inventory CSV file (local path or GCS URL)."""
+    import io
+
+    # Handle GCS URLs
+    if isinstance(inventory_path, str) and inventory_path.startswith("gs://"):
+        try:
+            from google.cloud import storage
+        except ImportError:
+            raise ImportError(
+                "google-cloud-storage is required for GCS URLs. "
+                "Install with: pip install google-cloud-storage"
+            )
+
+        # Parse gs://bucket/path
+        path = inventory_path[5:]  # Remove gs://
+        parts = path.split("/", 1)
+        bucket_name = parts[0]
+        blob_path = parts[1] if len(parts) > 1 else ""
+
+        # Initialize GCS client (uses default credentials)
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+
+        # Download and parse CSV
+        content = blob.download_as_text()
+        datasets = []
+        reader = csv.DictReader(io.StringIO(content))
+        for row in reader:
+            datasets.append(row)
+
+        logger.info(f"Loaded {len(datasets)} datasets from GCS: {inventory_path}")
+        return datasets
+
+    # Handle local file path
+    path = Path(inventory_path)
+    if not path.exists():
         raise FileNotFoundError(f"Inventory file not found: {inventory_path}")
 
     datasets = []
-    with open(inventory_path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
             datasets.append(row)
@@ -484,9 +646,9 @@ async def main():
     )
     parser.add_argument(
         "--inventory",
-        type=Path,
-        default=DEFAULT_INVENTORY_PATH,
-        help=f"Path to inventory CSV file (default: {DEFAULT_INVENTORY_PATH})",
+        type=str,
+        default=str(DEFAULT_INVENTORY_PATH),
+        help=f"Path to inventory CSV file (local or gs:// URL) (default: {DEFAULT_INVENTORY_PATH})",
     )
     parser.add_argument(
         "--dry-run",
@@ -522,6 +684,17 @@ async def main():
         action="store_true",
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip datasets that already exist in the database",
+    )
+    parser.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="Skip the first N datasets (for batch processing)",
+    )
 
     args = parser.parse_args()
 
@@ -532,10 +705,20 @@ async def main():
         # Load inventory
         datasets = load_inventory(args.inventory)
 
+        total_count = len(datasets)
+        logger.info(f"Total datasets in inventory: {total_count}")
+
+        # Apply offset if specified (for batch processing)
+        if args.offset:
+            datasets = datasets[args.offset :]
+            logger.info(f"Skipped first {args.offset} datasets (offset)")
+
         # Apply limit if specified
         if args.limit:
             datasets = datasets[: args.limit]
-            logger.info(f"Limited to first {args.limit} datasets")
+            logger.info(f"Limited to {args.limit} datasets")
+
+        logger.info(f"Will process {len(datasets)} datasets")
 
         # Get database session
         db = get_db_session()
@@ -569,6 +752,7 @@ async def main():
                 storage,
                 dry_run=args.dry_run,
                 add_to_geoserver=not args.skip_geoserver,
+                skip_existing=args.skip_existing,
             )
 
             # Print summary

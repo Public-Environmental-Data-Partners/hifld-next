@@ -1,13 +1,7 @@
 import { useState, useEffect } from "react";
 import { Map, FileJson, Database } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogTrigger } from "@/components/ui/dialog";
 import {
   getOgcFeaturesUrl,
@@ -100,21 +94,24 @@ export function DatasetCard({ dataset }: DatasetCardProps) {
   const geoparquetSource = getSelectedSource("geoparquet");
   const pmtilesSource = getSelectedSource("pmtiles");
   const geoserverSource = getSelectedSource("geoserver");
+  const geoserverStorageLocation = geoserverSource?.storage_location;
 
   // Extract URLs from selected sources
   const geoparquetUrl = getUrlFromSource(geoparquetSource);
   const pmtilesUrl = getUrlFromSource(pmtilesSource);
 
   // URLs for the selected GeoServer source
-  const ogcFeaturesUrl = geoserverSource
-    ? getOgcFeaturesUrl(geoserverSource)
-    : null;
+  const ogcFeaturesUrl =
+    geoserverSource && geoserverStorageLocation
+      ? getOgcFeaturesUrl(geoserverSource, geoserverStorageLocation)
+      : null;
   const fullLayerName = geoserverSource
     ? getFullLayerName(geoserverSource)
     : null;
-  const geopackageUrl = geoserverSource
-    ? getGeoPackageUrl(geoserverSource)
-    : null;
+  const geopackageUrl =
+    geoserverSource && geoserverStorageLocation
+      ? getGeoPackageUrl(geoserverSource, geoserverStorageLocation)
+      : null;
 
   // Extract metadata from selected source
   const featureCount = geoparquetSource?.source_metadata?.feature_count;
@@ -128,15 +125,37 @@ export function DatasetCard({ dataset }: DatasetCardProps) {
     <Dialog>
       <DialogTrigger asChild>
         <Card className="cursor-pointer hover:bg-muted/50 transition-colors h-full">
-          <CardHeader className="pb-3">
-            <div className="flex items-center gap-2 mb-2">
-              <Badge variant="default">ready</Badge>
-              <Badge variant="outline">{dataset.type}</Badge>
-            </div>
-            <CardTitle className="text-base">{dataset.alias}</CardTitle>
-            <CardDescription className="font-mono text-xs">
+          <CardHeader className="pb-3 min-w-0">
+            <CardTitle className="text-base break-words break-all hyphens-auto leading-snug mb-2">
               {dataset.name}
-            </CardDescription>
+            </CardTitle>
+            <div className="flex items-start gap-2 flex-wrap min-w-0 overflow-visible">
+              {dataset.tags &&
+                Object.entries(dataset.tags).map(([key, value]) => {
+                  if (Array.isArray(value)) {
+                    return value.map((v: string, idx: number) => (
+                      <Badge
+                        key={`${key}-${idx}`}
+                        variant="outline"
+                        className="whitespace-normal break-words break-all hyphens-auto min-w-0 max-w-full overflow-visible leading-tight rounded-md"
+                      >
+                        {v}
+                      </Badge>
+                    ));
+                  } else if (typeof value === "string") {
+                    return (
+                      <Badge
+                        key={key}
+                        variant="outline"
+                        className="whitespace-normal break-words break-all hyphens-auto min-w-0 max-w-full overflow-visible leading-tight rounded-md"
+                      >
+                        {value}
+                      </Badge>
+                    );
+                  }
+                  return null;
+                })}
+            </div>
           </CardHeader>
           <CardContent className="pt-0">
             <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
@@ -185,4 +204,3 @@ export function DatasetCard({ dataset }: DatasetCardProps) {
     </Dialog>
   );
 }
-

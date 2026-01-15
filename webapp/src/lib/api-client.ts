@@ -1,15 +1,60 @@
 /**
  * API client for dataset-api (Python FastAPI service)
+ *
+ * All API functions are server functions that can be called from both
+ * server (loaders) and client (components) via RPC.
  */
 
-const DATASET_API_URL = process.env.DATASET_API_URL || "http://localhost:8000";
+import { createServerFn } from "@tanstack/react-start";
+import { env } from "../env/server";
+
+// Type definitions matching Python Pydantic models
+
+export type FormatType = "geoparquet" | "pmtiles" | "geoserver";
+
+export type BackendType = "s3" | "geoserver";
+
+export type SourceType = "file" | "api" | "service";
+
+// Location schemas
+export interface FileLocation {
+  version: string;
+  path: string;
+}
+
+export interface ApiLocation {
+  version: string;
+  url: string;
+  method?: string;
+}
+
+export interface GeoServerLocation {
+  version: string;
+  workspace: string;
+  store_name: string;
+  layer_name: string;
+}
+
+export type DatasetSourceLocation =
+  | FileLocation
+  | ApiLocation
+  | GeoServerLocation;
+
+// Metadata schemas
+export interface SpatialDatasetFileMetadata {
+  version: string;
+  size_bytes?: number;
+  mime_type?: string;
+  feature_count?: number;
+  bounds?: [number, number, number, number]; // [minx, miny, maxx, maxy]
+  geometry_type?: string; // Geometry type (e.g. "Point", "Polygon", "LineString", "Mixed")
+}
 
 export interface Dataset {
   id: number;
-  name: string;
-  alias: string;
+  name: string; // Human-readable name
   description?: string;
-  type: string;
+  tags?: Record<string, string | string[]>; // Searchable metadata tags (e.g. {inventory_name: "...", geometry_type: "Point", categories: ["Boundaries", "Water Supply"]})
   collection_id?: number;
   created_at: string;
   updated_at: string;
@@ -19,54 +64,72 @@ export interface DatasetSource {
   id: number;
   version?: number;
   url?: string;
-  source_type: string;
-  location: Record<string, any>;
-  source_metadata?: Record<string, any>;
-  storage_location?: {
-    id: number;
-    name: string;
-    backend_type: string;
-  };
+  source_type: SourceType;
+  location: DatasetSourceLocation;
+  source_metadata?: SpatialDatasetFileMetadata;
+  storage_location?: StorageLocation;
+}
+
+// Storage location config schemas
+export interface BucketStorageLocationConfig {
+  version: string;
+  base_url: string;
+  bucket: string;
+}
+
+export interface GeoServerStorageLocationConfig {
+  version: string;
+  base_url: string;
+  workspace: string;
+}
+
+export type StorageLocationConfig =
+  | BucketStorageLocationConfig
+  | GeoServerStorageLocationConfig;
+
+export interface StorageLocation {
+  id: number;
+  name: string;
+  backend_type: BackendType;
+  description?: string;
+  config?: StorageLocationConfig;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Format {
+  id: number;
+  format_type: FormatType;
+  name: string;
+  description?: string;
+  mime_type?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DatasetFormatJoin {
+  id: number;
+  dataset_id: number;
+  format_id: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface DatasetFormat {
-  format: {
-    id: number;
-    format_type: string;
-    name: string;
-    description?: string;
-    mime_type?: string;
-  };
-  dataset_format: {
-    id: number;
-    dataset_id: number;
-    format_id: number;
-    description?: string;
-  };
+  format: Format;
+  dataset_format: DatasetFormatJoin;
   sources: DatasetSource[];
 }
 
 export interface DatasetWithUrls extends Dataset {
   formats?: DatasetFormat[];
-  geoserver_info?: {
-    dataset_name: string;
-    workspace: string;
-    sources: Array<{
-      source_id: number;
-      version: number;
-      storage_location_id: number;
-      storage_location_name: string | null;
-      workspace: string;
-      store_name: string;
-      layer_name: string;
-      feature_url: string;
-      wfs_url: string;
-      wms_url: string;
-      source_geoparquet_id?: number;
-      source_geoparquet_version?: number;
-      source_storage_location_id?: number;
-    }>;
-  };
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  limit: number | null;
+  offset: number;
 }
 
 export interface DatasetStats {
@@ -75,103 +138,183 @@ export interface DatasetStats {
 
 /**
  * Get all datasets across all collections
+ * Server function - can be called from loaders or components
  */
-export async function getDatasets(
-  search?: string,
-  includeUrls = false
-): Promise<Dataset[]> {
-  const params = new URLSearchParams();
-  if (search) params.set("search", search);
-  if (includeUrls) params.set("include_urls", "true");
+export const getDatasets = createServerFn({ method: "GET" })
+  .inputValidator((data: { search?: string; includeUrls?: boolean }) => data)
+  .handler(async ({ data }) => {
+    const params = new URLSearchParams();
+    if (data.search) params.set("search", data.search);
+    if (data.includeUrls) params.set("include_urls", "true");
 
-  const url = `${DATASET_API_URL}/api/datasets${params.toString() ? `?${params}` : ""}`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch datasets: ${response.statusText}`);
-  }
-  return response.json();
-}
+    const url = `${env.DATASET_API_URL}/api/datasets${params.toString() ? `?${params}` : ""}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(
+        `Failed to fetch datasets: ${response.status} ${errorText}`
+      );
+    }
+    return response.json();
+  });
 
 /**
  * Get a single dataset by ID with optional URLs
  * Note: We need to get the collection ID first, then fetch from collection endpoint
  * For now, we'll use the global endpoint and filter
+ * Server function - can be called from loaders or components
  */
-export async function getDatasetById(
-  id: number,
-  includeUrls = false
-): Promise<DatasetWithUrls | null> {
-  // Get all datasets and find the one we want
-  // TODO: Add direct endpoint to dataset-api for getting by ID
-  const datasets = await getDatasets(undefined, includeUrls);
-  const dataset = datasets.find((d) => d.id === id);
-  return (dataset as DatasetWithUrls) || null;
-}
+export const getDatasetById = createServerFn({ method: "GET" })
+  .inputValidator((data: { id: number; includeUrls?: boolean }) => data)
+  .handler(async ({ data }) => {
+    // Get all datasets and find the one we want
+    // TODO: Add direct endpoint to dataset-api for getting by ID
+    const datasets = await getDatasets({
+      data: { includeUrls: data.includeUrls },
+    });
+    const dataset = datasets.find((d: Dataset) => d.id === data.id);
+    return (dataset as DatasetWithUrls) || null;
+  });
 
 /**
  * Get dataset statistics
+ * Server function - can be called from loaders or components
  */
-export async function getDatasetStats(): Promise<DatasetStats> {
-  const response = await fetch(`${DATASET_API_URL}/api/datasets/stats`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch stats: ${response.statusText}`);
+export const getDatasetStats = createServerFn({ method: "GET" }).handler(
+  async () => {
+    const response = await fetch(`${env.DATASET_API_URL}/api/datasets/stats`);
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(`Failed to fetch stats: ${response.status} ${errorText}`);
+    }
+    return response.json();
   }
-  return response.json();
-}
+);
 
 /**
  * Get collections
+ * Server function - can be called from loaders or components
  */
-export async function getCollections(): Promise<
-  Array<{ id: number; name: string; description?: string }>
-> {
-  const response = await fetch(`${DATASET_API_URL}/api/collections`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch collections: ${response.statusText}`);
+export const getCollections = createServerFn({ method: "GET" }).handler(
+  async () => {
+    const response = await fetch(`${env.DATASET_API_URL}/api/collections`);
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(
+        `Failed to fetch collections: ${response.status} ${errorText}`
+      );
+    }
+    return response.json();
   }
-  return response.json();
-}
+);
 
 /**
  * Get a collection by ID
+ * Server function - can be called from loaders or components
  */
-export async function getCollectionById(
-  id: number
-): Promise<{ id: number; name: string; description?: string } | null> {
-  if (!id) {
-    return null;
-  }
-  const response = await fetch(`${DATASET_API_URL}/api/collections/${id}`);
-  if (!response.ok) {
-    if (response.status === 404) {
+export const getCollectionById = createServerFn({ method: "GET" })
+  .inputValidator((data: { id: number }) => data)
+  .handler(async ({ data }) => {
+    if (!data.id) {
       return null;
     }
-    throw new Error(`Failed to fetch collection: ${response.statusText}`);
-  }
-  return response.json();
-}
+    const response = await fetch(
+      `${env.DATASET_API_URL}/api/collections/${data.id}`
+    );
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null;
+      }
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(
+        `Failed to fetch collection: ${response.status} ${errorText}`
+      );
+    }
+    return response.json();
+  });
 
 /**
  * Get datasets in a specific collection
+ * Server function - can be called from loaders or components
  */
-export async function getCollectionDatasets(
-  collectionId: number,
-  search?: string,
-  includeUrls = false
-): Promise<Dataset[]> {
-  const params = new URLSearchParams();
-  if (search) params.set("search", search);
-  if (includeUrls) params.set("include_urls", "true");
+export const getCollectionDatasets = createServerFn({ method: "GET" })
+  .inputValidator(
+    (data: {
+      collectionId: number;
+      search?: string;
+      includeUrls?: boolean;
+      limit?: number;
+      offset?: number;
+      tagFilters?: Record<string, string | string[]>;
+    }) => data
+  )
+  .handler(async ({ data }) => {
+    const params = new URLSearchParams();
+    if (data.search) params.set("search", data.search);
+    if (data.includeUrls) params.set("include_urls", "true");
+    if (data.limit !== undefined) params.set("limit", data.limit.toString());
+    if (data.offset !== undefined) params.set("offset", data.offset.toString());
+    if (data.tagFilters && Object.keys(data.tagFilters).length > 0) {
+      params.set("tag_filters", JSON.stringify(data.tagFilters));
+    }
 
-  const url = `${DATASET_API_URL}/api/collections/${collectionId}/datasets${params.toString() ? `?${params}` : ""}`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch collection datasets: ${response.statusText}`
-    );
-  }
-  return response.json();
-}
+    const url = `${env.DATASET_API_URL}/api/collections/${data.collectionId}/datasets${params.toString() ? `?${params}` : ""}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        const errorText = await response
+          .text()
+          .catch(() => response.statusText);
+        throw new Error(
+          `Failed to fetch collection datasets: ${response.status} ${errorText}`
+        );
+      }
+      const result = await response.json();
+      return result as PaginatedResponse<DatasetWithUrls>;
+    } catch (error) {
+      // Log the error for debugging
+      console.error(`Error fetching collection datasets:`, {
+        url,
+        collectionId: data.collectionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  });
+
+/**
+ * Get available tag values for a collection
+ * Server function - can be called from loaders or components
+ */
+export const getCollectionTagValues = createServerFn({ method: "GET" })
+  .inputValidator((data: { collectionId: number; tagKey?: string }) => data)
+  .handler(async ({ data }) => {
+    const params = new URLSearchParams();
+    if (data.tagKey) params.set("tag_key", data.tagKey);
+
+    const url = `${env.DATASET_API_URL}/api/collections/${data.collectionId}/datasets/tags${params.toString() ? `?${params}` : ""}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        const errorText = await response
+          .text()
+          .catch(() => response.statusText);
+        throw new Error(
+          `Failed to fetch collection tag values: ${response.status} ${errorText}`
+        );
+      }
+      return response.json();
+    } catch (error) {
+      console.error(`Error fetching collection tag values:`, {
+        url,
+        collectionId: data.collectionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  });
 
 /**
  * Extract GeoParquet URL from dataset with URLs
@@ -198,9 +341,13 @@ export function getPmtilesUrl(dataset: DatasetWithUrls): string | null {
 /**
  * Get GeoServer format from dataset
  */
-export function getGeoServerFormat(dataset: DatasetWithUrls): DatasetFormat | null {
+export function getGeoServerFormat(
+  dataset: DatasetWithUrls
+): DatasetFormat | null {
   if (!dataset.formats) return null;
-  return dataset.formats.find((f) => f.format.format_type === "geoserver") || null;
+  return (
+    dataset.formats.find((f) => f.format.format_type === "geoserver") || null
+  );
 }
 
 /**
@@ -220,41 +367,83 @@ export function getGeoServerSources(dataset: DatasetWithUrls): DatasetSource[] {
 }
 
 /**
- * Get GeoPackage export URL for a specific GeoServer source
+ * Get GeoPackage export URL from GeoServer source
+ * Constructs URL from storage location + dataset source using WFS GetFeature with outputFormat=geopkg
  */
-export function getGeoPackageUrl(source: DatasetSource): string {
-  const workspace = source.location?.workspace || "hifld";
-  const storeName = source.location?.store_name || "";
-  return `http://localhost:8000/api/geoserver/export/geopackage/${workspace}/${storeName}`;
+export function getGeoPackageUrl(
+  source: DatasetSource,
+  storageLocation: StorageLocation
+): string | null {
+  const config = storageLocation.config as
+    | GeoServerStorageLocationConfig
+    | undefined;
+  if (!config?.base_url) return null;
+  const location = source.location as GeoServerLocation;
+  const workspace = location.workspace || "hifld";
+  const layerName = location.layer_name || location.store_name || "";
+  // GeoServer WFS GetFeature with GeoPackage output format
+  return `${config.base_url}/${workspace}/wfs?service=wfs&version=2.0.0&request=GetFeature&typeNames=${workspace}:${layerName}&outputFormat=geopkg`;
 }
 
 /**
  * Get WFS URL from GeoServer source
+ * Constructs URL from storage location + dataset source
  */
-export function getWfsUrl(source: DatasetSource): string | null {
-  return source.source_metadata?.wfs_url || null;
+export function getWfsUrl(
+  source: DatasetSource,
+  storageLocation: StorageLocation
+): string | null {
+  const config = storageLocation.config as
+    | GeoServerStorageLocationConfig
+    | undefined;
+  if (!config?.base_url) return null;
+  const location = source.location as GeoServerLocation;
+  const workspace = location.workspace || "hifld";
+  return `${config.base_url}/${workspace}/wfs`;
 }
 
 /**
  * Get WMS URL from GeoServer source
+ * Constructs URL from storage location + dataset source
  */
-export function getWmsUrl(source: DatasetSource): string | null {
-  return source.source_metadata?.wms_url || null;
+export function getWmsUrl(
+  source: DatasetSource,
+  storageLocation: StorageLocation
+): string | null {
+  const config = storageLocation.config as
+    | GeoServerStorageLocationConfig
+    | undefined;
+  if (!config?.base_url) return null;
+  const location = source.location as GeoServerLocation;
+  const workspace = location.workspace || "hifld";
+  return `${config.base_url}/${workspace}/wms`;
 }
 
 /**
  * Get OGC Features API URL from GeoServer source
+ * Constructs URL from storage location + dataset source
  */
-export function getOgcFeaturesUrl(source: DatasetSource): string | null {
-  return source.source_metadata?.feature_api_url || null;
+export function getOgcFeaturesUrl(
+  source: DatasetSource,
+  storageLocation: StorageLocation
+): string | null {
+  const config = storageLocation.config as
+    | GeoServerStorageLocationConfig
+    | undefined;
+  if (!config?.base_url) return null;
+  const location = source.location as GeoServerLocation;
+  const workspace = location.workspace || "hifld";
+  const layerName = location.layer_name || "";
+  return `${config.base_url}/${workspace}/ogc/features/v1/collections/${layerName}`;
 }
 
 /**
  * Get full layer name (workspace:layer) from GeoServer source
  */
 export function getFullLayerName(source: DatasetSource): string | null {
-  const workspace = source.location?.workspace;
-  const layerName = source.location?.layer_name;
+  const location = source.location as GeoServerLocation;
+  const workspace = location.workspace;
+  const layerName = location.layer_name;
   if (!workspace || !layerName) return null;
   return `${workspace}:${layerName}`;
 }

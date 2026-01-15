@@ -56,6 +56,10 @@ services:
     environment:
       # GeoServer data directory
       GEOSERVER_DATA_DIR: /var/local/geoserver
+      # Deprecated - use JDBCCONFIG_INITDB to control GeoServer schema initialization.
+      # RECREATE_DATA_DIR is not used in recent entrypoint scripts.
+      JDBCCONFIG_INITDB: "${JDBCCONFIG_INITDB:-false}"
+      JDBCCONFIG_IMPORT: "${JDBCCONFIG_IMPORT:-false}"
       # Java options
       JAVA_OPTS: "${JAVA_OPTS:--Xms512m -Xmx2048m -Djava.awt.headless=true}"
       # Database connection info for JDBCConfig (auto-configured on startup)

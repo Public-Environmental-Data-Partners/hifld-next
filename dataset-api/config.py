@@ -14,9 +14,11 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent
 
 # Load environment variables with precedence
-# .env.local overrides .env which overrides system environment
-load_dotenv(BASE_DIR / ".env")  # Load defaults first
-load_dotenv(BASE_DIR / ".env.local", override=True)  # Override with local settings
+# Only load .env files if DATABASE_URL is not already set (i.e., in production)
+# This prevents .env files from overriding Cloud Run environment variables
+if not os.getenv("DATABASE_URL"):
+    load_dotenv(BASE_DIR / ".env")  # Load defaults first
+    load_dotenv(BASE_DIR / ".env.local", override=True)  # Override with local settings
 
 
 class Config:
