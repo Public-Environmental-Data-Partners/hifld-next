@@ -53,7 +53,7 @@ class StorageClient(ABC):
 class SeaweedFSFilerClient(StorageClient):
     """
     SeaweedFS storage client using the Filer HTTP API.
-    
+
     Uses the filer's HTTP API for file operations, which doesn't require
     authentication unlike the S3 API.
     """
@@ -90,7 +90,7 @@ class SeaweedFSFilerClient(StorageClient):
         """Ensure bucket directory exists in filer."""
         bucket_path = f"/buckets/{self.bucket}/"
         url = f"{self.filer_url}{bucket_path}"
-        
+
         async with httpx.AsyncClient(timeout=30) as client:
             # Check if bucket exists
             response = await client.head(url)
@@ -108,7 +108,7 @@ class SeaweedFSFilerClient(StorageClient):
     ) -> str:
         """Upload a file to SeaweedFS using the filer HTTP API."""
         await self._ensure_bucket_exists()
-        
+
         content_type = content_type or self._get_content_type(local_path)
         filer_path = self._get_filer_path(remote_path)
         url = f"{self.filer_url}{filer_path}"
@@ -166,7 +166,7 @@ class SeaweedFSFilerClient(StorageClient):
 class GCSStorageClient(StorageClient):
     """
     Google Cloud Storage client that makes objects publicly readable.
-    
+
     Uploads objects with public-read ACL so they can be accessed without authentication.
     """
 
@@ -183,7 +183,7 @@ class GCSStorageClient(StorageClient):
                 "google-cloud-storage is required for GCS storage. "
                 "Install with: pip install google-cloud-storage"
             )
-        
+
         self.bucket_name = bucket
         self.project = project
         self.timeout = timeout
@@ -210,52 +210,52 @@ class GCSStorageClient(StorageClient):
     ) -> str:
         """Upload a file to GCS and make it publicly readable."""
         import asyncio
-        
+
         content_type = content_type or self._get_content_type(local_path)
         # Clean the remote path - ensure no leading slash
         clean_path = remote_path.lstrip("/")
         blob = self.bucket.blob(clean_path)
         blob.content_type = content_type
-        
+
         # Upload file
         def _upload():
             blob.upload_from_filename(str(local_path))
             # Note: With uniform bucket-level access, objects inherit bucket IAM permissions
             # The bucket is already configured with public read access via IAM
             # blob.make_public() would fail with uniform bucket-level access enabled
-        
+
         # Run in thread pool to avoid blocking
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _upload)
-        
+
         # Construct the public URL explicitly
         # Format: https://storage.googleapis.com/{bucket}/{path}
         public_url = f"https://storage.googleapis.com/{self.bucket_name}/{clean_path}"
-        
+
         logger.info(f"Uploaded {local_path.name} to {public_url}")
         return public_url
 
     async def download_file(self, remote_path: str, local_path: Path) -> None:
         """Download a file from GCS."""
         import asyncio
-        
+
         blob = self.bucket.blob(remote_path.lstrip("/"))
-        
+
         def _download():
             local_path.parent.mkdir(parents=True, exist_ok=True)
             blob.download_to_filename(str(local_path))
-        
+
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _download)
-        
+
         logger.info(f"Downloaded {remote_path} to {local_path}")
 
     async def delete_file(self, remote_path: str) -> bool:
         """Delete a file from GCS."""
         import asyncio
-        
+
         blob = self.bucket.blob(remote_path.lstrip("/"))
-        
+
         def _delete():
             try:
                 blob.delete()
@@ -263,19 +263,19 @@ class GCSStorageClient(StorageClient):
             except Exception as e:
                 logger.warning(f"Failed to delete {remote_path}: {e}")
                 return False
-        
+
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _delete)
 
     async def file_exists(self, remote_path: str) -> bool:
         """Check if a file exists in GCS."""
         import asyncio
-        
+
         blob = self.bucket.blob(remote_path.lstrip("/"))
-        
+
         def _exists():
             return blob.exists()
-        
+
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _exists)
 
@@ -297,11 +297,11 @@ def create_storage_client(
 ) -> StorageClient:
     """
     Factory function to create the appropriate storage client.
-    
+
     Args:
         storage_type: "seaweedfs" or "gcs" or auto-detect from environment
         **kwargs: Additional arguments for the storage client
-        
+
     Environment variables:
         STORAGE_TYPE: "seaweedfs" (default) or "gcs"
         SEAWEEDFS_FILER_URL: Filer HTTP API URL (default: http://localhost:8888)
@@ -311,17 +311,21 @@ def create_storage_client(
         GCS_PROJECT: GCS project ID (optional, uses default credentials project)
     """
     storage_type = storage_type or os.getenv("STORAGE_TYPE", "seaweedfs")
-    
+
     if storage_type == "seaweedfs":
         return SeaweedFSFilerClient(
-            filer_url=kwargs.get("filer_url") or os.getenv("SEAWEEDFS_FILER_URL", "http://localhost:8888"),
-            s3_url=kwargs.get("s3_url") or os.getenv("SEAWEEDFS_S3_URL", "http://localhost:8333"),
+            filer_url=kwargs.get("filer_url")
+            or os.getenv("SEAWEEDFS_FILER_URL", "http://localhost:8888"),
+            s3_url=kwargs.get("s3_url")
+            or os.getenv("SEAWEEDFS_S3_URL", "http://localhost:8333"),
             bucket=kwargs.get("bucket") or os.getenv("S3_BUCKET", "hifld"),
         )
     elif storage_type == "gcs":
         bucket = kwargs.get("bucket") or os.getenv("GCS_BUCKET")
         if not bucket:
-            raise ValueError("GCS_BUCKET environment variable or bucket kwarg is required for GCS storage")
+            raise ValueError(
+                "GCS_BUCKET environment variable or bucket kwarg is required for GCS storage"
+            )
         project = kwargs.get("project") or os.getenv("GCS_PROJECT")
         return GCSStorageClient(bucket=bucket, project=project)
     else:

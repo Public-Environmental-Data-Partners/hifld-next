@@ -1,27 +1,48 @@
 # Use Java 17 as base image (GeoServer requires Java 17 or 21)
 FROM eclipse-temurin:17-jre
 
-# Set working directory
-WORKDIR /usr/share/geoserver
+# Build date for GeoServer SNAPSHOT builds - ensures all components are from the same build
+ARG BUILD_DATE=2026-01-15
 
 # Install unzip, curl for health checks, and postgresql-client for schema checks
 RUN apt-get update && \
-    apt-get install -y unzip curl postgresql-client && \
+    apt-get install -y unzip curl postgresql-client wget && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy GeoServer binary
-COPY binaries/2.28.0/geoserver-2.28.0-bin.zip /tmp/geoserver.zip
+# Download plugin zip files from GeoServer build server
+# Using dated 2.28.x SNAPSHOT builds for consistency
+# All components from same build date ensures compatibility
+RUN set -eux && \
+    echo "Downloading GeoParquet plugin from GeoServer build server (${BUILD_DATE})" && \
+    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/community-${BUILD_DATE}/geoserver-2.28-SNAPSHOT-geoparquet-plugin.zip" -o /tmp/geoparquet-plugin.zip && \
+    test -s /tmp/geoparquet-plugin.zip && \
+    echo "GeoParquet plugin downloaded successfully" && \
+    echo "Skipping PMTiles plugin (incompatible ModuleStatusImpl.category property)" && \
+    echo "Downloading JDBCConfig plugin from GeoServer build server (${BUILD_DATE})" && \
+    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/community-${BUILD_DATE}/geoserver-2.28-SNAPSHOT-jdbcconfig-plugin.zip" -o /tmp/jdbcconfig-plugin.zip && \
+    test -s /tmp/jdbcconfig-plugin.zip && \
+    echo "JDBCConfig plugin downloaded successfully" && \
+    echo "Downloading OGC API Features plugin from GeoServer build server (${BUILD_DATE})" && \
+    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/ext-${BUILD_DATE}/geoserver-2.28-SNAPSHOT-ogcapi-features-plugin.zip" -o /tmp/ogcapi-features-plugin.zip && \
+    test -s /tmp/ogcapi-features-plugin.zip && \
+    echo "OGC API Features plugin downloaded successfully" && \
+    echo "Downloading GeoPackage output plugin from GeoServer build server (${BUILD_DATE})" && \
+    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/ext-${BUILD_DATE}/geoserver-2.28-SNAPSHOT-geopkg-output-plugin.zip" -o /tmp/geopkg-output-plugin.zip && \
+    test -s /tmp/geopkg-output-plugin.zip && \
+    echo "GeoPackage output plugin downloaded successfully"
+
+# Set working directory
+WORKDIR /usr/share/geoserver
+
+# Download GeoServer binary from build server (same dated build as plugins for compatibility)
+ARG BUILD_DATE
+RUN curl -fsSL -o /tmp/geoserver.zip \
+    "https://build.geoserver.org/geoserver/2.28.x/geoserver-2.28.x-${BUILD_DATE}-bin.zip" && \
+    echo "GeoServer binary downloaded successfully (${BUILD_DATE} build)"
 
 # Extract GeoServer directly to working directory
 RUN unzip -q /tmp/geoserver.zip -d /usr/share/geoserver && \
     rm -f /tmp/geoserver.zip
-
-# Copy plugin zip files
-COPY binaries/2.28.0/geoserver-2.28-SNAPSHOT-geoparquet-plugin.zip /tmp/geoparquet-plugin.zip
-COPY binaries/2.28.0/geoserver-2.28-SNAPSHOT-pmtiles-store-plugin.zip /tmp/pmtiles-plugin.zip
-COPY binaries/2.28.0/geoserver-2.28-SNAPSHOT-jdbcconfig-plugin.zip /tmp/jdbcconfig-plugin.zip
-COPY binaries/2.28.0/geoserver-2.28-SNAPSHOT-ogcapi-features-plugin.zip /tmp/ogcapi-features-plugin.zip
-COPY binaries/2.28.0/geoserver-2.28.0-geopkg-output-plugin.zip /tmp/geopkg-output-plugin.zip
 
 # Download PostgreSQL JDBC driver (required for JDBCConfig)
 RUN curl -fsSL https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar -o /tmp/postgresql-jdbc.jar && \
@@ -29,16 +50,14 @@ RUN curl -fsSL https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/p
     unzip -t /tmp/postgresql-jdbc.jar > /dev/null && \
     echo "PostgreSQL JDBC driver downloaded and verified successfully"
 
-# Extract and install plugins
-RUN mkdir -p /tmp/geoparquet-extract /tmp/pmtiles-extract /tmp/jdbcconfig-extract /tmp/ogcapi-features-extract /tmp/geopkg-output-extract && \
+# Extract and install plugins (PMTiles skipped due to incompatibility)
+RUN mkdir -p /tmp/geoparquet-extract /tmp/jdbcconfig-extract /tmp/ogcapi-features-extract /tmp/geopkg-output-extract && \
     unzip -q /tmp/geoparquet-plugin.zip -d /tmp/geoparquet-extract && \
-    unzip -q /tmp/pmtiles-plugin.zip -d /tmp/pmtiles-extract && \
     unzip -q /tmp/jdbcconfig-plugin.zip -d /tmp/jdbcconfig-extract && \
     unzip -q /tmp/ogcapi-features-plugin.zip -d /tmp/ogcapi-features-extract && \
     unzip -q /tmp/geopkg-output-plugin.zip -d /tmp/geopkg-output-extract && \
     # Copy .jar files to GeoServer lib directory
     find /tmp/geoparquet-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
-    find /tmp/pmtiles-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
     find /tmp/jdbcconfig-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
     find /tmp/ogcapi-features-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
     find /tmp/geopkg-output-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
