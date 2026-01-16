@@ -1,44 +1,40 @@
 # Use Java 17 as base image (GeoServer requires Java 17 or 21)
 FROM eclipse-temurin:17-jre
 
-# Build date for GeoServer SNAPSHOT builds - ensures all components are from the same build
-ARG BUILD_DATE=2026-01-15
-
 # Install unzip, curl for health checks, and postgresql-client for schema checks
 RUN apt-get update && \
     apt-get install -y unzip curl postgresql-client wget && \
     rm -rf /var/lib/apt/lists/*
 
 # Download plugin zip files from GeoServer build server
-# Using dated 2.28.x SNAPSHOT builds for consistency
-# All components from same build date ensures compatibility
+# Using latest 2.28.x SNAPSHOT builds - latest ensures all components are from the same build
+# Note: Using -latest instead of dated builds since dated builds are removed daily
 RUN set -eux && \
-    echo "Downloading GeoParquet plugin from GeoServer build server (${BUILD_DATE})" && \
-    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/community-${BUILD_DATE}/geoserver-2.28-SNAPSHOT-geoparquet-plugin.zip" -o /tmp/geoparquet-plugin.zip && \
+    echo "Downloading GeoParquet plugin from GeoServer build server (latest)" && \
+    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/community-latest/geoserver-2.28-SNAPSHOT-geoparquet-plugin.zip" -o /tmp/geoparquet-plugin.zip && \
     test -s /tmp/geoparquet-plugin.zip && \
     echo "GeoParquet plugin downloaded successfully" && \
     echo "Skipping PMTiles plugin (incompatible ModuleStatusImpl.category property)" && \
-    echo "Downloading JDBCConfig plugin from GeoServer build server (${BUILD_DATE})" && \
-    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/community-${BUILD_DATE}/geoserver-2.28-SNAPSHOT-jdbcconfig-plugin.zip" -o /tmp/jdbcconfig-plugin.zip && \
+    echo "Downloading JDBCConfig plugin from GeoServer build server (latest)" && \
+    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/community-latest/geoserver-2.28-SNAPSHOT-jdbcconfig-plugin.zip" -o /tmp/jdbcconfig-plugin.zip && \
     test -s /tmp/jdbcconfig-plugin.zip && \
     echo "JDBCConfig plugin downloaded successfully" && \
-    echo "Downloading OGC API Features plugin from GeoServer build server (${BUILD_DATE})" && \
-    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/ext-${BUILD_DATE}/geoserver-2.28-SNAPSHOT-ogcapi-features-plugin.zip" -o /tmp/ogcapi-features-plugin.zip && \
+    echo "Downloading OGC API Features plugin from GeoServer build server (latest)" && \
+    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/ext-latest/geoserver-2.28-SNAPSHOT-ogcapi-features-plugin.zip" -o /tmp/ogcapi-features-plugin.zip && \
     test -s /tmp/ogcapi-features-plugin.zip && \
     echo "OGC API Features plugin downloaded successfully" && \
-    echo "Downloading GeoPackage output plugin from GeoServer build server (${BUILD_DATE})" && \
-    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/ext-${BUILD_DATE}/geoserver-2.28-SNAPSHOT-geopkg-output-plugin.zip" -o /tmp/geopkg-output-plugin.zip && \
+    echo "Downloading GeoPackage output plugin from GeoServer build server (latest)" && \
+    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/ext-latest/geoserver-2.28-SNAPSHOT-geopkg-output-plugin.zip" -o /tmp/geopkg-output-plugin.zip && \
     test -s /tmp/geopkg-output-plugin.zip && \
     echo "GeoPackage output plugin downloaded successfully"
 
 # Set working directory
 WORKDIR /usr/share/geoserver
 
-# Download GeoServer binary from build server (same dated build as plugins for compatibility)
-ARG BUILD_DATE
+# Download GeoServer binary from build server (latest - same build as plugins for compatibility)
 RUN curl -fsSL -o /tmp/geoserver.zip \
-    "https://build.geoserver.org/geoserver/2.28.x/geoserver-2.28.x-${BUILD_DATE}-bin.zip" && \
-    echo "GeoServer binary downloaded successfully (${BUILD_DATE} build)"
+    "https://build.geoserver.org/geoserver/2.28.x/geoserver-2.28.x-latest-bin.zip" && \
+    echo "GeoServer binary downloaded successfully (latest build)"
 
 # Extract GeoServer directly to working directory
 RUN unzip -q /tmp/geoserver.zip -d /usr/share/geoserver && \
