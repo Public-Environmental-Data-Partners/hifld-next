@@ -52,6 +52,7 @@ export interface SpatialDatasetFileMetadata {
 
 export interface Dataset {
   id: number;
+  slug: string; // Unique identifier for the dataset
   name: string; // Human-readable name
   description?: string;
   tags?: Record<string, string | string[]>; // Searchable metadata tags (e.g. {inventory_name: "...", geometry_type: "Point", categories: ["Boundaries", "Water Supply"]})
@@ -64,6 +65,8 @@ export interface DatasetSource {
   id: number;
   version?: number;
   url?: string;
+  storage_uri?: string; // Storage URI (gs:// or s3://) for file sources
+  glob_pattern?: string; // Glob pattern (gs:// or s3://) for multiple files in same location/version
   source_type: SourceType;
   location: DatasetSourceLocation;
   source_metadata?: SpatialDatasetFileMetadata;
@@ -121,8 +124,27 @@ export interface DatasetFormat {
   sources: DatasetSource[];
 }
 
-export interface DatasetWithUrls extends Dataset {
+export interface DatasetFile {
+  id: number;
+  dataset_id: number;
+  name: string;
+  slug: string;
+  description?: string;
+  layer_name?: string;
+  source_file_path?: string;
+  file_metadata?: SpatialDatasetFileMetadata;
+  created_at: string;
+  updated_at: string;
   formats?: DatasetFormat[];
+}
+
+export interface DatasetWithUrls extends Dataset {
+  files?: DatasetFile[];
+}
+
+export interface DatasetFileResponse {
+  dataset: Dataset;
+  file: DatasetFile;
 }
 
 export interface PaginatedResponse<T> {
@@ -134,6 +156,15 @@ export interface PaginatedResponse<T> {
 
 export interface DatasetStats {
   total: number;
+}
+
+export interface Collection {
+  id: number;
+  slug: string; // Unique identifier for the collection
+  name: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 /**
@@ -168,12 +199,100 @@ export const getDatasetById = createServerFn({ method: "GET" })
   .inputValidator((data: { id: number; includeUrls?: boolean }) => data)
   .handler(async ({ data }) => {
     // Get all datasets and find the one we want
-    // TODO: Add direct endpoint to dataset-api for getting by ID
     const datasets = await getDatasets({
       data: { includeUrls: data.includeUrls },
     });
     const dataset = datasets.find((d: Dataset) => d.id === data.id);
     return (dataset as DatasetWithUrls) || null;
+  });
+
+/**
+ * Get a single dataset by slug from a collection
+ * Server function - can be called from loaders or components
+ */
+export const getDatasetBySlug = createServerFn({ method: "GET" })
+  .inputValidator((data: { collectionSlug: string; datasetSlug: string; includeUrls?: boolean }) => data)
+  .handler(async ({ data }) => {
+    // Get the collection first
+    const collection = await getCollectionBySlug({ data: { slug: data.collectionSlug } });
+    if (!collection) {
+      return null;
+    }
+    
+    // Use the appropriate endpoint based on includeUrls
+    const includeUrls = data.includeUrls ?? false;
+    let endpoint = `/api/collections/${collection.id}/datasets/by-slug/${data.datasetSlug}`;
+    if (includeUrls) {
+      endpoint += "/urls";
+    } else {
+      endpoint += "/files"; // Default to files endpoint for file tree
+    }
+    
+    const url = `${env.DATASET_API_URL}${endpoint}`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null;
+      }
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(
+        `Failed to fetch dataset: ${response.status} ${errorText}`
+      );
+    }
+    
+    return (await response.json()) as DatasetWithUrls;
+  });
+
+/**
+ * Get a single file by ID within a dataset by ID (includes URLs)
+ */
+export const getDatasetFileById = createServerFn({ method: "GET" })
+  .inputValidator(
+    (data: {
+      collectionId: number;
+      datasetId: number;
+      fileId: number;
+    }) => data
+  )
+  .handler(async ({ data }) => {
+    const url = `${env.DATASET_API_URL}/api/collections/${data.collectionId}/datasets/${data.datasetId}/files/${data.fileId}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(
+        `Failed to fetch dataset file: ${response.status} ${errorText}`
+      );
+    }
+    return (await response.json()) as DatasetFileResponse;
+  });
+
+/**
+ * Get a single file by slug within a dataset by slug (includes URLs)
+ */
+export const getDatasetFileBySlug = createServerFn({ method: "GET" })
+  .inputValidator(
+    (data: {
+      collectionSlug: string;
+      datasetSlug: string;
+      fileSlug: string;
+    }) => data
+  )
+  .handler(async ({ data }) => {
+    const collection = await getCollectionBySlug({ data: { slug: data.collectionSlug } });
+    if (!collection) {
+      console.error("[getDatasetFileBySlug] Collection not found:", data.collectionSlug);
+      return null;
+    }
+    const url = `${env.DATASET_API_URL}/api/collections/${collection.id}/datasets/by-slug/${data.datasetSlug}/files/${data.fileSlug}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(
+        `Failed to fetch dataset file: ${response.status} ${errorText}`
+      );
+    }
+    return (await response.json()) as DatasetFileResponse;
   });
 
 /**
@@ -234,6 +353,22 @@ export const getCollectionById = createServerFn({ method: "GET" })
   });
 
 /**
+ * Get a collection by slug
+ * Server function - can be called from loaders or components
+ */
+export const getCollectionBySlug = createServerFn({ method: "GET" })
+  .inputValidator((data: { slug: string }) => data)
+  .handler(async ({ data }) => {
+    if (!data.slug) {
+      return null;
+    }
+    // Fetch all collections and find by slug
+    const collections = await getCollections();
+    const collection = collections.find((c: Collection) => c.slug === data.slug);
+    return collection || null;
+  });
+
+/**
  * Get datasets in a specific collection
  * Server function - can be called from loaders or components
  */
@@ -261,7 +396,15 @@ export const getCollectionDatasets = createServerFn({ method: "GET" })
     const url = `${env.DATASET_API_URL}/api/collections/${data.collectionId}/datasets${params.toString() ? `?${params}` : ""}`;
 
     try {
-      const response = await fetch(url);
+      // Add a timeout to prevent hanging requests
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 second timeout
+      
+      const response = await fetch(url, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      
       if (!response.ok) {
         const errorText = await response
           .text()
@@ -274,6 +417,9 @@ export const getCollectionDatasets = createServerFn({ method: "GET" })
       return result as PaginatedResponse<DatasetWithUrls>;
     } catch (error) {
       // Log the error for debugging
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Request timeout: The server took too long to respond. This may be due to slow URL computation. Please try again or contact support.');
+      }
       console.error(`Error fetching collection datasets:`, {
         url,
         collectionId: data.collectionId,
@@ -281,6 +427,40 @@ export const getCollectionDatasets = createServerFn({ method: "GET" })
       });
       throw error;
     }
+  });
+
+/**
+ * Get datasets in a specific collection by collection slug
+ * Server function - can be called from loaders or components
+ */
+export const getCollectionDatasetsBySlug = createServerFn({ method: "GET" })
+  .inputValidator(
+    (data: {
+      collectionSlug: string;
+      search?: string;
+      includeUrls?: boolean;
+      limit?: number;
+      offset?: number;
+      tagFilters?: Record<string, string | string[]>;
+    }) => data
+  )
+  .handler(async ({ data }) => {
+    // First get the collection by slug to get its ID
+    const collection = await getCollectionBySlug({ data: { slug: data.collectionSlug } });
+    if (!collection) {
+      throw new Error(`Collection not found: ${data.collectionSlug}`);
+    }
+    // Then use the existing function with the collection ID
+    return getCollectionDatasets({
+      data: {
+        collectionId: collection.id,
+        search: data.search,
+        includeUrls: data.includeUrls,
+        limit: data.limit,
+        offset: data.offset,
+        tagFilters: data.tagFilters,
+      },
+    });
   });
 
 /**
@@ -314,6 +494,25 @@ export const getCollectionTagValues = createServerFn({ method: "GET" })
       });
       throw error;
     }
+  });
+
+/**
+ * Get available tag values for a collection by slug
+ * Server function - can be called from loaders or components
+ */
+export const getCollectionTagValuesBySlug = createServerFn({ method: "GET" })
+  .inputValidator((data: { collectionSlug: string; tagKey?: string }) => data)
+  .handler(async ({ data }) => {
+    const collection = await getCollectionBySlug({ data: { slug: data.collectionSlug } });
+    if (!collection) {
+      throw new Error(`Collection not found: ${data.collectionSlug}`);
+    }
+    return getCollectionTagValues({
+      data: {
+        collectionId: collection.id,
+        tagKey: data.tagKey,
+      },
+    });
   });
 
 /**
@@ -383,6 +582,25 @@ export function getGeoPackageUrl(
   const layerName = location.layer_name || location.store_name || "";
   // GeoServer WFS GetFeature with GeoPackage output format
   return `${config.base_url}/${workspace}/wfs?service=wfs&version=2.0.0&request=GetFeature&typeNames=${workspace}:${layerName}&outputFormat=geopkg`;
+}
+
+/**
+ * Get GeoJSON download URL from GeoServer source
+ * Constructs URL from storage location + dataset source
+ */
+export function getGeoJsonUrl(
+  source: DatasetSource,
+  storageLocation: StorageLocation
+): string | null {
+  const config = storageLocation.config as
+    | GeoServerStorageLocationConfig
+    | undefined;
+  if (!config?.base_url) return null;
+  const location = source.location as GeoServerLocation;
+  const workspace = location.workspace || "hifld";
+  const layerName = location.layer_name || location.store_name || "";
+  // GeoServer WFS GetFeature with GeoJSON output format
+  return `${config.base_url}/${workspace}/wfs?service=wfs&version=2.0.0&request=GetFeature&typeNames=${workspace}:${layerName}&outputFormat=application/json`;
 }
 
 /**

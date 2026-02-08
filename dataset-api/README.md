@@ -75,6 +75,12 @@ Dataset processing scripts additionally require storage configuration:
 
 ### Database Setup
 
+To generate migrations:
+
+```bash
+uv run alembic revision --autogenerate -m "revision_name"
+```
+
 #### SQLite (Default)
 
 No setup required. Just run the migrations:

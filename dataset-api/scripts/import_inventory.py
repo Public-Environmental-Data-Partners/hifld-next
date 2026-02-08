@@ -392,7 +392,23 @@ async def import_dataset(
 
     # Step 4: Register with GeoServer if requested
     geoserver_success = False
-    if add_to_geoserver and process_result.get("geoparquet_url"):
+    # Handle both single URL and chunked URLs (array)
+    geoparquet_url = process_result.get("geoparquet_url")
+    geoparquet_urls = process_result.get("geoparquet_urls", [])
+    
+    # If we have chunked URLs, use the first one for HTTP (glob patterns don't work)
+    # For S3, we could construct a glob pattern, but that requires endpoint config
+    if not geoparquet_url and geoparquet_urls:
+        if isinstance(geoparquet_urls, list) and len(geoparquet_urls) > 0:
+            geoparquet_url = geoparquet_urls[0]
+            logger.info(
+                f"  → Using first chunk from {len(geoparquet_urls)} chunked GeoParquet files for GeoServer"
+            )
+            logger.warning(
+                "  ⚠ Note: Only first chunk will be used. For full dataset, merge chunks or use S3 with glob patterns."
+            )
+    
+    if add_to_geoserver and geoparquet_url:
         logger.info("  → Registering with GeoServer...")
         try:
             if not geoparquet_source_created:
@@ -412,9 +428,6 @@ async def import_dataset(
                         "  ⚠ GeoServer storage location not found. Run seed_storage.py first."
                     )
                 else:
-                    # Use the geoparquet URL directly from process result
-                    geoparquet_url = process_result["geoparquet_url"]
-
                     # Use GeoServerClient directly to publish
                     geoserver_client = GeoServerClient()
                     workspace = os.getenv("GEOSERVER_WORKSPACE", "hifld")
@@ -508,10 +521,17 @@ async def import_dataset(
         except Exception as e:
             logger.warning(f"  ⚠ GeoServer registration error: {e}")
 
+    # Return single URL (use first from array if chunked)
+    geoparquet_url_return = process_result.get("geoparquet_url")
+    if not geoparquet_url_return:
+        geoparquet_urls = process_result.get("geoparquet_urls", [])
+        if isinstance(geoparquet_urls, list) and len(geoparquet_urls) > 0:
+            geoparquet_url_return = geoparquet_urls[0]
+    
     return {
         "name": alias,
         "dataset_id": dataset_obj.id,
-        "geoparquet_url": process_result.get("geoparquet_url"),
+        "geoparquet_url": geoparquet_url_return,
         "pmtiles_url": process_result.get("pmtiles_url"),
         "feature_count": process_result.get("feature_count"),
         "geoserver_success": geoserver_success,

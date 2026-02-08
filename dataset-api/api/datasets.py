@@ -1,14 +1,18 @@
 """Dataset API endpoints - nested under collections."""
 
+import json
+import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel import Session
 
 from database.db import get_db
 from services.datasets import DatasetService
 from services.collections import CollectionService
 from models.dataset import Collection
-from sqlmodel import Session
-import json
+
+logger = logging.getLogger(__name__)
+
 
 router = APIRouter(
     prefix="/api/collections/{collection_id}/datasets", tags=["datasets"]
@@ -109,9 +113,7 @@ async def list_datasets(
                         result.append(dataset_dict)
                 except Exception as e:
                     # Log error but continue with other datasets
-                    import logging
 
-                    logger = logging.getLogger(__name__)
                     # Use the stored dataset_id instead of accessing dataset.id
                     # which might trigger a lazy load on a rolled-back session
                     logger.error(
@@ -147,11 +149,141 @@ async def list_datasets(
             "offset": offset or 0,
         }
     except Exception as e:
-        import logging
 
-        logger = logging.getLogger(__name__)
         logger.error(
             f"Error listing datasets for collection {collection_id}: {e}", exc_info=True
+        )
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/{dataset_id}/files/{file_id}")
+async def get_dataset_file_by_id(
+    collection_id: int,
+    dataset_id: int,
+    file_id: int,
+    _collection: Collection = Depends(verify_collection_exists),
+    service: DatasetService = Depends(get_dataset_service),
+):
+    """Get a single file with URLs for a dataset by ID."""
+    logger.info(
+        "API endpoint called: get_dataset_file_by_id collection_id=%s dataset_id=%s file_id=%s",
+        collection_id,
+        dataset_id,
+        file_id,
+    )
+    try:
+        # Verify dataset belongs to collection
+        dataset = service.get_dataset_by_id(dataset_id)
+        if not dataset or dataset.collection_id != collection_id:
+            raise HTTPException(
+                status_code=404, detail="Dataset not found in this collection"
+            )
+
+        result = await service.get_dataset_file_with_urls_by_id(
+            dataset_id=dataset_id,
+            file_id=file_id,
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="Dataset file not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+
+        logger.error(
+            f"Error getting file {file_id} for dataset {dataset_id}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/by-slug/{dataset_slug}")
+async def get_dataset_by_slug(
+    collection_id: int,
+    dataset_slug: str,
+    _collection: Collection = Depends(verify_collection_exists),
+    service: DatasetService = Depends(get_dataset_service),
+):
+    """Get basic dataset metadata by slug (no files, no URLs)."""
+    dataset = service.get_dataset_by_slug(
+        collection_id=collection_id, slug=dataset_slug
+    )
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return dataset
+
+
+@router.get("/by-slug/{dataset_slug}/files")
+async def get_dataset_with_files_by_slug(
+    collection_id: int,
+    dataset_slug: str,
+    _collection: Collection = Depends(verify_collection_exists),
+    service: DatasetService = Depends(get_dataset_service),
+):
+    """Get dataset with files list by slug (no URLs). Used for file tree display."""
+    dataset = service.get_dataset_by_slug(
+        collection_id=collection_id, slug=dataset_slug
+    )
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    dataset_dict = service.get_dataset_with_files(dataset.id)
+    if not dataset_dict:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return dataset_dict
+
+
+@router.get("/by-slug/{dataset_slug}/urls")
+async def get_dataset_with_urls_by_slug(
+    collection_id: int,
+    dataset_slug: str,
+    _collection: Collection = Depends(verify_collection_exists),
+    service: DatasetService = Depends(get_dataset_service),
+):
+    """Get dataset with full URLs by slug. Used for file detail pages."""
+    dataset = service.get_dataset_by_slug(
+        collection_id=collection_id, slug=dataset_slug
+    )
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    dataset_dict = service.get_dataset_with_urls(dataset.id)
+    if not dataset_dict:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return dataset_dict
+
+
+@router.get("/by-slug/{dataset_slug}/files/{file_slug}")
+async def get_dataset_file_by_slug(
+    collection_id: int,
+    dataset_slug: str,
+    file_slug: str,
+    _collection: Collection = Depends(verify_collection_exists),
+    service: DatasetService = Depends(get_dataset_service),
+):
+    """Get a single file with URLs for a dataset by slug."""
+    logger.info(
+        "API endpoint called: get_dataset_file_by_slug collection_id=%s dataset_slug=%s file_slug=%s",
+        collection_id,
+        dataset_slug,
+        file_slug,
+    )
+    try:
+        result = await service.get_dataset_file_with_urls(
+            collection_id=collection_id,
+            dataset_slug=dataset_slug,
+            file_slug=file_slug,
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="Dataset file not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+
+        logger.error(
+            f"Error getting file {file_slug} for dataset {dataset_slug}: {e}",
+            exc_info=True,
         )
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
@@ -185,9 +317,7 @@ async def get_collection_tag_values(
         )
         return tag_values
     except Exception as e:
-        import logging
 
-        logger = logging.getLogger(__name__)
         logger.error(
             f"Error getting tag values for collection {collection_id}: {e}",
             exc_info=True,
@@ -199,13 +329,10 @@ async def get_collection_tag_values(
 async def get_dataset(
     collection_id: int,
     dataset_id: int,
-    include_urls: bool = Query(
-        False, description="Include full URLs constructed from storage location"
-    ),
     _collection: Collection = Depends(verify_collection_exists),
     service: DatasetService = Depends(get_dataset_service),
 ):
-    """Get a single dataset by ID from a collection."""
+    """Get basic dataset metadata (no files, no URLs)."""
     dataset = service.get_dataset_by_id(dataset_id)
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
@@ -216,13 +343,55 @@ async def get_dataset(
             status_code=404, detail="Dataset not found in this collection"
         )
 
-    if include_urls:
-        dataset_dict = service.get_dataset_with_urls(dataset_id)
-        if not dataset_dict:
-            raise HTTPException(status_code=404, detail="Dataset not found")
-        return dataset_dict
-
     return dataset
+
+
+@router.get("/{dataset_id}/files")
+async def get_dataset_with_files(
+    collection_id: int,
+    dataset_id: int,
+    _collection: Collection = Depends(verify_collection_exists),
+    service: DatasetService = Depends(get_dataset_service),
+):
+    """Get dataset with files list (no URLs). Used for file tree display."""
+    # Verify dataset belongs to collection
+    dataset = service.get_dataset_by_id(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    if dataset.collection_id != collection_id:
+        raise HTTPException(
+            status_code=404, detail="Dataset not found in this collection"
+        )
+
+    dataset_dict = service.get_dataset_with_files(dataset_id)
+    if not dataset_dict:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return dataset_dict
+
+
+@router.get("/{dataset_id}/urls")
+async def get_dataset_with_urls(
+    collection_id: int,
+    dataset_id: int,
+    _collection: Collection = Depends(verify_collection_exists),
+    service: DatasetService = Depends(get_dataset_service),
+):
+    """Get dataset with full URLs. Used for file detail pages."""
+    # Verify dataset belongs to collection
+    dataset = service.get_dataset_by_id(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    if dataset.collection_id != collection_id:
+        raise HTTPException(
+            status_code=404, detail="Dataset not found in this collection"
+        )
+
+    dataset_dict = service.get_dataset_with_urls(dataset_id)
+    if not dataset_dict:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return dataset_dict
 
 
 # Write endpoints removed - use scripts/import_inventory.py for dataset creation

@@ -41,8 +41,8 @@ function CollectionsListPage() {
                 className="cursor-pointer hover:bg-muted/50 transition-colors"
               >
                 <Link
-                  to="/collections/$id"
-                  params={{ id: collection.id.toString() }}
+                  to="/collections/$slug"
+                  params={{ slug: collection.slug }}
                 >
                   <CardHeader>
                     <div className="flex items-center gap-2 mb-2">

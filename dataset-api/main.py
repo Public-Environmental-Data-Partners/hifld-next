@@ -17,13 +17,17 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from database.db import init_db
 from api import collections as collections_router
 from api import datasets as datasets_router
-from api import datasets_global as datasets_global_router
 from api import geoserver as geoserver_router
 
 # Processing router removed - use scripts/import_inventory.py for dataset processing
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger("dataset-api")
+
+# SQLAlchemy logging is controlled in database/db.py via ENABLE_DB_DEBUG
 
 
 class TimeoutMiddleware(BaseHTTPMiddleware):
@@ -114,9 +118,6 @@ app.add_middleware(
 # Include routers (read-only endpoints)
 app.include_router(collections_router.router)  # GET only
 app.include_router(datasets_router.router)  # GET only, nested under collections
-app.include_router(
-    datasets_global_router.router
-)  # GET only, global endpoints (backwards compatibility)
 app.include_router(geoserver_router.router)  # GeoServer proxy endpoints
 # Processing router removed - use scripts/import_inventory.py for dataset processing
 

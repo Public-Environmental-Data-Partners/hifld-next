@@ -1,4 +1,4 @@
-import { createFileRoute, notFound } from "@tanstack/react-router";
+import { createFileRoute, notFound, useNavigate, useSearch } from "@tanstack/react-router";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Search, ArrowLeft, Database, Loader2 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
@@ -10,34 +10,54 @@ import { DatasetCard } from "@/components/dataset";
 import { Pagination } from "@/components/ui/pagination";
 import { TagFilters, type TagFilter } from "@/components/tag-filters";
 import {
-  getCollectionById,
+  getCollectionBySlug,
   getCollectionDatasets,
   getCollectionTagValues,
 } from "@/lib/api-client";
 import type { DatasetWithUrls } from "@/lib/api-client";
 
-export const Route = createFileRoute("/collections/$id")({
+export const Route = createFileRoute("/collections/$slug")({
+  validateSearch: (search: Record<string, unknown> | undefined) => {
+    if (!search) {
+      return {
+        query: "",
+        limit: 100, // Default limit to prevent timeouts
+        offset: 0,
+      };
+    }
+    return {
+      query: (search.query as string) || "",
+      limit: search.limit ? Number(search.limit) : 100, // Default to 100 if not specified
+      offset: search.offset ? Number(search.offset) : 0,
+    };
+  },
   // Loader is isomorphic - runs on server (SSR) and client (navigation)
   // Server functions handle RPC automatically when called from client
-  loader: async ({ params }) => {
+  loader: async ({ params, search }) => {
     try {
-      const collectionId = parseInt(params.id, 10);
-      if (isNaN(collectionId)) {
-        throw notFound();
-      }
-      const collection = await getCollectionById({
-        data: { id: collectionId },
+      const collection = await getCollectionBySlug({
+        data: { slug: params.slug },
       });
       if (!collection) {
         throw notFound();
       }
-      const pageSize = 12; // Default page size
+      // Search params are validated by validateSearch
+      // Use a default limit to prevent timeouts when fetching all datasets
+      // Users can still specify a limit in the URL, or remove it to get the default
+      const pageSize = search?.limit ?? 100; // Default to 100 to prevent timeouts
+      const offset = search?.offset ?? 0;
+      const searchQuery = search?.query ?? "";
+      
+      // Use getCollectionDatasets directly with the collection ID to avoid duplicate getCollectionBySlug call
+      // Note: includeUrls=false to avoid N+1 query performance issues in backend
+      // URLs will be loaded on-demand when viewing individual datasets
       const datasetsResponse = await getCollectionDatasets({
         data: {
           collectionId: collection.id,
-          includeUrls: true,
+          includeUrls: false, // Set to false to avoid backend N+1 query timeout
           limit: pageSize,
-          offset: 0,
+          offset: offset,
+          search: searchQuery || undefined,
         },
       });
       return { collection, datasetsResponse, pageSize };
@@ -56,12 +76,15 @@ function CollectionDetailPage() {
     datasetsResponse: initialResponse,
     pageSize,
   } = Route.useLoaderData();
-  const [searchQuery, setSearchQuery] = useState("");
+  const navigate = useNavigate({ from: Route.fullPath });
+  const search = useSearch({ from: Route.fullPath, strict: false });
+  
+  const [searchQuery, setSearchQuery] = useState(search?.query || "");
   const [datasets, setDatasets] = useState<DatasetWithUrls[]>(
     initialResponse?.items || []
   );
   const [total, setTotal] = useState(initialResponse?.total || 0);
-  const [offset, setOffset] = useState(0);
+  const [offset, setOffset] = useState(search?.offset || 0);
   const [isSearching, setIsSearching] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedTagFilters, setSelectedTagFilters] = useState<TagFilter[]>([]);
@@ -71,6 +94,30 @@ function CollectionDetailPage() {
   const [tagsLoading, setTagsLoading] = useState(true);
   const abortControllerRef = useRef<AbortController | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Update URL when search, offset, or limit changes
+  const updateUrlParams = useCallback(
+    (updates: { query?: string; offset?: number; limit?: number | undefined }) => {
+      const currentSearch = search || { query: "", limit: 100, offset: 0 };
+      const newSearch = {
+        ...currentSearch,
+        ...updates,
+      };
+      // Remove empty query from URL
+      if (newSearch.query === "") {
+        delete newSearch.query;
+      }
+      // Remove limit if it's the default (100) to keep URL clean
+      if (newSearch.limit === 100) {
+        delete newSearch.limit;
+      }
+      navigate({
+        search: newSearch,
+        replace: true,
+      });
+    },
+    [navigate, search]
+  );
 
   // Load available tag values
   useEffect(() => {
@@ -82,7 +129,7 @@ function CollectionDetailPage() {
         });
         console.log(
           "Loaded tag values for collection",
-          collection.id,
+          collection.slug,
           ":",
           tagValues
         );
@@ -109,7 +156,7 @@ function CollectionDetailPage() {
       }
     };
     loadTagValues();
-  }, [collection.id]);
+  }, [collection.slug]);
 
   // Convert selected filters to API format
   const getTagFiltersForAPI = (
@@ -136,7 +183,7 @@ function CollectionDetailPage() {
   // Fetch datasets with pagination and tag filters
   const fetchDatasets = useCallback(
     async (
-      search?: string,
+      searchQuery?: string,
       newOffset: number = 0,
       tagFilters: TagFilter[] = selectedTagFilters,
       signal?: AbortSignal
@@ -153,7 +200,7 @@ function CollectionDetailPage() {
 
       setIsLoading(true);
       try {
-        const trimmedQuery = search?.trim();
+        const trimmedQuery = searchQuery?.trim();
         // If search is empty, don't pass it to the API
         const searchParam =
           trimmedQuery && trimmedQuery.length > 0 ? trimmedQuery : undefined;
@@ -161,12 +208,17 @@ function CollectionDetailPage() {
         const tagFiltersForAPI =
           tagFilters.length > 0 ? getTagFiltersForAPI(tagFilters) : undefined;
 
+        // Use current limit from search params (defaults to 100 if not specified)
+        const currentLimit = search?.limit ?? 100;
+        
+        // Use includeUrls=false to avoid backend N+1 query performance issues
+        // URLs will be loaded when viewing individual dataset detail pages
         const response = await getCollectionDatasets({
           data: {
             collectionId: collection.id,
             search: searchParam,
-            includeUrls: true,
-            limit: pageSize,
+            includeUrls: false, // Set to false to avoid backend N+1 query timeout
+            limit: currentLimit,
             offset: newOffset,
             tagFilters: tagFiltersForAPI,
           },
@@ -179,6 +231,7 @@ function CollectionDetailPage() {
 
         setDatasets(response.items || []);
         setTotal(response.total || 0);
+        setOffset(newOffset);
       } catch (error) {
         // Ignore abort errors
         if (error instanceof Error && error.name === "AbortError") {
@@ -198,8 +251,21 @@ function CollectionDetailPage() {
         }
       }
     },
-    [collection.id, pageSize, selectedTagFilters]
+    [collection.slug, search?.limit, selectedTagFilters]
   );
+
+  // Sync URL params with state on mount and when URL changes
+  useEffect(() => {
+    const urlQuery = search?.query || "";
+    const urlOffset = search?.offset || 0;
+    
+    if (urlQuery !== searchQuery) {
+      setSearchQuery(urlQuery);
+    }
+    if (urlOffset !== offset) {
+      setOffset(urlOffset);
+    }
+  }, [search?.query, search?.offset]);
 
   // Debounced search handler
   const isInitialMount = useRef(true);
@@ -215,9 +281,11 @@ function CollectionDetailPage() {
       clearTimeout(searchTimeoutRef.current);
     }
 
+    // Update URL immediately
+    updateUrlParams({ query: searchQuery, offset: 0 });
+
     // If search is empty, immediately fetch without search (but debounce slightly to avoid rapid calls)
     if (!searchQuery.trim()) {
-      setOffset(0);
       // Small debounce even for empty search to avoid rapid successive calls
       searchTimeoutRef.current = setTimeout(async () => {
         setIsSearching(true);
@@ -229,7 +297,6 @@ function CollectionDetailPage() {
 
     // Set loading state immediately for better UX
     setIsSearching(true);
-    setOffset(0);
 
     // Debounce the search - wait 300ms after user stops typing
     searchTimeoutRef.current = setTimeout(async () => {
@@ -243,7 +310,7 @@ function CollectionDetailPage() {
         clearTimeout(searchTimeoutRef.current);
       }
     };
-  }, [searchQuery, fetchDatasets, selectedTagFilters]);
+  }, [searchQuery, fetchDatasets, selectedTagFilters, updateUrlParams]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -266,7 +333,7 @@ function CollectionDetailPage() {
 
   // Handle page change
   const handlePageChange = (newOffset: number) => {
-    setOffset(newOffset);
+    updateUrlParams({ offset: newOffset });
     fetchDatasets(searchQuery, newOffset, selectedTagFilters);
   };
 
@@ -285,7 +352,7 @@ function CollectionDetailPage() {
     ];
 
     setSelectedTagFilters(newFilters);
-    setOffset(0); // Reset to first page when filters change
+    updateUrlParams({ offset: 0 }); // Reset to first page when filters change
     await fetchDatasets(searchQuery, 0, newFilters);
   };
 
@@ -353,13 +420,13 @@ function CollectionDetailPage() {
           <>
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {datasets.map((dataset) => (
-                <DatasetCard key={dataset.id} dataset={dataset} />
+                <DatasetCard key={dataset.id} dataset={dataset} collectionSlug={collection.slug} />
               ))}
             </div>
-            {total > pageSize && (
+            {search?.limit && total > search.limit && (
               <Pagination
                 total={total}
-                limit={pageSize}
+                limit={search.limit}
                 offset={offset}
                 onPageChange={handlePageChange}
                 className="mt-8"
@@ -382,3 +449,4 @@ function CollectionDetailPage() {
     </div>
   );
 }
+

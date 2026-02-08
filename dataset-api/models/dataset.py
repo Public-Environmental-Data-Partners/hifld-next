@@ -1,8 +1,8 @@
 """Dataset models using SQLModel."""
 
-from datetime import datetime, timezone
-from typing import Optional, Union, Any, Literal
-from sqlmodel import Field, SQLModel, UniqueConstraint
+from datetime import datetime, timezone, date
+from typing import Optional, Union, Any, Literal, List
+from sqlmodel import Field, SQLModel, UniqueConstraint, Relationship
 from sqlalchemy import JSON
 from sqlalchemy.types import TypeDecorator
 from pydantic import BaseModel, field_validator, model_validator
@@ -18,6 +18,9 @@ FormatType = Literal["geoparquet", "pmtiles", "geoserver"]
 class BucketStorageLocationConfig(BaseModel):
     """Pydantic schema for bucket-based storage (S3-compatible: AWS S3, GCS, SeaweedFS, etc.)."""
 
+    type: Literal["s3", "gcs", "seaweedfs"] = (
+        "s3"  # Type discriminator for self-contained JSON
+    )
     version: str = "v1"  # Schema version
     base_url: str  # Base URL for accessing files
     bucket: str  # Bucket name
@@ -27,6 +30,9 @@ class BucketStorageLocationConfig(BaseModel):
 class GeoServerStorageLocationConfig(BaseModel):
     """Pydantic schema for GeoServer storage location."""
 
+    type: Literal["geoserver"] = (
+        "geoserver"  # Type discriminator for self-contained JSON
+    )
     version: str = "v1"  # Schema version
     base_url: str  # GeoServer base URL (e.g. "https://geoserver.../geoserver")
     workspace: str  # Default workspace (e.g. "hifld")
@@ -35,6 +41,7 @@ class GeoServerStorageLocationConfig(BaseModel):
 class FileLocation(BaseModel):
     """Location schema for file-based sources."""
 
+    type: Literal["file"] = "file"  # Type discriminator for self-contained JSON
     version: str = "v1"  # Schema version
     path: str  # Relative path to file within storage location
 
@@ -42,6 +49,9 @@ class FileLocation(BaseModel):
 class GeoServerLocation(BaseModel):
     """Location schema for GeoServer layer sources."""
 
+    type: Literal["geoserver"] = (
+        "geoserver"  # Type discriminator for self-contained JSON
+    )
     version: str = "v1"  # Schema version
     workspace: str  # Workspace name
     store_name: str  # Datastore name
@@ -60,6 +70,7 @@ class GeoServerLocation(BaseModel):
 class ApiLocation(BaseModel):
     """Location schema for API-based sources."""
 
+    type: Literal["api"] = "api"  # Type discriminator for self-contained JSON
     version: str = "v1"  # Schema version
     url: str  # Full API endpoint URL
     method: Optional[str] = None  # HTTP method (default: GET)
@@ -87,6 +98,8 @@ class SpatialDatasetFileMetadata(BaseModel):
 class PydanticJSON(TypeDecorator):
     """
     JSON column that accepts Pydantic models by converting to dict on bind.
+    Note: For StorageLocation.config, we return the dict as-is and let the
+    field_validator handle conversion to avoid SQLAlchemy dirty tracking issues.
     """
 
     impl = JSON
@@ -98,6 +111,8 @@ class PydanticJSON(TypeDecorator):
         return value
 
     def process_result_value(self, value, dialect):
+        # Return dict as-is - let Pydantic validators handle conversion
+        # This avoids SQLAlchemy marking objects as dirty
         return value
 
 
@@ -107,8 +122,16 @@ class Collection(SQLModel, table=True):
     __tablename__ = "collections"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(unique=True)
+    slug: str = Field(unique=True)  # Unique, user-defined identifier for the collection
+    name: str
     description: Optional[str] = None
+
+    # Relationships
+    datasets: List["Dataset"] = Relationship(
+        back_populates="collection",
+        # Don't cascade delete - datasets should remain when collection is deleted
+        # Their collection_id will just be set to None
+    )
 
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -124,7 +147,7 @@ class StorageLocation(SQLModel, table=True):
     name: str = Field(
         unique=True
     )  # e.g. "S3 Local", "GCS Production", "SeaweedFS Local"
-    backend_type: str  # "s3" | "geoserver" (validated in code)
+    backend_type: str  # "s3" | "geoserver" - validated by field_validator
     description: Optional[str] = None
 
     # Configuration (JSON object with storage-specific config)
@@ -134,6 +157,9 @@ class StorageLocation(SQLModel, table=True):
     config: Optional[
         Union[BucketStorageLocationConfig, GeoServerStorageLocationConfig]
     ] = Field(default=None, sa_type=PydanticJSON())
+
+    # Relationships
+    file_sources: List["FileSource"] = Relationship(back_populates="storage_location")
 
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -153,45 +179,35 @@ class StorageLocation(SQLModel, table=True):
     def validate_config(
         cls, v: Any, info
     ) -> Optional[Union[BucketStorageLocationConfig, GeoServerStorageLocationConfig]]:
-        """Convert dict to appropriate config model based on backend_type."""
+        """Convert dict to appropriate config model based on backend_type or type field."""
         if v is None:
             return None
         if isinstance(v, dict):
-            # Check if backend_type is available in validation context
-            # If we have backend_type, use it to determine which config model to use
-            backend_type = (
-                info.data.get("backend_type")
-                if info and hasattr(info, "data")
-                else None
-            )
-
-            if backend_type == "geoserver":
+            # First, check for explicit type field in JSON (preferred)
+            config_type = v.get("type")
+            if config_type == "geoserver":
                 return GeoServerStorageLocationConfig(**v)
-            else:
-                # Default to bucket config for s3 (S3-compatible storage)
+            elif config_type in ("s3", "gcs", "seaweedfs"):
                 return BucketStorageLocationConfig(**v)
+            else:
+                raise ValueError(
+                    f"Storage location config must have explicit 'type' field ('gcs', 'seaweedfs', 's3', or 'geoserver'), got: {config_type}"
+                )
         return v
 
     @model_validator(mode="after")
     def convert_config_after(self):
-        """Convert config dict to model after instantiation (handles SQLModel direct assignment)."""
-        if self.config is not None and isinstance(self.config, dict):
-            if self.backend_type == "geoserver":
-                self.config = GeoServerStorageLocationConfig(**self.config)
-            else:
-                self.config = BucketStorageLocationConfig(**self.config)
+        """
+        Avoid mutating config after hydration to prevent SQLAlchemy dirty tracking.
+        Keep config as dict on ORM instances; helpers already handle dicts.
+        """
         return self
 
     def model_dump(self, **kwargs):
         """
-        Ensure config is a Pydantic model before serialization to avoid warnings.
+        Serialize without mutating ORM instances; suppress warnings about dict input.
         """
-        if self.config is not None and isinstance(self.config, dict):
-            if self.backend_type == "geoserver":
-                self.config = GeoServerStorageLocationConfig(**self.config)
-            else:
-                self.config = BucketStorageLocationConfig(**self.config)
-        return super().model_dump(**kwargs)
+        return super().model_dump(**kwargs, warnings=False)
 
 
 class Dataset(SQLModel, table=True):
@@ -201,9 +217,8 @@ class Dataset(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     # Core identification
-    name: str = Field(
-        unique=True
-    )  # Human-readable name (e.g. "Security Zones - SecurityZones")
+    slug: str = Field(unique=True)  # Unique, user-defined identifier for the dataset
+    name: str  # Human-readable name (e.g. "Security Zones - SecurityZones")
     description: Optional[str] = None
     tags: Optional[dict[str, Union[str, list[str]]]] = Field(
         default=None, sa_type=JSON
@@ -212,9 +227,113 @@ class Dataset(SQLModel, table=True):
     # Collection membership
     collection_id: Optional[int] = Field(default=None, foreign_key="collections.id")
 
+    # Relationships
+    collection: Optional["Collection"] = Relationship(back_populates="datasets")
+    files: List["File"] = Relationship(
+        back_populates="dataset",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class File(SQLModel, table=True):
+    """
+    File model representing a file (or layer) within a dataset.
+
+    A dataset can have multiple files in several scenarios:
+    1. Multiple source files (e.g., dataset split into chunks or parts)
+    2. Multiple layers from a single source file (e.g., GeoPackage/File Geodatabase)
+    3. Multiple processed outputs from the same source
+
+    For multi-layer source files (GeoPackage, File Geodatabase), each layer is
+    represented as a separate File record. This allows each layer to have:
+    - Its own formats (geoparquet, pmtiles, etc.)
+    - Its own versions and storage locations
+    - Its own metadata (feature count, bounds, geometry type)
+
+    Each file can have multiple formats and versions.
+    """
+
+    __tablename__ = "files"
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "name", name="uq_dataset_file_name"),
+        # Note: For multi-layer files, consider also ensuring uniqueness of
+        # (dataset_id, source_file_path, layer_name) when source_file_path is not NULL
+        # This can be enforced via a partial unique index in the database if needed
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    dataset_id: int = Field(foreign_key="datasets.id")
+
+    # File identification
+    name: str  # Human-readable name for the file (e.g. "main", "chunk-1", "part-a", "layer-name")
+    slug: str  # Unique identifier within the dataset
+    description: Optional[str] = None
+
+    # Layer information (for multi-layer source files)
+    layer_name: Optional[str] = (
+        None  # Layer name if from a multi-layer source (GeoPackage/FileGDB)
+    )
+    # For multi-layer files, this identifies which layer from the source file
+    # For single-layer files, this is None or "default"
+
+    source_file_path: Optional[str] = (
+        None  # Original source file path (for multi-layer sources)
+    )
+    # This allows grouping files that came from the same source file
+    # e.g., "gs://bucket/dataset.gpkg" for all layers from that GeoPackage
+
+    # File-level metadata (optional, can be overridden by format-specific metadata)
+    file_metadata: Optional[SpatialDatasetFileMetadata] = Field(
+        default=None, sa_type=PydanticJSON()
+    )
+
+    # Relationships
+    dataset: "Dataset" = Relationship(back_populates="files")
+    file_formats: List["FileFormat"] = Relationship(
+        back_populates="file",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("file_metadata", mode="wrap")
+    @classmethod
+    def validate_file_metadata(
+        cls, v: Any, handler
+    ) -> Optional[SpatialDatasetFileMetadata]:
+        """Validate and convert file_metadata field."""
+        if v is None:
+            return None
+
+        # If it's already a model instance, return it
+        if isinstance(v, SpatialDatasetFileMetadata):
+            return v
+
+        # If it's a dict, convert to model
+        if isinstance(v, dict):
+            return SpatialDatasetFileMetadata(**v)
+
+        # Otherwise let Pydantic handle it
+        return handler(v)
+
+    @model_validator(mode="after")
+    def convert_file_metadata_field(self):
+        """Convert file_metadata dict to model after instantiation."""
+        if self.file_metadata is not None and isinstance(self.file_metadata, dict):
+            self.file_metadata = SpatialDatasetFileMetadata(**self.file_metadata)
+        return self
+
+    def model_dump(self, **kwargs):
+        """Ensure file_metadata is a Pydantic model before serialization."""
+        if self.file_metadata is not None and isinstance(self.file_metadata, dict):
+            self.file_metadata = SpatialDatasetFileMetadata(**self.file_metadata)
+        return super().model_dump(**kwargs)
 
 
 class Format(SQLModel, table=True):
@@ -230,6 +349,9 @@ class Format(SQLModel, table=True):
     description: Optional[str] = None  # Description of the format
     mime_type: Optional[str] = None  # Default MIME type for this format
 
+    # Relationships
+    file_formats: List["FileFormat"] = Relationship(back_populates="format")
+
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -244,54 +366,71 @@ class Format(SQLModel, table=True):
         return v
 
 
-class DatasetFormat(SQLModel, table=True):
-    """Join table linking datasets to formats (many-to-many)."""
+class FileFormat(SQLModel, table=True):
+    """Join table linking files to formats (many-to-many).
 
-    __tablename__ = "dataset_formats"
-    __table_args__ = (
-        UniqueConstraint("dataset_id", "format_id", name="uq_dataset_format"),
-    )
+    Each file can have multiple formats (e.g., geoparquet, pmtiles, geoserver),
+    and each format can be associated with multiple files.
+    """
+
+    __tablename__ = "file_formats"
+    __table_args__ = (UniqueConstraint("file_id", "format_id", name="uq_file_format"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    dataset_id: int = Field(foreign_key="datasets.id")
+    file_id: int = Field(foreign_key="files.id")
     format_id: int = Field(foreign_key="formats.id")
+
+    # Relationships
+    file: "File" = Relationship(back_populates="file_formats")
+    format: "Format" = Relationship(back_populates="file_formats")
+    file_sources: List["FileSource"] = Relationship(
+        back_populates="file_format",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
 
     # Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-class DatasetSource(SQLModel, table=True):
+class FileSource(SQLModel, table=True):
     """
     Model for storing data source references (files, databases, APIs, etc.) in specific storage locations.
 
-    A format can exist in multiple storage locations (for redundancy/backups).
+    A file format can exist in multiple storage locations (for redundancy/backups).
     Each instance represents one data source (file, database connection, API endpoint, etc.)
-    for a format in a specific storage location.
+    for a file format in a specific storage location.
 
     Supports versioning: each source can have multiple versions, with the highest version
-    number being the latest/current version.
+    string being the latest/current version (determined by application logic).
+
+    For GeoServer format sources:
+    - The source_type should be "geoserver"
+    - The location should be a GeoServerLocation (workspace, store_name, layer_name)
+    - The references_source_id should point to the FileSource that contains the actual data
+      (e.g., the GeoParquet file that the GeoServer layer serves)
+    - The version should typically match the referenced source's version
     """
 
-    __tablename__ = "dataset_sources"
+    __tablename__ = "file_sources"
     __table_args__ = (
         UniqueConstraint(
-            "dataset_format_id",
+            "file_format_id",
             "storage_location_id",
             "version",
-            name="uq_source_version",
+            name="uq_file_source_version",
         ),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    dataset_format_id: int = Field(foreign_key="dataset_formats.id")
+    file_format_id: int = Field(foreign_key="file_formats.id")
     storage_location_id: int = Field(foreign_key="storage_locations.id")
 
-    # Versioning: version number (auto-incremented per source group)
-    # Latest version = MAX(version) for (dataset_format_id, storage_location_id)
-    version: int = Field(default=1)
+    # Versioning: version string (defaults to current date in YYYY-MM-DD format, e.g., "2026-02-05")
+    # Latest version should be determined by application logic based on version string comparison
+    version: str = Field(default_factory=lambda: date.today().isoformat())
 
-    # Source type: "file", "database", "api"
+    # Source type: "file", "database", "api", "geoserver"
     source_type: str  # Type of data source (indexed for efficient querying)
 
     # Location information (validated against appropriate Pydantic schema based on source_type)
@@ -302,9 +441,25 @@ class DatasetSource(SQLModel, table=True):
         sa_type=PydanticJSON()
     )
 
+    # Reference to another FileSource (for service formats like GeoServer that reference data sources)
+    # e.g., a GeoServer layer source references the GeoParquet file source it serves
+    references_source_id: Optional[int] = Field(
+        default=None, foreign_key="file_sources.id"
+    )
+
     # Source metadata (optional, validated against SpatialDatasetFileMetadata schema)
     source_metadata: Optional[SpatialDatasetFileMetadata] = Field(
         default=None, sa_type=PydanticJSON()
+    )
+
+    # Relationships
+    file_format: "FileFormat" = Relationship(back_populates="file_sources")
+    storage_location: "StorageLocation" = Relationship(back_populates="file_sources")
+    referenced_source: Optional["FileSource"] = Relationship(
+        sa_relationship_kwargs={
+            "remote_side": "FileSource.id",
+            "foreign_keys": "FileSource.references_source_id",
+        }
     )
 
     # Timestamps
@@ -323,14 +478,18 @@ class DatasetSource(SQLModel, table=True):
 
         # If it's a dict, convert to appropriate model type
         if isinstance(v, dict):
-            if "url" in v:
+            # First, check for explicit type field (preferred)
+            location_type = v.get("type")
+            if location_type == "file":
+                return FileLocation(**v)
+            elif location_type == "api":
                 return ApiLocation(**v)
-            elif "workspace" in v and "layer_name" in v:
+            elif location_type == "geoserver":
                 return GeoServerLocation(**v)
-            elif "path" in v:
-                return FileLocation(**v)
             else:
-                return FileLocation(**v)
+                raise ValueError(
+                    f"FileSource location must have explicit 'type' field ('file', 'api', or 'geoserver'), got: {location_type}"
+                )
 
         # Otherwise let Pydantic handle it
         return handler(v)
@@ -362,38 +521,14 @@ class DatasetSource(SQLModel, table=True):
 
         SQLModel can hydrate from the database by setting attributes directly,
         bypassing validators; this ensures we still end up with typed models.
+        Avoid mutating ORM instances to prevent SQLAlchemy dirty tracking.
         """
-        if isinstance(self.location, dict):
-            if "url" in self.location:
-                self.location = ApiLocation(**self.location)
-            elif "workspace" in self.location and "layer_name" in self.location:
-                self.location = GeoServerLocation(**self.location)
-            elif "path" in self.location:
-                self.location = FileLocation(**self.location)
-            else:
-                self.location = FileLocation(**self.location)
-
-        if self.source_metadata is not None and isinstance(self.source_metadata, dict):
-            self.source_metadata = SpatialDatasetFileMetadata(**self.source_metadata)
-
         return self
 
     def model_dump(self, **kwargs):
         """
         Ensure typed fields before serialization to avoid Pydantic warnings.
         This covers cases where instances were hydrated without running validators.
+        Serialize without mutating ORM instances; suppress warnings about dict input.
         """
-        if isinstance(self.location, dict):
-            if "url" in self.location:
-                self.location = ApiLocation(**self.location)
-            elif "workspace" in self.location and "layer_name" in self.location:
-                self.location = GeoServerLocation(**self.location)
-            elif "path" in self.location:
-                self.location = FileLocation(**self.location)
-            else:
-                self.location = FileLocation(**self.location)
-
-        if self.source_metadata is not None and isinstance(self.source_metadata, dict):
-            self.source_metadata = SpatialDatasetFileMetadata(**self.source_metadata)
-
-        return super().model_dump(**kwargs)
+        return super().model_dump(**kwargs, warnings=False)

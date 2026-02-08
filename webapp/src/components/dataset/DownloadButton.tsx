@@ -56,7 +56,7 @@ export function DownloadButton({ url, label }: DownloadButtonProps) {
             </a>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Download {label}</TooltipContent>
+        <TooltipContent>{label}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );

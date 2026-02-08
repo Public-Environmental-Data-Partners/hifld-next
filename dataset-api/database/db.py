@@ -1,7 +1,19 @@
 """Database connection and session management using SQLModel."""
 
+import os
+import logging
 from sqlmodel import SQLModel, create_engine, Session
 from config import config
+
+# Set up SQLAlchemy logging to show all database operations
+# This helps debug unnecessary writes
+# Defaults to disabled - set ENABLE_DB_DEBUG=true to enable
+enable_echo = config.DATABASE_ECHO or os.getenv("ENABLE_DB_DEBUG", "false").lower() == "true"
+if enable_echo:
+    sqlalchemy_logger = logging.getLogger("sqlalchemy.engine")
+    sqlalchemy_logger.setLevel(logging.INFO)  # Log all SQL statements
+    sqlalchemy_pool_logger = logging.getLogger("sqlalchemy.pool")
+    sqlalchemy_pool_logger.setLevel(logging.INFO)
 
 # Get database URL from config
 DATABASE_URL = config.DATABASE_URL
@@ -10,7 +22,7 @@ DATABASE_URL = config.DATABASE_URL
 if config.is_sqlite():
     engine = create_engine(
         DATABASE_URL,
-        echo=config.DATABASE_ECHO,
+        echo=enable_echo,  # Log all SQL queries when enabled
         connect_args={
             "check_same_thread": False,
             "timeout": 30.0,  # 30 second timeout for SQLite operations
@@ -21,7 +33,7 @@ else:
     # PostgreSQL with connection pooling
     engine = create_engine(
         DATABASE_URL,
-        echo=config.DATABASE_ECHO,
+        echo=enable_echo,  # Log all SQL queries when enabled
         pool_size=10,  # Increased from 5 to handle more concurrent requests
         max_overflow=20,  # Increased from 10
         pool_pre_ping=True,  # Verify connections before using
@@ -56,9 +68,11 @@ def init_db():
     from models.dataset import (  # noqa: F401
         Collection,
         Dataset,
-        DatasetFormat,
-        DatasetSource,
+        File,
+        FileFormat,
+        FileSource,
         StorageLocation,
+        Format,
     )
 
     SQLModel.metadata.create_all(engine)

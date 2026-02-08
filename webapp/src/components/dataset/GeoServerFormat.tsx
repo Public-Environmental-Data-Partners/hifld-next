@@ -1,4 +1,4 @@
-import { Database, Globe, Package, ExternalLink } from "lucide-react";
+import { Database, Globe, Package, ExternalLink, FileJson } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DatasetWithUrls } from "@/lib/api-client";
 import { CopyButton } from "./CopyButton";
@@ -10,6 +10,7 @@ interface GeoServerFormatProps {
   ogcFeaturesUrl: string | null;
   fullLayerName: string | null;
   geopackageUrl: string | null;
+  geojsonUrl?: string | null;
   selectedSource: { storageLocationId: number; version: number } | null;
   onSourceChange: (storageLocationId: number, version: number) => void;
 }
@@ -19,6 +20,7 @@ export function GeoServerFormat({
   ogcFeaturesUrl,
   fullLayerName,
   geopackageUrl,
+  geojsonUrl,
   selectedSource,
   onSourceChange,
 }: GeoServerFormatProps) {
@@ -68,6 +70,24 @@ export function GeoServerFormat({
               </Button>
             </div>
           </div>
+
+          {/* GeoJSON Download */}
+          {geojsonUrl && (
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <FileJson className="h-3 w-3" />
+                  <p className="text-xs font-medium">GeoJSON</p>
+                </div>
+                <p className="text-xs text-muted-foreground pl-5">
+                  Download as GeoJSON format
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-1">
+                <DownloadButton url={geojsonUrl} label="GeoJSON" />
+              </div>
+            </div>
+          )}
 
           {/* GeoPackage Export */}
           <div className="flex items-start justify-between gap-2">

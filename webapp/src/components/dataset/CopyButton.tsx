@@ -34,7 +34,7 @@ export function CopyButton({ value, label }: CopyButtonProps) {
             )}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{copied ? "Copied!" : `Copy ${label}`}</TooltipContent>
+        <TooltipContent>{copied ? "Copied!" : label}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );

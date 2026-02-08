@@ -19,9 +19,11 @@ DATABASE_URL = config.DATABASE_URL
 from models.dataset import (  # noqa: F401
     Collection,
     Dataset,
-    DatasetFormat,
-    DatasetSource,
+    File,
+    FileFormat,
+    FileSource,
     StorageLocation,
+    Format,
 )
 
 # this is the Alembic Config object, which provides
