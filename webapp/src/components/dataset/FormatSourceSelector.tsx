@@ -75,6 +75,12 @@ export function FormatSourceSelector({
   const defaultLocationId = currentLocationId;
   const defaultVersion =
     selectedSource?.version || availableVersions[0]?.version || 1;
+  const locationLabel =
+    currentLocation?.location?.name || `Location ${defaultLocationId}`;
+  const truncateLabel = (value: string, maxLength = 15) =>
+    value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
+  const locationLabelShort = truncateLabel(locationLabel);
+  const versionLabel = `v${defaultVersion}`;
 
   return (
     <div className="flex flex-col gap-2 mb-2">
@@ -93,8 +99,13 @@ export function FormatSourceSelector({
           }}
           disabled={locations.length === 1}
         >
-          <SelectTrigger className="flex-1 max-w-full">
-            <SelectValue placeholder="Storage Location" />
+        <SelectTrigger
+          className="flex-1 min-w-0 max-w-full"
+          title={locationLabel}
+        >
+          <SelectValue placeholder="Storage Location" className="truncate">
+            {locationLabelShort}
+          </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {locations.map((entry: [string, LocationData]) => {
@@ -102,7 +113,9 @@ export function FormatSourceSelector({
               const locId = parseInt(locIdStr, 10);
               return (
                 <SelectItem key={locId} value={locId.toString()}>
-                  {locationData.location?.name || `Location ${locId}`}
+                  {truncateLabel(
+                    locationData.location?.name || `Location ${locId}`
+                  )}
                 </SelectItem>
               );
             })}
@@ -123,8 +136,13 @@ export function FormatSourceSelector({
           }}
           disabled={availableVersions.length === 1}
         >
-          <SelectTrigger className="flex-1 max-w-full">
-            <SelectValue placeholder="Version" />
+        <SelectTrigger
+          className="flex-1 min-w-0 max-w-full"
+          title={versionLabel}
+        >
+          <SelectValue placeholder="Version" className="truncate">
+            {versionLabel}
+          </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {availableVersions.map((entry: { version: number }) => {

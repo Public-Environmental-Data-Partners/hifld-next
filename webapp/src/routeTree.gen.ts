@@ -21,6 +21,8 @@ import { Route as ApiCollectionsSlugRouteImport } from './routes/api/collections
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug'
 import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug'
+import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.index'
+import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.viewer'
 import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug'
 
 const CollectionsRoute = CollectionsRouteImport.update({
@@ -86,6 +88,24 @@ const CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute =
     path: '/files/$fileSlug',
     getParentRoute: () => CollectionsCollectionSlugDatasetsDatasetSlugRoute,
   } as any)
+const CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute =
+  CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRouteImport.update(
+    {
+      id: '/',
+      path: '/',
+      getParentRoute: () =>
+        CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute,
+    } as any,
+  )
+const CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute =
+  CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRouteImport.update(
+    {
+      id: '/viewer',
+      path: '/viewer',
+      getParentRoute: () =>
+        CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute,
+    } as any,
+  )
 const ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute =
   ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteImport.update(
     {
@@ -108,8 +128,10 @@ export interface FileRoutesByFullPath {
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
-  '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+  '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+  '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
+  '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -122,8 +144,9 @@ export interface FileRoutesByTo {
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
-  '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+  '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
+  '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -138,8 +161,10 @@ export interface FileRoutesById {
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
-  '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+  '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+  '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
+  '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -157,6 +182,8 @@ export interface FileRouteTypes {
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
+    | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
+    | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -169,8 +196,9 @@ export interface FileRouteTypes {
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
-    | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
+    | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
+    | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
   id:
     | '__root__'
     | '/'
@@ -186,6 +214,8 @@ export interface FileRouteTypes {
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
+    | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
+    | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -281,6 +311,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteImport
       parentRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugRoute
     }
+    '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/': {
+      id: '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/'
+      path: '/'
+      fullPath: '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/'
+      preLoaderRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRouteImport
+      parentRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+    }
+    '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': {
+      id: '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
+      path: '/viewer'
+      fullPath: '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
+      preLoaderRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRouteImport
+      parentRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+    }
     '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': {
       id: '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
       path: '/files/$fileSlug'
@@ -291,14 +335,32 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren {
+  CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
+  CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
+}
+
+const CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren: CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren =
+  {
+    CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute:
+      CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute,
+    CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute:
+      CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute,
+  }
+
+const CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren =
+  CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute._addFileChildren(
+    CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren,
+  )
+
 interface CollectionsCollectionSlugDatasetsDatasetSlugRouteChildren {
-  CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+  CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
 }
 
 const CollectionsCollectionSlugDatasetsDatasetSlugRouteChildren: CollectionsCollectionSlugDatasetsDatasetSlugRouteChildren =
   {
     CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute:
-      CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute,
+      CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren,
   }
 
 const CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren =
