@@ -60,7 +60,7 @@ export function TagFilters({
       {/* Show selected filters with remove buttons */}
       {selectedFilters.length > 0 && (
         <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-sm text-muted-foreground mr-2">
+          <span className="font-mono text-xs tracking-wide text-muted-foreground mr-2 uppercase">
             Active filters:
           </span>
           {selectedFilters.map((filter) => {
@@ -101,7 +101,7 @@ export function TagFilters({
 
           return (
             <div key={key} className="space-y-2">
-              <label className="text-sm font-medium text-foreground">
+              <label className="font-mono text-xs font-medium tracking-wide uppercase text-foreground">
                 {label}
               </label>
               <MultiSelect

@@ -22,14 +22,19 @@ function CollectionsListPage() {
   const { collections } = Route.useLoaderData();
 
   return (
-    <div className="p-8">
+    <div className="p-6 sm:p-10">
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Header */}
         <div className="text-center">
-          <h1 className="text-4xl font-bold tracking-tight">Collections</h1>
+          <h1 className="text-5xl font-bold tracking-tight">Collections</h1>
           <p className="text-lg text-muted-foreground mt-2">
             Browse datasets organized by collection
           </p>
+          <Button variant="outline" size="sm" asChild className="mt-4 font-mono">
+            <a href="/api/collections" target="_blank" rel="noopener noreferrer">
+              View Metadata
+            </a>
+          </Button>
         </div>
 
         {/* Collections Grid */}
@@ -38,7 +43,7 @@ function CollectionsListPage() {
             {collections.map((collection) => (
               <Card
                 key={collection.id}
-                className="cursor-pointer hover:bg-muted/50 transition-colors"
+                className="cursor-pointer hover:bg-muted/60 transition-colors"
               >
                 <Link
                   to="/collections/$slug"

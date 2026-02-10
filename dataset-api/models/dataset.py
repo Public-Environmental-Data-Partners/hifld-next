@@ -129,8 +129,7 @@ class Collection(SQLModel, table=True):
     # Relationships
     datasets: List["Dataset"] = Relationship(
         back_populates="collection",
-        # Don't cascade delete - datasets should remain when collection is deleted
-        # Their collection_id will just be set to None
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
 
     # Timestamps
@@ -225,7 +224,11 @@ class Dataset(SQLModel, table=True):
     )  # Searchable metadata tags (e.g. {"inventory_name": "security-zones-securityzones", "geometry_type": "Point", "categories": ["Boundaries", "Water Supply"]})
 
     # Collection membership
-    collection_id: Optional[int] = Field(default=None, foreign_key="collections.id")
+    collection_id: Optional[int] = Field(
+        default=None,
+        ondelete="CASCADE",
+        foreign_key="collections.id",
+    )
 
     # Relationships
     collection: Optional["Collection"] = Relationship(back_populates="datasets")
@@ -266,7 +269,7 @@ class File(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    dataset_id: int = Field(foreign_key="datasets.id")
+    dataset_id: int = Field(ondelete="CASCADE", foreign_key="datasets.id")
 
     # File identification
     name: str  # Human-readable name for the file (e.g. "main", "chunk-1", "part-a", "layer-name")
@@ -377,8 +380,8 @@ class FileFormat(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("file_id", "format_id", name="uq_file_format"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    file_id: int = Field(foreign_key="files.id")
-    format_id: int = Field(foreign_key="formats.id")
+    file_id: int = Field(ondelete="CASCADE", foreign_key="files.id")
+    format_id: int = Field(ondelete="CASCADE", foreign_key="formats.id")
 
     # Relationships
     file: "File" = Relationship(back_populates="file_formats")
@@ -423,8 +426,10 @@ class FileSource(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    file_format_id: int = Field(foreign_key="file_formats.id")
-    storage_location_id: int = Field(foreign_key="storage_locations.id")
+    file_format_id: int = Field(ondelete="CASCADE", foreign_key="file_formats.id")
+    storage_location_id: int = Field(
+        ondelete="CASCADE", foreign_key="storage_locations.id"
+    )
 
     # Versioning: version string (defaults to current date in YYYY-MM-DD format, e.g., "2026-02-05")
     # Latest version should be determined by application logic based on version string comparison
@@ -444,7 +449,9 @@ class FileSource(SQLModel, table=True):
     # Reference to another FileSource (for service formats like GeoServer that reference data sources)
     # e.g., a GeoServer layer source references the GeoParquet file source it serves
     references_source_id: Optional[int] = Field(
-        default=None, foreign_key="file_sources.id"
+        default=None,
+        ondelete="CASCADE",
+        foreign_key="file_sources.id",
     )
 
     # Source metadata (optional, validated against SpatialDatasetFileMetadata schema)

@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "hyperparam": "^0.4.5"
+  }
+}

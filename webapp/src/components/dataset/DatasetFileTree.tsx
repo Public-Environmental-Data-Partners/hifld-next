@@ -77,11 +77,11 @@ function FileTreeNode({
         ) : (
           <File className="h-4 w-4 text-muted-foreground flex-shrink-0" />
         )}
-        <span className="flex-1 min-w-0 font-medium truncate">
+        <span className="flex-1 min-w-0 font-mono text-sm font-medium truncate">
           {file.name}
         </span>
         {file.layer_name && (
-          <Badge variant="outline" className="text-xs flex-shrink-0">
+          <Badge variant="outline" className="font-mono text-xs flex-shrink-0">
             {file.layer_name}
           </Badge>
         )}

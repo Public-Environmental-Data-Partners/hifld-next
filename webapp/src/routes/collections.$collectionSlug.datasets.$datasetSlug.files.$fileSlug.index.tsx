@@ -5,20 +5,30 @@ import { Link } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { getDatasetFileById, getDatasetFileBySlug, getCollectionBySlug, getDatasetBySlug } from "@/lib/api-client";
 import type { DatasetFile } from "@/lib/api-client";
 import { FileFormatTree } from "@/components/dataset/FileFormatTree";
+import { ParquetViewerPanel } from "@/components/dataset/ParquetViewerPanel";
 import {
   getOgcFeaturesUrl,
   getFullLayerName,
   getGeoPackageUrl,
   getGeoJsonUrl,
+  getShapefileUrl,
 } from "@/lib/api-client";
+
+const GEOSERVER_EXPORT_SIZE_LIMIT_MB = 250;
 
 export const Route = createFileRoute(
   "/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/"
 )({
-  loader: async ({ params, context }) => {
+  loader: async ({ params }) => {
     try {
       const collection = await getCollectionBySlug({
         data: { slug: params.collectionSlug },
@@ -79,11 +89,15 @@ export const Route = createFileRoute(
 });
 
 function FileDetailPage() {
-  const { collection, dataset, file } = Route.useLoaderData();
+  const { dataset, file } = Route.useLoaderData();
   const { collectionSlug, datasetSlug, fileSlug } = Route.useParams();
   const [selectedSources, setSelectedSources] = useState<
     Record<string, { storageLocationId: number; version: string | number }>
   >({});
+  const [parquetViewer, setParquetViewer] = useState<{
+    url: string;
+    fileName: string;
+  } | null>(null);
 
   // Initialize selected sources with the latest version for each format
   useEffect(() => {
@@ -178,13 +192,15 @@ function FileDetailPage() {
   const pmtilesSource = getSelectedSource("pmtiles");
   const geoserverSource = getSelectedSource("geoserver");
   const geoserverStorageLocation = geoserverSource?.storage_location;
+  const geoserverTotalSizeBytes = geoserverSource?.source_metadata?.size_bytes;
+  const geoserverExportsEnabled =
+    typeof geoserverTotalSizeBytes !== "number"
+      ? true
+      : geoserverTotalSizeBytes <=
+        GEOSERVER_EXPORT_SIZE_LIMIT_MB * 1024 * 1024;
 
   // Extract URLs from selected sources
-  const geoparquetUrl = getUrlFromSource(geoparquetSource);
   const pmtilesUrl = getUrlFromSource(pmtilesSource);
-  
-  // Get storage URI (glob pattern) for GeoParquet
-  const geoparquetStorageUri = geoparquetSource?.storage_uri || null;
 
   // URLs for the selected GeoServer source
   const ogcFeaturesUrl =
@@ -195,12 +211,16 @@ function FileDetailPage() {
     ? getFullLayerName(geoserverSource)
     : null;
   const geopackageUrl =
-    geoserverSource && geoserverStorageLocation
+    geoserverExportsEnabled && geoserverSource && geoserverStorageLocation
       ? getGeoPackageUrl(geoserverSource, geoserverStorageLocation)
       : null;
   const geojsonUrl =
-    geoserverSource && geoserverStorageLocation
+    geoserverExportsEnabled && geoserverSource && geoserverStorageLocation
       ? getGeoJsonUrl(geoserverSource, geoserverStorageLocation)
+      : null;
+  const shapefileUrl =
+    geoserverExportsEnabled && geoserverSource && geoserverStorageLocation
+      ? getShapefileUrl(geoserverSource, geoserverStorageLocation)
       : null;
 
   // Extract metadata from selected source
@@ -212,114 +232,158 @@ function FileDetailPage() {
     .trim();
 
   return (
-    <div className="p-8">
-      <div className="max-w-4xl mx-auto space-y-8">
-        {/* Header */}
-        <div>
-          <Button variant="ghost" asChild className="mb-4">
-            <Link
-              to="/collections/$collectionSlug/datasets/$datasetSlug"
-              params={{
-                collectionSlug,
-                datasetSlug,
-              }}
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to {dataset.name}
-            </Link>
-          </Button>
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h1 className="text-4xl font-bold tracking-tight break-words">
-                {file.name}
-              </h1>
-              {file.layer_name && (
-                <p className="text-muted-foreground mt-2">
-                  Layer: <code className="text-sm">{file.layer_name}</code>
-                </p>
-              )}
+    <div className="p-8 min-h-screen">
+      <ResizablePanelGroup
+        orientation="vertical"
+        className="min-h-[calc(100vh-4rem)]"
+      >
+        <ResizablePanel
+          defaultSize={parquetViewer ? "70%" : "100%"}
+          minSize="40%"
+          className="min-h-0"
+        >
+          <ScrollArea className="h-full">
+            <div className="max-w-4xl mx-auto space-y-8 pb-8">
+              {/* Header */}
+              <div>
+                <Button variant="ghost" asChild className="mb-4">
+                  <Link
+                    to="/collections/$collectionSlug/datasets/$datasetSlug"
+                    params={{
+                      collectionSlug,
+                      datasetSlug,
+                    }}
+                  >
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Back to {dataset.name}
+                  </Link>
+                </Button>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <h1 className="text-4xl font-mono font-bold tracking-tight break-words">
+                      {file.name}
+                    </h1>
+                    {file.layer_name && (
+                      <p className="text-muted-foreground mt-2">
+                        Layer: <code className="text-sm">{file.layer_name}</code>
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" asChild className="font-mono">
+                      <a
+                        href={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        View Metadata
+                      </a>
+                    </Button>
+                    <Button asChild>
+                      <Link
+                        to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer"
+                        params={{
+                          collectionSlug,
+                          datasetSlug,
+                          fileSlug,
+                        }}
+                      >
+                        Open Map Viewer
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                {cleanDescription && (
+                  <>
+                    <div>
+                      <h4 className="font-medium mb-2">Description</h4>
+                      <p className="text-sm text-muted-foreground break-words">
+                        {cleanDescription}
+                      </p>
+                    </div>
+                    <Separator />
+                  </>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {featureCount && (
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">Features</p>
+                      <p className="font-medium">{featureCount.toLocaleString()}</p>
+                    </div>
+                  )}
+                  {file.file_metadata?.geometry_type && (
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">Geometry Type</p>
+                      <p className="font-medium">{file.file_metadata.geometry_type}</p>
+                    </div>
+                  )}
+                  {file.file_metadata?.bounds && (
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">Bounds</p>
+                      <p className="font-mono text-xs">
+                        [{file.file_metadata.bounds.join(", ")}]
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* Filesystem-like format tree */}
+                <FileFormatTree
+                  file={file}
+                  selectedSources={selectedSources}
+                  onSourceChange={(formatType, storageLocationId, version) => {
+                    setSelectedSources((prev) => ({
+                      ...prev,
+                      [formatType]: { storageLocationId, version },
+                    }));
+                  }}
+                  onViewParquet={(url, fileName) => {
+                    setParquetViewer({ url, fileName });
+                  }}
+                  ogcFeaturesUrl={ogcFeaturesUrl}
+                  fullLayerName={fullLayerName}
+                  geopackageUrl={geopackageUrl}
+                  geojsonUrl={geojsonUrl}
+                  shapefileUrl={shapefileUrl}
+                  geoserverExportsEnabled={geoserverExportsEnabled}
+                  pmtilesUrl={pmtilesUrl}
+                />
+
+                <Separator />
+
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <p>Created: {new Date(file.created_at).toLocaleString()}</p>
+                  <p>Updated: {new Date(file.updated_at).toLocaleString()}</p>
+                </div>
+              </div>
             </div>
-            <Button asChild>
-              <Link
-                to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer"
-                params={{
-                  collectionSlug,
-                  datasetSlug,
-                  fileSlug,
-                }}
-              >
-                Open Map Viewer
-              </Link>
-            </Button>
-          </div>
-        </div>
+          </ScrollArea>
+        </ResizablePanel>
 
-        <div className="space-y-6">
-          {cleanDescription && (
-            <>
-              <div>
-                <h4 className="font-medium mb-2">Description</h4>
-                <p className="text-sm text-muted-foreground break-words">
-                  {cleanDescription}
-                </p>
-              </div>
-              <Separator />
-            </>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {featureCount && (
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">Features</p>
-                <p className="font-medium">{featureCount.toLocaleString()}</p>
-              </div>
-            )}
-            {file.file_metadata?.geometry_type && (
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">Geometry Type</p>
-                <p className="font-medium">{file.file_metadata.geometry_type}</p>
-              </div>
-            )}
-            {file.file_metadata?.bounds && (
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">Bounds</p>
-                <p className="font-mono text-xs">
-                  [{file.file_metadata.bounds.join(", ")}]
-                </p>
-              </div>
-            )}
-          </div>
-
-          <Separator />
-
-          {/* Filesystem-like format tree */}
-          <FileFormatTree
-            file={file}
-            selectedSources={selectedSources}
-            onSourceChange={(formatType, storageLocationId, version) => {
-              setSelectedSources((prev) => ({
-                ...prev,
-                [formatType]: { storageLocationId, version },
-              }));
-            }}
-            getSelectedSource={getSelectedSource}
-            ogcFeaturesUrl={ogcFeaturesUrl}
-            fullLayerName={fullLayerName}
-            geopackageUrl={geopackageUrl}
-            geojsonUrl={geojsonUrl}
-            geoparquetUrl={geoparquetUrl}
-            geoparquetStorageUri={geoparquetStorageUri}
-            pmtilesUrl={pmtilesUrl}
-          />
-
-          <Separator />
-
-          <div className="text-xs text-muted-foreground space-y-1">
-            <p>Created: {new Date(file.created_at).toLocaleString()}</p>
-            <p>Updated: {new Date(file.updated_at).toLocaleString()}</p>
-          </div>
-        </div>
-      </div>
+        {parquetViewer && (
+          <>
+            <ResizableHandle withHandle />
+            <ResizablePanel
+              defaultSize="30%"
+              minSize="20%"
+              maxSize="60%"
+              className="min-h-[240px]"
+            >
+              <ParquetViewerPanel
+                url={parquetViewer.url}
+                fileName={parquetViewer.fileName}
+                onClose={() => setParquetViewer(null)}
+              />
+            </ResizablePanel>
+          </>
+        )}
+      </ResizablePanelGroup>
     </div>
   );
 }

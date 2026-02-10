@@ -1,8 +1,8 @@
 """init
 
-Revision ID: c18943b5892e
+Revision ID: 2efd2830a066
 Revises:
-Create Date: 2026-02-06 01:11:53.116924
+Create Date: 2026-02-09 15:52:42.869864
 
 """
 
@@ -11,10 +11,11 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 import sqlmodel
+from models.dataset import PydanticJSON
 
 
 # revision identifiers, used by Alembic.
-revision: str = "c18943b5892e"
+revision: str = "2efd2830a066"
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -52,7 +53,7 @@ def upgrade() -> None:
         sa.Column("name", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("backend_type", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("description", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
-        sa.Column("config", sa.JSON(), nullable=True),
+        sa.Column("config", PydanticJSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
@@ -64,13 +65,12 @@ def upgrade() -> None:
         sa.Column("slug", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("name", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("description", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
-        sa.Column("tags", sa.JSON(), nullable=True),
+        sa.Column("tags", PydanticJSON(), nullable=True),
         sa.Column("collection_id", sa.Integer(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(
-            ["collection_id"],
-            ["collections.id"],
+            ["collection_id"], ["collections.id"], ondelete="CASCADE"
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("slug"),
@@ -86,13 +86,10 @@ def upgrade() -> None:
         sa.Column(
             "source_file_path", sqlmodel.sql.sqltypes.AutoString(), nullable=True
         ),
-        sa.Column("file_metadata", sa.JSON(), nullable=True),
+        sa.Column("file_metadata", PydanticJSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["dataset_id"],
-            ["datasets.id"],
-        ),
+        sa.ForeignKeyConstraint(["dataset_id"], ["datasets.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("dataset_id", "name", name="uq_dataset_file_name"),
     )
@@ -103,14 +100,8 @@ def upgrade() -> None:
         sa.Column("format_id", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["file_id"],
-            ["files.id"],
-        ),
-        sa.ForeignKeyConstraint(
-            ["format_id"],
-            ["formats.id"],
-        ),
+        sa.ForeignKeyConstraint(["file_id"], ["files.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["format_id"], ["formats.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("file_id", "format_id", name="uq_file_format"),
     )
@@ -121,22 +112,19 @@ def upgrade() -> None:
         sa.Column("storage_location_id", sa.Integer(), nullable=False),
         sa.Column("version", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("source_type", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-        sa.Column("location", sa.JSON(), nullable=False),
+        sa.Column("location", PydanticJSON(), nullable=False),
         sa.Column("references_source_id", sa.Integer(), nullable=True),
-        sa.Column("source_metadata", sa.JSON(), nullable=True),
+        sa.Column("source_metadata", PydanticJSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(
-            ["file_format_id"],
-            ["file_formats.id"],
+            ["file_format_id"], ["file_formats.id"], ondelete="CASCADE"
         ),
         sa.ForeignKeyConstraint(
-            ["references_source_id"],
-            ["file_sources.id"],
+            ["references_source_id"], ["file_sources.id"], ondelete="CASCADE"
         ),
         sa.ForeignKeyConstraint(
-            ["storage_location_id"],
-            ["storage_locations.id"],
+            ["storage_location_id"], ["storage_locations.id"], ondelete="CASCADE"
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(

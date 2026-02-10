@@ -217,6 +217,8 @@ async def import_dataset(
             # Cascade deletes will handle File -> FileFormat -> FileSource deletion
             db.delete(existing_dataset)
             db.commit()
+            # Ensure the session is cleared of the deleted object's state
+            db.expire_all()
         else:
             raise Exception(
                 f"Dataset '{dataset_slug}' already exists. Use --skip-existing to skip or --upsert to re-import."

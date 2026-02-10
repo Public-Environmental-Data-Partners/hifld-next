@@ -357,7 +357,7 @@ function CollectionDetailPage() {
   };
 
   return (
-    <div className="p-8">
+    <div className="p-6 sm:p-10">
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Header */}
         <div>
@@ -368,7 +368,7 @@ function CollectionDetailPage() {
             </Link>
           </Button>
           <div className="text-center">
-            <h1 className="text-4xl font-bold tracking-tight">
+            <h1 className="text-5xl font-bold tracking-tight">
               {collection.name}
             </h1>
             {collection.description && (
@@ -376,6 +376,15 @@ function CollectionDetailPage() {
                 {collection.description}
               </p>
             )}
+            <Button variant="outline" size="sm" asChild className="mt-4 font-mono">
+              <a
+                href={`/api/collections/${collection.slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                View Metadata
+              </a>
+            </Button>
           </div>
         </div>
 

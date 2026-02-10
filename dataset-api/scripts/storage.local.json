@@ -18,7 +18,8 @@
       "type": "seaweedfs",
       "version": "v1",
       "base_url": "http://localhost:8888",
-      "bucket": "drp-hifld-copy-formatted"
+      "bucket": "drp-hifld-copy-formatted",
+      "endpoint_url": "http://localhost:8333"
     }
   },
   {

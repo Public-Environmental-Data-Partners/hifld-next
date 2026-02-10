@@ -19,6 +19,7 @@ Usage:
 import argparse
 import asyncio
 import json
+import logging
 import re
 import sys
 from pathlib import Path
@@ -35,6 +36,17 @@ from models.dataset import (
 )
 from datetime import date
 
+logger = logging.getLogger(__name__)
+
+
+def dataset_has_sources(dataset_entry: Dict) -> bool:
+    """Return True if at least one format source exists in the dataset entry."""
+    for file_entry in dataset_entry.get("files", []):
+        for fmt in file_entry.get("formats", []):
+            if fmt.get("sources"):
+                return True
+    return False
+
 
 async def find_processed_files(
     storage_client: StorageClient,
@@ -46,16 +58,43 @@ async def find_processed_files(
         storage_client: Storage client instance
         filename: Dataset filename/slug
     """
-    prefix = f"{filename}/"
-    files_by_ext = await storage_client.find_files_by_extensions(
-        prefix, [".parquet", ".zstd.parquet", ".pmtiles"]
-    )
+    # New layout only: <dataset>/<zip-stem>/parquet/<layer>-N.zstd.parquet
+    # and <dataset>/<zip-stem>/pmtiles/<layer>.pmtiles
+    parquet_globs = [
+        f"**/{filename}*/parquet/*.zstd.parquet",
+    ]
+    pmtiles_globs = [
+        f"**/{filename}*/pmtiles/*.pmtiles",
+    ]
 
-    # Convert to the expected format
+    geoparquet_paths = set()
+    pmtiles_paths = set()
+
+    for pattern in parquet_globs:
+        try:
+            matches = await storage_client.expand_glob_pattern(pattern)
+            for path in matches:
+                if path.endswith(".parquet"):
+                    geoparquet_paths.add(path)
+        except Exception:
+            continue
+
+    for pattern in pmtiles_globs:
+        try:
+            matches = await storage_client.expand_glob_pattern(pattern)
+            for path in matches:
+                if path.endswith(".pmtiles"):
+                    pmtiles_paths.add(path)
+        except Exception:
+            continue
+
     return {
-        "geoparquet": files_by_ext.get("parquet", [])
-        + files_by_ext.get("zstd.parquet", []),
-        "pmtiles": files_by_ext.get("pmtiles", []),
+        "geoparquet": sorted(
+            [storage_client.get_public_url(path) for path in geoparquet_paths]
+        ),
+        "pmtiles": sorted(
+            [storage_client.get_public_url(path) for path in pmtiles_paths]
+        ),
     }
 
 
@@ -68,17 +107,10 @@ def group_parquet_files_by_pattern(
     parquet_urls: List[str], storage_client: StorageClient
 ) -> Dict[str, List[str]]:
     """
-    Group parquet files by their base pattern (removing chunk suffixes).
-
-    Returns a dict mapping base pattern to list of URLs.
-    For example:
-    - Single chunk: "path/file.parquet" -> ["path/file.parquet"]
-    - Multi-chunk: "path/file-0.parquet", "path/file-1.parquet" -> "path/file-*.parquet" -> [both URLs]
-
-    If both chunked and non-chunked files exist with the same base name, prefer the chunked version.
+    Group chunked parquet files by base pattern.
+    Assumes chunked parquet naming: <base>-N.zstd.parquet
     """
-    # Group files by base name (without chunk number)
-    base_name_groups = {}  # Maps (dir, base_name) to list of URLs
+    groups = {}
 
     for url in parquet_urls:
         path = extract_path_from_url(url, storage_client)
@@ -93,86 +125,87 @@ def group_parquet_files_by_pattern(
             dir_part = ""
             filename = path
 
-        # Check for chunk pattern: filename-{number}.parquet
-        # Match: filename-0.parquet, filename-1.zstd.parquet, etc.
         chunk_match = re.match(r"^(.+)-(\d+)\.(zstd\.)?parquet$", filename)
-        if chunk_match:
-            # This is a chunked file
-            base_name = chunk_match.group(1)
-            key = (dir_part, base_name, True)  # True indicates chunked
-        else:
-            # Non-chunked file
-            base_name = filename.replace(".zstd.parquet", "").replace(".parquet", "")
-            key = (dir_part, base_name, False)  # False indicates non-chunked
-
-        if key not in base_name_groups:
-            base_name_groups[key] = []
-        base_name_groups[key].append(url)
-
-    # Convert to pattern-based groups
-    # If both chunked and non-chunked files exist with the same base name, prefer chunked
-    groups = {}
-    base_name_to_group = {}  # Track which base names we've processed
-
-    for (dir_part, base_name, is_chunked), urls in base_name_groups.items():
-        base_key = (dir_part, base_name)
-
-        # If we already have a chunked version, skip non-chunked
-        if (
-            base_key in base_name_to_group
-            and base_name_to_group[base_key][1]
-            and not is_chunked
-        ):
+        if not chunk_match:
             continue
 
-        # If we have a chunked version and this is non-chunked, skip
-        if (
-            base_key in base_name_to_group
-            and not base_name_to_group[base_key][1]
-            and is_chunked
-        ):
-            # Remove the non-chunked version and use chunked instead
-            old_pattern, _ = base_name_to_group[base_key]
-            if old_pattern in groups:
-                del groups[old_pattern]
-
-        if is_chunked and len(urls) > 1:
-            # Multiple chunks - use glob pattern
-            # Determine extension from first file
-            first_path = extract_path_from_url(urls[0], storage_client)
-            if first_path:
-                first_filename = first_path.rsplit("/", 1)[-1]
-                ext_match = re.match(r"^.+-\d+\.(zstd\.)?parquet$", first_filename)
-                if ext_match:
-                    ext = ext_match.group(1) or ""
-                    pattern = (
-                        f"{dir_part}/{base_name}-*.{ext}parquet"
-                        if dir_part
-                        else f"{base_name}-*.{ext}parquet"
-                    )
-                    groups[pattern] = urls
-                    base_name_to_group[base_key] = (pattern, True)
-                else:
-                    # Fallback to first file path
-                    groups[first_path] = urls
-                    base_name_to_group[base_key] = (first_path, True)
-            else:
-                # Fallback
-                path = extract_path_from_url(urls[0], storage_client)
-                if path:
-                    groups[path] = urls
-                    base_name_to_group[base_key] = (path, True)
-        else:
-            # Single file (or single chunk) - use exact path
-            path = extract_path_from_url(urls[0], storage_client)
-            if path:
-                groups[path] = urls
-                base_name_to_group[base_key] = (path, is_chunked)
+        base_name = chunk_match.group(1)
+        ext = chunk_match.group(3) or ""
+        pattern = (
+            f"{dir_part}/{base_name}-*.{ext}parquet"
+            if dir_part
+            else f"{base_name}-*.{ext}parquet"
+        )
+        if pattern not in groups:
+            groups[pattern] = []
+        groups[pattern].append(url)
 
     return groups
 
 
-def create_dataset_entry(
+def _parse_bounds(raw_bounds: object) -> Optional[List[float]]:
+    """Parse bounds from list/tuple or string representation."""
+    if raw_bounds is None:
+        return None
+    if isinstance(raw_bounds, (list, tuple)) and len(raw_bounds) == 4:
+        try:
+            return [float(v) for v in raw_bounds]
+        except Exception:
+            return None
+    if isinstance(raw_bounds, str):
+        text = raw_bounds.strip()
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        try:
+            values = [float(v.strip()) for v in text.split(",")]
+            if len(values) == 4:
+                return values
+        except Exception:
+            return None
+    return None
+
+
+def _build_metadata_from_inventory(
+    inventory_entry: Dict,
+    inventory_file: Optional[Dict] = None,
+    *,
+    size_bytes: Optional[int] = None,
+    mime_type: Optional[str] = None,
+) -> Optional[Dict]:
+    """Build source/file metadata from inventory fields plus computed size/mime data."""
+    tags = inventory_entry.get("tags", {}) or {}
+    file_meta = (inventory_file or {}).get("file_metadata", {}) or {}
+    geometry_type = (
+        (inventory_file or {}).get("geometry_type")
+        or file_meta.get("geometry_type")
+        or tags.get("geometry_type")
+    )
+    feature_count = (inventory_file or {}).get("feature_count") or file_meta.get(
+        "feature_count"
+    )
+    bounds = _parse_bounds(
+        (inventory_file or {}).get("bounds") or file_meta.get("bounds")
+    )
+
+    metadata = SpatialDatasetFileMetadata(
+        size_bytes=size_bytes,
+        mime_type=mime_type,
+        feature_count=feature_count,
+        bounds=bounds,
+        geometry_type=geometry_type,
+    )
+    if (
+        metadata.size_bytes is None
+        and metadata.mime_type is None
+        and metadata.feature_count is None
+        and metadata.bounds is None
+        and metadata.geometry_type is None
+    ):
+        return None
+    return metadata.model_dump()
+
+
+async def create_dataset_entry(
     dataset_slug: str,
     inventory_entry: Dict,
     storage_files_by_location: Dict[str, Dict[str, List[str]]],
@@ -224,38 +257,15 @@ def create_dataset_entry(
                 path_parts = pattern.rsplit("/", 1)
                 if len(path_parts) == 2:
                     filename = path_parts[1]
-                    # Remove glob pattern and extension to get base name
-                    # Handle both glob patterns (file-*.zstd.parquet) and single files (file.zstd.parquet)
-                    if "*.zstd.parquet" in filename:
-                        # Glob pattern: remove -*.zstd.parquet
-                        base_name = filename.replace("-*.zstd.parquet", "").replace(
-                            "*.zstd.parquet", ""
-                        )
-                    elif "*.parquet" in filename:
-                        # Glob pattern: remove -*.parquet
-                        base_name = filename.replace("-*.parquet", "").replace(
-                            "*.parquet", ""
-                        )
-                    else:
-                        # Single file: remove extension
-                        base_name = filename.replace(".zstd.parquet", "").replace(
-                            ".parquet", ""
-                        )
+                    # New layout always uses chunk globs (file-*.zstd.parquet)
+                    base_name = filename.replace("-*.zstd.parquet", "").replace(
+                        "-*.parquet", ""
+                    )
                     logical_file_name = f"{path_parts[0]}/{base_name}"
                 else:
-                    # Same logic for files without directory
-                    if "*.zstd.parquet" in pattern:
-                        base_name = pattern.replace("-*.zstd.parquet", "").replace(
-                            "*.zstd.parquet", ""
-                        )
-                    elif "*.parquet" in pattern:
-                        base_name = pattern.replace("-*.parquet", "").replace(
-                            "*.parquet", ""
-                        )
-                    else:
-                        base_name = pattern.replace(".zstd.parquet", "").replace(
-                            ".parquet", ""
-                        )
+                    base_name = pattern.replace("-*.zstd.parquet", "").replace(
+                        "-*.parquet", ""
+                    )
                     logical_file_name = base_name
 
                 # Initialize logical file if needed
@@ -274,15 +284,8 @@ def create_dataset_entry(
                         storage_location_name
                     ] = []
 
-                # Create location (glob pattern if multiple files, otherwise exact path)
-                if len(urls) > 1:
-                    location = FileLocation(path=pattern)
-                else:
-                    path = extract_path_from_url(urls[0], storage_client)
-                    if path:
-                        location = FileLocation(path=path)
-                    else:
-                        continue
+                # New layout assumes chunked parquet, so we always store glob pattern.
+                location = FileLocation(path=pattern)
 
                 logical_files[logical_file_name]["sources_by_location"][
                     storage_location_name
@@ -360,6 +363,7 @@ def create_dataset_entry(
 
         # Use inventory file info if available, but use file_slug for name to ensure uniqueness
         # when there are multiple logical files
+        inv_file: Optional[Dict] = None
         if inventory_files and len(inventory_files) == 1 and len(logical_files) == 1:
             # Only use inventory name if there's exactly one logical file
             inv_file = inventory_files[0]
@@ -378,7 +382,7 @@ def create_dataset_entry(
             "description": None,
             "layer_name": layer_name,
             "source_file_path": source_file_path,
-            "file_metadata": None,
+            "file_metadata": _build_metadata_from_inventory(inventory_entry, inv_file),
             "formats": [],
         }
 
@@ -388,6 +392,34 @@ def create_dataset_entry(
         all_geoparquet_sources = []
         for storage_location_name, sources in file_data["sources_by_location"].items():
             all_geoparquet_sources.extend(sources)
+
+        for source in all_geoparquet_sources:
+            source_storage_location = source.get("storage_location_name")
+            storage_client = (
+                storage_clients_by_location.get(source_storage_location)
+                if source_storage_location
+                else None
+            )
+            location = source.get("location", {}) or {}
+            source_path = (
+                location.get("path")
+                if isinstance(location, dict)
+                else getattr(location, "path", None)
+            )
+            size_bytes: Optional[int] = None
+            if storage_client and source_path:
+                if "*" in source_path:
+                    size_bytes = await storage_client.calculate_total_size_for_glob(
+                        source_path
+                    )
+                else:
+                    size_bytes = await storage_client.get_file_size(source_path)
+            source["source_metadata"] = _build_metadata_from_inventory(
+                inventory_entry,
+                inv_file,
+                size_bytes=size_bytes,
+                mime_type="application/x-parquet",
+            )
 
         if all_geoparquet_sources:
             formats_dict["geoparquet"] = {
@@ -414,8 +446,12 @@ def create_dataset_entry(
                         pmtiles_filename = path_parts[1].replace(".pmtiles", "")
                         if pmtiles_filename == logical_file_base:
                             location = FileLocation(path=path)
-                            metadata = SpatialDatasetFileMetadata(
-                                mime_type="application/x-protobuf"
+                            size_bytes = await storage_client.get_file_size(path)
+                            metadata = _build_metadata_from_inventory(
+                                inventory_entry,
+                                inv_file,
+                                size_bytes=size_bytes,
+                                mime_type="application/x-protobuf",
                             )
                             pmtiles_sources.append(
                                 {
@@ -424,7 +460,7 @@ def create_dataset_entry(
                                     "source_type": "file",
                                     "location": location.model_dump(),
                                     "references_source_id": None,
-                                    "source_metadata": metadata.model_dump(),
+                                    "source_metadata": metadata,
                                 }
                             )
 
@@ -434,19 +470,39 @@ def create_dataset_entry(
                 "sources": pmtiles_sources,
             }
 
-        # GeoServer format - only if this file has sources in the specified storage location
+        # GeoServer format - add for all matching files so OGC Features endpoint is always available.
+        # For large datasets, disable download-style exports (GeoJSON/GeoPackage/Shapefile)
+        # and keep only OGC Features.
         if geoserver_storage_location_name:
             # Check case-insensitively for storage location name
             has_geoserver_source = False
+            geoserver_storage_location = None
             geoserver_loc_upper = geoserver_storage_location_name.upper()
             for storage_loc_name in file_data["sources_by_location"].keys():
                 if storage_loc_name.upper() == geoserver_loc_upper:
                     has_geoserver_source = True
+                    geoserver_storage_location = storage_loc_name
                     break
 
             if has_geoserver_source:
                 import_settings = inventory_entry.get("import", {})
                 if import_settings.get("add_to_geoserver", True):
+                    # Calculate total size of GeoParquet files for this logical file.
+                    # Reuse source metadata to avoid extra storage scans where possible.
+                    total_size_bytes = 0
+                    geoparquet_sources = file_data["sources_by_location"].get(
+                        geoserver_storage_location, []
+                    )
+                    for source in geoparquet_sources:
+                        source_metadata = source.get("source_metadata") or {}
+                        source_size_bytes = (
+                            source_metadata.get("size_bytes")
+                            if isinstance(source_metadata, dict)
+                            else None
+                        )
+                        if isinstance(source_size_bytes, int):
+                            total_size_bytes += source_size_bytes
+
                     geoserver_workspace = (
                         import_settings.get("geoserver_workspace") or "hifld"
                     )
@@ -464,6 +520,9 @@ def create_dataset_entry(
                         store_name=geoserver_store_name,
                         layer_name=geoserver_layer_name,
                     )
+                    geoserver_metadata = SpatialDatasetFileMetadata(
+                        size_bytes=total_size_bytes,
+                    )
 
                     formats_dict["geoserver"] = {
                         "format_type": "geoserver",
@@ -474,7 +533,7 @@ def create_dataset_entry(
                                 "source_type": "geoserver",
                                 "location": geoserver_location.model_dump(),
                                 "references_source_id": None,
-                                "source_metadata": None,
+                                "source_metadata": geoserver_metadata.model_dump(),
                             }
                         ],
                     }
@@ -495,7 +554,9 @@ def create_dataset_entry(
                         "description": None,
                         "layer_name": inv_file.get("layer_name"),
                         "source_file_path": inv_file.get("source_file_path"),
-                        "file_metadata": None,
+                        "file_metadata": _build_metadata_from_inventory(
+                            inventory_entry, inv_file
+                        ),
                         "formats": [],
                     }
                 )
@@ -507,15 +568,24 @@ def create_dataset_entry(
                     "description": None,
                     "layer_name": None,
                     "source_file_path": None,
-                    "file_metadata": None,
+                    "file_metadata": _build_metadata_from_inventory(inventory_entry),
                     "formats": [],
                 }
             )
+
+    # Filter tags to exclude category_confidence and category_reasoning
+    raw_tags = inventory_entry.get("tags", {})
+    filtered_tags = {
+        k: v
+        for k, v in raw_tags.items()
+        if k not in ("category_confidence", "category_reasoning")
+    }
+
     return {
         "slug": dataset_slug,
         "name": inventory_entry.get("name", dataset_slug),
         "description": inventory_entry.get("description", ""),
-        "tags": inventory_entry.get("tags", {}),
+        "tags": filtered_tags,
         "collection_slug": "hifld",
         "files": files,
     }
@@ -537,12 +607,6 @@ async def main():
         action="append",
         required=True,
         help="Storage bucket (can specify multiple times). Format: gcs://bucket-name or seaweedfs://bucket-name",
-    )
-    parser.add_argument(
-        "--seaweedfs-url",
-        type=str,
-        default="http://localhost:8888",
-        help="SeaweedFS filer URL (default: http://localhost:8888)",
     )
     parser.add_argument(
         "--output",
@@ -592,7 +656,6 @@ async def main():
                 {
                     "type": "seaweedfs",
                     "bucket": bucket_name,
-                    "filer_url": args.seaweedfs_url,
                 }
             )
         else:
@@ -631,11 +694,9 @@ async def main():
                     storage_type="gcs", bucket=bucket_name
                 )
             elif storage_type == "seaweedfs":
-                filer_url = bucket_config.get("filer_url", args.seaweedfs_url)
                 storage_client = create_storage_client(
                     storage_type="seaweedfs",
                     bucket=bucket_name,
-                    filer_url=filer_url,
                 )
             else:
                 continue
@@ -647,15 +708,6 @@ async def main():
             files = await find_processed_files(storage_client, slug)
             all_storage_files[f"{storage_type}_{bucket_name}"] = files
 
-            # Debug: print what we found
-            all_files = await storage_client.list_files(f"{slug}/")
-            if all_files:
-                print(f"    Found {len(all_files)} file(s) with prefix '{slug}/':")
-                for f in all_files[:5]:  # Show first 5
-                    print(f"      - {f}")
-                if len(all_files) > 5:
-                    print(f"      ... and {len(all_files) - 5} more")
-
             print(f"    → {len(files['geoparquet'])} GeoParquet file(s)")
             if files["pmtiles"]:
                 print(f"    → {len(files['pmtiles'])} PMTiles file(s)")
@@ -665,7 +717,9 @@ async def main():
                 print(
                     f"    ⚠ No files found for '{slug}' in {storage_type}://{bucket_name}"
                 )
-                print(f"       Looking for: {slug}/ (parquet and pmtiles files)")
+                print(
+                    f"       Looking for recursive paths matching '**/{slug}*/parquet/*.parquet' and '**/{slug}*/pmtiles/*.pmtiles'"
+                )
 
         # Determine GeoServer storage location name from flag
         geoserver_storage_location_name = None
@@ -722,14 +776,17 @@ async def main():
                     storage_clients.get(location_key)
                 )
 
-        entry = create_dataset_entry(
+        entry = await create_dataset_entry(
             slug,
             inventory_entry,
             storage_files_by_location,
             storage_clients_by_location,
             geoserver_storage_location_name,
         )
-        dataset_entries.append(entry)
+        if dataset_has_sources(entry):
+            dataset_entries.append(entry)
+        else:
+            print("  Skipping dataset with no sources")
 
     # Write JSONL file
     print(f"\nWriting {len(dataset_entries)} datasets to {args.output}...")

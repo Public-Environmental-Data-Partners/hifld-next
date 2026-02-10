@@ -604,6 +604,25 @@ export function getGeoJsonUrl(
 }
 
 /**
+ * Get Shapefile download URL from GeoServer source.
+ * Constructs URL from storage location + dataset source.
+ */
+export function getShapefileUrl(
+  source: DatasetSource,
+  storageLocation: StorageLocation
+): string | null {
+  const config = storageLocation.config as
+    | GeoServerStorageLocationConfig
+    | undefined;
+  if (!config?.base_url) return null;
+  const location = source.location as GeoServerLocation;
+  const workspace = location.workspace || "hifld";
+  const layerName = location.layer_name || location.store_name || "";
+  // GeoServer WFS GetFeature with Shapefile output format (zip)
+  return `${config.base_url}/${workspace}/wfs?service=wfs&version=2.0.0&request=GetFeature&typeNames=${workspace}:${layerName}&outputFormat=shape-zip`;
+}
+
+/**
  * Get WFS URL from GeoServer source
  * Constructs URL from storage location + dataset source
  */

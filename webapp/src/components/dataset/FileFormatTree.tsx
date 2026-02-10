@@ -8,9 +8,7 @@ import {
   Package,
   FileJson,
   Map as MapIcon,
-  Database,
   ExternalLink,
-  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DatasetFile } from "@/lib/api-client";
@@ -26,19 +24,29 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+function formatFileSize(bytes: number | null | undefined): string {
+  if (bytes == null || bytes === 0) return "Unknown size";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = bytes;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+  return `${size.toFixed(unitIndex > 0 ? 1 : 0)} ${units[unitIndex]}`;
+}
+
 interface FileFormatTreeProps {
   file: DatasetFile;
   selectedSources: Record<string, { storageLocationId: number; version: string | number }>;
   onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
-  getSelectedSource: (
-    formatType: string
-  ) => NonNullable<DatasetFile["formats"]>[0]["sources"][0] | null;
+  onViewParquet?: (url: string, fileName: string) => void;
   ogcFeaturesUrl: string | null;
   fullLayerName: string | null;
   geopackageUrl: string | null;
   geojsonUrl: string | null;
-  geoparquetUrl: string | null;
-  geoparquetStorageUri: string | null;
+  shapefileUrl: string | null;
+  geoserverExportsEnabled: boolean;
   pmtilesUrl: string | null;
 }
 
@@ -46,13 +54,13 @@ export function FileFormatTree({
   file,
   selectedSources,
   onSourceChange,
-  getSelectedSource,
+  onViewParquet,
   ogcFeaturesUrl,
   fullLayerName,
   geopackageUrl,
   geojsonUrl,
-  geoparquetUrl,
-  geoparquetStorageUri,
+  shapefileUrl,
+  geoserverExportsEnabled,
   pmtilesUrl,
 }: FileFormatTreeProps) {
   const [expandedFormats, setExpandedFormats] = useState<Set<string>>(new Set());
@@ -80,51 +88,78 @@ export function FileFormatTree({
       {/* GeoServer formats */}
       {geoserverFormat && (
         <div className="space-y-1">
-          {/* GeoJSON */}
-          <FormatFileNode
-            icon={<FileJson className="h-4 w-4 text-orange-500" />}
-            name="geojson.json"
-            formatType="geoserver"
-            formatEntry={geoserverFormat}
-            selectedSources={selectedSources}
-            onSourceChange={onSourceChange}
-            isExpanded={expandedFormats.has("geoserver-geojson")}
-            onToggle={() => toggleFormat("geoserver-geojson")}
-          >
-            {geojsonUrl && (
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  Download as GeoJSON format from GeoServer
-                </p>
-                <div className="flex items-center gap-2">
-                  <DownloadButton url={geojsonUrl} label="Download" />
-                </div>
-              </div>
-            )}
-          </FormatFileNode>
+          {geoserverExportsEnabled && (
+            <>
+              {/* GeoJSON */}
+              <FormatFileNode
+                icon={<FileJson className="h-4 w-4 text-orange-500" />}
+                name="geojson.json"
+                formatType="geoserver"
+                formatEntry={geoserverFormat}
+                selectedSources={selectedSources}
+                onSourceChange={onSourceChange}
+                isExpanded={expandedFormats.has("geoserver-geojson")}
+                onToggle={() => toggleFormat("geoserver-geojson")}
+              >
+                {geojsonUrl && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Download as GeoJSON format from GeoServer
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <DownloadButton url={geojsonUrl} label="Download" />
+                    </div>
+                  </div>
+                )}
+              </FormatFileNode>
 
-          {/* GeoPackage */}
-          <FormatFileNode
-            icon={<Package className="h-4 w-4 text-purple-500" />}
-            name="geopackage.gpkg"
-            formatType="geoserver"
-            formatEntry={geoserverFormat}
-            selectedSources={selectedSources}
-            onSourceChange={onSourceChange}
-            isExpanded={expandedFormats.has("geoserver-gpkg")}
-            onToggle={() => toggleFormat("geoserver-gpkg")}
-          >
-            {geopackageUrl && (
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  Download as GeoPackage format from GeoServer
-                </p>
-                <div className="flex items-center gap-2">
-                  <DownloadButton url={geopackageUrl} label="Download" />
-                </div>
-              </div>
-            )}
-          </FormatFileNode>
+              {/* GeoPackage */}
+              <FormatFileNode
+                icon={<Package className="h-4 w-4 text-purple-500" />}
+                name="geopackage.gpkg"
+                formatType="geoserver"
+                formatEntry={geoserverFormat}
+                selectedSources={selectedSources}
+                onSourceChange={onSourceChange}
+                isExpanded={expandedFormats.has("geoserver-gpkg")}
+                onToggle={() => toggleFormat("geoserver-gpkg")}
+              >
+                {geopackageUrl && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Download as GeoPackage format from GeoServer
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <DownloadButton url={geopackageUrl} label="Download" />
+                    </div>
+                  </div>
+                )}
+              </FormatFileNode>
+
+              {/* Shapefile */}
+              <FormatFileNode
+                icon={<File className="h-4 w-4 text-amber-600" />}
+                name="shapefile.zip"
+                formatType="geoserver"
+                formatEntry={geoserverFormat}
+                selectedSources={selectedSources}
+                onSourceChange={onSourceChange}
+                isExpanded={expandedFormats.has("geoserver-shp")}
+                onToggle={() => toggleFormat("geoserver-shp")}
+              >
+                {shapefileUrl && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Download as Shapefile (zip) from GeoServer
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <DownloadButton url={shapefileUrl} label="Download" />
+                    </div>
+                  </div>
+                )}
+              </FormatFileNode>
+            </>
+          )}
 
           {/* OGC Features API */}
           <FormatFileNode
@@ -149,6 +184,11 @@ export function FileFormatTree({
                     {fullLayerName}
                   </code>
                 </p>
+                {!geoserverExportsEnabled && (
+                  <p className="text-xs text-muted-foreground">
+                    Dataset is large; only OGC Features API is offered for this source.
+                  </p>
+                )}
                 <div className="flex items-center gap-2">
                   <CopyButton value={ogcFeaturesUrl} label="Copy URL" />
                   <Button variant="ghost" size="sm" asChild>
@@ -194,12 +234,24 @@ export function FileFormatTree({
                 // Get glob pattern from API (it's added to each source in the group)
                 const sourceWithGlob = allSources.find((s) => s.glob_pattern);
                 const globPattern = sourceWithGlob?.glob_pattern || null;
+                
+                // Calculate total size from all sources (for glob pattern, use the first source's total size)
+                const totalSizeBytes = allSources.reduce((sum, source) => {
+                  const size = source.source_metadata?.size_bytes;
+                  return sum + (typeof size === "number" ? size : 0);
+                }, 0);
+                // If we have individual files, sum their sizes; otherwise use the glob pattern source's size
+                const globSourceSize = allSources.find((s) => {
+                  const path = (s.location as any)?.path;
+                  return path && path.includes("*");
+                })?.source_metadata?.size_bytes;
+                const displaySize = globSourceSize || totalSizeBytes;
 
                 return (
                   <FormatFileNode
                     icon={<FileJson className="h-4 w-4 text-green-600" />}
                     name="*.parquet (glob)"
-                    badge="pattern"
+                    badge={displaySize > 0 ? formatFileSize(displaySize) : "pattern"}
                     formatType="geoparquet"
                     formatEntry={geoparquetFormat}
                     selectedSources={selectedSources}
@@ -209,19 +261,89 @@ export function FileFormatTree({
                     showSourceSelector={false}
                   >
                     <div className="space-y-2">
-                      {globPattern ? (
-                        <>
-                          <p className="text-xs text-muted-foreground">
-                            Use this URI in DuckDB or other tools that support glob patterns
-                          </p>
-                          <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
-                            {globPattern}
-                          </code>
-                          <div className="flex items-center gap-2">
-                            <CopyButton value={globPattern} label="Copy URI" />
-                          </div>
-                        </>
-                      ) : (
+                      {globPattern ? (() => {
+                        // Check if this is SeaweedFS (has endpoint_url parameter)
+                        const hasEndpointUrl = globPattern.includes("?endpoint_url=");
+                        let s3Uri = globPattern;
+                        let endpointUrl = "";
+                        let host = "";
+                        let port = "";
+                        
+                        if (hasEndpointUrl) {
+                          // Extract endpoint URL and clean S3 URI
+                          const [uriPart, queryPart] = globPattern.split("?");
+                          s3Uri = uriPart;
+                          const params = new URLSearchParams(queryPart);
+                          endpointUrl = params.get("endpoint_url") || "";
+                          
+                          // Parse endpoint URL to extract host and port
+                          try {
+                            const url = new URL(endpointUrl);
+                            host = url.hostname;
+                            port = url.port || (url.protocol === "https:" ? "443" : "80");
+                          } catch {
+                            // If parsing fails, try to extract from endpoint_url string
+                            const match = endpointUrl.match(/\/\/([^:]+)(?::(\d+))?/);
+                            if (match) {
+                              host = match[1];
+                              port = match[2] || "8333";
+                            }
+                          }
+                        }
+                        
+                        return (
+                          <>
+                            {hasEndpointUrl ? (
+                              <>
+                                <p className="text-xs text-muted-foreground mb-2">
+                                  For DuckDB, configure the S3 endpoint first:
+                                </p>
+                                <div className="space-y-1 mb-2">
+                                  <code className="text-xs bg-muted px-2 py-1 rounded block">
+                                    SET s3_endpoint='{host}:{port}';
+                                  </code>
+                                  <code className="text-xs bg-muted px-2 py-1 rounded block">
+                                    SET s3_use_ssl=false;
+                                  </code>
+                                  <code className="text-xs bg-muted px-2 py-1 rounded block">
+                                    SET s3_url_style='path';
+                                  </code>
+                                </div>
+                                <p className="text-xs text-muted-foreground mb-2">
+                                  Then use this URI in your query:
+                                </p>
+                                <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
+                                  {s3Uri}
+                                </code>
+                                <div className="flex items-center gap-2 mt-2">
+                                  <CopyButton 
+                                    value={`SET s3_endpoint='${host}:${port}';\nSET s3_use_ssl=false;\nSET s3_url_style='path';\n\nSELECT * FROM '${s3Uri}';`} 
+                                    label="Copy DuckDB Config" 
+                                  />
+                                  <CopyButton value={s3Uri} label="Copy URI" />
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-xs text-muted-foreground">
+                                  Use this URI in DuckDB or other tools that support glob patterns
+                                </p>
+                                <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
+                                  {globPattern}
+                                </code>
+                                <div className="flex items-center gap-2 mt-2">
+                                  <CopyButton value={globPattern} label="Copy URI" />
+                                </div>
+                              </>
+                            )}
+                            {displaySize > 0 && (
+                              <p className="text-xs text-muted-foreground">
+                                Total size: {formatFileSize(displaySize)}
+                              </p>
+                            )}
+                          </>
+                        );
+                      })() : (
                         <p className="text-xs text-muted-foreground">
                           No glob pattern available for the selected location and version
                         </p>
@@ -245,10 +367,12 @@ export function FileFormatTree({
                 }) || [];
 
                 // Group by file path to show individual files
+                // Filter out glob patterns (paths containing "*") - those are shown separately
                 const filesByPath = new Map<string, typeof allSources[0]>();
                 allSources.forEach((source) => {
                   const path = (source.location as any)?.path;
-                  if (path && !filesByPath.has(path)) {
+                  // Only include individual files, not glob patterns
+                  if (path && !path.includes("*") && !filesByPath.has(path)) {
                     filesByPath.set(path, source);
                   }
                 });
@@ -257,12 +381,14 @@ export function FileFormatTree({
                   const fileName = path.split("/").pop() || `file-${index + 1}.parquet`;
                   const fileUrl = source.url;
                   const fileStorageUri = source.storage_uri;
+                  const fileSizeBytes = source.source_metadata?.size_bytes;
 
                   return (
                     <FormatFileNode
                       key={`${path}-${index}`}
                       icon={<File className="h-4 w-4 text-green-600" />}
                       name={fileName}
+                      badge={fileSizeBytes != null ? formatFileSize(fileSizeBytes) : undefined}
                       formatType="geoparquet"
                       formatEntry={geoparquetFormat}
                       selectedSources={selectedSources}
@@ -272,17 +398,87 @@ export function FileFormatTree({
                       showSourceSelector={false}
                     >
                       <div className="space-y-2">
-                        {fileStorageUri && (
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">Storage URI:</p>
-                            <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
-                              {fileStorageUri}
-                            </code>
-                            <div className="flex items-center gap-2 mt-1">
-                              <CopyButton value={fileStorageUri} label="Copy URI" />
-                            </div>
-                          </div>
+                        {fileSizeBytes != null && (
+                          <p className="text-xs text-muted-foreground">
+                            Size: {formatFileSize(fileSizeBytes)}
+                          </p>
                         )}
+                        {fileStorageUri && (() => {
+                          // Check if this is SeaweedFS (has endpoint_url parameter)
+                          const hasEndpointUrl = fileStorageUri.includes("?endpoint_url=");
+                          let s3Uri = fileStorageUri;
+                          let endpointUrl = "";
+                          let host = "";
+                          let port = "";
+                          
+                          if (hasEndpointUrl) {
+                            // Extract endpoint URL and clean S3 URI
+                            const [uriPart, queryPart] = fileStorageUri.split("?");
+                            s3Uri = uriPart;
+                            const params = new URLSearchParams(queryPart);
+                            endpointUrl = params.get("endpoint_url") || "";
+                            
+                            // Parse endpoint URL to extract host and port
+                            try {
+                              const url = new URL(endpointUrl);
+                              host = url.hostname;
+                              port = url.port || (url.protocol === "https:" ? "443" : "80");
+                            } catch {
+                              // If parsing fails, try to extract from endpoint_url string
+                              const match = endpointUrl.match(/\/\/([^:]+)(?::(\d+))?/);
+                              if (match) {
+                                host = match[1];
+                                port = match[2] || "8333";
+                              }
+                            }
+                          }
+                          
+                          return (
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">Storage URI:</p>
+                              {hasEndpointUrl ? (
+                                <>
+                                  <p className="text-xs text-muted-foreground mb-2">
+                                    For DuckDB, configure the S3 endpoint first:
+                                  </p>
+                                  <div className="space-y-1 mb-2">
+                                    <code className="text-xs bg-muted px-2 py-1 rounded block">
+                                      SET s3_endpoint='{host}:{port}';
+                                    </code>
+                                    <code className="text-xs bg-muted px-2 py-1 rounded block">
+                                      SET s3_use_ssl=false;
+                                    </code>
+                                    <code className="text-xs bg-muted px-2 py-1 rounded block">
+                                      SET s3_url_style='path';
+                                    </code>
+                                  </div>
+                                  <p className="text-xs text-muted-foreground mb-1">
+                                    Then use this URI in your query:
+                                  </p>
+                                  <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
+                                    {s3Uri}
+                                  </code>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <CopyButton 
+                                      value={`SET s3_endpoint='${host}:${port}';\nSET s3_use_ssl=false;\nSET s3_url_style='path';\n\nSELECT * FROM '${s3Uri}';`} 
+                                      label="Copy DuckDB Config" 
+                                    />
+                                    <CopyButton value={s3Uri} label="Copy URI" />
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
+                                    {fileStorageUri}
+                                  </code>
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <CopyButton value={fileStorageUri} label="Copy URI" />
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })()}
                         {fileUrl && (
                           <div>
                             <p className="text-xs text-muted-foreground mb-1">Download URL:</p>
@@ -291,6 +487,18 @@ export function FileFormatTree({
                             </p>
                             <div className="flex items-center gap-2">
                               <DownloadButton url={fileUrl} label="Download" />
+                              {onViewParquet && (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    onViewParquet(fileUrl, fileName);
+                                  }}
+                                >
+                                  View Data
+                                </Button>
+                              )}
                             </div>
                           </div>
                         )}
@@ -305,30 +513,50 @@ export function FileFormatTree({
       )}
 
       {/* PMTiles */}
-      {pmtilesFormat && (
-        <FormatFileNode
-          icon={<MapIcon className="h-4 w-4 text-pink-500" />}
-          name="tiles.pmtiles"
-          formatType="pmtiles"
-          formatEntry={pmtilesFormat}
-          selectedSources={selectedSources}
-          onSourceChange={onSourceChange}
-          isExpanded={expandedFormats.has("pmtiles")}
-          onToggle={() => toggleFormat("pmtiles")}
-        >
-          {pmtilesUrl && (
-            <div className="space-y-2">
-              <p className="text-xs text-muted-foreground break-all">
-                {pmtilesUrl}
-              </p>
-              <div className="flex items-center gap-2">
-                <CopyButton value={pmtilesUrl} label="Copy URL" />
-                <DownloadButton url={pmtilesUrl} label="Download" />
+      {pmtilesFormat && (() => {
+        const selectedLocationId = selectedSources["pmtiles"]?.storageLocationId;
+        const selectedVersion = selectedSources["pmtiles"]?.version;
+        
+        const selectedPmtilesSource = pmtilesFormat.sources?.find((source) => {
+          return (
+            source.storage_location?.id === selectedLocationId &&
+            String(source.version || "1") === String(selectedVersion || "1")
+          );
+        });
+        
+        const pmtilesSizeBytes = selectedPmtilesSource?.source_metadata?.size_bytes;
+        
+        return (
+          <FormatFileNode
+            icon={<MapIcon className="h-4 w-4 text-pink-500" />}
+            name="tiles.pmtiles"
+            badge={pmtilesSizeBytes != null ? formatFileSize(pmtilesSizeBytes) : undefined}
+            formatType="pmtiles"
+            formatEntry={pmtilesFormat}
+            selectedSources={selectedSources}
+            onSourceChange={onSourceChange}
+            isExpanded={expandedFormats.has("pmtiles")}
+            onToggle={() => toggleFormat("pmtiles")}
+          >
+            {pmtilesUrl && (
+              <div className="space-y-2">
+                {pmtilesSizeBytes != null && (
+                  <p className="text-xs text-muted-foreground">
+                    Size: {formatFileSize(pmtilesSizeBytes)}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground break-all">
+                  {pmtilesUrl}
+                </p>
+                <div className="flex items-center gap-2">
+                  <CopyButton value={pmtilesUrl} label="Copy URL" />
+                  <DownloadButton url={pmtilesUrl} label="Download" />
+                </div>
               </div>
-            </div>
-          )}
-        </FormatFileNode>
-      )}
+            )}
+          </FormatFileNode>
+        );
+      })()}
 
       {(!file.formats || file.formats.length === 0) && (
         <p className="text-sm text-muted-foreground">
@@ -370,10 +598,10 @@ function FormatFileNode({
   const sources = formatEntry.sources || [];
 
   return (
-    <div className="select-none">
+    <div>
       <div
         className={cn(
-          "flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors",
+          "select-none flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors",
           isExpanded && hasChildren && "bg-muted/30"
         )}
         onClick={onToggle}
@@ -388,7 +616,7 @@ function FormatFileNode({
           <div className="w-3" />
         )}
         {icon}
-        <span className="flex-1 min-w-0 text-sm truncate">{name}</span>
+        <span className="flex-1 min-w-0 text-sm font-mono truncate">{name}</span>
         {badge && (
           <Badge variant="outline" className="text-[10px] h-4 px-1">
             {badge}
@@ -397,7 +625,7 @@ function FormatFileNode({
       </div>
 
       {isExpanded && hasChildren && (
-        <div className="ml-5 pl-4 mt-2 mb-2 border-l-2 border-muted">
+        <div className="ml-5 pl-4 mt-2 mb-2 border-l-2 border-muted select-text">
           {/* Version/Location Selector - only show if showSourceSelector is true */}
           {showSourceSelector && sources.length > 0 && (
             <div className="mb-3">
@@ -440,12 +668,31 @@ function FormatFolderNode({
   children,
 }: FormatFolderNodeProps) {
   const sources = formatEntry.sources || [];
+  
+  // For geoparquet, count only unique storage locations (excluding glob pattern sources)
+  // The glob pattern is just a representation of individual files, not a separate source
+  let sourceCount = sources.length;
+  if (formatType === "geoparquet") {
+    // Count unique storage locations, excluding glob pattern sources
+    const uniqueLocations = new Set<number>();
+    sources.forEach((source) => {
+      const path = (source.location as any)?.path || "";
+      // Only count sources that are NOT glob patterns
+      if (!path.includes("*")) {
+        const locId = source.storage_location?.id;
+        if (locId) {
+          uniqueLocations.add(locId);
+        }
+      }
+    });
+    sourceCount = uniqueLocations.size;
+  }
 
   return (
-    <div className="select-none">
+    <div>
       <div
         className={cn(
-          "flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors",
+          "select-none flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors",
           isExpanded && "bg-muted/30"
         )}
         onClick={onToggle}
@@ -456,16 +703,16 @@ function FormatFolderNode({
           <ChevronRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
         )}
         {icon}
-        <span className="flex-1 min-w-0 text-sm font-medium truncate">{name}</span>
-        {sources.length > 0 && (
+        <span className="flex-1 min-w-0 text-sm font-mono font-medium truncate">{name}</span>
+        {sourceCount > 0 && (
           <Badge variant="secondary" className="text-[10px] h-4 px-1">
-            {sources.length} source{sources.length !== 1 ? "s" : ""}
+            {sourceCount} source{sourceCount !== 1 ? "s" : ""}
           </Badge>
         )}
       </div>
 
       {isExpanded && (
-        <div className="ml-5 mt-2 mb-2">
+        <div className="ml-5 mt-2 mb-2 select-text">
           {/* Version/Location Selector */}
           {sources.length > 0 && (
             <div className="mb-3 pl-4 border-l-2 border-muted">

@@ -5,6 +5,7 @@ This module provides an abstraction layer for object storage operations,
 allowing the upload processor to work with different storage backends.
 """
 
+import asyncio
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -13,16 +14,6 @@ from typing import Dict, List, Optional
 
 import httpx
 import gcsfs
-import s3fs
-
-try:
-    from google.cloud import storage
-
-    GCS_AVAILABLE = True
-except ImportError:
-    GCS_AVAILABLE = False
-
-from models.dataset import BucketStorageLocationConfig
 
 logger = logging.getLogger("storage-client")
 
@@ -164,6 +155,42 @@ class StorageClient(ABC):
             List of relative paths (not full URLs) matching the glob pattern
         """
         pass
+
+    @abstractmethod
+    async def get_file_size(self, remote_path: str) -> int:
+        """Get the size of a file in bytes.
+
+        Args:
+            remote_path: Relative path to the file
+
+        Returns:
+            File size in bytes, or 0 if file doesn't exist or size cannot be determined
+        """
+        pass
+
+    async def calculate_total_size_for_glob(self, glob_path: str) -> int:
+        """Calculate the total size in bytes of all files matching a glob pattern.
+
+        Args:
+            glob_path: Glob pattern path (e.g., "dataset/parquet/file-*.zstd.parquet")
+
+        Returns:
+            Total size in bytes of all matching files
+        """
+        try:
+            matching_files = await self.expand_glob_pattern(glob_path)
+            if not matching_files:
+                return 0
+
+            total_size = 0
+            for file_path in matching_files:
+                size = await self.get_file_size(file_path)
+                total_size += size
+
+            return total_size
+        except Exception as e:
+            logger.warning(f"Error calculating total size for pattern {glob_path}: {e}")
+            return 0
 
 
 class SeaweedFSFilerClient(StorageClient):
@@ -422,6 +449,13 @@ class SeaweedFSFilerClient(StorageClient):
         # Construct full S3 URI with endpoint
         full_glob_path = f"s3://{self.bucket}/{glob_path.lstrip('/')}"
 
+        logger.info(
+            "Expanding glob pattern: path=%s bucket=%s endpoint=%s",
+            glob_path,
+            self.bucket,
+            self.s3_url,
+        )
+
         # Use s3fs with custom endpoint
         fs = s3fs.S3FileSystem(
             client_kwargs={"endpoint_url": self.s3_url},
@@ -430,16 +464,21 @@ class SeaweedFSFilerClient(StorageClient):
         )
 
         # Use fsspec glob to find all matching files
+        # Note: s3fs.glob() returns paths without s3:// prefix, just "bucket/path/to/file"
         matching_files = fs.glob(full_glob_path)
 
-        # Remove the protocol and bucket prefix(es) to get relative paths
-        # Handle cases where bucket name might appear multiple times in the path
+        logger.info(
+            "s3fs.glob found %d files matching %s",
+            len(matching_files),
+            full_glob_path,
+        )
+
+        # Remove the bucket prefix to get relative paths
+        # s3fs.glob() returns paths like "bucket/path/to/file" (no s3:// prefix)
         cleaned_files = []
         for f in matching_files:
-            # Remove s3:// protocol
-            if f.startswith("s3://"):
-                f = f[5:]  # Remove "s3://"
             # Remove all occurrences of bucket prefix
+            # Handle cases where bucket name might appear multiple times in the path
             while f.startswith(f"{self.bucket}/"):
                 f = f[len(f"{self.bucket}/") :]
             f = f.lstrip("/")
@@ -448,7 +487,44 @@ class SeaweedFSFilerClient(StorageClient):
         # Filter out directories (they might end with /)
         matching_files = [f for f in cleaned_files if f and not f.endswith("/")]
 
+        logger.info(
+            "After cleaning, found %d individual files: %s",
+            len(matching_files),
+            matching_files[:5] if matching_files else [],
+        )
+
         return matching_files
+
+    async def get_file_size(self, remote_path: str) -> int:
+        """Get the size of a file in bytes using s3fs.
+
+        Args:
+            remote_path: Relative path to the file
+
+        Returns:
+            File size in bytes, or 0 if file doesn't exist or size cannot be determined
+        """
+        try:
+            import s3fs
+
+            # Construct full S3 URI with endpoint
+            full_path = f"s3://{self.bucket}/{remote_path.lstrip('/')}"
+
+            # Use s3fs with custom endpoint
+            fs = s3fs.S3FileSystem(
+                client_kwargs={"endpoint_url": self.s3_url},
+                key="",  # SeaweedFS doesn't require auth
+                secret="",
+            )
+
+            # Get file info (includes size)
+            info = fs.info(full_path)
+            if info and "size" in info:
+                return info["size"]
+            return 0
+        except Exception as e:
+            logger.warning(f"Could not get size for {remote_path}: {e}")
+            return 0
 
 
 class GCSStorageClient(StorageClient):
@@ -620,7 +696,6 @@ class GCSStorageClient(StorageClient):
         Returns:
             List of relative paths (not full URLs) matching the glob pattern
         """
-        import gcsfs
 
         # Construct full GCS URI
         full_glob_path = f"gs://{self.bucket_name}/{glob_path.lstrip('/')}"
@@ -648,6 +723,31 @@ class GCSStorageClient(StorageClient):
         matching_files = [f for f in cleaned_files if f and not f.endswith("/")]
 
         return matching_files
+
+    async def get_file_size(self, remote_path: str) -> int:
+        """Get the size of a file in bytes using gcsfs.
+
+        Args:
+            remote_path: Relative path to the file
+
+        Returns:
+            File size in bytes, or 0 if file doesn't exist or size cannot be determined
+        """
+        try:
+            # Construct full GCS URI
+            full_path = f"gs://{self.bucket_name}/{remote_path.lstrip('/')}"
+
+            # Use gcsfs
+            fs = gcsfs.GCSFileSystem()
+
+            # Get file info (includes size)
+            info = fs.info(full_path)
+            if info and "size" in info:
+                return info["size"]
+            return 0
+        except Exception as e:
+            logger.warning(f"Could not get size for {remote_path}: {e}")
+            return 0
 
 
 # Default client

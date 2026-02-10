@@ -1285,12 +1285,21 @@ class DatasetService:
                                             )
                                             for s in expanded[:5]
                                         ]
-                                        logger.info(
-                                            "Expanded source paths (first 5): %s",
-                                            expanded_paths,
-                                        )
+                                    logger.info(
+                                        "Expanded source paths (first 5): %s",
+                                        expanded_paths,
+                                    )
                                     # Add expanded sources (they're already dicts with location as dict)
+                                    # Keep the original source for glob pattern display, and add expanded sources for individual files
                                     if expanded:
+                                        logger.info(
+                                            "Adding %d expanded sources and 1 original glob pattern source for source_id=%s",
+                                            len(expanded),
+                                            source.id,
+                                        )
+                                        # Keep original source for glob pattern display
+                                        all_sources_to_process.append(source)
+                                        # Add expanded individual files
                                         all_sources_to_process.extend(expanded)
                                     else:
                                         # Fallback to original source if expansion failed
@@ -1305,7 +1314,47 @@ class DatasetService:
                                     # source_item is either a dict (from expansion) or a FileSource object
                                     if isinstance(source_item, dict):
                                         source_dict = source_item.copy()
+                                        # Preserve metadata from expanded source (includes size_bytes)
+                                        source_metadata_dict = source_dict.get(
+                                            "source_metadata"
+                                        )
+
+                                        # Get storage_location_id from the expanded source dict
+                                        expanded_loc_id = source_dict.get(
+                                            "storage_location_id"
+                                        )
+                                        if expanded_loc_id:
+                                            # Look up storage location for this expanded source
+                                            source_storage = (
+                                                storage_locations_by_id.get(
+                                                    expanded_loc_id
+                                                )
+                                            )
+                                            loc_id = expanded_loc_id
+                                        else:
+                                            # Fallback to original source's storage location
+                                            source_storage = (
+                                                storage_locations_by_id.get(loc_id)
+                                            )
+
                                         # Reconstruct FileSource object for URL generation
+                                        # Use metadata from expanded source if available
+                                        source_metadata_model = None
+                                        if source_metadata_dict:
+                                            try:
+                                                from models.dataset import (
+                                                    SpatialDatasetFileMetadata,
+                                                )
+
+                                                source_metadata_model = (
+                                                    SpatialDatasetFileMetadata(
+                                                        **source_metadata_dict
+                                                    )
+                                                )
+                                            except Exception as e:
+                                                logger.warning(
+                                                    f"Failed to parse source_metadata for expanded source: {e}"
+                                                )
 
                                         temp_source = FileSourceModel(
                                             id=source_dict.get("id"),
@@ -1322,7 +1371,7 @@ class DatasetService:
                                             location=FileLocationModel(
                                                 **source_dict.get("location", {})
                                             ),
-                                            source_metadata=None,  # Expanded sources don't have metadata
+                                            source_metadata=source_metadata_model,
                                         )
                                     else:
                                         # It's a FileSource object
@@ -1333,6 +1382,10 @@ class DatasetService:
                                             source_dict["storage_location_id"] = (
                                                 source_item.storage_location_id
                                             )
+                                        # Use the original source's storage location
+                                        source_storage = storage_locations_by_id.get(
+                                            loc_id
+                                        )
 
                                     # Always explicitly set storage_location from our loaded dict
                                     if not source_storage:
@@ -1353,8 +1406,31 @@ class DatasetService:
                                         else None
                                     )
                                     # Add glob pattern to each source in the group for easy access
+                                    # Only add glob_pattern to the original glob pattern source, not expanded individual files
                                     if glob_pattern:
-                                        source_dict["glob_pattern"] = glob_pattern
+                                        source_path = (
+                                            source_dict.get("location", {})
+                                            if isinstance(
+                                                source_dict.get("location"), dict
+                                            )
+                                            else {}
+                                        ).get("path", "")
+                                        # Only add glob_pattern if this is the original glob pattern source
+                                        if "*" in source_path:
+                                            source_dict["glob_pattern"] = glob_pattern
+
+                                    logger.debug(
+                                        "Adding source to format: id=%s path=%s has_glob=%s",
+                                        source_dict.get("id"),
+                                        (
+                                            source_path
+                                            if isinstance(
+                                                source_dict.get("location"), dict
+                                            )
+                                            else "unknown"
+                                        ),
+                                        "glob_pattern" in source_dict,
+                                    )
                                     format_dict["sources"].append(source_dict)
                                 except Exception as source_error:
                                     logger.warning(
@@ -1490,30 +1566,14 @@ class DatasetService:
         return dataset
 
     def delete_dataset(self, dataset_id: int) -> bool:
-        """Delete a dataset and all related records (formats, sources)."""
+        """Delete a dataset and all related records (files, formats, sources)."""
         dataset = self.get_dataset_by_id(dataset_id)
         if not dataset:
             return False
 
         try:
-            # Get all dataset formats for this dataset
-            dataset_formats = self.get_dataset_formats(dataset_id)
-
-            # Delete all sources for each format
-            for dataset_format in dataset_formats:
-                sources = self.get_format_sources(dataset_format.id)
-                for source in sources:
-                    self.db.delete(source)
-                # Commit sources deletion before deleting format
-                self.db.commit()
-
-            # Delete all dataset formats
-            for dataset_format in dataset_formats:
-                self.db.delete(dataset_format)
-            # Commit formats deletion before deleting dataset
-            self.db.commit()
-
-            # Finally, delete the dataset itself
+            # Cascade deletes (configured in models) will handle:
+            # Dataset -> File -> FileFormat -> FileSource
             self.db.delete(dataset)
             self.db.commit()
             return True

@@ -60,7 +60,7 @@ function DatasetDetailPage() {
 
   // Otherwise, render the dataset detail page
   return (
-    <div className="p-8">
+    <div className="p-6 sm:p-10">
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Header */}
         <div>
@@ -75,15 +75,19 @@ function DatasetDetailPage() {
             </Link>
           </Button>
           <div>
-            <h1 className="text-4xl font-bold tracking-tight break-words">
+            <h1 className="text-5xl font-mono font-bold tracking-tight break-words">
               {dataset.name}
             </h1>
             {dataset.tags && Object.keys(dataset.tags).length > 0 && (
-              <p className="font-mono break-all text-xs text-muted-foreground mt-2">
-                {Object.entries(dataset.tags)
-                  .map(([key, value]) => `${key}: ${value}`)
-                  .join(", ")}
-              </p>
+              <Button variant="outline" size="sm" asChild className="mt-3 font-mono">
+                <a
+                  href={`/api/collections/${collectionSlug}/datasets/${datasetSlug}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  View Metadata
+                </a>
+              </Button>
             )}
           </div>
         </div>
@@ -99,10 +103,6 @@ function DatasetDetailPage() {
           <Separator />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <p className="text-sm text-muted-foreground mb-1">Status</p>
-              <Badge variant="default">ready</Badge>
-            </div>
             {dataset.tags &&
               Object.entries(dataset.tags).map(([key, value]) => {
                 const label = key

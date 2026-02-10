@@ -280,6 +280,7 @@ async def expand_glob_pattern_in_source(
             return [file_source.model_dump()]
 
     # Normalize paths that include a scheme or full URL
+    # The endpoint URL comes from storage location config, not from the path
     match = re.match(r"^(gs://|s3://)([^/]+)/(.*)$", file_path)
     if match:
         file_path = match.group(3)
@@ -309,14 +310,39 @@ async def expand_glob_pattern_in_source(
         logger.warning(f"No files found matching glob pattern: {file_path}")
         return [file_source.model_dump()]
 
-    # Create individual file source dicts
+    # Create individual file source dicts with individual file sizes
     expanded_sources = []
     for matching_file in matching_files:
+        # Calculate size for this individual file
+        try:
+            file_size = await storage_client.get_file_size(matching_file)
+        except Exception as e:
+            logger.warning(
+                f"Failed to get file size for {matching_file}: {e}"
+            )
+            file_size = None
+
         # Create a new FileLocation with the actual file path
         new_location = FileLocation(
             version=location_version,
             path=matching_file,
         )
+
+        # Get base metadata from parent source, supporting both dict and model shapes.
+        source_metadata = file_source.source_metadata
+        if isinstance(source_metadata, dict):
+            base_metadata = source_metadata.copy()
+        elif source_metadata and hasattr(source_metadata, "model_dump"):
+            base_metadata = source_metadata.model_dump()
+        else:
+            base_metadata = {}
+        # Update size_bytes with the individual file size
+        if file_size is not None:
+            base_metadata["size_bytes"] = file_size
+        # Ensure version is set
+        if "version" not in base_metadata:
+            base_metadata["version"] = "v1"
+
         # Create a dict representation (not a FileSource object)
         source_dict = {
             "id": file_source.id,  # Keep original ID for reference
@@ -325,11 +351,7 @@ async def expand_glob_pattern_in_source(
             "version": file_source.version,
             "source_type": file_source.source_type,
             "location": new_location.model_dump(),
-            "source_metadata": (
-                file_source.source_metadata.model_dump()
-                if file_source.source_metadata
-                else None
-            ),
+            "source_metadata": base_metadata if base_metadata else None,
         }
         expanded_sources.append(source_dict)
 
