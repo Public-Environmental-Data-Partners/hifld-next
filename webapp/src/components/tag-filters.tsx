@@ -56,11 +56,11 @@ export function TagFilters({
   const tagKeys = Object.keys(availableTags).sort();
 
   return (
-    <div className={cn("space-y-4", className)}>
+    <div className={cn("space-y-4 min-w-0", className)}>
       {/* Show selected filters with remove buttons */}
       {selectedFilters.length > 0 && (
-        <div className="flex flex-wrap gap-2 items-center">
-          <span className="font-mono text-xs tracking-wide text-muted-foreground mr-2 uppercase">
+        <div className="flex flex-wrap gap-2 items-center min-w-0">
+          <span className="font-mono text-xs tracking-wide text-muted-foreground mr-2 uppercase shrink-0">
             Active filters:
           </span>
           {selectedFilters.map((filter) => {
@@ -69,7 +69,7 @@ export function TagFilters({
               <Badge
                 key={`${filter.key}-${filter.value}`}
                 variant="default"
-                className="cursor-pointer hover:bg-primary/80 gap-1 pr-1"
+                className="cursor-pointer hover:bg-primary/80 gap-1 pr-1 break-words max-w-full"
                 onClick={() => {
                   const currentValues = selectedByKey[filter.key] || [];
                   const newValues = currentValues.filter(
@@ -78,8 +78,8 @@ export function TagFilters({
                   onFilterChange(filter.key, newValues);
                 }}
               >
-                {label}: {filter.value}
-                <X className="h-3 w-3" />
+                <span className="break-words">{label}: {filter.value}</span>
+                <X className="h-3 w-3 shrink-0" />
               </Badge>
             );
           })}
@@ -87,7 +87,7 @@ export function TagFilters({
       )}
 
       {/* Show multi-select dropdowns for each unique tag key */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 min-w-0">
         {tagKeys.map((key) => {
           const values = availableTags[key];
           if (values.length === 0) return null;
@@ -100,8 +100,8 @@ export function TagFilters({
           }));
 
           return (
-            <div key={key} className="space-y-2">
-              <label className="font-mono text-xs font-medium tracking-wide uppercase text-foreground">
+            <div key={key} className="space-y-2 min-w-0">
+              <label className="font-mono text-xs font-medium tracking-wide uppercase text-foreground break-words">
                 {label}
               </label>
               <MultiSelect

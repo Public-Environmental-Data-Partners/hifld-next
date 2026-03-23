@@ -65,24 +65,24 @@ export function MultiSelect({
           role="combobox"
           aria-expanded={open}
           className={cn(
-            "w-full justify-between min-h-9 h-auto",
+            "w-full justify-between min-h-9 h-auto min-w-0",
             selected.length > 0 && "h-auto",
             className
           )}
         >
-          <div className="flex gap-1 flex-wrap items-center min-w-0 flex-1 pr-2">
+          <div className="flex gap-1 flex-wrap items-center min-w-0 flex-1 pr-2 overflow-hidden">
             {selectedOptions.slice(0, maxDisplay).map((option) => (
               <Badge
                 variant="secondary"
                 key={option.value}
-                className="mr-1 mb-1 max-w-[180px] shrink-0"
+                className="mr-1 mb-1 max-w-[calc(100%-0.5rem)] sm:max-w-[180px] shrink-0"
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   handleUnselect(option.value);
                 }}
               >
-                <span className="truncate block max-w-[140px]">{option.label}</span>
+                <span className="truncate block max-w-full sm:max-w-[140px]">{option.label}</span>
                 <button
                   className="ml-1 ring-offset-background rounded-full outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 shrink-0 flex-shrink-0"
                   onKeyDown={(e) => {

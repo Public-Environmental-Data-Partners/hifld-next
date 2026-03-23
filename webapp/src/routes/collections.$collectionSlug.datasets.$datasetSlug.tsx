@@ -7,6 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { getDatasetBySlug, getCollectionBySlug } from "@/lib/api-client";
 import { DatasetFileTree } from "@/components/dataset/DatasetFileTree";
+import { PageLoader } from "@/components/ui/page-loader";
 
 export const Route = createFileRoute(
   "/collections/$collectionSlug/datasets/$datasetSlug"
@@ -38,6 +39,12 @@ export const Route = createFileRoute(
     }
   },
   component: DatasetDetailPage,
+  pendingComponent: () => (
+    <div className="flex min-h-[50vh] flex-1 flex-col items-center justify-center">
+      <PageLoader size="lg" />
+    </div>
+  ),
+  pendingMs: 200,
 });
 
 function DatasetDetailPage() {
@@ -75,7 +82,7 @@ function DatasetDetailPage() {
             </Link>
           </Button>
           <div>
-            <h1 className="text-5xl font-mono font-bold tracking-tight break-words">
+            <h1 className="text-3xl sm:text-4xl md:text-5xl font-mono font-bold tracking-tight break-words">
               {dataset.name}
             </h1>
             {dataset.tags && Object.keys(dataset.tags).length > 0 && (

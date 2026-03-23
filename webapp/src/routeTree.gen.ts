@@ -9,9 +9,13 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as CommonsRouteImport } from './routes/commons'
 import { Route as CollectionsRouteImport } from './routes/collections'
+import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as CommonsIndexRouteImport } from './routes/commons.index'
 import { Route as CollectionsIndexRouteImport } from './routes/collections.index'
+import { Route as AboutIndexRouteImport } from './routes/about.index'
 import { Route as CollectionsSlugRouteImport } from './routes/collections.$slug'
 import { Route as ApiDatasetsRouteImport } from './routes/api/datasets'
 import { Route as ApiCollectionsRouteImport } from './routes/api/collections'
@@ -24,10 +28,21 @@ import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.index'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.viewer'
 import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug'
+import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.sources.$sourceId.download-zip'
 
+const CommonsRoute = CommonsRouteImport.update({
+  id: '/commons',
+  path: '/commons',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CollectionsRoute = CollectionsRouteImport.update({
   id: '/collections',
   path: '/collections',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AboutRoute = AboutRouteImport.update({
+  id: '/about',
+  path: '/about',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -35,10 +50,20 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CommonsIndexRoute = CommonsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => CommonsRoute,
+} as any)
 const CollectionsIndexRoute = CollectionsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => CollectionsRoute,
+} as any)
+const AboutIndexRoute = AboutIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AboutRoute,
 } as any)
 const CollectionsSlugRoute = CollectionsSlugRouteImport.update({
   id: '/$slug',
@@ -115,66 +140,92 @@ const ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute =
         ApiCollectionsCollectionSlugDatasetsDatasetSlugRoute,
     } as any,
   )
+const ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute =
+  ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRouteImport.update(
+    {
+      id: '/sources/$sourceId/download-zip',
+      path: '/sources/$sourceId/download-zip',
+      getParentRoute: () =>
+        ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute,
+    } as any,
+  )
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/about': typeof AboutRouteWithChildren
   '/collections': typeof CollectionsRouteWithChildren
+  '/commons': typeof CommonsRouteWithChildren
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
   '/collections/$slug': typeof CollectionsSlugRoute
+  '/about/': typeof AboutIndexRoute
   '/collections/': typeof CollectionsIndexRoute
+  '/commons/': typeof CommonsIndexRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
-  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
   '/collections/$slug': typeof CollectionsSlugRoute
+  '/about': typeof AboutIndexRoute
   '/collections': typeof CollectionsIndexRoute
+  '/commons': typeof CommonsIndexRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
-  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/about': typeof AboutRouteWithChildren
   '/collections': typeof CollectionsRouteWithChildren
+  '/commons': typeof CommonsRouteWithChildren
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
   '/collections/$slug': typeof CollectionsSlugRoute
+  '/about/': typeof AboutIndexRoute
   '/collections/': typeof CollectionsIndexRoute
+  '/commons/': typeof CommonsIndexRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
-  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/about'
     | '/collections'
+    | '/commons'
     | '/api/collections'
     | '/api/datasets'
     | '/collections/$slug'
+    | '/about/'
     | '/collections/'
+    | '/commons/'
     | '/api/collections/$slug'
     | '/api/datasets/$id'
     | '/api/datasets/stats'
@@ -184,13 +235,16 @@ export interface FileRouteTypes {
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/'
+    | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/api/collections'
     | '/api/datasets'
     | '/collections/$slug'
+    | '/about'
     | '/collections'
+    | '/commons'
     | '/api/collections/$slug'
     | '/api/datasets/$id'
     | '/api/datasets/stats'
@@ -199,14 +253,19 @@ export interface FileRouteTypes {
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
+    | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip'
   id:
     | '__root__'
     | '/'
+    | '/about'
     | '/collections'
+    | '/commons'
     | '/api/collections'
     | '/api/datasets'
     | '/collections/$slug'
+    | '/about/'
     | '/collections/'
+    | '/commons/'
     | '/api/collections/$slug'
     | '/api/datasets/$id'
     | '/api/datasets/stats'
@@ -216,22 +275,39 @@ export interface FileRouteTypes {
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/'
+    | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AboutRoute: typeof AboutRouteWithChildren
   CollectionsRoute: typeof CollectionsRouteWithChildren
+  CommonsRoute: typeof CommonsRouteWithChildren
   ApiCollectionsRoute: typeof ApiCollectionsRouteWithChildren
   ApiDatasetsRoute: typeof ApiDatasetsRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/commons': {
+      id: '/commons'
+      path: '/commons'
+      fullPath: '/commons'
+      preLoaderRoute: typeof CommonsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/collections': {
       id: '/collections'
       path: '/collections'
       fullPath: '/collections'
       preLoaderRoute: typeof CollectionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/about': {
+      id: '/about'
+      path: '/about'
+      fullPath: '/about'
+      preLoaderRoute: typeof AboutRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -241,12 +317,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/commons/': {
+      id: '/commons/'
+      path: '/'
+      fullPath: '/commons/'
+      preLoaderRoute: typeof CommonsIndexRouteImport
+      parentRoute: typeof CommonsRoute
+    }
     '/collections/': {
       id: '/collections/'
       path: '/'
       fullPath: '/collections/'
       preLoaderRoute: typeof CollectionsIndexRouteImport
       parentRoute: typeof CollectionsRoute
+    }
+    '/about/': {
+      id: '/about/'
+      path: '/'
+      fullPath: '/about/'
+      preLoaderRoute: typeof AboutIndexRouteImport
+      parentRoute: typeof AboutRoute
     }
     '/collections/$slug': {
       id: '/collections/$slug'
@@ -332,8 +422,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteImport
       parentRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRoute
     }
+    '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip': {
+      id: '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip'
+      path: '/sources/$sourceId/download-zip'
+      fullPath: '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip'
+      preLoaderRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRouteImport
+      parentRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+    }
   }
 }
+
+interface AboutRouteChildren {
+  AboutIndexRoute: typeof AboutIndexRoute
+}
+
+const AboutRouteChildren: AboutRouteChildren = {
+  AboutIndexRoute: AboutIndexRoute,
+}
+
+const AboutRouteWithChildren = AboutRoute._addFileChildren(AboutRouteChildren)
 
 interface CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren {
   CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
@@ -385,14 +492,40 @@ const CollectionsRouteWithChildren = CollectionsRoute._addFileChildren(
   CollectionsRouteChildren,
 )
 
+interface CommonsRouteChildren {
+  CommonsIndexRoute: typeof CommonsIndexRoute
+}
+
+const CommonsRouteChildren: CommonsRouteChildren = {
+  CommonsIndexRoute: CommonsIndexRoute,
+}
+
+const CommonsRouteWithChildren =
+  CommonsRoute._addFileChildren(CommonsRouteChildren)
+
+interface ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren {
+  ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute
+}
+
+const ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren: ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren =
+  {
+    ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute:
+      ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute,
+  }
+
+const ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren =
+  ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute._addFileChildren(
+    ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren,
+  )
+
 interface ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteChildren {
-  ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+  ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
 }
 
 const ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteChildren: ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteChildren =
   {
     ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute:
-      ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute,
+      ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren,
   }
 
 const ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren =
@@ -431,7 +564,9 @@ const ApiDatasetsRouteWithChildren = ApiDatasetsRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AboutRoute: AboutRouteWithChildren,
   CollectionsRoute: CollectionsRouteWithChildren,
+  CommonsRoute: CommonsRouteWithChildren,
   ApiCollectionsRoute: ApiCollectionsRouteWithChildren,
   ApiDatasetsRoute: ApiDatasetsRouteWithChildren,
 }

@@ -6,5 +6,10 @@ export const env = createEnv({
     // Dataset API URL for server-side routes (loader functions)
     DATASET_API_URL: z.string().url(),
   },
-  runtimeEnv: process.env,
+  runtimeEnv: {
+    ...process.env,
+    // Local dev convenience: allow using only VITE_PUBLIC_DATASET_API_URL in .env
+    DATASET_API_URL:
+      process.env.DATASET_API_URL || process.env.VITE_PUBLIC_DATASET_API_URL,
+  },
 });

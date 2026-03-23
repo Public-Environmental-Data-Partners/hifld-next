@@ -23,6 +23,8 @@ export type HoverInfo = {
   y: number;
   features: maplibregl.MapGeoJSONFeature[];
   selectedIndex: number;
+  isPinned?: boolean;
+  lngLat?: { lng: number; lat: number }; // Geographic coordinates for pinned popups
 };
 
 export type ColorScheme = {

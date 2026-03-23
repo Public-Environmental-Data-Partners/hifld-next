@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "./CopyButton";
 import { DownloadButton } from "./DownloadButton";
+import { ShapefileZipDownloadButton } from "./ShapefileZipDownloadButton";
 import {
   Select,
   SelectContent,
@@ -48,6 +49,10 @@ interface FileFormatTreeProps {
   shapefileUrl: string | null;
   geoserverExportsEnabled: boolean;
   pmtilesUrl: string | null;
+  collectionId?: number;
+  collectionSlug?: string;
+  datasetSlug?: string;
+  fileSlug?: string;
 }
 
 export function FileFormatTree({
@@ -62,6 +67,10 @@ export function FileFormatTree({
   shapefileUrl,
   geoserverExportsEnabled,
   pmtilesUrl,
+  collectionId,
+  collectionSlug,
+  datasetSlug,
+  fileSlug,
 }: FileFormatTreeProps) {
   const [expandedFormats, setExpandedFormats] = useState<Set<string>>(new Set());
 
@@ -80,6 +89,10 @@ export function FileFormatTree({
   const geoserverFormat = file.formats?.find((f) => f.format.format_type === "geoserver");
   const geoparquetFormat = file.formats?.find((f) => f.format.format_type === "geoparquet");
   const pmtilesFormat = file.formats?.find((f) => f.format.format_type === "pmtiles");
+  const geopackageFormat = file.formats?.find((f) => f.format.format_type === "geopackage");
+  const shapefileFormat = file.formats?.find((f) => f.format.format_type === "shapefile");
+  const geojsonFormat = file.formats?.find((f) => f.format.format_type === "geojson");
+  const fileGeodatabaseFormat = file.formats?.find((f) => f.format.format_type === "file_geodatabase");
 
   return (
     <div className="space-y-1 border rounded-md p-4">
@@ -551,6 +564,273 @@ export function FileFormatTree({
                 <div className="flex items-center gap-2">
                   <CopyButton value={pmtilesUrl} label="Copy URL" />
                   <DownloadButton url={pmtilesUrl} label="Download" />
+                </div>
+              </div>
+            )}
+          </FormatFileNode>
+        );
+      })()}
+
+      {/* GeoPackage */}
+      {geopackageFormat && (() => {
+        const selectedLocationId = selectedSources["geopackage"]?.storageLocationId;
+        const selectedVersion = selectedSources["geopackage"]?.version;
+        
+        const selectedGeopackageSource = geopackageFormat.sources?.find((source) => {
+          return (
+            source.storage_location?.id === selectedLocationId &&
+            String(source.version || "1") === String(selectedVersion || "1")
+          );
+        });
+        
+        const geopackageSizeBytes = selectedGeopackageSource?.source_metadata?.size_bytes;
+        const geopackageUrl = selectedGeopackageSource?.url;
+        
+        return (
+          <FormatFileNode
+            icon={<Package className="h-4 w-4 text-purple-500" />}
+            name="geopackage.gpkg"
+            badge={geopackageSizeBytes != null ? formatFileSize(geopackageSizeBytes) : undefined}
+            formatType="geopackage"
+            formatEntry={geopackageFormat}
+            selectedSources={selectedSources}
+            onSourceChange={onSourceChange}
+            isExpanded={expandedFormats.has("geopackage")}
+            onToggle={() => toggleFormat("geopackage")}
+          >
+            {geopackageUrl && (
+              <div className="space-y-2">
+                {geopackageSizeBytes != null && (
+                  <p className="text-xs text-muted-foreground">
+                    Size: {formatFileSize(geopackageSizeBytes)}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground break-all">
+                  {geopackageUrl}
+                </p>
+                <div className="flex items-center gap-2">
+                  <CopyButton value={geopackageUrl} label="Copy URL" />
+                  <DownloadButton url={geopackageUrl} label="Download" sizeBytes={geopackageSizeBytes ?? undefined} />
+                </div>
+              </div>
+            )}
+          </FormatFileNode>
+        );
+      })()}
+
+      {/* Shapefile */}
+      {shapefileFormat && (() => {
+        const selectedLocationId = selectedSources["shapefile"]?.storageLocationId;
+        const selectedVersion = selectedSources["shapefile"]?.version;
+        
+        // Find all sources matching the selected location and version
+        // This includes both the original glob pattern source and expanded individual file sources
+        const matchingSources = shapefileFormat.sources?.filter((source) => {
+          return (
+            source.storage_location?.id === selectedLocationId &&
+            String(source.version || "1") === String(selectedVersion || "1")
+          );
+        }) || [];
+        
+        // Check if any source has a glob pattern (either in glob_pattern field or in path)
+        const hasGlobPattern = matchingSources.some((source) => {
+          return (
+            source.glob_pattern ||
+            (source.location && 
+             typeof source.location === 'object' && 
+             'path' in source.location &&
+             typeof source.location.path === 'string' &&
+             source.location.path.includes('*'))
+          );
+        });
+        
+        // Find the original source (with glob_pattern or glob in path) for metadata
+        const originalSource = matchingSources.find((source) => 
+          source.glob_pattern || 
+          (source.location && 
+           typeof source.location === 'object' && 
+           'path' in source.location &&
+           typeof source.location.path === 'string' &&
+           source.location.path.includes('*'))
+        );
+        const shapefileSizeBytes = originalSource?.source_metadata?.size_bytes;
+        
+        // Get sources with URLs (expanded sources from glob pattern)
+        // Filter out sources that have glob patterns in their URL/path (those are the original glob sources)
+        const sourcesWithUrls = matchingSources.filter((source) => {
+          if (!source.url) return false;
+          // Exclude sources where the URL itself contains a glob pattern
+          return !source.url.includes('*');
+        });
+        
+        // Check if we have expanded sources (multiple URLs from glob pattern)
+        // If we have a glob pattern source, we should use client-side zip creation
+        // Otherwise, fall back to single URL download
+        const hasExpandedSources = hasGlobPattern && sourcesWithUrls.length > 0;
+        
+        const zipFilename = datasetSlug && fileSlug 
+          ? `${datasetSlug}_${fileSlug}_shapefile.zip`
+          : "shapefile.zip";
+        
+        return (
+          <FormatFileNode
+            icon={<File className="h-4 w-4 text-amber-600" />}
+            name="shapefile.zip"
+            badge={shapefileSizeBytes != null ? formatFileSize(shapefileSizeBytes) : undefined}
+            formatType="shapefile"
+            formatEntry={shapefileFormat}
+            selectedSources={selectedSources}
+            onSourceChange={onSourceChange}
+            isExpanded={expandedFormats.has("shapefile")}
+            onToggle={() => toggleFormat("shapefile")}
+          >
+            {hasExpandedSources ? (
+              // We have expanded sources - use client-side zip creation
+              <div className="space-y-2">
+                {shapefileSizeBytes != null && (
+                  <p className="text-xs text-muted-foreground">
+                    Size: {formatFileSize(shapefileSizeBytes)} (zip contains all shapefile components)
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Download all shapefile components (.shp, .shx, .dbf, .prj, etc.) as a zip file
+                  {sourcesWithUrls.length > 0 && ` (${sourcesWithUrls.length} files)`}
+                </p>
+                <div className="flex items-center gap-2">
+                  <ShapefileZipDownloadButton
+                    sources={sourcesWithUrls}
+                    filename={zipFilename}
+                    label="Download Zip"
+                  />
+                </div>
+              </div>
+            ) : hasGlobPattern && originalSource?.id && collectionSlug && datasetSlug && fileSlug ? (
+              // We have a glob pattern but no expanded sources yet - fall back to server-side zip
+              <div className="space-y-2">
+                {shapefileSizeBytes != null && (
+                  <p className="text-xs text-muted-foreground">
+                    Size: {formatFileSize(shapefileSizeBytes)} (zip contains all shapefile components)
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Download all shapefile components (.shp, .shx, .dbf, .prj, etc.) as a zip file
+                </p>
+                <div className="flex items-center gap-2">
+                  <DownloadButton 
+                    url={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}/sources/${originalSource.id}/download-zip`}
+                    label="Download Zip"
+                    filename={zipFilename}
+                  />
+                </div>
+              </div>
+            ) : sourcesWithUrls.length === 1 && sourcesWithUrls[0]?.url ? (
+              // Fallback: single URL (no glob pattern)
+              <div className="space-y-2">
+                {shapefileSizeBytes != null && (
+                  <p className="text-xs text-muted-foreground">
+                    Size: {formatFileSize(shapefileSizeBytes)}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground break-all">
+                  {sourcesWithUrls[0].url}
+                </p>
+                <div className="flex items-center gap-2">
+                  <CopyButton value={sourcesWithUrls[0].url} label="Copy URL" />
+                  <DownloadButton url={sourcesWithUrls[0].url} label="Download" />
+                </div>
+              </div>
+            ) : null}
+          </FormatFileNode>
+        );
+      })()}
+
+      {/* GeoJSON */}
+      {geojsonFormat && (() => {
+        const selectedLocationId = selectedSources["geojson"]?.storageLocationId;
+        const selectedVersion = selectedSources["geojson"]?.version;
+        
+        const selectedGeojsonSource = geojsonFormat.sources?.find((source) => {
+          return (
+            source.storage_location?.id === selectedLocationId &&
+            String(source.version || "1") === String(selectedVersion || "1")
+          );
+        });
+        
+        const geojsonSizeBytes = selectedGeojsonSource?.source_metadata?.size_bytes;
+        const geojsonUrl = selectedGeojsonSource?.url;
+        
+        return (
+          <FormatFileNode
+            icon={<FileJson className="h-4 w-4 text-orange-500" />}
+            name="geojson.json"
+            badge={geojsonSizeBytes != null ? formatFileSize(geojsonSizeBytes) : undefined}
+            formatType="geojson"
+            formatEntry={geojsonFormat}
+            selectedSources={selectedSources}
+            onSourceChange={onSourceChange}
+            isExpanded={expandedFormats.has("geojson")}
+            onToggle={() => toggleFormat("geojson")}
+          >
+            {geojsonUrl && (
+              <div className="space-y-2">
+                {geojsonSizeBytes != null && (
+                  <p className="text-xs text-muted-foreground">
+                    Size: {formatFileSize(geojsonSizeBytes)}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground break-all">
+                  {geojsonUrl}
+                </p>
+                <div className="flex items-center gap-2">
+                  <CopyButton value={geojsonUrl} label="Copy URL" />
+                  <DownloadButton url={geojsonUrl} label="Download" />
+                </div>
+              </div>
+            )}
+          </FormatFileNode>
+        );
+      })()}
+
+      {/* File Geodatabase */}
+      {fileGeodatabaseFormat && (() => {
+        const selectedLocationId = selectedSources["file_geodatabase"]?.storageLocationId;
+        const selectedVersion = selectedSources["file_geodatabase"]?.version;
+        
+        const selectedFileGeodatabaseSource = fileGeodatabaseFormat.sources?.find((source) => {
+          return (
+            source.storage_location?.id === selectedLocationId &&
+            String(source.version || "1") === String(selectedVersion || "1")
+          );
+        });
+        
+        const fileGeodatabaseSizeBytes = selectedFileGeodatabaseSource?.source_metadata?.size_bytes;
+        const fileGeodatabaseUrl = selectedFileGeodatabaseSource?.url;
+        
+        return (
+          <FormatFileNode
+            icon={<Folder className="h-4 w-4 text-indigo-500" />}
+            name="file_geodatabase.gdb"
+            badge={fileGeodatabaseSizeBytes != null ? formatFileSize(fileGeodatabaseSizeBytes) : undefined}
+            formatType="file_geodatabase"
+            formatEntry={fileGeodatabaseFormat}
+            selectedSources={selectedSources}
+            onSourceChange={onSourceChange}
+            isExpanded={expandedFormats.has("file_geodatabase")}
+            onToggle={() => toggleFormat("file_geodatabase")}
+          >
+            {fileGeodatabaseUrl && (
+              <div className="space-y-2">
+                {fileGeodatabaseSizeBytes != null && (
+                  <p className="text-xs text-muted-foreground">
+                    Size: {formatFileSize(fileGeodatabaseSizeBytes)}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground break-all">
+                  {fileGeodatabaseUrl}
+                </p>
+                <div className="flex items-center gap-2">
+                  <CopyButton value={fileGeodatabaseUrl} label="Copy URL" />
+                  <DownloadButton url={fileGeodatabaseUrl} label="Download" />
                 </div>
               </div>
             )}

@@ -9,7 +9,8 @@ export function useMapInitialization(
   mapContainerRef: React.RefObject<HTMLDivElement | null>,
   pmtilesUrl: string | null,
   onLayersLoaded: (layers: VectorLayerInfo[]) => void,
-  onHover: (info: HoverInfo | null) => void
+  onHover: (info: HoverInfo | null) => void,
+  onPinnedPopup?: (info: HoverInfo | null) => void
 ) {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const protocolRef = useRef<Protocol | null>(null);
@@ -195,11 +196,40 @@ export function useMapInitialization(
         y: event.point.y,
         features,
         selectedIndex: 0,
+        isPinned: false,
       });
+    });
+
+    map.on("click", (event) => {
+      if (!mapRef.current || interactiveLayerIds.current.length === 0) return;
+      
+      const features = map.queryRenderedFeatures(event.point, {
+        layers: interactiveLayerIds.current,
+      });
+
+      if (features && features.length > 0) {
+        // Pin the popup on click - store both screen and geographic coordinates
+        if (onPinnedPopup) {
+          onPinnedPopup({
+            x: event.point.x,
+            y: event.point.y,
+            features,
+            selectedIndex: 0,
+            isPinned: true,
+            lngLat: event.lngLat,
+          });
+        }
+      } else {
+        // Click on empty map - clear pinned popup
+        if (onPinnedPopup) {
+          onPinnedPopup(null);
+        }
+      }
     });
 
     map.on("mouseleave", () => {
       clearHoverFeature();
+      // Only clear hover, not pinned popup
       onHover(null);
     });
 
@@ -207,7 +237,7 @@ export function useMapInitialization(
       map.remove();
       mapRef.current = null;
     };
-  }, [pmtilesUrl, mapContainerRef, onLayersLoaded, onHover]);
+  }, [pmtilesUrl, mapContainerRef, onLayersLoaded, onHover, onPinnedPopup]);
 
   useEffect(() => {
     if (!mapRef.current) return;

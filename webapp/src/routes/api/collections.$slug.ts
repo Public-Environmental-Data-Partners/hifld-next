@@ -18,7 +18,10 @@ export const Route = createFileRoute("/api/collections/$slug")({
 
         // Parse query parameters for pagination and search
         const url = new URL(request.url);
-        const search = url.searchParams.get("search") || undefined;
+        // Support both `query` (used by webapp URLs) and legacy `search`
+        const queryParam = url.searchParams.get("query");
+        const searchParam = url.searchParams.get("search");
+        const search = (queryParam ?? searchParam)?.trim() || undefined;
         const limit = url.searchParams.get("limit")
           ? parseInt(url.searchParams.get("limit")!, 10)
           : undefined;

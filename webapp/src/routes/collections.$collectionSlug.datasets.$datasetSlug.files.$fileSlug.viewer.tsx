@@ -28,6 +28,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { FormatSourceSelector } from "@/components/dataset/FormatSourceSelector";
 import type { PanelImperativeHandle } from "react-resizable-panels";
+import { PageLoader } from "@/components/ui/page-loader";
 
 export const Route = createFileRoute(
   "/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer"
@@ -79,6 +80,12 @@ export const Route = createFileRoute(
     return { collection, dataset: result.dataset, file: result.file };
   },
   component: FileViewerPage,
+  pendingComponent: () => (
+    <div className="flex min-h-[50vh] flex-1 flex-col items-center justify-center">
+      <PageLoader size="lg" />
+    </div>
+  ),
+  pendingMs: 200,
   ssr: false,
 });
 
@@ -93,6 +100,7 @@ function FileViewerPage() {
   const [sizeSectionOpen, setSizeSectionOpen] = useState(true);
   const [legendVisible, setLegendVisible] = useState(true);
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
+  const [pinnedPopupInfo, setPinnedPopupInfo] = useState<HoverInfo | null>(null);
   const [selectedSources, setSelectedSources] = useState<
     Record<string, { storageLocationId: number; version: string | number }>
   >({});
@@ -170,7 +178,8 @@ function FileViewerPage() {
     mapContainerRef,
     pmtilesUrl,
     setVectorLayers,
-    setHoverInfo
+    setHoverInfo,
+    setPinnedPopupInfo
   );
 
   // Layer styling hook
@@ -214,6 +223,43 @@ function FileViewerPage() {
     }
   }, [hoverInfo?.selectedIndex, hoverInfo?.features, setHoverFeature, clearHoverFeature]);
 
+  // Update pinned popup position when map moves/zooms
+  useEffect(() => {
+    if (!mapRef.current || !pinnedPopupInfo || !pinnedPopupInfo.lngLat) return;
+
+    const map = mapRef.current;
+    const lngLat = pinnedPopupInfo.lngLat;
+
+    const updatePopupPosition = () => {
+      if (!mapRef.current || !lngLat) return;
+      
+      const point = mapRef.current.project(lngLat);
+      setPinnedPopupInfo((prev) => {
+        if (!prev || !prev.lngLat || 
+            prev.lngLat.lng !== lngLat.lng || 
+            prev.lngLat.lat !== lngLat.lat) {
+          return prev;
+        }
+        return {
+          ...prev,
+          x: point.x,
+          y: point.y,
+        };
+      });
+    };
+
+    map.on("move", updatePopupPosition);
+    map.on("zoom", updatePopupPosition);
+
+    // Update immediately in case map moved before this effect ran
+    updatePopupPosition();
+
+    return () => {
+      map.off("move", updatePopupPosition);
+      map.off("zoom", updatePopupPosition);
+    };
+  }, [mapRef, pinnedPopupInfo?.lngLat?.lng, pinnedPopupInfo?.lngLat?.lat]);
+
   // Computed values for active layer
   const activeLayer = vectorLayers[0] || null;
   const activeLayerId = activeLayer?.id || null;
@@ -227,7 +273,9 @@ function FileViewerPage() {
     [activeBreaks, activeColors]
   );
 
-  const selectedFeature = hoverInfo?.features[hoverInfo.selectedIndex] || null;
+  // Determine which popup to show (pinned takes precedence)
+  const activePopupInfo = pinnedPopupInfo || (pinnedPopupInfo === null ? hoverInfo : null);
+  const selectedFeature = activePopupInfo?.features?.[activePopupInfo?.selectedIndex ?? 0] || null;
   const selectedProperties = selectedFeature?.properties || {};
   const propertyEntries = Object.entries(selectedProperties).sort(([a], [b]) =>
     a.localeCompare(b)
@@ -252,8 +300,10 @@ function FileViewerPage() {
       setSizeSectionOpen={setSizeSectionOpen}
       legendVisible={legendVisible}
       setLegendVisible={setLegendVisible}
-      hoverInfo={hoverInfo}
+      hoverInfo={activePopupInfo}
       setHoverInfo={setHoverInfo}
+      pinnedPopupInfo={pinnedPopupInfo}
+      setPinnedPopupInfo={setPinnedPopupInfo}
       activeLayer={activeLayer}
       activeStyle={activeStyle}
       activeBreaks={activeBreaks}
@@ -284,6 +334,8 @@ function FileViewerContent({
   setLegendVisible,
   hoverInfo,
   setHoverInfo,
+  pinnedPopupInfo,
+  setPinnedPopupInfo,
   activeLayer,
   activeStyle,
   activeBreaks,
@@ -310,6 +362,8 @@ function FileViewerContent({
   setLegendVisible: React.Dispatch<React.SetStateAction<boolean>>;
   hoverInfo: HoverInfo | null;
   setHoverInfo: React.Dispatch<React.SetStateAction<HoverInfo | null>>;
+  pinnedPopupInfo: HoverInfo | null;
+  setPinnedPopupInfo: React.Dispatch<React.SetStateAction<HoverInfo | null>>;
   activeLayer: VectorLayerInfo | null;
   activeStyle: LayerStyle | null;
   activeBreaks: number[];
@@ -344,11 +398,18 @@ function FileViewerContent({
           hoverInfo={hoverInfo}
           selectedIndex={hoverInfo.selectedIndex}
           propertyEntries={propertyEntries}
-          onIndexChange={(index) =>
-            setHoverInfo((prev) =>
-              prev ? { ...prev, selectedIndex: index } : prev
-            )
-          }
+          onIndexChange={(index) => {
+            if (hoverInfo.isPinned) {
+              setPinnedPopupInfo((prev) =>
+                prev ? { ...prev, selectedIndex: index } : prev
+              );
+            } else {
+              setHoverInfo((prev) =>
+                prev ? { ...prev, selectedIndex: index } : prev
+              );
+            }
+          }}
+          onClose={() => setPinnedPopupInfo(null)}
         />
       )}
       {activeStyle && (

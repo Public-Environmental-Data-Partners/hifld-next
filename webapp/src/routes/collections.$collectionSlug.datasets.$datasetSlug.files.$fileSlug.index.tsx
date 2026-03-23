@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Table } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui/button";
@@ -10,11 +10,11 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { getDatasetFileById, getDatasetFileBySlug, getCollectionBySlug, getDatasetBySlug } from "@/lib/api-client";
 import type { DatasetFile } from "@/lib/api-client";
 import { FileFormatTree } from "@/components/dataset/FileFormatTree";
 import { ParquetViewerPanel } from "@/components/dataset/ParquetViewerPanel";
+import { PageLoader } from "@/components/ui/page-loader";
 import {
   getOgcFeaturesUrl,
   getFullLayerName,
@@ -86,10 +86,16 @@ export const Route = createFileRoute(
     }
   },
   component: FileDetailPage,
+  pendingComponent: () => (
+    <div className="flex min-h-[50vh] flex-1 flex-col items-center justify-center">
+      <PageLoader size="lg" />
+    </div>
+  ),
+  pendingMs: 200,
 });
 
 function FileDetailPage() {
-  const { dataset, file } = Route.useLoaderData();
+  const { collection, dataset, file } = Route.useLoaderData();
   const { collectionSlug, datasetSlug, fileSlug } = Route.useParams();
   const [selectedSources, setSelectedSources] = useState<
     Record<string, { storageLocationId: number; version: string | number }>
@@ -226,26 +232,54 @@ function FileDetailPage() {
   // Extract metadata from selected source
   const featureCount = geoparquetSource?.source_metadata?.feature_count;
 
+  // Helper to get first parquet file for data table preview
+  const getFirstParquetFile = (): { url: string; fileName: string } | null => {
+    const geoparquetFormat = file.formats?.find(
+      (f) => f.format.format_type === "geoparquet"
+    );
+
+    if (!geoparquetFormat?.sources || geoparquetFormat.sources.length === 0) {
+      return null;
+    }
+
+    // Use selected source if available, otherwise find first individual file
+    const selectedSource = geoparquetSource;
+    
+    if (selectedSource?.url) {
+      // Extract filename from location path
+      const location = selectedSource.location as { path?: string };
+      const path = location?.path;
+      if (path && !path.includes("*")) {
+        const fileName = path.split("/").pop() || "data.parquet";
+        return { url: selectedSource.url, fileName };
+      }
+    }
+
+    // Fallback: find first individual file (not a glob pattern)
+    for (const source of geoparquetFormat.sources) {
+      if (!source.url) continue;
+      const location = source.location as { path?: string };
+      const path = location?.path;
+      if (path && !path.includes("*")) {
+        const fileName = path.split("/").pop() || "data.parquet";
+        return { url: source.url, fileName };
+      }
+    }
+
+    return null;
+  };
+
+  const firstParquetFile = getFirstParquetFile();
+
   const cleanDescription = file.description
     ?.replace(/<[^>]*>/g, "")
     .replace(/&nbsp;/g, " ")
     .trim();
 
-  return (
-    <div className="p-8 min-h-screen">
-      <ResizablePanelGroup
-        orientation="vertical"
-        className="min-h-[calc(100vh-4rem)]"
-      >
-        <ResizablePanel
-          defaultSize={parquetViewer ? "70%" : "100%"}
-          minSize="40%"
-          className="min-h-0"
-        >
-          <ScrollArea className="h-full">
-            <div className="max-w-4xl mx-auto space-y-8 pb-8">
-              {/* Header */}
-              <div>
+  const content = (
+    <div className="max-w-4xl mx-auto space-y-8 p-4 sm:p-6 md:p-8">
+      {/* Header */}
+      <div>
                 <Button variant="ghost" asChild className="mb-4">
                   <Link
                     to="/collections/$collectionSlug/datasets/$datasetSlug"
@@ -259,18 +293,18 @@ function FileDetailPage() {
                   </Link>
                 </Button>
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <h1 className="text-4xl font-mono font-bold tracking-tight break-words">
+                  <div className="min-w-0 flex-1">
+                    <h1 className="text-2xl sm:text-3xl md:text-4xl font-mono font-bold tracking-tight break-words">
                       {file.name}
                     </h1>
                     {file.layer_name && (
-                      <p className="text-muted-foreground mt-2">
+                      <p className="text-muted-foreground mt-2 break-words">
                         Layer: <code className="text-sm">{file.layer_name}</code>
                       </p>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" asChild className="font-mono">
+                  <div className="flex flex-col gap-2 min-w-0 sm:min-w-[200px]">
+                    <Button variant="outline" asChild className="font-mono w-full sm:w-auto">
                       <a
                         href={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}`}
                         target="_blank"
@@ -279,18 +313,32 @@ function FileDetailPage() {
                         View Metadata
                       </a>
                     </Button>
-                    <Button asChild>
-                      <Link
-                        to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer"
-                        params={{
-                          collectionSlug,
-                          datasetSlug,
-                          fileSlug,
-                        }}
-                      >
-                        Open Map Viewer
-                      </Link>
-                    </Button>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Button asChild className="flex-1 sm:flex-initial min-w-0">
+                        <Link
+                          to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer"
+                          params={{
+                            collectionSlug,
+                            datasetSlug,
+                            fileSlug,
+                          }}
+                        >
+                          <span className="hidden sm:inline">Open Map Viewer</span>
+                          <span className="sm:hidden">Map Viewer</span>
+                        </Link>
+                      </Button>
+                      {firstParquetFile && (
+                        <Button
+                          variant="outline"
+                          onClick={() => setParquetViewer(firstParquetFile)}
+                          className="flex-1 sm:flex-initial min-w-0"
+                        >
+                          <Table className="h-4 w-4 sm:mr-2 shrink-0" />
+                          <span className="hidden sm:inline">Open Data Table</span>
+                          <span className="sm:hidden">Data Table</span>
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -353,6 +401,10 @@ function FileDetailPage() {
                   shapefileUrl={shapefileUrl}
                   geoserverExportsEnabled={geoserverExportsEnabled}
                   pmtilesUrl={pmtilesUrl}
+                  collectionId={collection.id}
+                  collectionSlug={collectionSlug}
+                  datasetSlug={datasetSlug}
+                  fileSlug={fileSlug}
                 />
 
                 <Separator />
@@ -362,28 +414,40 @@ function FileDetailPage() {
                   <p>Updated: {new Date(file.updated_at).toLocaleString()}</p>
                 </div>
               </div>
-            </div>
-          </ScrollArea>
-        </ResizablePanel>
+    </div>
+  );
 
-        {parquetViewer && (
-          <>
-            <ResizableHandle withHandle />
-            <ResizablePanel
-              defaultSize="30%"
-              minSize="20%"
-              maxSize="60%"
-              className="min-h-[240px]"
-            >
-              <ParquetViewerPanel
-                url={parquetViewer.url}
-                fileName={parquetViewer.fileName}
-                onClose={() => setParquetViewer(null)}
-              />
-            </ResizablePanel>
-          </>
-        )}
-      </ResizablePanelGroup>
+  return (
+    <div>
+      {parquetViewer ? (
+        <ResizablePanelGroup
+          orientation="vertical"
+          className="min-h-[calc(100vh-4rem)]"
+        >
+          <ResizablePanel
+            defaultSize="70%"
+            minSize="40%"
+            className="min-h-0 overflow-y-auto"
+          >
+            {content}
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel
+            defaultSize="30%"
+            minSize="20%"
+            maxSize="60%"
+            className="min-h-[240px] overflow-hidden flex flex-col"
+          >
+            <ParquetViewerPanel
+              url={parquetViewer.url}
+              fileName={parquetViewer.fileName}
+              onClose={() => setParquetViewer(null)}
+            />
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      ) : (
+        content
+      )}
     </div>
   );
 }
