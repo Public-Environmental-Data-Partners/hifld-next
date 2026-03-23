@@ -353,6 +353,38 @@ class DatasetService:
             return None
         return self.db.get(StorageLocation, storage_location_id)
 
+    def get_storage_location_by_name(self, name: str) -> Optional[StorageLocation]:
+        """Get storage location by exact name."""
+        statement = select(StorageLocation).where(StorageLocation.name == name)
+        return self.db.exec(statement).first()
+
+    def get_file_by_slug(self, dataset_id: int, file_slug: str) -> Optional[File]:
+        """Get a file by dataset and slug."""
+        statement = select(File).where(
+            File.dataset_id == dataset_id,
+            File.slug == file_slug,
+        )
+        return self.db.exec(statement).first()
+
+    def get_or_create_file_format_for_file(
+        self, file_id: int, format_type: str
+    ) -> FileFormat:
+        """Get or create a file-format link for a specific file."""
+        format_obj = self.get_or_create_format(format_type)
+        statement = select(FileFormat).where(
+            FileFormat.file_id == file_id,
+            FileFormat.format_id == format_obj.id,
+        )
+        existing = self.db.exec(statement).first()
+        if existing:
+            return existing
+
+        file_format = FileFormat(file_id=file_id, format_id=format_obj.id)
+        self.db.add(file_format)
+        self.db.commit()
+        self.db.refresh(file_format)
+        return file_format
+
     def get_dataset_formats(self, dataset_id: int) -> list[FileFormat]:
         """Get all formats available for a dataset."""
         statement = (
@@ -605,6 +637,58 @@ class DatasetService:
             location=location_dict,
             source_metadata=metadata_dict,
         )
+        self.db.add(file_source)
+        self.db.commit()
+        self.db.refresh(file_source)
+        return file_source
+
+    def update_format_source(
+        self,
+        file_source_id: int,
+        location: FileLocation | ApiLocation | GeoServerLocation | dict[str, Any],
+        source_metadata: Optional[SpatialDatasetFileMetadata | dict[str, Any]] = None,
+    ) -> Optional[FileSource]:
+        """Update location and metadata for an existing FileSource."""
+        file_source = self.db.get(FileSource, file_source_id)
+        if not file_source:
+            return None
+
+        location_dict = (
+            location.model_dump() if hasattr(location, "model_dump") else location
+        )
+        metadata_dict = (
+            source_metadata.model_dump()
+            if source_metadata and hasattr(source_metadata, "model_dump")
+            else source_metadata
+        )
+        file_source.location = location_dict
+        file_source.source_metadata = metadata_dict
+        self.db.add(file_source)
+        self.db.commit()
+        self.db.refresh(file_source)
+        return file_source
+
+    def update_source_metadata(
+        self, file_source_id: int, metadata_patch: dict[str, Any]
+    ) -> Optional[FileSource]:
+        """Merge and persist source_metadata for a FileSource."""
+        file_source = self.db.get(FileSource, file_source_id)
+        if not file_source:
+            return None
+
+        current = file_source.source_metadata
+        if isinstance(current, dict):
+            merged = dict(current)
+        elif current and hasattr(current, "model_dump"):
+            merged = current.model_dump()
+        else:
+            merged = {}
+
+        merged.update(metadata_patch or {})
+        if "version" not in merged:
+            merged["version"] = "v1"
+
+        file_source.source_metadata = merged
         self.db.add(file_source)
         self.db.commit()
         self.db.refresh(file_source)

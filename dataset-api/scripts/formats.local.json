@@ -12,10 +12,33 @@
     "mime_type": "application/x-protobuf"
   },
   {
+    "format_type": "geopackage",
+    "name": "GeoPackage",
+    "description": "GeoPackage format for geospatial data storage and exchange",
+    "mime_type": "application/geopackage+sqlite3"
+  },
+  {
+    "format_type": "shapefile",
+    "name": "Shapefile",
+    "description": "ESRI Shapefile format for geospatial vector data",
+    "mime_type": "application/zip"
+  },
+  {
+    "format_type": "geojson",
+    "name": "GeoJSON",
+    "description": "GeoJSON format for encoding geographic data structures",
+    "mime_type": "application/geo+json"
+  },
+  {
+    "format_type": "file_geodatabase",
+    "name": "File Geodatabase",
+    "description": "ESRI File Geodatabase format for geospatial data storage",
+    "mime_type": "application/x-esri-shape"
+  },
+  {
     "format_type": "geoserver",
     "name": "GeoServer",
-    "description": "GeoServer service providing multiple OGC-compliant interfaces (WFS, WMS, OGC API Features, GeoPackage export)",
+    "description": "GeoServer service providing OGC API Features endpoint",
     "mime_type": null
   }
 ]
-

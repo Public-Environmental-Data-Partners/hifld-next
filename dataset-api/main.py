@@ -1,10 +1,10 @@
 """
-HIFLD Dataset API
+HIFLD Next Dataset API
 
 FastAPI service for reading geospatial datasets:
 - Read-only dataset and collection endpoints
 - GeoServer integration
-- Dataset creation/processing via scripts/import_inventory.py
+- Dataset ingestion via scripts/import_datasets.py
 """
 
 import logging
@@ -19,7 +19,7 @@ from api import collections as collections_router
 from api import datasets as datasets_router
 from api import geoserver as geoserver_router
 
-# Processing router removed - use scripts/import_inventory.py for dataset processing
+# Processing router removed - use scripts/import_datasets.py for dataset ingestion
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,27 +31,46 @@ logger = logging.getLogger("dataset-api")
 
 
 class TimeoutMiddleware(BaseHTTPMiddleware):
-    """Middleware to add request timeout protection."""
+    """Middleware to add request timeout protection.
     
-    def __init__(self, app, timeout: float = 60.0):
+    Applies different timeouts based on the request path:
+    - Download endpoints (download-zip, export) get 280 seconds (just under Cloud Run's 300s limit)
+    - All other endpoints get 60 seconds
+    """
+    
+    def __init__(self, app, timeout: float = 60.0, long_timeout: float = 280.0):
         super().__init__(app)
         self.timeout = timeout
+        self.long_timeout = long_timeout
+        # Paths that need longer timeouts
+        self.long_timeout_paths = ["/download-zip", "/export/"]
+    
+    def _get_timeout(self, request: Request) -> float:
+        """Determine the appropriate timeout for this request."""
+        path = str(request.url.path)
+        # Check if this is a long-running operation
+        for long_path in self.long_timeout_paths:
+            if long_path in path:
+                logger.debug(f"Using long timeout ({self.long_timeout}s) for {path}")
+                return self.long_timeout
+        return self.timeout
     
     async def dispatch(self, request: Request, call_next):
         import asyncio
         
+        timeout = self._get_timeout(request)
         try:
             # Create a timeout task
             response = await asyncio.wait_for(
                 call_next(request),
-                timeout=self.timeout
+                timeout=timeout
             )
             return response
         except asyncio.TimeoutError:
-            logger.error(f"Request timeout after {self.timeout}s: {request.url}")
+            logger.error(f"Request timeout after {timeout}s: {request.url}")
             return JSONResponse(
                 status_code=504,
-                content={"detail": f"Request timeout after {self.timeout} seconds"}
+                content={"detail": f"Request timeout after {timeout} seconds"}
             )
 
 
@@ -97,14 +116,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="HIFLD Dataset API",
-    description="Read-only API for geospatial datasets. Use scripts/import_inventory.py for dataset creation and processing.",
+    title="HIFLD Next Dataset API",
+    description="Read-only API for geospatial datasets. Use scripts/import_datasets.py for dataset ingestion.",
     version="1.0.0",
     lifespan=lifespan,
 )
 
 # Request timeout middleware (must be first to catch all requests)
-app.add_middleware(TimeoutMiddleware, timeout=60.0)
+# Default timeout: 60s for most endpoints
+# Long timeout: 280s for download/export endpoints (just under Cloud Run's 300s limit)
+app.add_middleware(TimeoutMiddleware, timeout=60.0, long_timeout=280.0)
 
 # CORS middleware
 app.add_middleware(
@@ -119,7 +140,7 @@ app.add_middleware(
 app.include_router(collections_router.router)  # GET only
 app.include_router(datasets_router.router)  # GET only, nested under collections
 app.include_router(geoserver_router.router)  # GeoServer proxy endpoints
-# Processing router removed - use scripts/import_inventory.py for dataset processing
+# Processing router removed - use scripts/import_datasets.py for dataset ingestion
 
 
 @app.get("/health")

@@ -6,7 +6,6 @@ A read-only FastAPI service for serving geospatial dataset metadata.
 
 - Read-only API for collections and datasets
 - Serves dataset metadata (formats, sources, URLs)
-- GeoServer integration endpoints
 - Dataset processing is handled by CLI scripts
 
 ## API Endpoints
@@ -26,14 +25,74 @@ A read-only FastAPI service for serving geospatial dataset metadata.
 
 - `GET /health` - Health check endpoint
 
-## Dataset Processing
+## DRP -> Dataset API Import Process
 
-Dataset processing is done via CLI scripts, not through the API:
+The API is read-only. Dataset ingestion happens through scripts.
+
+Current source inventory CSV:
+- `dataset-api/scripts/HIFLD_Open_Inventory_12112025.csv`
+
+Current DRP source bucket:
+- `gs://drp-hifld-copy-49775666365`
+
+Current formatted destination bucket:
+- `seaweedfs://drp-hifld-copy-formatted`
+
+### End-to-end workflow
+
+1) Map inventory rows to source zips in DRP bucket.
 
 ```bash
-# Process datasets from inventory
-python -m scripts.import_inventory [--dry-run] [--limit N]
+python -m scripts.generate_gcs_inventory \
+  --input scripts/HIFLD_Open_Inventory_12112025.csv \
+  --output scripts/inventory_gcs.csv \
+  --bucket drp-hifld-copy-49775666365 \
+  --skip-verify
 ```
+
+2) Process source files into publishable formats in destination storage.
+
+```bash
+python -m scripts.process_gcs_datasets \
+  --inventory scripts/inventory_gcs.csv \
+  --source gs://drp-hifld-copy-49775666365 \
+  --dest seaweedfs://drp-hifld-copy-formatted
+```
+
+3) Build metadata inventory JSONL from the HIFLD inventory CSV.
+
+```bash
+python -m scripts.generate_jsonl_inventory \
+  --input scripts/HIFLD_Open_Inventory_12112025.csv \
+  --output scripts/inventory.jsonl
+```
+
+4) Join metadata with storage-discovered files to produce import payload.
+
+```bash
+python -m scripts.generate_datasets \
+  --inventory scripts/inventory.jsonl \
+  --bucket seaweedfs://drp-hifld-copy-formatted \
+  --output scripts/datasets.jsonl
+```
+
+5) Seed DB lookup tables (idempotent).
+
+```bash
+python -m scripts.seed_formats
+python -m scripts.seed_storage
+```
+
+6) Import datasets into the Dataset API database.
+
+```bash
+python -m scripts.import_datasets --input scripts/datasets.jsonl
+```
+
+### GeoServer note
+
+GeoServer is no longer used as a storage target for this pipeline.
+Do not pass GeoServer storage options during import.
 
 ## Running
 

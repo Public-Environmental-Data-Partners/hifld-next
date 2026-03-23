@@ -201,7 +201,7 @@ class GeoServerClient:
                             "name": store_name,
                             "type": "PMTiles",
                             "connectionParameters": {
-                                "entry": [{"@key": "url", "$": docker_url}],
+                                "entry": [{"@key": "pmtiles", "$": docker_url}],
                             },
                         },
                     },

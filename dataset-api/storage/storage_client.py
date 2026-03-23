@@ -539,6 +539,7 @@ class GCSStorageClient(StorageClient):
         bucket: str,
         project: Optional[str] = None,
         timeout: float = 300.0,
+        base_url: Optional[str] = None,
     ):
         try:
             from google.cloud import storage
@@ -549,6 +550,9 @@ class GCSStorageClient(StorageClient):
             )
 
         self.bucket_name = bucket
+        # When set (e.g. https://domain/storage for load balancer), use for public URLs instead of storage.googleapis.com.
+        # LB path rewrite sends /storage/* -> /, so URL is base_url + "/" + path (no bucket in path).
+        self.base_url = (base_url or "").rstrip("/") or None
         self.project = project
         self.timeout = timeout
         self.client = storage.Client(project=project)
@@ -591,9 +595,7 @@ class GCSStorageClient(StorageClient):
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _upload)
 
-        # Construct the public URL explicitly
-        # Format: https://storage.googleapis.com/{bucket}/{path}
-        public_url = f"https://storage.googleapis.com/{self.bucket_name}/{clean_path}"
+        public_url = self.get_public_url(clean_path)
 
         logger.info(f"Uploaded {local_path.name} to {public_url}")
         return public_url
@@ -642,8 +644,9 @@ class GCSStorageClient(StorageClient):
     def get_public_url(self, remote_path: str) -> str:
         """Get the public URL for a file."""
         clean_path = remote_path.lstrip("/")
-        # Return the public URL directly without checking if blob exists
-        # Format: https://storage.googleapis.com/{bucket}/{path}
+        if self.base_url:
+            # Load balancer: base_url/storage -> backend receives path only (no bucket in URL)
+            return f"{self.base_url}/{clean_path}"
         return f"https://storage.googleapis.com/{self.bucket_name}/{clean_path}"
 
     async def list_files(self, prefix: str) -> List[str]:
@@ -658,11 +661,17 @@ class GCSStorageClient(StorageClient):
 
     def parse_url_to_path(self, url: str) -> Optional[str]:
         """Parse a GCS URL to extract the relative path."""
-        # GCS format: https://storage.googleapis.com/{bucket}/{path}
         if "storage.googleapis.com" in url:
             parts = url.split(f"storage.googleapis.com/{self.bucket_name}/")
             if len(parts) > 1:
                 return parts[1]
+        if self.base_url:
+            prefix = self.base_url.rstrip("/") + "/"
+            if prefix in url:
+                idx = url.find(prefix)
+                rest = url[idx + len(prefix) :].split("?")[0]
+                if rest:
+                    return rest
         return None
 
     def path_to_s3_uri(self, path: str) -> str:
@@ -685,13 +694,13 @@ class GCSStorageClient(StorageClient):
             path: Relative path within the storage location
             for_docker: Not used for GCS (always uses public HTTPS URLs)
         """
-        return f"https://storage.googleapis.com/{self.bucket_name}/{path}"
+        return self.get_public_url(path)
 
     async def expand_glob_pattern(self, glob_path: str) -> List[str]:
         """Expand a glob pattern to list of matching file paths using fsspec.
 
         Args:
-            glob_path: Glob pattern path (e.g., "dataset/*.parquet")
+            glob_path: Glob pattern path (e.g., "dataset/*.parquet" or "**/dataset/**/*.parquet")
 
         Returns:
             List of relative paths (not full URLs) matching the glob pattern
@@ -703,8 +712,37 @@ class GCSStorageClient(StorageClient):
         # Use gcsfs
         fs = gcsfs.GCSFileSystem()
 
-        # Use fsspec glob to find all matching files
-        matching_files = fs.glob(full_glob_path)
+        # For patterns starting with ** (nested parent directories), use glob()
+        # For direct prefix patterns (even with ** for subdirectories), use find() which is much faster
+        if glob_path.startswith("**/"):
+            # Use glob for nested parent patterns (e.g., "**/dataset/**/*.parquet")
+            def _glob():
+                return fs.glob(full_glob_path)
+
+            loop = asyncio.get_event_loop()
+            matching_files = await loop.run_in_executor(None, _glob)
+        else:
+            # Use find() for direct prefix patterns - much faster!
+            # Extract prefix from pattern (everything before the first wildcard)
+            # e.g., "dataset/**/*.parquet" -> "dataset/"
+            # e.g., "dataset/*.parquet" -> "dataset/"
+            prefix = glob_path.split("*")[0] if "*" in glob_path else glob_path
+            if not prefix.endswith("/"):
+                # If no trailing slash, find the directory
+                prefix = "/".join(prefix.split("/")[:-1]) + "/" if "/" in prefix else ""
+
+            full_prefix = f"gs://{self.bucket_name}/{prefix.lstrip('/')}"
+
+            def _find():
+                all_files = fs.find(full_prefix, detail=False)
+                # Filter by extension if pattern has one
+                if "*." in glob_path:
+                    ext = glob_path.split("*.")[-1].split("/")[0].split("*")[0]
+                    return [f for f in all_files if f.endswith(f".{ext}")]
+                return all_files
+
+            loop = asyncio.get_event_loop()
+            matching_files = await loop.run_in_executor(None, _find)
 
         # Remove the protocol and bucket prefix(es) to get relative paths
         # Handle cases where bucket name might appear multiple times in the path
@@ -837,7 +875,7 @@ def create_storage_client_from_location(storage_location) -> Optional[StorageCli
         return None
 
     if config_type == "gcs":
-        return GCSStorageClient(bucket=bucket)
+        return GCSStorageClient(bucket=bucket, base_url=base_url)
     elif config_type == "seaweedfs":
         # Extract S3 endpoint from base_url (filer URL) - SeaweedFS S3 is typically on port 8333
         s3_url = (

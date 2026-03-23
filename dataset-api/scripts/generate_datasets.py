@@ -58,35 +58,142 @@ async def find_processed_files(
         storage_client: Storage client instance
         filename: Dataset filename/slug
     """
-    # New layout only: <dataset>/<zip-stem>/parquet/<layer>-N.zstd.parquet
-    # and <dataset>/<zip-stem>/pmtiles/<layer>.pmtiles
-    parquet_globs = [
-        f"**/{filename}*/parquet/*.zstd.parquet",
-    ]
-    pmtiles_globs = [
-        f"**/{filename}*/pmtiles/*.pmtiles",
-    ]
+    # New layout: <dataset>/<zip-stem>/<format>/<files>
+    # Support nested subfolders: <dataset>/<subfolder>/<format>/...
+    # Also support nested parent folders: <parent>/<dataset>/<subfolder>/<format>/...
+    # Examples:
+    #   - flowline: nhd/flowline/flowline_ak/.../parquet/...
+    #   - icis-wastewater-treatment-plants-sic-codes: icis-wastewater-treatment-plants-sic-codes/.../parquet/...
+    # Important: match only when dataset slug is an exact path segment.
+    # This prevents over-matching sibling datasets like "flowline-large-scale-2"
+    # when the requested dataset is "flowline".
 
     geoparquet_paths = set()
     pmtiles_paths = set()
+    geopackage_paths = set()
+    shapefile_paths = set()
+    geojson_paths = set()
+    file_geodatabase_paths = set()
 
-    for pattern in parquet_globs:
-        try:
-            matches = await storage_client.expand_glob_pattern(pattern)
-            for path in matches:
-                if path.endswith(".parquet"):
-                    geoparquet_paths.add(path)
-        except Exception:
-            continue
+    # Strategy: Try fast list_files first, then fall back to glob patterns for nested structures
+    # This is much faster for GCS since list_files uses the native API
+    try:
+        all_files = await storage_client.list_files(f"{filename}/")
+        logger.debug(f"list_files found {len(all_files)} files under '{filename}/'")
 
-    for pattern in pmtiles_globs:
-        try:
-            matches = await storage_client.expand_glob_pattern(pattern)
-            for path in matches:
-                if path.endswith(".pmtiles"):
-                    pmtiles_paths.add(path)
-        except Exception:
-            continue
+        # Filter files by extension and add to appropriate sets
+        # Only include files that are actually under this dataset (not siblings with similar names)
+        for path in all_files:
+            # Ensure the path starts with the dataset name (to avoid false matches)
+            # e.g., "flowline-large-scale-2" shouldn't match when looking for "flowline"
+            if not path.startswith(filename):
+                continue
+
+            if path.endswith((".parquet", ".zstd.parquet")):
+                geoparquet_paths.add(path)
+            elif path.endswith(".pmtiles"):
+                pmtiles_paths.add(path)
+            elif path.endswith(".gpkg"):
+                geopackage_paths.add(path)
+            elif path.endswith(".shp"):
+                shapefile_paths.add(path)
+            elif path.endswith(".geojson"):
+                geojson_paths.add(path)
+            elif path.endswith(".gdb"):
+                file_geodatabase_paths.add(path)
+
+        logger.debug(
+            f"Filtered to: {len(geoparquet_paths)} parquet, {len(pmtiles_paths)} pmtiles, "
+            f"{len(geopackage_paths)} gpkg, {len(shapefile_paths)} shp, "
+            f"{len(geojson_paths)} geojson, {len(file_geodatabase_paths)} gdb"
+        )
+
+        # If we found files, we're done (fast path)
+        total_found = (
+            len(geoparquet_paths)
+            + len(pmtiles_paths)
+            + len(geopackage_paths)
+            + len(shapefile_paths)
+            + len(geojson_paths)
+            + len(file_geodatabase_paths)
+        )
+        if total_found > 0:
+            logger.debug(
+                "Found %d files via list_files, skipping glob patterns", total_found
+            )
+        else:
+            # No files found with direct prefix, try nested patterns
+            logger.debug(
+                "No files found with direct prefix, trying nested glob patterns"
+            )
+            raise ValueError("No files found, try nested patterns")
+
+    except Exception as e:
+        # Fallback to glob patterns for nested structures (e.g., parent/dataset/...)
+        logger.debug(
+            f"list_files approach failed or found nothing: {e}, trying glob patterns"
+        )
+
+        # Use optimized patterns: direct patterns use find() (fast), nested patterns use glob() (slower but necessary)
+        all_format_patterns = [
+            # Direct patterns (will use find() - fast)
+            f"{filename}/**/*.zstd.parquet",
+            f"{filename}/**/*.parquet",
+            f"{filename}/**/*.pmtiles",
+            f"{filename}/**/*.gpkg",
+            f"{filename}/**/*.shp",
+            f"{filename}/**/*.geojson",
+            f"{filename}/**/*.gdb",
+            # Nested patterns (will use glob() - slower, only if needed)
+            f"**/{filename}/**/*.zstd.parquet",
+            f"**/{filename}/**/*.parquet",
+            f"**/{filename}/**/*.pmtiles",
+            f"**/{filename}/**/*.gpkg",
+            f"**/{filename}/**/*.shp",
+            f"**/{filename}/**/*.geojson",
+            f"**/{filename}/**/*.gdb",
+        ]
+
+        async def expand_pattern(pattern: str) -> list[str]:
+            """Expand a glob pattern and return matching paths."""
+            try:
+                matches = await storage_client.expand_glob_pattern(pattern)
+                return matches
+            except Exception as e:
+                logger.debug(f"Pattern '{pattern}' failed: {e}")
+                return []
+
+        # Get all matching files in parallel
+        all_results = await asyncio.gather(
+            *[expand_pattern(pattern) for pattern in all_format_patterns],
+            return_exceptions=True,
+        )
+
+        # Collect all unique paths and filter by extension
+        all_matching_paths = set()
+        for result in all_results:
+            if isinstance(result, Exception):
+                continue
+            all_matching_paths.update(result)
+
+        logger.debug(
+            f"Found {len(all_matching_paths)} total files via glob patterns for '{filename}'"
+        )
+
+        # Filter files by extension into appropriate sets
+        for path in all_matching_paths:
+            if path.endswith((".parquet", ".zstd.parquet")):
+                geoparquet_paths.add(path)
+            elif path.endswith(".pmtiles"):
+                pmtiles_paths.add(path)
+            elif path.endswith(".gpkg"):
+                geopackage_paths.add(path)
+            elif path.endswith(".shp"):
+                shapefile_paths.add(path)
+            elif path.endswith(".geojson"):
+                geojson_paths.add(path)
+            elif path.endswith(".gdb"):
+                file_geodatabase_paths.add(path)
 
     return {
         "geoparquet": sorted(
@@ -94,6 +201,18 @@ async def find_processed_files(
         ),
         "pmtiles": sorted(
             [storage_client.get_public_url(path) for path in pmtiles_paths]
+        ),
+        "geopackage": sorted(
+            [storage_client.get_public_url(path) for path in geopackage_paths]
+        ),
+        "shapefile": sorted(
+            [storage_client.get_public_url(path) for path in shapefile_paths]
+        ),
+        "geojson": sorted(
+            [storage_client.get_public_url(path) for path in geojson_paths]
+        ),
+        "file_geodatabase": sorted(
+            [storage_client.get_public_url(path) for path in file_geodatabase_paths]
         ),
     }
 
@@ -126,16 +245,18 @@ def group_parquet_files_by_pattern(
             filename = path
 
         chunk_match = re.match(r"^(.+)-(\d+)\.(zstd\.)?parquet$", filename)
-        if not chunk_match:
-            continue
-
-        base_name = chunk_match.group(1)
-        ext = chunk_match.group(3) or ""
-        pattern = (
-            f"{dir_part}/{base_name}-*.{ext}parquet"
-            if dir_part
-            else f"{base_name}-*.{ext}parquet"
-        )
+        if chunk_match:
+            base_name = chunk_match.group(1)
+            ext = chunk_match.group(3) or ""
+            pattern = (
+                f"{dir_part}/{base_name}-*.{ext}parquet"
+                if dir_part
+                else f"{base_name}-*.{ext}parquet"
+            )
+        else:
+            # Keep non-chunk parquet files as valid sources as well.
+            # This supports datasets that only have a single parquet file.
+            pattern = f"{dir_part}/{filename}" if dir_part else filename
         if pattern not in groups:
             groups[pattern] = []
         groups[pattern].append(url)
@@ -234,7 +355,7 @@ async def create_dataset_entry(
     inventory_files = inventory_entry.get("files", [])
 
     # Build logical files from all storage locations independently
-    # logical_files maps logical_file_name -> {sources_by_location: {...}, pmtiles_by_location: {...}}
+    # logical_files maps logical_file_name -> {sources_by_location: {...}, pmtiles_by_location: {...}, format_by_location: {...}}
     logical_files = {}
 
     # Process each storage location independently
@@ -245,6 +366,10 @@ async def create_dataset_entry(
 
         parquet_urls = sorted(files_dict.get("geoparquet", []))
         pmtiles_urls = sorted(files_dict.get("pmtiles", []))
+        geopackage_urls = sorted(files_dict.get("geopackage", []))
+        shapefile_urls = sorted(files_dict.get("shapefile", []))
+        geojson_urls = sorted(files_dict.get("geojson", []))
+        file_geodatabase_urls = sorted(files_dict.get("file_geodatabase", []))
 
         # Group parquet files by logical file pattern
         if parquet_urls:
@@ -273,6 +398,10 @@ async def create_dataset_entry(
                     logical_files[logical_file_name] = {
                         "sources_by_location": {},  # Maps storage_location_name -> list of sources
                         "pmtiles_by_location": {},  # Maps storage_location_name -> list of PMTiles URLs
+                        "geopackage_by_location": {},  # Maps storage_location_name -> list of GeoPackage URLs
+                        "shapefile_by_location": {},  # Maps storage_location_name -> list of Shapefile URLs
+                        "geojson_by_location": {},  # Maps storage_location_name -> list of GeoJSON URLs
+                        "file_geodatabase_by_location": {},  # Maps storage_location_name -> list of File Geodatabase URLs
                     }
 
                 # Add GeoParquet sources for this storage location
@@ -349,17 +478,186 @@ async def create_dataset_entry(
                             storage_location_name
                         ].append(pmtiles_url)
 
+        # Helper function to match format URLs to logical files
+        def match_format_urls_to_logical_files(
+            format_urls: List[str],
+            format_ext: str,
+            format_key: str,
+            mime_type: str,
+        ):
+            """Match format URLs to logical files based on directory structure and filename."""
+            for format_url in format_urls:
+                path = extract_path_from_url(format_url, storage_client)
+                if path:
+                    path_parts = path.rsplit("/", 1)
+                    if len(path_parts) == 2:
+                        dir_part = path_parts[0]
+                        format_filename = path_parts[1]
+                        format_base = format_filename.replace(format_ext, "")
+
+                        # Extract the parent directory structure
+                        # Example: "12nm-territorial-sea/12nm-territorial-sea-shapefile/geopackage/file.gpkg"
+                        # -> base_dir = "12nm-territorial-sea/12nm-territorial-sea-shapefile"
+                        # -> format_folder = "geopackage"
+                        dir_components = [c for c in dir_part.split("/") if c]
+
+                        # Remove the format folder (last component) to get the base directory
+                        if len(dir_components) >= 1:
+                            # The last component is the format folder, remove it
+                            base_dir_components = dir_components[:-1]
+                            base_dir = (
+                                "/".join(base_dir_components)
+                                if base_dir_components
+                                else ""
+                            )
+                            dataset_subfolder = (
+                                base_dir_components[-1] if base_dir_components else ""
+                            )
+                        else:
+                            base_dir = ""
+                            dataset_subfolder = ""
+
+                        # Try to find matching logical file by directory structure
+                        matching_logical_file = None
+                        for logical_file_name in logical_files.keys():
+                            logical_file_slug = (
+                                logical_file_name.rsplit("/", 1)[-1]
+                                if "/" in logical_file_name
+                                else logical_file_name
+                            )
+                            logical_dir = (
+                                "/".join(logical_file_name.split("/")[:-1])
+                                if "/" in logical_file_name
+                                else ""
+                            )
+
+                            # Match if:
+                            # 1. The base directory matches the logical file directory, OR
+                            # 2. The format base name matches the logical file slug, OR
+                            # 3. The dataset subfolder matches the logical file slug, OR
+                            # 4. The base directory is contained in the logical file name (for nested structures), OR
+                            # 5. The logical directory is contained in the base directory (reverse check)
+                            # 6. Both share the same parent directory structure (most important for matching)
+                            if (
+                                base_dir == logical_dir
+                                or format_base == logical_file_slug
+                                or dataset_subfolder == logical_file_slug
+                                or (base_dir and base_dir in logical_file_name)
+                                or (logical_dir and logical_dir in base_dir)
+                                or (
+                                    base_dir
+                                    and logical_dir
+                                    and
+                                    # Check if they share the same parent path components
+                                    set(base_dir.split("/"))
+                                    & set(logical_dir.split("/"))
+                                    and len(
+                                        set(base_dir.split("/"))
+                                        & set(logical_dir.split("/"))
+                                    )
+                                    >= 2
+                                )
+                            ):
+                                matching_logical_file = logical_file_name
+                                break
+
+                        # If no matching logical file found, create one from the format path
+                        if not matching_logical_file:
+                            # Use the base directory + dataset subfolder (which is the common parent folder)
+                            # This ensures format files in the same dataset subfolder are grouped together
+                            if base_dir and dataset_subfolder:
+                                matching_logical_file = (
+                                    f"{base_dir}/{dataset_subfolder}"
+                                )
+                            elif base_dir:
+                                # Fallback: use format base name if dataset subfolder not available
+                                matching_logical_file = f"{base_dir}/{format_base}"
+                            else:
+                                matching_logical_file = f"{dir_part}/{format_base}"
+
+                            if matching_logical_file not in logical_files:
+                                logical_files[matching_logical_file] = {
+                                    "sources_by_location": {},
+                                    "pmtiles_by_location": {},
+                                    "geopackage_by_location": {},
+                                    "shapefile_by_location": {},
+                                    "geojson_by_location": {},
+                                    "file_geodatabase_by_location": {},
+                                }
+
+                        # Store format URL for this logical file
+                        if (
+                            storage_location_name
+                            not in logical_files[matching_logical_file][format_key]
+                        ):
+                            logical_files[matching_logical_file][format_key][
+                                storage_location_name
+                            ] = []
+                        logical_files[matching_logical_file][format_key][
+                            storage_location_name
+                        ].append(format_url)
+
+        # Match new formats to logical files
+        match_format_urls_to_logical_files(
+            geopackage_urls,
+            ".gpkg",
+            "geopackage_by_location",
+            "application/geopackage+sqlite3",
+        )
+        match_format_urls_to_logical_files(
+            shapefile_urls, ".shp", "shapefile_by_location", "application/zip"
+        )
+        match_format_urls_to_logical_files(
+            geojson_urls, ".geojson", "geojson_by_location", "application/geo+json"
+        )
+        match_format_urls_to_logical_files(
+            file_geodatabase_urls,
+            ".gdb",
+            "file_geodatabase_by_location",
+            "application/x-esri-shape",
+        )
+
     # Create File entries from logical files
     files = []
     for logical_file_name, file_data in logical_files.items():
 
         # Extract file slug from logical file name
-        # Use the actual file name from storage (don't simplify)
+        # Default to the actual file name from storage.
         path_parts = logical_file_name.rsplit("/", 1)
         if len(path_parts) == 2:
             file_slug = path_parts[1]
         else:
             file_slug = logical_file_name
+
+        # For datasets that resolve to multiple logical files under nested folders
+        # (e.g. nhd/flowline/flowline_ak/... and nhd/flowline/flowline_conus/...),
+        # prefer the folder immediately below dataset_slug as the file slug.
+        # This maps a single Dataset ("flowline") to multiple File entries
+        # ("flowline_ak", "flowline_conus"), matching the DB model semantics.
+        if len(logical_files) > 1:
+            logical_parts = [p for p in logical_file_name.split("/") if p]
+            if dataset_slug in logical_parts:
+                dataset_idx = logical_parts.index(dataset_slug)
+                if dataset_idx + 1 < len(logical_parts):
+                    nested_candidate = logical_parts[dataset_idx + 1]
+                    if nested_candidate not in (
+                        "parquet",
+                        "pmtiles",
+                        "geopackage",
+                        "shapefile",
+                        "geojson",
+                        "file_geodatabase",
+                    ):
+                        file_slug = nested_candidate
+            else:
+                # Fallback for paths where the dataset appears as a prefix segment
+                # instead of a dedicated folder segment (e.g. "flowline_ak/...").
+                for part in logical_parts:
+                    if part.startswith(f"{dataset_slug}_") or part.startswith(
+                        f"{dataset_slug}-"
+                    ):
+                        file_slug = part
+                        break
 
         # Use inventory file info if available, but use file_slug for name to ensure uniqueness
         # when there are multiple logical files
@@ -470,6 +768,152 @@ async def create_dataset_entry(
                 "sources": pmtiles_sources,
             }
 
+        # Helper function to create format sources from URLs
+        async def create_format_sources(
+            format_urls_by_location: Dict[str, List[str]],
+            format_type: str,
+            mime_type: str,
+        ) -> List[Dict]:
+            """Create format sources from URLs by location.
+
+            This function processes format URLs that were already matched to this logical file
+            in the match_format_urls_to_logical_files function above. So we just need to
+            create the source entries for all URLs in the format_urls_by_location dict.
+
+            For shapefiles, groups files by folder and creates a glob pattern (e.g., folder/*.shp)
+            instead of individual sources, similar to how parquet files work.
+            """
+            format_sources = []
+            for storage_location_name, format_urls in format_urls_by_location.items():
+                storage_client = storage_clients_by_location.get(storage_location_name)
+                if not storage_client:
+                    continue
+
+                # For shapefiles, always use glob patterns to capture all components
+                # Shapefiles consist of multiple files (.shp, .shx, .dbf, .prj, etc.) in the same folder
+                if format_type == "shapefile":
+                    # Group shapefile URLs by folder
+                    folders = {}
+                    for format_url in format_urls:
+                        path = extract_path_from_url(format_url, storage_client)
+                        if path:
+                            # Extract folder path (remove filename)
+                            path_parts = path.rsplit("/", 1)
+                            if len(path_parts) == 2:
+                                folder_path = path_parts[0] + "/"
+                                filename = path_parts[1]
+                            else:
+                                folder_path = ""
+                                filename = path
+
+                            if folder_path not in folders:
+                                folders[folder_path] = []
+                            folders[folder_path].append((path, filename))
+
+                    # Create one source per folder with glob pattern
+                    # Always use glob pattern for shapefiles to capture all components
+                    for folder_path, files in folders.items():
+                        # Use * to match all shapefile components (.shp, .shx, .dbf, .prj, etc.)
+                        glob_path = f"{folder_path}*" if folder_path else "*"
+                        location = FileLocation(path=glob_path)
+
+                        # Calculate total size from all files found
+                        total_size = 0
+                        for file_path, _ in files:
+                            size_bytes = await storage_client.get_file_size(file_path)
+                            total_size += size_bytes
+
+                        metadata = _build_metadata_from_inventory(
+                            inventory_entry,
+                            inv_file,
+                            size_bytes=total_size if total_size > 0 else None,
+                            mime_type=mime_type,
+                        )
+                        format_sources.append(
+                            {
+                                "storage_location_name": storage_location_name,
+                                "version": date.today().isoformat(),
+                                "source_type": "file",
+                                "location": location.model_dump(),
+                                "references_source_id": None,
+                                "source_metadata": metadata,
+                            }
+                        )
+                else:
+                    # For other formats or single shapefile, create individual sources
+                    for format_url in format_urls:
+                        path = extract_path_from_url(format_url, storage_client)
+                        if path:
+                            # All URLs in format_urls_by_location are already matched to this logical file,
+                            # so we can create sources for all of them
+                            location = FileLocation(path=path)
+                            size_bytes = await storage_client.get_file_size(path)
+                            metadata = _build_metadata_from_inventory(
+                                inventory_entry,
+                                inv_file,
+                                size_bytes=size_bytes,
+                                mime_type=mime_type,
+                            )
+                            format_sources.append(
+                                {
+                                    "storage_location_name": storage_location_name,
+                                    "version": date.today().isoformat(),
+                                    "source_type": "file",
+                                    "location": location.model_dump(),
+                                    "references_source_id": None,
+                                    "source_metadata": metadata,
+                                }
+                            )
+            return format_sources
+
+        # GeoPackage format
+        geopackage_sources = await create_format_sources(
+            file_data.get("geopackage_by_location", {}),
+            "geopackage",
+            "application/geopackage+sqlite3",
+        )
+        if geopackage_sources:
+            formats_dict["geopackage"] = {
+                "format_type": "geopackage",
+                "sources": geopackage_sources,
+            }
+
+        # Shapefile format
+        shapefile_sources = await create_format_sources(
+            file_data.get("shapefile_by_location", {}),
+            "shapefile",
+            "application/zip",
+        )
+        if shapefile_sources:
+            formats_dict["shapefile"] = {
+                "format_type": "shapefile",
+                "sources": shapefile_sources,
+            }
+
+        # GeoJSON format
+        geojson_sources = await create_format_sources(
+            file_data.get("geojson_by_location", {}),
+            "geojson",
+            "application/geo+json",
+        )
+        if geojson_sources:
+            formats_dict["geojson"] = {
+                "format_type": "geojson",
+                "sources": geojson_sources,
+            }
+
+        # File Geodatabase format
+        file_geodatabase_sources = await create_format_sources(
+            file_data.get("file_geodatabase_by_location", {}),
+            "file_geodatabase",
+            "application/x-esri-shape",
+        )
+        if file_geodatabase_sources:
+            formats_dict["file_geodatabase"] = {
+                "format_type": "file_geodatabase",
+                "sources": file_geodatabase_sources,
+            }
+
         # GeoServer format - add for all matching files so OGC Features endpoint is always available.
         # For large datasets, disable download-style exports (GeoJSON/GeoPackage/Shapefile)
         # and keep only OGC Features.
@@ -541,6 +985,43 @@ async def create_dataset_entry(
         # Convert formats dict to array
         file_entry["formats"] = list(formats_dict.values())
         files.append(file_entry)
+
+    # Merge duplicate file slugs that can occur when the same logical file is
+    # discovered via multiple path patterns (legacy + new layouts).
+    if files:
+        merged_files: Dict[str, Dict] = {}
+        for file_entry in files:
+            slug = file_entry["slug"]
+            existing = merged_files.get(slug)
+            if not existing:
+                merged_files[slug] = file_entry
+                continue
+
+            existing_formats = {
+                fmt["format_type"]: fmt for fmt in existing.get("formats", [])
+            }
+            for fmt in file_entry.get("formats", []):
+                fmt_type = fmt["format_type"]
+                if fmt_type not in existing_formats:
+                    existing_formats[fmt_type] = fmt
+                    continue
+
+                # Merge sources by value to avoid duplicates.
+                existing_sources = existing_formats[fmt_type].get("sources", [])
+                existing_keys = {
+                    json.dumps(src, sort_keys=True, default=str)
+                    for src in existing_sources
+                }
+                for src in fmt.get("sources", []):
+                    src_key = json.dumps(src, sort_keys=True, default=str)
+                    if src_key not in existing_keys:
+                        existing_sources.append(src)
+                        existing_keys.add(src_key)
+                existing_formats[fmt_type]["sources"] = existing_sources
+
+            existing["formats"] = list(existing_formats.values())
+
+        files = list(merged_files.values())
 
     # If no parquet files found, create a basic file entry
     if not files:
@@ -711,15 +1192,38 @@ async def main():
             print(f"    → {len(files['geoparquet'])} GeoParquet file(s)")
             if files["pmtiles"]:
                 print(f"    → {len(files['pmtiles'])} PMTiles file(s)")
+            if files["geopackage"]:
+                print(f"    → {len(files['geopackage'])} GeoPackage file(s)")
+            if files["shapefile"]:
+                print(f"    → {len(files['shapefile'])} Shapefile file(s)")
+            if files["geojson"]:
+                print(f"    → {len(files['geojson'])} GeoJSON file(s)")
+            if files["file_geodatabase"]:
+                print(
+                    f"    → {len(files['file_geodatabase'])} File Geodatabase file(s)"
+                )
 
             # Debug: show what we're looking for
-            if len(files["geoparquet"]) == 0 and len(files["pmtiles"]) == 0:
+            if (
+                len(files["geoparquet"]) == 0
+                and len(files["pmtiles"]) == 0
+                and len(files["geopackage"]) == 0
+                and len(files["shapefile"]) == 0
+                and len(files["geojson"]) == 0
+                and len(files["file_geodatabase"]) == 0
+            ):
                 print(
                     f"    ⚠ No files found for '{slug}' in {storage_type}://{bucket_name}"
                 )
-                print(
-                    f"       Looking for recursive paths matching '**/{slug}*/parquet/*.parquet' and '**/{slug}*/pmtiles/*.pmtiles'"
-                )
+                print("       Looking for recursive paths matching patterns like:")
+                print(f"         - {slug}/**/parquet/*.zstd.parquet")
+                print(f"         - **/{slug}/**/parquet/*.zstd.parquet")
+                print(f"         - **/{slug}/**/*.zstd.parquet")
+            elif len(files["geoparquet"]) > 0:
+                # Show first few paths found for debugging
+                print("       Found GeoParquet files (showing first 3):")
+                for path in list(files["geoparquet"])[:3]:
+                    print(f"         - {path}")
 
         # Determine GeoServer storage location name from flag
         geoserver_storage_location_name = None
@@ -805,6 +1309,10 @@ async def main():
     total_geoparquet_seaweedfs = 0
     total_geoserver = 0
     total_pmtiles = 0
+    total_geopackage = 0
+    total_shapefile = 0
+    total_geojson = 0
+    total_file_geodatabase = 0
 
     for entry in dataset_entries:
         for file in entry["files"]:
@@ -821,12 +1329,24 @@ async def main():
                     total_geoserver += len(fmt.get("sources", []))
                 elif fmt["format_type"] == "pmtiles":
                     total_pmtiles += 1
+                elif fmt["format_type"] == "geopackage":
+                    total_geopackage += len(fmt.get("sources", []))
+                elif fmt["format_type"] == "shapefile":
+                    total_shapefile += len(fmt.get("sources", []))
+                elif fmt["format_type"] == "geojson":
+                    total_geojson += len(fmt.get("sources", []))
+                elif fmt["format_type"] == "file_geodatabase":
+                    total_file_geodatabase += len(fmt.get("sources", []))
 
     print(f"Datasets: {len(dataset_entries)}")
     print(f"Total files: {total_files}")
     print(f"GeoParquet sources (GCS): {total_geoparquet_gcs}")
     print(f"GeoParquet sources (SeaweedFS): {total_geoparquet_seaweedfs}")
     print(f"PMTiles sources: {total_pmtiles}")
+    print(f"GeoPackage sources: {total_geopackage}")
+    print(f"Shapefile sources: {total_shapefile}")
+    print(f"GeoJSON sources: {total_geojson}")
+    print(f"File Geodatabase sources: {total_file_geodatabase}")
     print(f"GeoServer entries: {total_geoserver}")
 
 

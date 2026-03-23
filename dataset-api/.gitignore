@@ -9,3 +9,10 @@ __pycache__/
 
 # Local database
 local.db
+
+# Generated inventory/import artifacts
+scripts/inventory_gcs.csv
+scripts/inventory_categorized.csv
+scripts/inventory-small.csv
+scripts/inventory.jsonl
+scripts/datasets.jsonl

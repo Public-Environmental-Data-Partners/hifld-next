@@ -13,6 +13,7 @@ This script:
 import argparse
 import asyncio
 import csv
+import json
 import logging
 import os
 import subprocess
@@ -61,6 +62,8 @@ FORMAT_SUFFIXES = [
 
 DEFAULT_ROW_GROUP_SIZE = 100_000
 DEFAULT_DATA_PAGE_SIZE_BYTES = 1024 * 1024
+DEFAULT_FGB_CHUNK_SIZE_MB = 100
+DEFAULT_MEMORY_ESTIMATE_MULTIPLIER = 5.0
 
 
 def parse_storage_url(url: str) -> Tuple[str, str, str]:
@@ -133,7 +136,7 @@ async def discover_nested_datasets(
     source_storage: StorageClient, source_path: str
 ) -> List[Dict[str, str]]:
     """Discover datasets by scanning zip files and grouping by dataset base name."""
-    datasets_by_name: Dict[str, Dict[str, str]] = {}
+    datasets_by_name: Dict[str, Dict[str, Any]] = {}
     zip_files = await list_zip_files_in_folder(source_storage, source_path)
 
     for zip_path in zip_files:
@@ -149,11 +152,13 @@ async def discover_nested_datasets(
                 "gcs_zip_path": storage_url,
                 "gcs_match_found": "Yes",
                 format_name: "1",
+                "_format_paths": {format_name: storage_url},  # Track all format paths
             }
             continue
 
         current = datasets_by_name[base_name]
         current[format_name] = "1"
+        current["_format_paths"][format_name] = storage_url
 
         # Prefer chunk-readable formats for the canonical source path.
         current_fmt = _detect_format_from_path(current.get("gcs_zip_path", ""))
@@ -163,7 +168,12 @@ async def discover_nested_datasets(
         ):
             current["gcs_zip_path"] = storage_url
 
-    return list(datasets_by_name.values())
+    # Convert to list and remove internal tracking dict
+    result = []
+    for dataset in datasets_by_name.values():
+        dataset.pop("_format_paths", None)  # Remove internal tracking
+        result.append(dataset)
+    return result
 
 
 def get_memory_usage_mb() -> float:
@@ -382,12 +392,12 @@ async def _create_and_upload_pmtiles(
 def _filter_valid_geometries(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", "GeoSeries.notna", UserWarning)
-        return gdf[~gdf.geometry.is_empty & gdf.geometry.notna()].copy()
+        return gdf[~gdf.geometry.is_empty & gdf.geometry.notna()]
 
 
 def _repair_geometries_for_fgb(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """Best-effort geometry repair for FlatGeobuf writer compatibility."""
-    repaired = gdf.copy()
+    repaired = gdf
     try:
         repaired.geometry = repaired.geometry.make_valid()
     except Exception:
@@ -423,10 +433,19 @@ async def process_layer_chunked(
     dest_storage: StorageClient,
     work_dir: Path,
     geoparquet_chunk_size_mb: int = 250,
+    fgb_chunk_size_mb: int = DEFAULT_FGB_CHUNK_SIZE_MB,
     row_group_size: int = DEFAULT_ROW_GROUP_SIZE,
     data_page_size_bytes: int = DEFAULT_DATA_PAGE_SIZE_BYTES,
+    skip_parquet: bool = False,
+    skip_pmtiles: bool = False,
 ) -> Dict[str, Any]:
     """Streaming reader/writer path with separate parquet and PMTiles passes."""
+    if skip_parquet and skip_pmtiles:
+        logger.info(
+            "    Skipping layer generation for parquet/pmtiles because both outputs already exist."
+        )
+        return {"geoparquet_urls": [], "pmtiles_url": None, "feature_count": 0}
+
     mem_before = get_memory_usage_mb()
     driver = _get_fiona_driver(format_type)
     if not driver:
@@ -439,7 +458,6 @@ async def process_layer_chunked(
 
     geoparquet_files: List[Path] = []
     fgb_files: List[Path] = []
-    chunk_row_plan: List[int] = []
 
     feature_count = 0
     null_geometry_count = 0
@@ -451,6 +469,10 @@ async def process_layer_chunked(
     bytes_per_feature: Optional[float] = None
     current_chunk_size: Optional[int] = None
     chunk_features: List[Dict[str, Any]] = []
+    current_memory_multiplier = DEFAULT_MEMORY_ESTIMATE_MULTIPLIER
+    compressed_target_bytes = geoparquet_chunk_size_mb * 1024 * 1024
+    chunk_target_bytes = int(compressed_target_bytes * current_memory_multiplier)
+    chunk_uncompressed_bytes = 0
     chunk_num = 0
     features_processed = 0
     estimate_sample_size = 10
@@ -463,44 +485,81 @@ async def process_layer_chunked(
     ) -> int:
         nonlocal bytes_per_feature
         nonlocal current_chunk_size
+        nonlocal current_memory_multiplier
+        nonlocal chunk_target_bytes
 
-        gdf_chunk = gpd.GeoDataFrame.from_features(features, crs=crs)
-        gdf_chunk = _ensure_id_column(gdf_chunk, start_id=start_id)
+        if skip_parquet:
+            actual_uncompressed_bytes = sum(
+                _estimate_feature_size_bytes(f) for f in features
+            )
+            file_size_bytes = max(
+                1, int(actual_uncompressed_bytes / max(1.0, current_memory_multiplier))
+            )
+            chunk_bytes_per_feature = file_size_bytes / max(1, len(features))
+            processed_len = len(features)
+        else:
+            gdf_chunk = gpd.GeoDataFrame.from_features(features, crs=crs)
+            gdf_chunk = _ensure_id_column(gdf_chunk, start_id=start_id)
 
-        parquet_path = geoparquet_dir / f"{layer_filename}-{idx}.parquet"
-        gdf_chunk.to_parquet(
-            parquet_path,
-            compression="zstd",
-            schema_version="1.0.0",
-            row_group_size=row_group_size,
-            data_page_size=data_page_size_bytes,
+            parquet_path = geoparquet_dir / f"{layer_filename}-{idx}.parquet"
+            gdf_chunk.to_parquet(
+                parquet_path,
+                compression="zstd",
+                schema_version="1.0.0",
+                row_group_size=row_group_size,
+                data_page_size=data_page_size_bytes,
+            )
+            geoparquet_files.append(parquet_path)
+
+            file_size_bytes = parquet_path.stat().st_size
+            chunk_bytes_per_feature = file_size_bytes / max(1, len(gdf_chunk))
+            # Calculate the actual uncompressed size of this chunk for multiplier tuning
+            actual_uncompressed_bytes = sum(
+                _estimate_feature_size_bytes(f) for f in features
+            )
+            processed_len = len(gdf_chunk)
+        # Ratio of compressed parquet size to our uncompressed estimate
+        # This helps us understand how "heavy" the in-memory features are relative to their parquet size
+        observed_multiplier = actual_uncompressed_bytes / max(1, file_size_bytes)
+
+        # Smoothly update the multiplier (70% old, 30% new)
+        current_memory_multiplier = (current_memory_multiplier * 0.7) + (
+            observed_multiplier * 0.3
         )
-        geoparquet_files.append(parquet_path)
-        chunk_row_plan.append(len(gdf_chunk))
+        # Clamp multiplier to sane range
+        current_memory_multiplier = max(2.0, min(20.0, current_memory_multiplier))
 
-        file_size_bytes = parquet_path.stat().st_size
-        chunk_bytes_per_feature = file_size_bytes / max(1, len(gdf_chunk))
         if bytes_per_feature is None:
             bytes_per_feature = chunk_bytes_per_feature
         else:
             bytes_per_feature = (bytes_per_feature * 0.7) + (
                 chunk_bytes_per_feature * 0.3
             )
-        target_bytes = geoparquet_chunk_size_mb * 1024 * 1024
-        proposed_chunk_size = max(1, int(target_bytes / max(bytes_per_feature, 1)))
+
+        # Target rows is now driven by the uncompressed budget divided by the
+        # (compressed bytes per feature * current memory multiplier)
+        # Keep row targeting based on compressed parquet size target.
+        proposed_chunk_size = max(
+            1, int(compressed_target_bytes / max(bytes_per_feature, 1))
+        )
+        # Keep a separate in-memory budget based on learned multiplier.
+        chunk_target_bytes = int(compressed_target_bytes * current_memory_multiplier)
+
         if current_chunk_size is None:
             current_chunk_size = proposed_chunk_size
         else:
             min_size = max(1, int(current_chunk_size * 0.75))
             max_size = max(1, int(current_chunk_size * 1.25))
             current_chunk_size = max(min_size, min(max_size, proposed_chunk_size))
+
         logger.info(
-            "    Chunk sizing update: target_rows=%s (bytes_per_feature=%.1f, chunk=%.2fMB)",
+            "    Chunk sizing update: target_rows=%s (bytes_per_feature=%.1f, multiplier=%.1f, chunk=%.2fMB)",
             current_chunk_size,
             bytes_per_feature,
+            current_memory_multiplier,
             file_size_bytes / (1024 * 1024),
         )
-        return len(gdf_chunk)
+        return processed_len
 
     def flush_fgb_chunk(crs: Any, features: List[Dict[str, Any]], idx: int) -> None:
         nonlocal null_geometry_count
@@ -515,19 +574,6 @@ async def process_layer_chunked(
         if len(gdf_valid) == 0:
             return
 
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", "GeoSeries.notna", UserWarning)
-            valid_mask = gdf_valid.geometry.is_valid
-        invalid_before = int((~valid_mask).sum())
-        invalid_geometry_count += invalid_before
-        if invalid_before > 0:
-            logger.warning(
-                "    Chunk %s has invalid geometries before FGB write: %s/%s",
-                idx,
-                invalid_before,
-                len(gdf_valid),
-            )
-
         gdf_valid = _to_wgs84(gdf_valid)
         fgb_path = pmtiles_dir / f"{layer_filename}-chunk-{idx}.fgb"
         try:
@@ -539,6 +585,11 @@ async def process_layer_chunked(
                 idx,
                 e,
             )
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", "GeoSeries.notna", UserWarning)
+                valid_mask = gdf_valid.geometry.is_valid
+            invalid_before = int((~valid_mask).sum())
+            invalid_geometry_count += invalid_before
             repaired = _repair_geometries_for_fgb(gdf_valid)
             if len(repaired) == 0:
                 invalid_geometry_count_after_repair += invalid_before
@@ -580,63 +631,123 @@ async def process_layer_chunked(
 
     try:
         # Pass 1: stream source -> parquet only
-        with fiona.open(str(file_path), **open_kwargs) as src:
-            crs = src.crs if src.crs else "EPSG:4326"
+        if not skip_parquet:
+            with fiona.open(str(file_path), **open_kwargs) as src:
+                crs = src.crs if src.crs else "EPSG:4326"
+                src_iter = iter(src)
 
-            sample_features: List[Dict[str, Any]] = []
-            for _ in range(estimate_sample_size):
-                try:
-                    sample_features.append(next(src))
-                except StopIteration:
-                    break
+                sample_features: List[Dict[str, Any]] = []
+                for _ in range(estimate_sample_size):
+                    try:
+                        sample_features.append(next(src_iter))
+                    except StopIteration:
+                        break
 
-            if not sample_features:
-                return {"geoparquet_urls": [], "pmtiles_url": None, "feature_count": 0}
+                if not sample_features:
+                    return {
+                        "geoparquet_urls": [],
+                        "pmtiles_url": None,
+                        "feature_count": 0,
+                    }
 
-            sample = _ensure_id_column(
-                gpd.GeoDataFrame.from_features(sample_features, crs=crs), start_id=1
-            )
-            sample_path = geoparquet_dir / "_estimate.parquet"
-            sample.to_parquet(
-                sample_path,
-                compression="zstd",
-                schema_version="1.0.0",
-                row_group_size=row_group_size,
-                data_page_size=data_page_size_bytes,
-            )
-            bytes_per_feature = sample_path.stat().st_size / max(1, len(sample))
-            sample_path.unlink(missing_ok=True)
-            current_chunk_size = max(
-                1,
-                int(
-                    (geoparquet_chunk_size_mb * 1024 * 1024) / max(bytes_per_feature, 1)
-                ),
-            )
-            logger.info(
-                "    Initial chunk sizing: target_rows=%s (bytes_per_feature=%.1f, sample_rows=%s)",
-                current_chunk_size,
-                bytes_per_feature,
-                len(sample_features),
-            )
+                sample = _ensure_id_column(
+                    gpd.GeoDataFrame.from_features(sample_features, crs=crs), start_id=1
+                )
+                sample_path = geoparquet_dir / "_estimate.parquet"
+                sample.to_parquet(
+                    sample_path,
+                    compression="zstd",
+                    schema_version="1.0.0",
+                    row_group_size=row_group_size,
+                    data_page_size=data_page_size_bytes,
+                )
+                bytes_per_feature = sample_path.stat().st_size / max(1, len(sample))
+                sample_path.unlink(missing_ok=True)
+                current_chunk_size = max(
+                    1,
+                    int(compressed_target_bytes / max(bytes_per_feature, 1)),
+                )
+                chunk_target_bytes = int(
+                    compressed_target_bytes * current_memory_multiplier
+                )
 
-            chunk_features.extend(sample_features)
-            feature_count = len(sample_features)
+                logger.info(
+                    "    Initial chunk sizing: target_rows=%s, target_compressed=%.2fMB, uncompressed_budget=%.2fMB (bytes_per_feature=%.1f, sample_rows=%s, multiplier=%.1f)",
+                    current_chunk_size,
+                    compressed_target_bytes / (1024 * 1024),
+                    chunk_target_bytes / (1024 * 1024),
+                    bytes_per_feature,
+                    len(sample_features),
+                    current_memory_multiplier,
+                )
 
-            for feat in src:
-                chunk_features.append(feat)
-                feature_count += 1
-                estimated_mb = (len(chunk_features) * bytes_per_feature) / (1024 * 1024)
-                if (
-                    len(chunk_features) >= current_chunk_size
-                    or estimated_mb >= geoparquet_chunk_size_mb
-                ):
-                    logger.info(
-                        "    Flushing parquet chunk %s at rows_in_buffer=%s (target_rows=%s, estimated=%.2fMB)",
-                        chunk_num,
-                        len(chunk_features),
-                        current_chunk_size,
-                        estimated_mb,
+                chunk_features.extend(sample_features)
+                chunk_uncompressed_bytes = sum(
+                    _estimate_feature_size_bytes(feat) for feat in sample_features
+                )
+                feature_count = len(sample_features)
+
+                for feat in src_iter:
+                    feat_size = _estimate_feature_size_bytes(feat)
+                    if (
+                        chunk_features
+                        and (chunk_uncompressed_bytes + feat_size) > chunk_target_bytes
+                    ):
+                        estimated_mb = (len(chunk_features) * bytes_per_feature) / (
+                            1024 * 1024
+                        )
+                        uncompressed_mb = chunk_uncompressed_bytes / (1024 * 1024)
+                        logger.info(
+                            "    Pre-flush parquet chunk %s at rows_in_buffer=%s (next_feature=%.2fKB, estimated=%.2fMB, uncompressed=%.2fMB)",
+                            chunk_num,
+                            len(chunk_features),
+                            feat_size / 1024,
+                            estimated_mb,
+                            uncompressed_mb,
+                        )
+                        processed_count = flush_parquet_chunk(
+                            crs=crs,
+                            features=chunk_features,
+                            idx=chunk_num,
+                            start_id=features_processed + 1,
+                        )
+                        features_processed += processed_count
+                        chunk_features = []
+                        chunk_uncompressed_bytes = 0
+                        chunk_num += 1
+
+                    chunk_features.append(feat)
+                    chunk_uncompressed_bytes += feat_size
+                    feature_count += 1
+                    estimated_mb = (len(chunk_features) * bytes_per_feature) / (
+                        1024 * 1024
                     )
+                    uncompressed_mb = chunk_uncompressed_bytes / (1024 * 1024)
+                    if (
+                        len(chunk_features) >= current_chunk_size
+                        or estimated_mb >= geoparquet_chunk_size_mb
+                        or chunk_uncompressed_bytes >= chunk_target_bytes
+                    ):
+                        logger.info(
+                            "    Flushing parquet chunk %s at rows_in_buffer=%s (target_rows=%s, estimated=%.2fMB, uncompressed=%.2fMB)",
+                            chunk_num,
+                            len(chunk_features),
+                            current_chunk_size,
+                            estimated_mb,
+                            uncompressed_mb,
+                        )
+                        processed_count = flush_parquet_chunk(
+                            crs=crs,
+                            features=chunk_features,
+                            idx=chunk_num,
+                            start_id=features_processed + 1,
+                        )
+                        features_processed += processed_count
+                        chunk_features = []
+                        chunk_uncompressed_bytes = 0
+                        chunk_num += 1
+
+                if chunk_features:
                     processed_count = flush_parquet_chunk(
                         crs=crs,
                         features=chunk_features,
@@ -644,46 +755,110 @@ async def process_layer_chunked(
                         start_id=features_processed + 1,
                     )
                     features_processed += processed_count
-                    chunk_features = []
-                    chunk_num += 1
-
-            if chunk_features:
-                processed_count = flush_parquet_chunk(
-                    crs=crs,
-                    features=chunk_features,
-                    idx=chunk_num,
-                    start_id=features_processed + 1,
+        else:
+            logger.info("    Parquet generation skipped for this layer.")
+            # Still estimate bytes per feature so PMTiles pass has sane row targeting.
+            with fiona.open(str(file_path), **open_kwargs) as src:
+                src_iter = iter(src)
+                sample_features: List[Dict[str, Any]] = []
+                for _ in range(estimate_sample_size):
+                    try:
+                        sample_features.append(next(src_iter))
+                    except StopIteration:
+                        break
+                if not sample_features:
+                    return {
+                        "geoparquet_urls": [],
+                        "pmtiles_url": None,
+                        "feature_count": 0,
+                    }
+                sample_bytes = sum(
+                    _estimate_feature_size_bytes(f) for f in sample_features
                 )
-                features_processed += processed_count
+                bytes_per_feature = max(
+                    1.0, sample_bytes / max(1, len(sample_features))
+                )
+                current_chunk_size = max(
+                    1, int(compressed_target_bytes / max(bytes_per_feature, 1))
+                )
+                chunk_target_bytes = int(
+                    compressed_target_bytes * current_memory_multiplier
+                )
 
         # Pass 2: stream source again -> FGB/PMTiles only
-        if chunk_row_plan:
+        if (feature_count > 0 or skip_parquet) and not skip_pmtiles:
+            fgb_bytes_per_feature = max(bytes_per_feature or 1.0, 1.0)
+            fgb_compressed_target_bytes = fgb_chunk_size_mb * 1024 * 1024
+            # Target rows by compressed size, with a separate uncompressed safety budget.
+            fgb_target_rows = max(
+                1,
+                int(fgb_compressed_target_bytes / max(fgb_bytes_per_feature, 1)),
+            )
+            fgb_target_bytes = int(
+                fgb_compressed_target_bytes * current_memory_multiplier
+            )
+
             logger.info(
-                "    Starting PMTiles pass using parquet row plan (%s chunks).",
-                len(chunk_row_plan),
+                "    Starting PMTiles pass: target_compressed=%sMB, uncompressed_budget=%.2fMB, multiplier=%.1f (~%s rows/chunk)",
+                fgb_chunk_size_mb,
+                fgb_target_bytes / (1024 * 1024),
+                current_memory_multiplier,
+                fgb_target_rows,
             )
             with fiona.open(str(file_path), **open_kwargs) as src:
                 crs = src.crs if src.crs else "EPSG:4326"
-                plan_idx = 0
-                target_rows = chunk_row_plan[plan_idx]
+                src_iter = iter(src)
                 chunk_features = []
-                for feat in src:
-                    chunk_features.append(feat)
-                    if len(chunk_features) >= target_rows:
-                        flush_fgb_chunk(crs=crs, features=chunk_features, idx=plan_idx)
-                        chunk_features = []
-                        plan_idx += 1
-                        if plan_idx >= len(chunk_row_plan):
-                            break
-                        target_rows = chunk_row_plan[plan_idx]
+                chunk_uncompressed_bytes = 0
+                fgb_chunk_num = 0
 
-                # Any trailing features (plan drift / source mutation)
-                if chunk_features:
-                    flush_fgb_chunk(
-                        crs=crs,
-                        features=chunk_features,
-                        idx=min(plan_idx, max(0, len(chunk_row_plan) - 1)),
+                for feat in src_iter:
+                    if skip_parquet:
+                        feature_count += 1
+                    feat_size = _estimate_feature_size_bytes(feat)
+
+                    # Flush if next feature exceeds budget
+                    if (
+                        chunk_features
+                        and (chunk_uncompressed_bytes + feat_size) > fgb_target_bytes
+                    ):
+                        flush_fgb_chunk(
+                            crs=crs, features=chunk_features, idx=fgb_chunk_num
+                        )
+                        chunk_features = []
+                        chunk_uncompressed_bytes = 0
+                        fgb_chunk_num += 1
+
+                    chunk_features.append(feat)
+                    chunk_uncompressed_bytes += feat_size
+
+                    uncompressed_mb = chunk_uncompressed_bytes / (1024 * 1024)
+                    estimated_mb = (len(chunk_features) * fgb_bytes_per_feature) / (
+                        1024 * 1024
                     )
+
+                    if (
+                        len(chunk_features) >= fgb_target_rows
+                        or estimated_mb >= fgb_chunk_size_mb
+                        or chunk_uncompressed_bytes >= fgb_target_bytes
+                    ):
+                        logger.info(
+                            "    Flushing FGB chunk %s at rows_in_buffer=%s (target_rows=%s, estimated=%.2fMB, uncompressed=%.2fMB)",
+                            fgb_chunk_num,
+                            len(chunk_features),
+                            fgb_target_rows,
+                            estimated_mb,
+                            uncompressed_mb,
+                        )
+                        flush_fgb_chunk(
+                            crs=crs, features=chunk_features, idx=fgb_chunk_num
+                        )
+                        chunk_features = []
+                        chunk_uncompressed_bytes = 0
+                        fgb_chunk_num += 1
+
+                if chunk_features:
+                    flush_fgb_chunk(crs=crs, features=chunk_features, idx=fgb_chunk_num)
 
         mem_after = get_memory_usage_mb()
         logger.info(
@@ -704,15 +879,21 @@ async def process_layer_chunked(
                 dropped_for_pmtiles_count,
             )
 
-        geoparquet_urls = await _upload_geoparquet_files(
-            dest_storage=dest_storage,
-            geoparquet_files=geoparquet_files,
-            dest_folder=dest_folder,
-            layer_filename=layer_filename,
-        )
+        geoparquet_urls = []
+        if not skip_parquet:
+            geoparquet_urls = await _upload_geoparquet_files(
+                dest_storage=dest_storage,
+                geoparquet_files=geoparquet_files,
+                dest_folder=dest_folder,
+                layer_filename=layer_filename,
+            )
+        else:
+            logger.info(
+                "    Skipping parquet upload (parquet folder already exists)..."
+            )
 
         pmtiles_url = None
-        if not pmtiles_write_failed:
+        if not skip_pmtiles and not pmtiles_write_failed:
             pmtiles_url = await _create_and_upload_pmtiles(
                 dest_storage=dest_storage,
                 fgb_files=fgb_files,
@@ -720,7 +901,11 @@ async def process_layer_chunked(
                 dest_folder=dest_folder,
                 layer_filename=layer_filename,
             )
-        else:
+        elif skip_pmtiles:
+            logger.info(
+                "    Skipping PMTiles creation (pmtiles folder already exists)..."
+            )
+        elif pmtiles_write_failed:
             logger.warning(
                 "    Skipping PMTiles creation for layer '%s' because one or more FGB chunks failed.",
                 layer_filename,
@@ -848,6 +1033,424 @@ async def check_dataset_exists(
     return False
 
 
+async def check_format_folder_exists(
+    dest_storage: StorageClient,
+    dest_folder: str,
+    format_name: str,
+) -> bool:
+    """Return True if the format folder exists and has at least one file."""
+    format_folder = f"{dest_folder}{format_name}/"
+    try:
+        files = await dest_storage.list_files(format_folder)
+        return len(files) > 0
+    except Exception:
+        return False
+
+
+async def resolve_existing_output_formats(
+    dest_storage: StorageClient,
+    dest_folder: str,
+    skip_format_existing: bool,
+) -> Dict[str, bool]:
+    """
+    Resolve which output format folders already exist in destination storage.
+    Returns flags for parquet/pmtiles/geopackage existence.
+    """
+    if not skip_format_existing:
+        return {"parquet": False, "pmtiles": False, "geopackage": False}
+
+    parquet_exists = await check_format_folder_exists(
+        dest_storage, dest_folder, "parquet"
+    )
+    pmtiles_exists = await check_format_folder_exists(
+        dest_storage, dest_folder, "pmtiles"
+    )
+    geopackage_exists = await check_format_folder_exists(
+        dest_storage, dest_folder, "geopackage"
+    )
+    return {
+        "parquet": parquet_exists,
+        "pmtiles": pmtiles_exists,
+        "geopackage": geopackage_exists,
+    }
+
+
+def _select_best_format_for_geopackage(
+    processed_formats: Dict[str, Dict[str, Any]],
+) -> Tuple[Optional[Dict[str, Any]], Optional[Path]]:
+    """Pick the best available source format for geopackage creation."""
+    for fmt_name in CHUNKED_READABLE_FORMATS:
+        if fmt_name in processed_formats:
+            fmt_info = processed_formats[fmt_name]
+            return fmt_info, fmt_info["data_file"]
+
+    for _fmt_name, fmt_info in processed_formats.items():
+        return fmt_info, fmt_info["data_file"]
+
+    return None, None
+
+
+def _select_preferred_processing_format(
+    processed_formats: Dict[str, Dict[str, Any]],
+) -> Tuple[Optional[Dict[str, Any]], Optional[Path], Optional[str]]:
+    """Pick preferred format for parquet/pmtiles generation based on priority."""
+    for fmt_name, _suffix in FORMAT_PRIORITY:
+        if fmt_name in processed_formats:
+            fmt_info = processed_formats[fmt_name]
+            return fmt_info, fmt_info["data_file"], fmt_info["format_type"]
+    return None, None, None
+
+
+async def _upload_extracted_format_files(
+    data_file: Path,
+    format_type: str,
+    format_name: str,
+    format_dest_folder: str,
+    work_dir: Path,
+    dest_storage: StorageClient,
+) -> None:
+    """Copy extracted source files into a temp folder and upload to destination."""
+    import shutil
+
+    format_files_dir = work_dir / f"format_{format_name}"
+    format_files_dir.mkdir(exist_ok=True)
+
+    if data_file.is_dir():  # File geodatabase
+        shutil.copytree(
+            data_file,
+            format_files_dir / data_file.name,
+            dirs_exist_ok=True,
+        )
+    else:
+        shutil.copy2(data_file, format_files_dir / data_file.name)
+        if format_type == "shapefile":
+            base = data_file.stem
+            for ext in [".shx", ".dbf", ".prj", ".cpg", ".sbn", ".sbx"]:
+                sibling = data_file.parent / f"{base}{ext}"
+                if sibling.exists():
+                    shutil.copy2(sibling, format_files_dir / sibling.name)
+
+    for file_path in format_files_dir.rglob("*"):
+        if file_path.is_file():
+            rel_path = file_path.relative_to(format_files_dir)
+            remote_path = f"{format_dest_folder}{rel_path}"
+            await dest_storage.upload_file(file_path, remote_path)
+            logger.info(f"    Uploaded {format_name} file: {remote_path}")
+
+
+async def _process_single_format_variant(
+    format_name: str,
+    format_path: str,
+    source_storage: StorageClient,
+    dest_storage: StorageClient,
+    extract_dir: Path,
+    work_dir: Path,
+    dest_folder: str,
+    skip_format_existing: bool,
+) -> Optional[Dict[str, Any]]:
+    """Extract, inspect, and optionally upload one source format variant."""
+    format_dest_folder = f"{dest_folder}{format_name}/"
+    skip_upload = False
+
+    if skip_format_existing and await check_format_folder_exists(
+        dest_storage, dest_folder, format_name
+    ):
+        logger.info(
+            f"  Format folder '{format_name}' already exists, skipping upload (but will extract for conversion if needed)..."
+        )
+        skip_upload = True
+
+    logger.info(f"  Processing format: {format_name}")
+    unzip_result = await unzip_from_storage(
+        source_storage, format_path, extract_dir / format_name
+    )
+    if unzip_result is None:
+        logger.warning(f"    Could not extract {format_name} format")
+        return None
+
+    format_type, data_file = unzip_result
+    logger.info(f"    Extracted {format_type} format, file: {data_file}")
+
+    # If path-based detection failed, use the actual extracted format.
+    if format_name == "unknown":
+        format_name = format_type
+        format_dest_folder = f"{dest_folder}{format_name}/"
+        logger.info(f"    Detected actual format from file content: {format_name}")
+        if skip_format_existing and await check_format_folder_exists(
+            dest_storage, dest_folder, format_name
+        ):
+            logger.info(
+                f"  Format folder '{format_name}' already exists, skipping upload..."
+            )
+            skip_upload = True
+
+    try:
+        layers = list_layers_in_file(data_file, format_type)
+    except Exception as e:
+        logger.warning(f"    Failed to list layers in {format_name}: {e}")
+        return None
+
+    logger.info(f"    Found {len(layers)} layer(s) in {format_name}")
+
+    if not skip_upload:
+        await _upload_extracted_format_files(
+            data_file=data_file,
+            format_type=format_type,
+            format_name=format_name,
+            format_dest_folder=format_dest_folder,
+            work_dir=work_dir,
+            dest_storage=dest_storage,
+        )
+
+    return {
+        "format_name": format_name,
+        "format_type": format_type,
+        "layers": layers,
+        "data_file": data_file,
+        "is_geopackage_source": format_name == "geopackage",
+    }
+
+
+async def write_geopackage_chunked(
+    file_path: Path,
+    format_type: str,
+    layer_name: Optional[str],
+    output_gpkg: Path,
+    geoparquet_chunk_size_mb: int = 250,
+    row_group_size: int = DEFAULT_ROW_GROUP_SIZE,
+    data_page_size_bytes: int = DEFAULT_DATA_PAGE_SIZE_BYTES,
+) -> None:
+    """
+    Write a geopackage file in chunks using fiona's streaming writerecords to avoid memory issues.
+    """
+    driver = _get_fiona_driver(format_type)
+    if not driver:
+        raise ValueError(f"Unsupported format for geopackage conversion: {format_type}")
+
+    open_kwargs: Dict[str, Any] = {"driver": driver}
+    if layer_name and format_type in {"geopackage", "file_geodatabase"}:
+        open_kwargs["layer"] = layer_name
+
+    chunk_target_bytes = geoparquet_chunk_size_mb * 1024 * 1024
+    chunk_features: List[Dict[str, Any]] = []
+    chunk_uncompressed_bytes = 0
+    output_schema = None
+    output_crs = None
+
+    with fiona.open(str(file_path), **open_kwargs) as src:
+        output_crs = src.crs if src.crs else "EPSG:4326"
+        output_schema = src.schema.copy()
+
+        # Ensure schema has an 'id' property if it doesn't exist
+        if "id" not in output_schema["properties"]:
+            output_schema["properties"]["id"] = "int"
+
+        src_iter = iter(src)
+
+        # Sample first few features for sizing and geometry type detection
+        sample_features = []
+        detected_geom_types = set()
+        for _ in range(10):
+            try:
+                feat = next(src_iter)
+                sample_features.append(feat)
+                # Detect actual geometry type from feature
+                if feat.get("geometry") and feat["geometry"].get("type"):
+                    geom_type = feat["geometry"]["type"]
+                    # Map GeoJSON types to Fiona types
+                    geom_type_map = {
+                        "Point": "Point",
+                        "LineString": "LineString",
+                        "Polygon": "Polygon",
+                        "MultiPoint": "MultiPoint",
+                        "MultiLineString": "MultiLineString",
+                        "MultiPolygon": "MultiPolygon",
+                    }
+                    if geom_type in geom_type_map:
+                        detected_geom_types.add(geom_type_map[geom_type])
+            except StopIteration:
+                break
+
+        if not sample_features:
+            return
+
+        # Determine the most general geometry type that covers all detected types
+        # Priority: MultiPolygon > MultiLineString > MultiPoint > Polygon > LineString > Point
+        geom_type_priority = {
+            "MultiPolygon": 6,
+            "MultiLineString": 5,
+            "MultiPoint": 4,
+            "Polygon": 3,
+            "LineString": 2,
+            "Point": 1,
+        }
+
+        if detected_geom_types:
+            # Use the most general type found
+            detected_geom_type = max(
+                detected_geom_types, key=lambda x: geom_type_priority.get(x, 0)
+            )
+            # If we have both LineString and MultiLineString, use MultiLineString
+            if (
+                "LineString" in detected_geom_types
+                and "MultiLineString" in detected_geom_types
+            ):
+                detected_geom_type = "MultiLineString"
+            # If we have both Polygon and MultiPolygon, use MultiPolygon
+            elif (
+                "Polygon" in detected_geom_types
+                and "MultiPolygon" in detected_geom_types
+            ):
+                detected_geom_type = "MultiPolygon"
+            # If we have both Point and MultiPoint, use MultiPoint
+            elif "Point" in detected_geom_types and "MultiPoint" in detected_geom_types:
+                detected_geom_type = "MultiPoint"
+
+            # Update schema geometry type if we detected a different type
+            if detected_geom_type != output_schema.get("geometry"):
+                logger.info(
+                    f"    Updating geometry type from '{output_schema.get('geometry')}' to '{detected_geom_type}' (detected types: {sorted(detected_geom_types)})"
+                )
+                output_schema["geometry"] = detected_geom_type
+
+        # Estimate bytes per feature from sample by writing a small test file
+        # Use geopandas to handle mixed geometry types automatically
+        import geopandas as gpd
+
+        # Convert sample features to GeoDataFrame
+        sample_gdf = gpd.GeoDataFrame.from_features(sample_features, crs=output_crs)
+        # Ensure id column exists
+        if "id" not in sample_gdf.columns:
+            sample_gdf["id"] = 1
+
+        # Write sample to temporary file to estimate size
+        sample_path = output_gpkg.parent / f"{output_gpkg.stem}_sample.gpkg"
+        sample_gdf.to_file(
+            str(sample_path), driver="GPKG", layer=layer_name if layer_name else None
+        )
+
+        bytes_per_feature = sample_path.stat().st_size / max(1, len(sample_features))
+        sample_path.unlink(missing_ok=True)
+
+        # Calculate target chunk size
+        current_memory_multiplier = DEFAULT_MEMORY_ESTIMATE_MULTIPLIER
+        current_chunk_size = max(
+            1,
+            int(chunk_target_bytes / (bytes_per_feature * current_memory_multiplier)),
+        )
+
+        # Initialize output geopackage with first chunk
+        chunk_features.extend(sample_features)
+        chunk_uncompressed_bytes = sum(
+            _estimate_feature_size_bytes(feat) for feat in sample_features
+        )
+
+        # Open output file and write chunks using geopandas (handles mixed geometry types)
+        # Write first chunk
+        if chunk_features:
+            chunk_gdf = gpd.GeoDataFrame.from_features(chunk_features, crs=output_crs)
+            chunk_gdf = _ensure_id_column(chunk_gdf, start_id=1)
+            # Write with append=False to create the file
+            chunk_gdf.to_file(
+                str(output_gpkg),
+                driver="GPKG",
+                layer=layer_name if layer_name else None,
+                mode="w",
+            )
+
+            chunk_features = []
+            chunk_uncompressed_bytes = 0
+            feature_id_counter = (
+                len(chunk_features) + 1
+            )  # Continue from where sample left off
+
+            # Continue streaming and writing chunks
+            for feat in src_iter:
+                feat_size = _estimate_feature_size_bytes(feat)
+
+                # If adding this feature would exceed budget, write current batch
+                if (
+                    chunk_features
+                    and (chunk_uncompressed_bytes + feat_size) > chunk_target_bytes
+                ):
+                    # Write accumulated features using geopandas
+                    if chunk_features:
+                        chunk_gdf = gpd.GeoDataFrame.from_features(
+                            chunk_features, crs=output_crs
+                        )
+                        chunk_gdf = _ensure_id_column(
+                            chunk_gdf, start_id=feature_id_counter
+                        )
+                        feature_id_counter += len(chunk_gdf)
+                        # Append to existing file
+                        chunk_gdf.to_file(
+                            str(output_gpkg),
+                            driver="GPKG",
+                            layer=layer_name if layer_name else None,
+                            mode="a",
+                        )
+
+                    chunk_features = []
+                    chunk_uncompressed_bytes = 0
+
+                chunk_features.append(feat)
+                chunk_uncompressed_bytes += feat_size
+
+                # Write chunk when it reaches target size
+                if len(chunk_features) >= current_chunk_size:
+                    # Write chunk using geopandas
+                    if chunk_features:
+                        chunk_gdf = gpd.GeoDataFrame.from_features(
+                            chunk_features, crs=output_crs
+                        )
+                        chunk_gdf = _ensure_id_column(
+                            chunk_gdf, start_id=feature_id_counter
+                        )
+                        feature_id_counter += len(chunk_gdf)
+                        # Append to existing file
+                        chunk_gdf.to_file(
+                            str(output_gpkg),
+                            driver="GPKG",
+                            layer=layer_name if layer_name else None,
+                            mode="a",
+                        )
+
+                    chunk_features = []
+                    chunk_uncompressed_bytes = 0
+
+            # Write remaining features
+            if chunk_features:
+                chunk_gdf = gpd.GeoDataFrame.from_features(
+                    chunk_features, crs=output_crs
+                )
+                chunk_gdf = _ensure_id_column(chunk_gdf, start_id=feature_id_counter)
+                # Append to existing file
+                chunk_gdf.to_file(
+                    str(output_gpkg),
+                    driver="GPKG",
+                    layer=layer_name if layer_name else None,
+                    mode="a",
+                )
+
+
+async def copy_geopackage_if_source(
+    source_file: Path,
+    format_type: str,
+    output_gpkg: Path,
+) -> bool:
+    """
+    If source is already a geopackage, copy it directly.
+    Returns True if copied, False if not a geopackage.
+    """
+    if format_type != "geopackage":
+        return False
+
+    import shutil
+
+    shutil.copy2(source_file, output_gpkg)
+    return True
+
+
 def _extract_source_path(row: Dict[str, str]) -> Optional[str]:
     source_path = row.get("gcs_zip_path", "").strip()
     if not source_path:
@@ -859,6 +1462,43 @@ def _extract_source_path(row: Dict[str, str]) -> Optional[str]:
 def _is_format_available_in_row(row: Dict[str, str], format_name: str) -> bool:
     value = str(row.get(format_name, "")).strip().lower()
     return value not in {"", "0", "no", "false", "none", "null"}
+
+
+async def _find_all_format_variants(
+    row: Dict[str, str],
+    source_storage: StorageClient,
+    base_filename: str,
+) -> Dict[str, str]:
+    """
+    Find all format variants for a dataset by scanning the source folder.
+    Returns a dict mapping format_name -> storage_path.
+    """
+    # Try to find the parent folder from the row's gcs_zip_path
+    source_path = row.get("gcs_zip_path", "")
+    if not source_path:
+        return {}
+
+    _, _, rel_path = parse_storage_url(source_path)
+    parent_prefix = str(Path(rel_path).parent).strip(".")
+    dataset_base = _strip_format_suffix(base_filename)
+
+    format_paths: Dict[str, str] = {}
+
+    try:
+        sibling_files = await source_storage.list_files(parent_prefix)
+    except Exception as e:
+        logger.debug(f"Could not list sibling files for format discovery: {e}")
+        return format_paths
+
+    for sibling in sibling_files:
+        sibling_base = _strip_format_suffix(Path(sibling).stem)
+        if sibling_base != dataset_base:
+            continue
+        fmt = _detect_format_from_path(sibling)
+        # Include "unknown" formats - we'll detect the actual format after extraction
+        format_paths[fmt] = sibling
+
+    return format_paths
 
 
 async def _select_preferred_source_path(
@@ -903,27 +1543,251 @@ def _detect_format_for_dry_run(source_path: str) -> str:
     return _detect_format_from_path(source_path)
 
 
+def _estimate_feature_size_bytes(feature: Dict[str, Any]) -> int:
+    """Estimate feature size before compression to cap in-memory chunk growth."""
+    try:
+        raw_size = len(
+            json.dumps(feature, default=str, ensure_ascii=False).encode("utf-8")
+        )
+        # Serialized GeoJSON-like payload size is typically much lower than
+        # in-memory Python/GEOS object footprint; inflate conservatively.
+        return max(1024, int(raw_size * DEFAULT_MEMORY_ESTIMATE_MULTIPLIER))
+    except Exception:
+        return 1024
+
+
+def _is_storage_url(value: str) -> bool:
+    return value.startswith("gs://") or value.startswith("seaweedfs://")
+
+
+def _is_prefix_selector(path: str) -> bool:
+    # Treat trailing slash or extension-less paths as folder/prefix selectors.
+    return path.endswith("/") or Path(path).suffix == ""
+
+
+def _build_dataset_selectors(
+    dataset_args: List[str],
+) -> Dict[str, Any]:
+    """Parse --datasets values into exact-name, exact-path, and prefix selectors."""
+    selector_names = set()
+    selector_exact_paths = set()
+    selector_prefixes = set()
+    explicit_paths_by_name: Dict[str, str] = {}
+    explicit_paths_by_row_path: Dict[str, str] = {}
+
+    for ds in dataset_args:
+        if _is_storage_url(ds):
+            _, _, path = parse_storage_url(ds)
+            normalized_path = _normalize_duplicate_leading_folder(path)
+
+            if _is_prefix_selector(normalized_path):
+                selector_prefixes.add(normalized_path.rstrip("/"))
+                continue
+
+            filename = Path(normalized_path).stem
+            for fmt, _ in FORMAT_PRIORITY:
+                if filename.endswith(f"-{fmt}") or filename.endswith(
+                    f"-{fmt.replace('_', '-')}"
+                ):
+                    filename = filename[: -(len(fmt) + 1)]
+                    break
+
+            selector_names.add(filename)
+            selector_exact_paths.add(normalized_path)
+            explicit_paths_by_name[filename] = ds
+            explicit_paths_by_row_path[normalized_path] = ds
+        else:
+            selector_names.add(ds)
+
+    return {
+        "names": selector_names,
+        "exact_paths": selector_exact_paths,
+        "prefixes": selector_prefixes,
+        "explicit_paths_by_name": explicit_paths_by_name,
+        "explicit_paths_by_row_path": explicit_paths_by_row_path,
+    }
+
+
+def _row_matches_dataset_selectors(
+    row: Dict[str, str],
+    selector_names: set,
+    selector_exact_paths: set,
+    selector_prefixes: set,
+) -> bool:
+    row_filename = row.get("filename", "").strip()
+    storage_path = row.get("gcs_zip_path", "").strip()
+    _, _, row_path = parse_storage_url(storage_path) if storage_path else ("", "", "")
+    normalized_row_path = _normalize_duplicate_leading_folder(row_path)
+
+    if row_filename in selector_names:
+        return True
+    if normalized_row_path in selector_exact_paths:
+        return True
+    return any(
+        normalized_row_path == prefix or normalized_row_path.startswith(f"{prefix}/")
+        for prefix in selector_prefixes
+    )
+
+
+def _resolve_explicit_source_path_for_row(
+    row: Dict[str, str],
+    explicit_paths_by_name: Dict[str, str],
+    explicit_paths_by_row_path: Dict[str, str],
+) -> Optional[str]:
+    row_filename = row.get("filename", "").strip()
+    storage_path = row.get("gcs_zip_path", "").strip()
+    if storage_path:
+        _, _, row_path = parse_storage_url(storage_path)
+        normalized_row_path = _normalize_duplicate_leading_folder(row_path)
+        explicit_match = explicit_paths_by_row_path.get(normalized_row_path)
+        if explicit_match:
+            return explicit_match
+    return explicit_paths_by_name.get(row_filename)
+
+
+async def _process_single_layer(
+    layer_name: str,
+    base_filename: str,
+    preferred_data_file: Path,
+    preferred_format_type: str,
+    dest_folder: str,
+    dest_storage: StorageClient,
+    work_dir: Path,
+    skip_parquet_upload: bool,
+    skip_pmtiles_upload: bool,
+) -> Dict[str, Any]:
+    """Process one layer via streaming path and fallback path when needed."""
+    layer_filename = _build_layer_filename(base_filename, layer_name)
+    logger.info(f"  Processing layer: {layer_name}")
+    log_memory_usage(f"Before processing {layer_name}")
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", category=UserWarning, message=".*parsing datetimes.*"
+        )
+        warnings.filterwarnings(
+            "ignore",
+            category=UserWarning,
+            message=".*Out of bounds nanosecond timestamp.*",
+        )
+
+        stream_result = await process_layer_chunked(
+            file_path=preferred_data_file,
+            format_type=preferred_format_type,
+            layer_name=layer_name if layer_name != "default" else None,
+            layer_filename=layer_filename,
+            dest_folder=dest_folder,
+            dest_storage=dest_storage,
+            work_dir=work_dir,
+            row_group_size=DEFAULT_ROW_GROUP_SIZE,
+            data_page_size_bytes=DEFAULT_DATA_PAGE_SIZE_BYTES,
+            skip_parquet=skip_parquet_upload,
+            skip_pmtiles=skip_pmtiles_upload,
+        )
+
+        if "error" not in stream_result:
+            log_memory_usage(f"After processing {layer_name}")
+            return {
+                "layer": layer_name,
+                "geoparquet_urls": stream_result.get("geoparquet_urls", []),
+                "pmtiles_url": stream_result.get("pmtiles_url"),
+                "feature_count": stream_result.get("feature_count", 0),
+            }
+
+        logger.warning(
+            f"    Streaming failed ({stream_result['error']}), falling back to full read..."
+        )
+
+        if skip_parquet_upload and skip_pmtiles_upload:
+            return {
+                "layer": layer_name,
+                "geoparquet_urls": [],
+                "pmtiles_url": None,
+                "feature_count": 0,
+            }
+
+        gdf = read_chunked(
+            file_path=preferred_data_file,
+            format_type=preferred_format_type,
+            layer_name=layer_name if layer_name != "default" else None,
+        )
+        gdf = _ensure_id_column(gdf, start_id=1)
+        log_memory_usage(f"After reading {layer_name}")
+
+        geoparquet_dir = work_dir / "geoparquet"
+        pmtiles_dir = work_dir / "pmtiles"
+        geoparquet_dir.mkdir(exist_ok=True)
+        pmtiles_dir.mkdir(exist_ok=True)
+
+        geoparquet_urls = []
+        if not skip_parquet_upload:
+            geoparquet_files = write_geoparquet_chunked(
+                gdf,
+                geoparquet_dir / layer_filename,
+                row_group_size=DEFAULT_ROW_GROUP_SIZE,
+                data_page_size_bytes=DEFAULT_DATA_PAGE_SIZE_BYTES,
+            )
+            geoparquet_urls = await _upload_geoparquet_files(
+                dest_storage=dest_storage,
+                geoparquet_files=geoparquet_files,
+                dest_folder=dest_folder,
+                layer_filename=layer_filename,
+            )
+
+        pmtiles_url = None
+        if not skip_pmtiles_upload:
+            pmtiles_path = pmtiles_dir / f"{layer_filename}.pmtiles"
+            pmtiles_result = write_pmtiles_chunked(
+                gdf=gdf,
+                output_path=pmtiles_path,
+                layer_filename=layer_filename,
+            )
+            if pmtiles_result:
+                remote_path = f"{dest_folder}pmtiles/{layer_filename}.pmtiles"
+                await dest_storage.upload_file(pmtiles_result, remote_path)
+                pmtiles_url = dest_storage.get_public_url(remote_path)
+                logger.info(f"    Uploaded PMTiles: {remote_path}")
+
+        return {
+            "layer": layer_name,
+            "geoparquet_urls": geoparquet_urls,
+            "pmtiles_url": pmtiles_url,
+            "feature_count": len(gdf),
+        }
+
+
 async def process_dataset(
     row: Dict[str, str],
     source_storage: StorageClient,
     dest_storage: StorageClient,
     dry_run: bool = False,
     skip_existing: bool = False,
+    skip_format_existing: bool = False,
+    explicit_source_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Process a single dataset: download, decode, transform, upload."""
     filename = row.get("filename", "").strip()
     title = row.get("title", "").strip()
     logger.info(f"Processing: {filename} - {title}")
 
-    source_rel_path = _extract_source_path(row)
-    if not source_rel_path:
-        return {"success": False, "error": "No source path found", "filename": filename}
+    if explicit_source_path:
+        _, _, source_rel_path = parse_storage_url(explicit_source_path)
+        source_rel_path = _normalize_duplicate_leading_folder(source_rel_path)
+        logger.info(f"  Using explicit source path: {source_rel_path}")
+    else:
+        source_rel_path = _extract_source_path(row)
+        if not source_rel_path:
+            return {
+                "success": False,
+                "error": "No source path found",
+                "filename": filename,
+            }
 
-    source_rel_path = await _select_preferred_source_path(
-        row=row,
-        source_storage=source_storage,
-        fallback_path=source_rel_path,
-    )
+        source_rel_path = await _select_preferred_source_path(
+            row=row,
+            source_storage=source_storage,
+            fallback_path=source_rel_path,
+        )
 
     if dry_run:
         format_name = _detect_format_for_dry_run(source_rel_path)
@@ -946,41 +1810,176 @@ async def process_dataset(
     base_filename = _strip_format_suffix(zip_stem)
     dest_folder = _build_dest_folder(source_rel_path)
 
+    # Find all format variants for this dataset
+    format_variants = await _find_all_format_variants(
+        row=row,
+        source_storage=source_storage,
+        base_filename=base_filename,
+    )
+
+    if not format_variants:
+        # Fallback to the explicit or selected source path
+        format_variants[_detect_format_from_path(source_rel_path)] = source_rel_path
+
+    logger.info(
+        f"  Found {len(format_variants)} format variant(s): {', '.join(format_variants.keys())}"
+    )
+
+    # Process each format variant
+    processed_formats: Dict[str, Dict[str, Any]] = {}
+    geopackage_created = False
+
     with tempfile.TemporaryDirectory() as temp_dir:
         work_dir = Path(temp_dir)
         extract_dir = work_dir / "extracted"
         extract_dir.mkdir(parents=True, exist_ok=True)
 
-        unzip_result = await unzip_from_storage(
-            source_storage, source_rel_path, extract_dir
+        for format_name, format_path in format_variants.items():
+            try:
+                processed = await _process_single_format_variant(
+                    format_name=format_name,
+                    format_path=format_path,
+                    source_storage=source_storage,
+                    dest_storage=dest_storage,
+                    extract_dir=extract_dir,
+                    work_dir=work_dir,
+                    dest_folder=dest_folder,
+                    skip_format_existing=skip_format_existing,
+                )
+            except Exception as e:
+                logger.error(f"    Error processing format {format_name}: {e}")
+                continue
+
+            if not processed:
+                continue
+
+            processed_formats[processed["format_name"]] = {
+                "format_type": processed["format_type"],
+                "layers": processed["layers"],
+                "data_file": processed["data_file"],
+            }
+            if processed["is_geopackage_source"]:
+                logger.info("    Source is already a geopackage, using it directly")
+                geopackage_created = True
+
+        existing_outputs = await resolve_existing_output_formats(
+            dest_storage=dest_storage,
+            dest_folder=dest_folder,
+            skip_format_existing=skip_format_existing,
         )
-        if unzip_result is None:
+
+        # Always create geopackage if not already created from source and not skipped.
+        if not geopackage_created and not existing_outputs["geopackage"]:
+            logger.info("  Creating geopackage from available format...")
+
+            # Find the best source format for geopackage conversion.
+            best_format, best_format_path = _select_best_format_for_geopackage(
+                processed_formats
+            )
+
+            if best_format and best_format_path:
+                if not best_format_path.exists():
+                    logger.error(f"    Source file does not exist: {best_format_path}")
+                else:
+                    format_type = best_format["format_type"]
+                    layers = best_format["layers"]
+                    geopackage_dir = work_dir / "geopackage"
+                    geopackage_dir.mkdir(exist_ok=True)
+
+                    for layer_name, _geom_type in layers:
+                        layer_filename = _build_layer_filename(
+                            base_filename, layer_name
+                        )
+                        output_gpkg = geopackage_dir / f"{layer_filename}.gpkg"
+                        try:
+                            layer_display = (
+                                layer_name if layer_name != "default" else "default"
+                            )
+                            logger.info(
+                                f"    Creating geopackage for layer '{layer_display}' from {format_type}..."
+                            )
+                            await write_geopackage_chunked(
+                                file_path=best_format_path,
+                                format_type=format_type,
+                                layer_name=(
+                                    layer_name if layer_name != "default" else None
+                                ),
+                                output_gpkg=output_gpkg,
+                            )
+                            if not output_gpkg.exists():
+                                logger.error(
+                                    f"    Geopackage file was not created: {output_gpkg}"
+                                )
+                                continue
+                            remote_path = (
+                                f"{dest_folder}geopackage/{layer_filename}.gpkg"
+                            )
+                            await dest_storage.upload_file(output_gpkg, remote_path)
+                            logger.info(f"    Uploaded geopackage: {remote_path}")
+                            geopackage_created = True
+                        except Exception as e:
+                            logger.error(
+                                f"    Failed to create geopackage for layer {layer_name}: {e}",
+                                exc_info=True,
+                            )
+            else:
+                if not best_format:
+                    logger.warning(
+                        "    Could not find suitable format for geopackage conversion"
+                    )
+                elif not best_format_path:
+                    logger.warning(
+                        "    Could not determine source file path for geopackage conversion"
+                    )
+        elif existing_outputs["geopackage"] and not geopackage_created:
+            logger.info(
+                "  Geopackage folder already exists, skipping geopackage creation..."
+            )
+            geopackage_created = True
+
+        # Process layers for parquet and pmtiles (using the preferred format)
+        preferred_format, preferred_data_file, preferred_format_type = (
+            _select_preferred_processing_format(processed_formats)
+        )
+
+        if not preferred_format:
             return {
                 "success": False,
-                "error": "Could not detect format (not a zip file or recognized geospatial format)",
+                "error": "No processable format found",
                 "filename": filename,
             }
 
-        format_type, data_file = unzip_result
-        logger.info(f"  Detected format: {format_type}, file: {data_file}")
+        layers = preferred_format["layers"]
+        logger.info(f"  Processing {len(layers)} layer(s) for parquet/pmtiles")
 
-        try:
-            layers = list_layers_in_file(data_file, format_type)
-        except Exception as e:
+        # Decide whether to skip parquet/pmtiles generation entirely.
+        skip_parquet_upload = existing_outputs["parquet"]
+        skip_pmtiles_upload = existing_outputs["pmtiles"]
+        if skip_parquet_upload and skip_pmtiles_upload:
+            logger.info(
+                "  Parquet and PMTiles folders already exist, skipping parquet/pmtiles processing..."
+            )
             return {
-                "success": False,
-                "error": f"Failed to list layers: {e}",
+                "success": True,
+                "skipped": True,
                 "filename": filename,
+                "reason": "Parquet and PMTiles folders already exist",
             }
-
-        logger.info(f"  Found {len(layers)} layer(s)")
+        if skip_parquet_upload:
+            logger.info(
+                "  Parquet folder already exists, skipping parquet generation..."
+            )
+        if skip_pmtiles_upload:
+            logger.info(
+                "  PMTiles folder already exists, skipping PMTiles generation..."
+            )
 
         if skip_existing:
             try:
                 if await check_dataset_exists(
                     dest_storage, dest_folder, base_filename, layers
                 ):
-                    logger.info("  Dataset already exists, skipping...")
+                    logger.info("  Dataset already exists, skipping parquet/pmtiles...")
                     return {
                         "success": True,
                         "skipped": True,
@@ -995,99 +1994,19 @@ async def process_dataset(
         results: List[Dict[str, Any]] = []
 
         for layer_name, _geom_type in layers:
-            layer_filename = _build_layer_filename(base_filename, layer_name)
-            logger.info(f"  Processing layer: {layer_name}")
-            log_memory_usage(f"Before processing {layer_name}")
-
             try:
-                with warnings.catch_warnings():
-                    warnings.filterwarnings(
-                        "ignore", category=UserWarning, message=".*parsing datetimes.*"
-                    )
-                    warnings.filterwarnings(
-                        "ignore",
-                        category=UserWarning,
-                        message=".*Out of bounds nanosecond timestamp.*",
-                    )
-
-                    stream_result = await process_layer_chunked(
-                        file_path=data_file,
-                        format_type=format_type,
-                        layer_name=layer_name if layer_name != "default" else None,
-                        layer_filename=layer_filename,
-                        dest_folder=dest_folder,
-                        dest_storage=dest_storage,
-                        work_dir=work_dir,
-                        row_group_size=DEFAULT_ROW_GROUP_SIZE,
-                        data_page_size_bytes=DEFAULT_DATA_PAGE_SIZE_BYTES,
-                    )
-
-                    if "error" not in stream_result:
-                        log_memory_usage(f"After processing {layer_name}")
-                        results.append(
-                            {
-                                "layer": layer_name,
-                                "geoparquet_urls": stream_result.get(
-                                    "geoparquet_urls", []
-                                ),
-                                "pmtiles_url": stream_result.get("pmtiles_url"),
-                                "feature_count": stream_result.get("feature_count", 0),
-                            }
-                        )
-                        continue
-
-                    logger.warning(
-                        f"    Streaming failed ({stream_result['error']}), falling back to full read..."
-                    )
-
-                    gdf = read_chunked(
-                        file_path=data_file,
-                        format_type=format_type,
-                        layer_name=layer_name if layer_name != "default" else None,
-                    )
-                    gdf = _ensure_id_column(gdf, start_id=1)
-                    log_memory_usage(f"After reading {layer_name}")
-
-                    geoparquet_dir = work_dir / "geoparquet"
-                    pmtiles_dir = work_dir / "pmtiles"
-                    geoparquet_dir.mkdir(exist_ok=True)
-                    pmtiles_dir.mkdir(exist_ok=True)
-
-                    geoparquet_files = write_geoparquet_chunked(
-                        gdf,
-                        geoparquet_dir / layer_filename,
-                        row_group_size=DEFAULT_ROW_GROUP_SIZE,
-                        data_page_size_bytes=DEFAULT_DATA_PAGE_SIZE_BYTES,
-                    )
-                    geoparquet_urls = await _upload_geoparquet_files(
-                        dest_storage=dest_storage,
-                        geoparquet_files=geoparquet_files,
-                        dest_folder=dest_folder,
-                        layer_filename=layer_filename,
-                    )
-
-                    pmtiles_path = pmtiles_dir / f"{layer_filename}.pmtiles"
-                    pmtiles_result = write_pmtiles_chunked(
-                        gdf=gdf,
-                        output_path=pmtiles_path,
-                        layer_filename=layer_filename,
-                    )
-
-                    pmtiles_url = None
-                    if pmtiles_result:
-                        remote_path = f"{dest_folder}pmtiles/{layer_filename}.pmtiles"
-                        await dest_storage.upload_file(pmtiles_result, remote_path)
-                        pmtiles_url = dest_storage.get_public_url(remote_path)
-                        logger.info(f"    Uploaded PMTiles: {remote_path}")
-
-                    results.append(
-                        {
-                            "layer": layer_name,
-                            "geoparquet_urls": geoparquet_urls,
-                            "pmtiles_url": pmtiles_url,
-                            "feature_count": len(gdf),
-                        }
-                    )
+                layer_result = await _process_single_layer(
+                    layer_name=layer_name,
+                    base_filename=base_filename,
+                    preferred_data_file=preferred_data_file,
+                    preferred_format_type=preferred_format_type,
+                    dest_folder=dest_folder,
+                    dest_storage=dest_storage,
+                    work_dir=work_dir,
+                    skip_parquet_upload=skip_parquet_upload,
+                    skip_pmtiles_upload=skip_pmtiles_upload,
+                )
+                results.append(layer_result)
             except Exception as e:
                 logger.error(f"    Error processing layer {layer_name}: {e}")
                 results.append({"layer": layer_name, "error": str(e)})
@@ -1095,9 +2014,63 @@ async def process_dataset(
         return {
             "success": True,
             "filename": filename,
-            "format": format_type,
+            "formats_processed": list(processed_formats.keys()),
+            "geopackage_created": geopackage_created,
             "layers": results,
         }
+
+
+def _scope_datasets_to_source_prefix(
+    datasets: List[Dict[str, str]], source_path: str
+) -> List[Dict[str, str]]:
+    """Filter datasets to those under the source path prefix."""
+    if not source_path:
+        return datasets
+
+    source_prefix = source_path.strip("/")
+    filtered: List[Dict[str, str]] = []
+    for dataset in datasets:
+        storage_path = dataset.get("gcs_zip_path", "").strip()
+        if not storage_path:
+            continue
+        _, _, rel_path = parse_storage_url(storage_path)
+        rel_path = rel_path.strip("/")
+        if rel_path == source_prefix or rel_path.startswith(f"{source_prefix}/"):
+            filtered.append(dataset)
+    logger.info(
+        f"Scoped to source prefix '{source_prefix}': {len(filtered)} dataset(s)"
+    )
+    return filtered
+
+
+def _apply_dataset_selectors(
+    datasets: List[Dict[str, str]], dataset_args: Optional[List[str]]
+) -> Tuple[List[Dict[str, str]], Dict[str, str], Dict[str, str]]:
+    """
+    Filter datasets using --datasets selectors.
+    Returns (filtered_datasets, explicit_paths_by_name, explicit_paths_by_row_path).
+    """
+    explicit_paths_by_name: Dict[str, str] = {}
+    explicit_paths_by_row_path: Dict[str, str] = {}
+    if not dataset_args:
+        return datasets, explicit_paths_by_name, explicit_paths_by_row_path
+
+    selectors = _build_dataset_selectors(dataset_args)
+    explicit_paths_by_name = selectors["explicit_paths_by_name"]
+    explicit_paths_by_row_path = selectors["explicit_paths_by_row_path"]
+
+    filtered = [
+        dataset
+        for dataset in datasets
+        if _row_matches_dataset_selectors(
+            row=dataset,
+            selector_names=selectors["names"],
+            selector_exact_paths=selectors["exact_paths"],
+            selector_prefixes=selectors["prefixes"],
+        )
+    ]
+    logger.info(f"Filtered to {len(filtered)} specified datasets")
+    return filtered, explicit_paths_by_name, explicit_paths_by_row_path
 
 
 async def main():
@@ -1157,6 +2130,11 @@ async def main():
         action="store_true",
         help="Skip datasets that already have output files in destination storage",
     )
+    parser.add_argument(
+        "--skip-format-existing",
+        action="store_true",
+        help="Skip creating files if the format's folder in the destination already exists",
+    )
 
     args = parser.parse_args()
 
@@ -1188,60 +2166,12 @@ async def main():
         datasets = load_inventory(args.inventory)
         logger.info(f"Loaded {len(datasets)} datasets from inventory")
 
-    # If source includes a path prefix, scope inventory datasets to that prefix.
-    # Example: --source gs://bucket/nfhl keeps only rows whose object path starts with "nfhl/".
-    if source_path:
-        source_prefix = source_path.strip("/")
-        filtered_by_source = []
-        for d in datasets:
-            storage_path = d.get("gcs_zip_path", "").strip()
-            if not storage_path:
-                continue
-            _, _, rel_path = parse_storage_url(storage_path)
-            rel_path = rel_path.strip("/")
-            if rel_path == source_prefix or rel_path.startswith(f"{source_prefix}/"):
-                filtered_by_source.append(d)
-        datasets = filtered_by_source
-        logger.info(
-            f"Scoped to source prefix '{source_prefix}': {len(datasets)} dataset(s)"
-        )
-
-    # Filter by dataset list if provided
-    if args.datasets:
-        # Handle both filenames and full paths
-        dataset_paths = set()
-        dataset_names = set()
-        for ds in args.datasets:
-            if ds.startswith("gs://") or ds.startswith("seaweedfs://"):
-                # Full path - extract filename
-                _, _, path = parse_storage_url(ds)
-                filename = Path(path).stem
-                # Remove format suffix
-                for fmt, _ in FORMAT_PRIORITY:
-                    if filename.endswith(f"-{fmt}") or filename.endswith(
-                        f"-{fmt.replace('_', '-')}"
-                    ):
-                        filename = filename[: -(len(fmt) + 1)]
-                        break
-                dataset_names.add(filename)
-                dataset_paths.add(path)
-            else:
-                dataset_names.add(ds)
-
-        # Filter datasets
-        filtered = []
-        for d in datasets:
-            filename = d.get("filename", "").strip()
-            storage_path = d.get("gcs_zip_path", "").strip()
-            _, _, path = (
-                parse_storage_url(storage_path) if storage_path else ("", "", "")
-            )
-
-            if filename in dataset_names or path in dataset_paths:
-                filtered.append(d)
-
-        datasets = filtered
-        logger.info(f"Filtered to {len(datasets)} specified datasets")
+    datasets = _scope_datasets_to_source_prefix(datasets, source_path)
+    (
+        datasets,
+        explicit_paths_by_name,
+        explicit_paths_by_row_path,
+    ) = _apply_dataset_selectors(datasets, args.datasets)
 
     # Apply offset
     if args.offset:
@@ -1284,12 +2214,20 @@ async def main():
         }
 
         try:
+            explicit_path = _resolve_explicit_source_path_for_row(
+                row=dataset,
+                explicit_paths_by_name=explicit_paths_by_name,
+                explicit_paths_by_row_path=explicit_paths_by_row_path,
+            )
+
             result = await process_dataset(
                 dataset,
                 source_storage,
                 dest_storage,
                 dry_run=args.dry_run,
                 skip_existing=args.skip_existing,
+                skip_format_existing=args.skip_format_existing,
+                explicit_source_path=explicit_path,
             )
 
             if result.get("success"):

@@ -67,6 +67,11 @@ def get_file_url(
         if not file_path:
             return None
 
+        # Don't generate URLs for glob patterns - they need to be expanded first
+        # Expanded sources will have individual file paths without wildcards
+        if "*" in file_path:
+            return None
+
         if not storage_location:
             return None
 

@@ -93,6 +93,10 @@ class SpatialDatasetFileMetadata(BaseModel):
     geometry_type: Optional[str] = (
         None  # Geometry type (e.g. "Point", "Polygon", "LineString", "Mixed")
     )
+    # Data quality metadata
+    invalid_geometry_count: Optional[int] = None
+    quality_check_passed: Optional[bool] = None
+    columns_hash: Optional[str] = None
 
 
 class PydanticJSON(TypeDecorator):

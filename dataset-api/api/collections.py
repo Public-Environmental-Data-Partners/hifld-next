@@ -36,5 +36,5 @@ async def get_collection(
     return collection
 
 
-# Write endpoints removed - use scripts/import_inventory.py for dataset creation
+# Write endpoints removed - use scripts/import_datasets.py for dataset ingestion
 
