@@ -22,3 +22,7 @@ Thumbs.db
 
 # Large GeoServer binaries (downloaded during Docker build)
 geoserver/binaries/
+
+# Node dependencies
+node_modules/
+**/node_modules/
