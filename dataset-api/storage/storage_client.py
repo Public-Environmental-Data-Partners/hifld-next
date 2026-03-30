@@ -5,13 +5,15 @@ This module provides an abstraction layer for object storage operations,
 allowing the upload processor to work with different storage backends.
 """
 
+import asyncio
 import logging
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 import httpx
+import gcsfs
 
 logger = logging.getLogger("storage-client")
 
@@ -49,6 +51,147 @@ class StorageClient(ABC):
         """Get the public URL for a file."""
         pass
 
+    @abstractmethod
+    async def list_files(self, prefix: str) -> List[str]:
+        """List all files with the given prefix.
+
+        Args:
+            prefix: Path prefix to search within (e.g., "dataset-name/")
+
+        Returns:
+            List of relative paths (not full URLs), excluding directories.
+        """
+        pass
+
+    async def find_files_by_extensions(
+        self, prefix: str, extensions: List[str]
+    ) -> Dict[str, List[str]]:
+        """Find files by extension within a prefix.
+
+        Args:
+            prefix: Path prefix to search within
+            extensions: List of extensions (e.g., ['.parquet', '.pmtiles'])
+
+        Returns:
+            Dict mapping extension (without dot) to list of public URLs.
+            Keys are normalized (e.g., 'parquet', 'pmtiles').
+        """
+        all_files = await self.list_files(prefix)
+        result: Dict[str, List[str]] = {}
+
+        for file_path in all_files:
+            # Check each extension
+            for ext in extensions:
+                # Normalize extension (remove leading dot, handle .zstd.parquet)
+                normalized_ext = ext.lstrip(".")
+                if file_path.endswith(ext) or (
+                    ext == ".parquet" and file_path.endswith(".zstd.parquet")
+                ):
+                    # Use normalized extension as key
+                    if normalized_ext not in result:
+                        result[normalized_ext] = []
+                    result[normalized_ext].append(self.get_public_url(file_path))
+                    break  # File matched one extension, move to next file
+
+        return result
+
+    def parse_url_to_path(self, url: str) -> Optional[str]:
+        """Parse a storage URL to extract the relative path.
+
+        Args:
+            url: Full storage URL
+
+        Returns:
+            Relative path if URL belongs to this storage backend, None otherwise.
+        """
+        pass
+
+    def path_to_s3_uri(self, path: str) -> str:
+        """Convert a storage path to S3-compatible URI (e.g., s3://bucket/path).
+
+        Args:
+            path: Relative path within the storage location
+
+        Returns:
+            S3-compatible URI (e.g., s3://bucket/path/to/file.parquet)
+        """
+        pass
+
+    def path_to_storage_uri(self, path: str) -> str:
+        """Convert a storage path to storage-specific URI (e.g., gs://bucket/path or s3://bucket/path).
+
+        This method returns the native protocol for each storage backend:
+        - GCS: gs://bucket/path
+        - SeaweedFS/S3: s3://bucket/path
+
+        Args:
+            path: Relative path within the storage location
+
+        Returns:
+            Storage URI with correct protocol (e.g., gs://bucket/path/to/file.parquet or s3://bucket/path/to/file.parquet)
+        """
+        pass
+
+    def path_to_public_url(self, path: str, for_docker: bool = False) -> str:
+        """Convert a storage path to public HTTP URL.
+
+        Args:
+            path: Relative path within the storage location
+            for_docker: If True, use host.docker.internal instead of localhost
+                       for Docker container access (e.g., when GeoServer is in Docker)
+
+        Returns:
+            Public HTTP URL for accessing the file
+        """
+        pass
+
+    async def expand_glob_pattern(self, glob_path: str) -> List[str]:
+        """Expand a glob pattern to list of matching file paths.
+
+        Args:
+            glob_path: Glob pattern path (e.g., "dataset/*.parquet")
+
+        Returns:
+            List of relative paths (not full URLs) matching the glob pattern
+        """
+        pass
+
+    @abstractmethod
+    async def get_file_size(self, remote_path: str) -> int:
+        """Get the size of a file in bytes.
+
+        Args:
+            remote_path: Relative path to the file
+
+        Returns:
+            File size in bytes, or 0 if file doesn't exist or size cannot be determined
+        """
+        pass
+
+    async def calculate_total_size_for_glob(self, glob_path: str) -> int:
+        """Calculate the total size in bytes of all files matching a glob pattern.
+
+        Args:
+            glob_path: Glob pattern path (e.g., "dataset/parquet/file-*.zstd.parquet")
+
+        Returns:
+            Total size in bytes of all matching files
+        """
+        try:
+            matching_files = await self.expand_glob_pattern(glob_path)
+            if not matching_files:
+                return 0
+
+            total_size = 0
+            for file_path in matching_files:
+                size = await self.get_file_size(file_path)
+                total_size += size
+
+            return total_size
+        except Exception as e:
+            logger.warning(f"Error calculating total size for pattern {glob_path}: {e}")
+            return 0
+
 
 class SeaweedFSFilerClient(StorageClient):
     """
@@ -72,7 +215,8 @@ class SeaweedFSFilerClient(StorageClient):
 
     def _get_filer_path(self, remote_path: str) -> str:
         """Build the full filer path including bucket."""
-        return f"/buckets/{self.bucket}/{remote_path.lstrip('/')}"
+        clean_path = remote_path.lstrip("/")
+        return f"/buckets/{self.bucket}/{clean_path}"
 
     def _get_content_type(self, local_path: Path) -> str:
         """Determine content type from file extension."""
@@ -162,6 +306,226 @@ class SeaweedFSFilerClient(StorageClient):
         key = remote_path.lstrip("/")
         return f"{self.filer_url}/buckets/{self.bucket}/{key}"
 
+    async def list_files(self, prefix: str) -> List[str]:
+        """List all files in SeaweedFS with the given prefix."""
+        clean_prefix = prefix.lstrip("/")
+
+        # Use the buckets format with JSON accept header
+        url = f"{self.filer_url}/buckets/{self.bucket}/{clean_prefix}"
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            try:
+                # Request JSON response explicitly
+                response = await client.get(url, headers={"Accept": "application/json"})
+
+                if response.status_code == 200:
+                    try:
+                        data = response.json()
+                    except Exception:
+                        # If JSON parsing fails, log and return empty
+                        text = response.text[:200] if response.text else "(empty)"
+                        logger.warning(
+                            f"SeaweedFS returned non-JSON response: {text[:100]}..."
+                        )
+                        return []
+
+                    files = []
+                    # Parse the response (format depends on SeaweedFS version)
+                    if "Files" in data:
+                        for item in data["Files"]:
+                            if "FullPath" in item:
+                                # FullPath might include /buckets/{bucket}/ prefix
+                                full_path = item["FullPath"].lstrip("/")
+                                # Remove bucket prefix if present
+                                if full_path.startswith(f"buckets/{self.bucket}/"):
+                                    full_path = full_path[
+                                        len(f"buckets/{self.bucket}/") :
+                                    ]
+                                files.append(full_path)
+                            elif "name" in item:
+                                # Relative path from prefix
+                                full_path = f"{clean_prefix.rstrip('/')}/{item['name']}"
+                                files.append(full_path)
+                    elif "Entries" in data:
+                        # Alternative response format
+                        for item in data["Entries"]:
+                            if "FullPath" in item:
+                                full_path = item["FullPath"].lstrip("/")
+                                if full_path.startswith(f"buckets/{self.bucket}/"):
+                                    full_path = full_path[
+                                        len(f"buckets/{self.bucket}/") :
+                                    ]
+                                files.append(full_path)
+                            elif "name" in item:
+                                full_path = f"{clean_prefix.rstrip('/')}/{item['name']}"
+                                files.append(full_path)
+                    elif isinstance(data, list):
+                        # Response might be a direct list
+                        for item in data:
+                            if isinstance(item, dict):
+                                if "FullPath" in item:
+                                    full_path = item["FullPath"].lstrip("/")
+                                    if full_path.startswith(f"buckets/{self.bucket}/"):
+                                        full_path = full_path[
+                                            len(f"buckets/{self.bucket}/") :
+                                        ]
+                                    files.append(full_path)
+                                elif "name" in item:
+                                    full_path = (
+                                        f"{clean_prefix.rstrip('/')}/{item['name']}"
+                                    )
+                                    files.append(full_path)
+                    # Filter out directories (paths ending with /)
+                    return [f for f in files if not f.endswith("/")]
+                elif response.status_code == 404:
+                    # Directory doesn't exist, return empty list
+                    return []
+                else:
+                    logger.warning(
+                        f"SeaweedFS API returned status {response.status_code} for {url}"
+                    )
+                    return []
+            except Exception as e:
+                logger.warning(f"Error listing SeaweedFS files: {e}")
+                return []
+
+    def parse_url_to_path(self, url: str) -> Optional[str]:
+        """Parse a SeaweedFS URL to extract the relative path."""
+        # SeaweedFS format: http://localhost:8888/buckets/{bucket}/{path}
+        if f"/buckets/{self.bucket}/" in url:
+            parts = url.split(f"/buckets/{self.bucket}/")
+            if len(parts) > 1:
+                return parts[1]
+        return None
+
+    def path_to_s3_uri(self, path: str) -> str:
+        """Convert a SeaweedFS path to S3-compatible URI.
+
+        Note: SeaweedFS doesn't support S3 URIs directly, but we can construct
+        an S3-compatible format for compatibility.
+        """
+        clean_path = path.lstrip("/")
+        # For SeaweedFS, we can't use S3 URIs directly, but return a format
+        # that indicates it's SeaweedFS (though GeoServer won't support this)
+        return f"s3://{self.bucket}/{clean_path}"
+
+    def path_to_storage_uri(self, path: str) -> str:
+        """Convert a SeaweedFS path to storage URI (s3://) with endpoint parameter.
+
+        Returns:
+            S3 URI with endpoint parameter: s3://bucket/path?endpoint_url=http://localhost:8333
+        """
+        clean_path = path.lstrip("/")
+        return f"s3://{self.bucket}/{clean_path}?endpoint_url={self.s3_url}"
+
+    def path_to_public_url(self, path: str, for_docker: bool = False) -> str:
+        """Convert a SeaweedFS path to public HTTP URL.
+
+        Args:
+            path: Relative path within the storage location
+            for_docker: If True, use host.docker.internal instead of localhost
+                       for Docker container access (e.g., when GeoServer is in Docker)
+        """
+        url = self.get_public_url(path)
+        # If this URL is for use by Docker containers (like GeoServer),
+        # replace localhost with host.docker.internal
+        if for_docker and "localhost" in url:
+            url = url.replace("localhost", "host.docker.internal")
+        elif for_docker and "127.0.0.1" in url:
+            url = url.replace("127.0.0.1", "host.docker.internal")
+        return url
+
+    async def expand_glob_pattern(self, glob_path: str) -> List[str]:
+        """Expand a glob pattern to list of matching file paths using fsspec.
+
+        Args:
+            glob_path: Glob pattern path (e.g., "dataset/*.parquet")
+
+        Returns:
+            List of relative paths (not full URLs) matching the glob pattern
+        """
+        import s3fs
+
+        # Construct full S3 URI with endpoint
+        full_glob_path = f"s3://{self.bucket}/{glob_path.lstrip('/')}"
+
+        logger.info(
+            "Expanding glob pattern: path=%s bucket=%s endpoint=%s",
+            glob_path,
+            self.bucket,
+            self.s3_url,
+        )
+
+        # Use s3fs with custom endpoint
+        fs = s3fs.S3FileSystem(
+            client_kwargs={"endpoint_url": self.s3_url},
+            key="",  # SeaweedFS doesn't require auth
+            secret="",
+        )
+
+        # Use fsspec glob to find all matching files
+        # Note: s3fs.glob() returns paths without s3:// prefix, just "bucket/path/to/file"
+        matching_files = fs.glob(full_glob_path)
+
+        logger.info(
+            "s3fs.glob found %d files matching %s",
+            len(matching_files),
+            full_glob_path,
+        )
+
+        # Remove the bucket prefix to get relative paths
+        # s3fs.glob() returns paths like "bucket/path/to/file" (no s3:// prefix)
+        cleaned_files = []
+        for f in matching_files:
+            # Remove all occurrences of bucket prefix
+            # Handle cases where bucket name might appear multiple times in the path
+            while f.startswith(f"{self.bucket}/"):
+                f = f[len(f"{self.bucket}/") :]
+            f = f.lstrip("/")
+            cleaned_files.append(f)
+
+        # Filter out directories (they might end with /)
+        matching_files = [f for f in cleaned_files if f and not f.endswith("/")]
+
+        logger.info(
+            "After cleaning, found %d individual files: %s",
+            len(matching_files),
+            matching_files[:5] if matching_files else [],
+        )
+
+        return matching_files
+
+    async def get_file_size(self, remote_path: str) -> int:
+        """Get the size of a file in bytes using s3fs.
+
+        Args:
+            remote_path: Relative path to the file
+
+        Returns:
+            File size in bytes, or 0 if file doesn't exist or size cannot be determined
+        """
+        try:
+            import s3fs
+
+            # Construct full S3 URI with endpoint
+            full_path = f"s3://{self.bucket}/{remote_path.lstrip('/')}"
+
+            # Use s3fs with custom endpoint
+            fs = s3fs.S3FileSystem(
+                client_kwargs={"endpoint_url": self.s3_url},
+                key="",  # SeaweedFS doesn't require auth
+                secret="",
+            )
+
+            # Get file info (includes size)
+            info = fs.info(full_path)
+            if info and "size" in info:
+                return info["size"]
+            return 0
+        except Exception as e:
+            logger.warning(f"Could not get size for {remote_path}: {e}")
+            return 0
+
 
 class GCSStorageClient(StorageClient):
     """
@@ -175,6 +539,7 @@ class GCSStorageClient(StorageClient):
         bucket: str,
         project: Optional[str] = None,
         timeout: float = 300.0,
+        base_url: Optional[str] = None,
     ):
         try:
             from google.cloud import storage
@@ -185,6 +550,9 @@ class GCSStorageClient(StorageClient):
             )
 
         self.bucket_name = bucket
+        # When set (e.g. https://domain/storage for load balancer), use for public URLs instead of storage.googleapis.com.
+        # LB path rewrite sends /storage/* -> /, so URL is base_url + "/" + path (no bucket in path).
+        self.base_url = (base_url or "").rstrip("/") or None
         self.project = project
         self.timeout = timeout
         self.client = storage.Client(project=project)
@@ -209,7 +577,6 @@ class GCSStorageClient(StorageClient):
         content_type: Optional[str] = None,
     ) -> str:
         """Upload a file to GCS and make it publicly readable."""
-        import asyncio
 
         content_type = content_type or self._get_content_type(local_path)
         # Clean the remote path - ensure no leading slash
@@ -228,16 +595,13 @@ class GCSStorageClient(StorageClient):
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _upload)
 
-        # Construct the public URL explicitly
-        # Format: https://storage.googleapis.com/{bucket}/{path}
-        public_url = f"https://storage.googleapis.com/{self.bucket_name}/{clean_path}"
+        public_url = self.get_public_url(clean_path)
 
         logger.info(f"Uploaded {local_path.name} to {public_url}")
         return public_url
 
     async def download_file(self, remote_path: str, local_path: Path) -> None:
         """Download a file from GCS."""
-        import asyncio
 
         blob = self.bucket.blob(remote_path.lstrip("/"))
 
@@ -252,7 +616,6 @@ class GCSStorageClient(StorageClient):
 
     async def delete_file(self, remote_path: str) -> bool:
         """Delete a file from GCS."""
-        import asyncio
 
         blob = self.bucket.blob(remote_path.lstrip("/"))
 
@@ -269,7 +632,6 @@ class GCSStorageClient(StorageClient):
 
     async def file_exists(self, remote_path: str) -> bool:
         """Check if a file exists in GCS."""
-        import asyncio
 
         blob = self.bucket.blob(remote_path.lstrip("/"))
 
@@ -282,9 +644,148 @@ class GCSStorageClient(StorageClient):
     def get_public_url(self, remote_path: str) -> str:
         """Get the public URL for a file."""
         clean_path = remote_path.lstrip("/")
-        # Return the public URL directly without checking if blob exists
-        # Format: https://storage.googleapis.com/{bucket}/{path}
+        if self.base_url:
+            # Load balancer: base_url/storage -> backend receives path only (no bucket in URL)
+            return f"{self.base_url}/{clean_path}"
         return f"https://storage.googleapis.com/{self.bucket_name}/{clean_path}"
+
+    async def list_files(self, prefix: str) -> List[str]:
+        """List all files in a GCS bucket with the given prefix."""
+
+        def _list():
+            blobs = self.bucket.list_blobs(prefix=prefix)
+            return [blob.name for blob in blobs if not blob.name.endswith("/")]
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _list)
+
+    def parse_url_to_path(self, url: str) -> Optional[str]:
+        """Parse a GCS URL to extract the relative path."""
+        if "storage.googleapis.com" in url:
+            parts = url.split(f"storage.googleapis.com/{self.bucket_name}/")
+            if len(parts) > 1:
+                return parts[1]
+        if self.base_url:
+            prefix = self.base_url.rstrip("/") + "/"
+            if prefix in url:
+                idx = url.find(prefix)
+                rest = url[idx + len(prefix) :].split("?")[0]
+                if rest:
+                    return rest
+        return None
+
+    def path_to_s3_uri(self, path: str) -> str:
+        """Convert a GCS path to S3-compatible URI for GeoServer.
+
+        GeoServer's GeoParquet plugin supports S3 URIs for GCS.
+        """
+        clean_path = path.lstrip("/")
+        return f"s3://{self.bucket_name}/{clean_path}"
+
+    def path_to_storage_uri(self, path: str) -> str:
+        """Convert a GCS path to storage URI (gs://)."""
+        clean_path = path.lstrip("/")
+        return f"gs://{self.bucket_name}/{clean_path}"
+
+    def path_to_public_url(self, path: str, for_docker: bool = False) -> str:
+        """Convert a GCS path to public HTTP URL.
+
+        Args:
+            path: Relative path within the storage location
+            for_docker: Not used for GCS (always uses public HTTPS URLs)
+        """
+        return self.get_public_url(path)
+
+    async def expand_glob_pattern(self, glob_path: str) -> List[str]:
+        """Expand a glob pattern to list of matching file paths using fsspec.
+
+        Args:
+            glob_path: Glob pattern path (e.g., "dataset/*.parquet" or "**/dataset/**/*.parquet")
+
+        Returns:
+            List of relative paths (not full URLs) matching the glob pattern
+        """
+
+        # Construct full GCS URI
+        full_glob_path = f"gs://{self.bucket_name}/{glob_path.lstrip('/')}"
+
+        # Use gcsfs
+        fs = gcsfs.GCSFileSystem()
+
+        # For patterns starting with ** (nested parent directories), use glob()
+        # For direct prefix patterns (even with ** for subdirectories), use find() which is much faster
+        if glob_path.startswith("**/"):
+            # Use glob for nested parent patterns (e.g., "**/dataset/**/*.parquet")
+            def _glob():
+                return fs.glob(full_glob_path)
+
+            loop = asyncio.get_event_loop()
+            matching_files = await loop.run_in_executor(None, _glob)
+        else:
+            # Use find() for direct prefix patterns - much faster!
+            # Extract prefix from pattern (everything before the first wildcard)
+            # e.g., "dataset/**/*.parquet" -> "dataset/"
+            # e.g., "dataset/*.parquet" -> "dataset/"
+            prefix = glob_path.split("*")[0] if "*" in glob_path else glob_path
+            if not prefix.endswith("/"):
+                # If no trailing slash, find the directory
+                prefix = "/".join(prefix.split("/")[:-1]) + "/" if "/" in prefix else ""
+
+            full_prefix = f"gs://{self.bucket_name}/{prefix.lstrip('/')}"
+
+            def _find():
+                all_files = fs.find(full_prefix, detail=False)
+                # Filter by extension if pattern has one
+                if "*." in glob_path:
+                    ext = glob_path.split("*.")[-1].split("/")[0].split("*")[0]
+                    return [f for f in all_files if f.endswith(f".{ext}")]
+                return all_files
+
+            loop = asyncio.get_event_loop()
+            matching_files = await loop.run_in_executor(None, _find)
+
+        # Remove the protocol and bucket prefix(es) to get relative paths
+        # Handle cases where bucket name might appear multiple times in the path
+        cleaned_files = []
+        for f in matching_files:
+            # Remove gs:// protocol
+            if f.startswith("gs://"):
+                f = f[5:]  # Remove "gs://"
+            # Remove all occurrences of bucket prefix
+            while f.startswith(f"{self.bucket_name}/"):
+                f = f[len(f"{self.bucket_name}/") :]
+            f = f.lstrip("/")
+            cleaned_files.append(f)
+
+        # Filter out directories (they might end with /)
+        matching_files = [f for f in cleaned_files if f and not f.endswith("/")]
+
+        return matching_files
+
+    async def get_file_size(self, remote_path: str) -> int:
+        """Get the size of a file in bytes using gcsfs.
+
+        Args:
+            remote_path: Relative path to the file
+
+        Returns:
+            File size in bytes, or 0 if file doesn't exist or size cannot be determined
+        """
+        try:
+            # Construct full GCS URI
+            full_path = f"gs://{self.bucket_name}/{remote_path.lstrip('/')}"
+
+            # Use gcsfs
+            fs = gcsfs.GCSFileSystem()
+
+            # Get file info (includes size)
+            info = fs.info(full_path)
+            if info and "size" in info:
+                return info["size"]
+            return 0
+        except Exception as e:
+            logger.warning(f"Could not get size for {remote_path}: {e}")
+            return 0
 
 
 # Default client
@@ -330,3 +831,64 @@ def create_storage_client(
         return GCSStorageClient(bucket=bucket, project=project)
     else:
         raise ValueError(f"Unsupported storage type: {storage_type}")
+
+
+def create_storage_client_from_location(storage_location) -> Optional[StorageClient]:
+    """
+    Create a storage client from a StorageLocation model.
+
+    Args:
+        storage_location: StorageLocation model with config
+
+    Returns:
+        StorageClient instance or None if storage location is not bucket-based
+    """
+    if not storage_location or not storage_location.config:
+        return None
+
+    # Only bucket-based storage locations can create clients
+    if storage_location.backend_type != "s3":
+        return None
+
+    # Handle both dict and Pydantic model configs
+    # Import here to avoid circular dependencies
+    try:
+        from models.dataset import BucketStorageLocationConfig
+    except ImportError:
+        # If models not available, try to infer from dict
+        BucketStorageLocationConfig = None
+
+    if isinstance(storage_location.config, dict):
+        config_type = storage_location.config.get("type")
+        bucket = storage_location.config.get("bucket")
+        base_url = storage_location.config.get("base_url")
+    elif BucketStorageLocationConfig and isinstance(
+        storage_location.config, BucketStorageLocationConfig
+    ):
+        config_type = storage_location.config.type
+        bucket = storage_location.config.bucket
+        base_url = storage_location.config.base_url
+    else:
+        return None
+
+    if not bucket or not config_type:
+        return None
+
+    if config_type == "gcs":
+        return GCSStorageClient(bucket=bucket, base_url=base_url)
+    elif config_type == "seaweedfs":
+        # Extract S3 endpoint from base_url (filer URL) - SeaweedFS S3 is typically on port 8333
+        s3_url = (
+            base_url.replace(":8888", ":8333")
+            if ":8888" in base_url
+            else base_url.replace("localhost", "localhost:8333")
+        )
+        if not s3_url.startswith("http"):
+            s3_url = f"http://{s3_url}"
+        return SeaweedFSFilerClient(
+            filer_url=base_url,
+            s3_url=s3_url,
+            bucket=bucket,
+        )
+    else:
+        return None

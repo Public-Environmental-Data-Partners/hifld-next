@@ -1,21 +1,36 @@
 [
   {
-    "name": "SeaweedFS Local",
+    "name": "GCS drp-hifld-copy-formatted-49775666365",
     "backend_type": "s3",
-    "description": "Local SeaweedFS instance for development (S3-compatible)",
+    "description": "Google Cloud Storage bucket for formatted HIFLD datasets",
     "config": {
-      "base_url": "http://localhost:8888",
-      "bucket": "hifld"
+      "type": "gcs",
+      "version": "v1",
+      "base_url": "https://storage.googleapis.com",
+      "bucket": "drp-hifld-copy-formatted-49775666365"
     }
   },
   {
-    "name": "GeoServer Local",
-    "backend_type": "geoserver",
-    "description": "Local GeoServer instance for spatial data services",
+    "name": "SeaweedFS drp-hifld-copy-formatted",
+    "backend_type": "s3",
+    "description": "SeaweedFS bucket for formatted HIFLD datasets (S3-compatible)",
     "config": {
+      "type": "seaweedfs",
+      "version": "v1",
+      "base_url": "http://localhost:8888",
+      "bucket": "drp-hifld-copy-formatted",
+      "endpoint_url": "http://localhost:8333"
+    }
+  },
+  {
+    "name": "GeoServer",
+    "backend_type": "geoserver",
+    "description": "GeoServer instance for spatial data services",
+    "config": {
+      "type": "geoserver",
+      "version": "v1",
       "base_url": "http://localhost:8080/geoserver",
       "workspace": "hifld"
     }
   }
 ]
-

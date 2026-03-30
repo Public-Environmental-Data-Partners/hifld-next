@@ -25,14 +25,23 @@ dependencies = [
     "sqlmodel>=0.0.31",
     "alembic>=1.17.2",
     "psycopg2-binary>=2.9.9",
+    "psutil>=5.9.0",
+    "fsspec>=2026.1.0",
+    "gcsfs>=2026.1.0",
+    "s3fs>=2026.1.0",
 ]
 
 [project.optional-dependencies]
 test = [
     "pytest>=8.2.0",
 ]
+storage = [
+    "gcsfs>=2024.3.1",
+    "s3fs>=2024.3.1",
+]
 
 [dependency-groups]
 dev = [
+    "globus-sdk>=4.3.1",
     "pydantic-ai>=1.38.0",
 ]

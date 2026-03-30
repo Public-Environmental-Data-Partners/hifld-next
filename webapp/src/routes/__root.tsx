@@ -1,10 +1,15 @@
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
-import { TanStackDevtools } from '@tanstack/react-devtools'
-
-import Header from '../components/Header'
+import { HeadContent, Scripts, createRootRoute, Outlet } from '@tanstack/react-router'
 
 import appCss from '../styles.css?url'
+import Header from '../components/Header'
+import Footer from '../components/Footer'
+import { PostHogProvider } from '../components/PostHogProvider'
+import { usePageTracking } from '../hooks/usePageTracking'
+import { SurveyButton } from '../components/SurveyButton'
+import { PageLoader } from '../components/ui/page-loader'
+
+const PEDP_FAVICON =
+  'https://images.squarespace-cdn.com/content/v1/6793060d1570ff20aceb1125/1bf945a1-a73f-4823-a4d5-7cfc42a96bfa/favicon.ico';
 
 export const Route = createRootRoute({
   head: () => ({
@@ -17,7 +22,7 @@ export const Route = createRootRoute({
         content: 'width=device-width, initial-scale=1',
       },
       {
-        title: 'TanStack Start Starter',
+        title: 'HIFLD Next | PEDP',
       },
     ],
     links: [
@@ -25,11 +30,51 @@ export const Route = createRootRoute({
         rel: 'stylesheet',
         href: appCss,
       },
+      {
+        rel: 'icon',
+        href: PEDP_FAVICON,
+        type: 'image/x-icon',
+      },
     ],
   }),
 
+  component: RootLayout,
   shellComponent: RootDocument,
+  pendingComponent: PendingLayout,
+  pendingMs: 300,
 })
+
+function PendingLayout() {
+  return (
+    <div className="flex min-h-screen flex-col">
+      <Header />
+      <main className="flex flex-1 flex-col">
+        <div className="flex flex-1 flex-col items-center justify-center">
+          <PageLoader size="lg" />
+        </div>
+      </main>
+      <Footer />
+    </div>
+  )
+}
+
+function RootLayout() {
+  // Track page views at the root level
+  usePageTracking();
+  
+  return (
+    <PostHogProvider>
+      <div className="flex flex-col min-h-screen">
+        <Header />
+        <main className="flex flex-1 flex-col">
+          <Outlet />
+        </main>
+        <Footer />
+        <SurveyButton />
+      </div>
+    </PostHogProvider>
+  )
+}
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
@@ -38,9 +83,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <Header />
         {children}
-        <TanStackDevtools
+        {/* <TanStackDevtools
           config={{
             position: 'bottom-right',
           }}
@@ -50,7 +94,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
               render: <TanStackRouterDevtoolsPanel />,
             },
           ]}
-        />
+        /> */}
         <Scripts />
       </body>
     </html>

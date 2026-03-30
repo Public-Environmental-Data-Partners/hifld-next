@@ -3,25 +3,31 @@
 from .dataset import (
     Collection,
     Dataset,
-    DatasetFormat,
-    DatasetSource,
+    File,
+    FileFormat,
+    FileSource,
     StorageLocation,
     BucketStorageLocationConfig,
     SpatialDatasetFileMetadata,
     FileLocation,
     ApiLocation,
+    GeoServerLocation,
+    Format,
 )
 from sqlmodel import SQLModel
 
 __all__ = [
     "Collection",
     "Dataset",
-    "DatasetFormat",
-    "DatasetSource",
+    "File",
+    "FileFormat",
+    "FileSource",
     "StorageLocation",
     "BucketStorageLocationConfig",
     "SpatialDatasetFileMetadata",
     "FileLocation",
     "ApiLocation",
+    "GeoServerLocation",
+    "Format",
     "SQLModel",
 ]

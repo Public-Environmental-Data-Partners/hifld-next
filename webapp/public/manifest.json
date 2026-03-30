@@ -1,21 +1,11 @@
 {
-  "short_name": "TanStack App",
-  "name": "Create TanStack App Sample",
+  "short_name": "HIFLD Next",
+  "name": "HIFLD Next | PEDP",
   "icons": [
     {
-      "src": "favicon.ico",
+      "src": "https://images.squarespace-cdn.com/content/v1/6793060d1570ff20aceb1125/1bf945a1-a73f-4823-a4d5-7cfc42a96bfa/favicon.ico",
       "sizes": "64x64 32x32 24x24 16x16",
       "type": "image/x-icon"
-    },
-    {
-      "src": "logo192.png",
-      "type": "image/png",
-      "sizes": "192x192"
-    },
-    {
-      "src": "logo512.png",
-      "type": "image/png",
-      "sizes": "512x512"
     }
   ],
   "start_url": ".",

@@ -22,14 +22,19 @@ function CollectionsListPage() {
   const { collections } = Route.useLoaderData();
 
   return (
-    <div className="p-8">
+    <div className="p-6 sm:p-10">
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Header */}
         <div className="text-center">
-          <h1 className="text-4xl font-bold tracking-tight">Collections</h1>
-          <p className="text-lg text-muted-foreground mt-2">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight break-words">Collections</h1>
+          <p className="text-base sm:text-lg text-muted-foreground mt-2">
             Browse datasets organized by collection
           </p>
+          <Button variant="outline" size="sm" asChild className="mt-4 font-mono">
+            <a href="/api/collections" target="_blank" rel="noopener noreferrer">
+              View Metadata
+            </a>
+          </Button>
         </div>
 
         {/* Collections Grid */}
@@ -38,21 +43,21 @@ function CollectionsListPage() {
             {collections.map((collection) => (
               <Card
                 key={collection.id}
-                className="cursor-pointer hover:bg-muted/50 transition-colors"
+                className="cursor-pointer hover:bg-muted/60 transition-colors"
               >
                 <Link
-                  to="/collections/$id"
-                  params={{ id: collection.id.toString() }}
+                  to="/collections/$slug"
+                  params={{ slug: collection.slug }}
                 >
                   <CardHeader>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Folder className="h-5 w-5 text-muted-foreground" />
-                      <CardTitle className="text-lg">
+                    <div className="flex items-center gap-2 mb-2 min-w-0">
+                      <Folder className="h-5 w-5 text-muted-foreground shrink-0" />
+                      <CardTitle className="text-lg break-words min-w-0">
                         {collection.name}
                       </CardTitle>
                     </div>
                     {collection.description && (
-                      <CardDescription className="line-clamp-2">
+                      <CardDescription className="line-clamp-2 break-words">
                         {collection.description}
                       </CardDescription>
                     )}

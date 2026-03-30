@@ -1,9 +1,9 @@
 # Use Java 17 as base image (GeoServer requires Java 17 or 21)
 FROM eclipse-temurin:17-jre
 
-# Install unzip, curl for health checks, and postgresql-client for schema checks
+# Install unzip, zip, curl for health checks, and postgresql-client for schema checks
 RUN apt-get update && \
-    apt-get install -y unzip curl postgresql-client wget && \
+    apt-get install -y unzip zip curl postgresql-client wget && \
     rm -rf /var/lib/apt/lists/*
 
 # Download plugin zip files from GeoServer build server
@@ -14,7 +14,10 @@ RUN set -eux && \
     curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/community-latest/geoserver-2.28-SNAPSHOT-geoparquet-plugin.zip" -o /tmp/geoparquet-plugin.zip && \
     test -s /tmp/geoparquet-plugin.zip && \
     echo "GeoParquet plugin downloaded successfully" && \
-    echo "Skipping PMTiles plugin (incompatible ModuleStatusImpl.category property)" && \
+    echo "Downloading PMTiles plugin from GeoServer build server (latest)" && \
+    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/community-latest/geoserver-2.28-SNAPSHOT-pmtiles-store-plugin.zip" -o /tmp/pmtiles-plugin.zip && \
+    test -s /tmp/pmtiles-plugin.zip && \
+    echo "PMTiles plugin downloaded successfully" && \
     echo "Downloading JDBCConfig plugin from GeoServer build server (latest)" && \
     curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/community-latest/geoserver-2.28-SNAPSHOT-jdbcconfig-plugin.zip" -o /tmp/jdbcconfig-plugin.zip && \
     test -s /tmp/jdbcconfig-plugin.zip && \
@@ -26,7 +29,11 @@ RUN set -eux && \
     echo "Downloading GeoPackage output plugin from GeoServer build server (latest)" && \
     curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/ext-latest/geoserver-2.28-SNAPSHOT-geopkg-output-plugin.zip" -o /tmp/geopkg-output-plugin.zip && \
     test -s /tmp/geopkg-output-plugin.zip && \
-    echo "GeoPackage output plugin downloaded successfully"
+    echo "GeoPackage output plugin downloaded successfully" && \
+    echo "Downloading FlatGeobuf plugin from GeoServer build server (latest)" && \
+    curl -fsSL "https://build.geoserver.org/geoserver/2.28.x/community-latest/geoserver-2.28-SNAPSHOT-flatgeobuf-plugin.zip" -o /tmp/flatgeobuf-plugin.zip && \
+    test -s /tmp/flatgeobuf-plugin.zip && \
+    echo "FlatGeobuf plugin downloaded successfully"
 
 # Set working directory
 WORKDIR /usr/share/geoserver
@@ -46,17 +53,34 @@ RUN curl -fsSL https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/p
     unzip -t /tmp/postgresql-jdbc.jar > /dev/null && \
     echo "PostgreSQL JDBC driver downloaded and verified successfully"
 
-# Extract and install plugins (PMTiles skipped due to incompatibility)
-RUN mkdir -p /tmp/geoparquet-extract /tmp/jdbcconfig-extract /tmp/ogcapi-features-extract /tmp/geopkg-output-extract && \
+# Extract and install plugins
+RUN mkdir -p /tmp/geoparquet-extract /tmp/pmtiles-extract /tmp/jdbcconfig-extract /tmp/ogcapi-features-extract /tmp/geopkg-output-extract /tmp/flatgeobuf-extract && \
     unzip -q /tmp/geoparquet-plugin.zip -d /tmp/geoparquet-extract && \
+    unzip -q /tmp/pmtiles-plugin.zip -d /tmp/pmtiles-extract && \
     unzip -q /tmp/jdbcconfig-plugin.zip -d /tmp/jdbcconfig-extract && \
     unzip -q /tmp/ogcapi-features-plugin.zip -d /tmp/ogcapi-features-extract && \
     unzip -q /tmp/geopkg-output-plugin.zip -d /tmp/geopkg-output-extract && \
+    unzip -q /tmp/flatgeobuf-plugin.zip -d /tmp/flatgeobuf-extract && \
+    # Patch PMTiles plugin: Remove incompatible 'category' property from applicationContext.xml
+    # The category property is not writable in ModuleStatusImpl in GeoServer 2.28
+    PMTILES_JAR=$(find /tmp/pmtiles-extract -name "gs-pmtiles-store-*.jar" | head -1) && \
+    if [ -n "$PMTILES_JAR" ]; then \
+        WORKDIR=$(pwd) && \
+        cd /tmp && \
+        unzip -q "$PMTILES_JAR" applicationContext.xml && \
+        sed -i '/<property name="category"/d' applicationContext.xml && \
+        zip -q "$PMTILES_JAR" applicationContext.xml && \
+        rm -f applicationContext.xml && \
+        cd "$WORKDIR" && \
+        echo "PMTiles plugin patched: removed incompatible category property"; \
+    fi && \
     # Copy .jar files to GeoServer lib directory
     find /tmp/geoparquet-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
+    find /tmp/pmtiles-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
     find /tmp/jdbcconfig-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
     find /tmp/ogcapi-features-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
     find /tmp/geopkg-output-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
+    find /tmp/flatgeobuf-extract -name "*.jar" -exec cp {} webapps/geoserver/WEB-INF/lib/ \; && \
     # Copy PostgreSQL JDBC driver to GeoServer lib
     cp /tmp/postgresql-jdbc.jar webapps/geoserver/WEB-INF/lib/ && \
     rm -rf /tmp/*.zip /tmp/*.jar /tmp/*-extract

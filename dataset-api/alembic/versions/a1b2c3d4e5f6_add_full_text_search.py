@@ -5,6 +5,7 @@ Revises: 28b71e5cfc45
 Create Date: 2026-01-15 15:00:00.000000
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -13,8 +14,8 @@ import sqlmodel
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'a1b2c3d4e5f6'
-down_revision: Union[str, Sequence[str], None] = '28b71e5cfc45'
+revision: str = "a1b2c3d4e5f6"
+down_revision: Union[str, Sequence[str], None] = "2efd2830a066"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -23,7 +24,7 @@ def upgrade() -> None:
     """Add full-text search support for both PostgreSQL and SQLite."""
     bind = op.get_bind()
     dialect_name = bind.dialect.name
-    
+
     if dialect_name == "postgresql":
         # PostgreSQL: Use tsvector for full-text search
         # Add tsvector column for full-text search
@@ -43,12 +44,13 @@ def upgrade() -> None:
         )
 
         # Create function to update search_vector
-        # Includes name, tags (as text), and description
+        # Includes slug, name, tags (as text), and description
         op.execute(
             """
             CREATE OR REPLACE FUNCTION datasets_update_search_vector() RETURNS trigger AS $$
             BEGIN
                 NEW.search_vector := 
+                    setweight(to_tsvector('english', COALESCE(NEW.slug, '')), 'A') ||
                     setweight(to_tsvector('english', COALESCE(NEW.name, '')), 'A') ||
                     setweight(to_tsvector('english', COALESCE(NEW.tags::text, '')), 'A') ||
                     setweight(to_tsvector('english', COALESCE(NEW.description, '')), 'B');
@@ -74,6 +76,7 @@ def upgrade() -> None:
             """
             UPDATE datasets 
             SET search_vector = 
+                setweight(to_tsvector('english', COALESCE(slug, '')), 'A') ||
                 setweight(to_tsvector('english', COALESCE(name, '')), 'A') ||
                 setweight(to_tsvector('english', COALESCE(tags::text, '')), 'A') ||
                 setweight(to_tsvector('english', COALESCE(description, '')), 'B');
@@ -85,6 +88,7 @@ def upgrade() -> None:
         op.execute(
             """
             CREATE VIRTUAL TABLE IF NOT EXISTS datasets_fts USING fts5(
+                slug,
                 name, 
                 tags,
                 description,
@@ -98,8 +102,8 @@ def upgrade() -> None:
         # Extract tags as space-separated string from JSON object
         op.execute(
             """
-            INSERT INTO datasets_fts(rowid, name, tags, description)
-            SELECT id, name, 
+            INSERT INTO datasets_fts(rowid, slug, name, tags, description)
+            SELECT id, COALESCE(slug, ''), name, 
                    CASE 
                      WHEN tags IS NOT NULL THEN 
                        (SELECT GROUP_CONCAT(value, ' ') 
@@ -116,9 +120,10 @@ def upgrade() -> None:
         op.execute(
             """
             CREATE TRIGGER IF NOT EXISTS datasets_fts_insert AFTER INSERT ON datasets BEGIN
-                INSERT INTO datasets_fts(rowid, name, tags, description)
+                INSERT INTO datasets_fts(rowid, slug, name, tags, description)
                 VALUES (
                     new.id, 
+                    COALESCE(new.slug, ''),
                     new.name, 
                     CASE 
                       WHEN new.tags IS NOT NULL THEN 
@@ -136,7 +141,8 @@ def upgrade() -> None:
             """
             CREATE TRIGGER IF NOT EXISTS datasets_fts_update AFTER UPDATE ON datasets BEGIN
                 UPDATE datasets_fts 
-                SET name = new.name, 
+                SET slug = COALESCE(new.slug, ''),
+                    name = new.name, 
                     tags = CASE 
                              WHEN new.tags IS NOT NULL THEN 
                                (SELECT GROUP_CONCAT(value, ' ') FROM json_each(new.tags))
@@ -162,7 +168,7 @@ def downgrade() -> None:
     """Remove full-text search support."""
     bind = op.get_bind()
     dialect_name = bind.dialect.name
-    
+
     if dialect_name == "postgresql":
         # Drop PostgreSQL full-text search
         op.execute("DROP TRIGGER IF EXISTS datasets_search_vector_update ON datasets")
@@ -175,4 +181,3 @@ def downgrade() -> None:
         op.execute("DROP TRIGGER IF EXISTS datasets_fts_update")
         op.execute("DROP TRIGGER IF EXISTS datasets_fts_insert")
         op.execute("DROP TABLE IF EXISTS datasets_fts")
-

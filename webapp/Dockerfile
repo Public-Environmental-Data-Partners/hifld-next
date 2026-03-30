@@ -7,9 +7,18 @@ WORKDIR /app
 # Accept build arguments for environment variables
 ARG NODE_ENV=production
 
+# Client-side environment variables (VITE_PUBLIC_*)
+# These are embedded in the client bundle at build time by Vite
+ARG VITE_PUBLIC_DATASET_API_URL=""
+ARG VITE_PUBLIC_POSTHOG_KEY=""
+ARG VITE_PUBLIC_POSTHOG_HOST="https://us.i.posthog.com"
+
 # Set environment variables at build time (before compilation)
 # These will be available during the build process
 ENV NODE_ENV=${NODE_ENV}
+ENV VITE_PUBLIC_DATASET_API_URL=${VITE_PUBLIC_DATASET_API_URL}
+ENV VITE_PUBLIC_POSTHOG_KEY=${VITE_PUBLIC_POSTHOG_KEY}
+ENV VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST}
 
 # Copy package files first (for better layer caching)
 COPY package.json ./
@@ -23,7 +32,9 @@ RUN npm install
 # Copy source code
 COPY . .
 
-# Build the application (NODE_ENV and PUBLIC_DATASET_API_URL are now available)
+# Build the application
+# VITE_PUBLIC_* variables are embedded in the client bundle at build time
+# These are passed as build args and set as ENV variables above
 RUN npm run build
 
 # Production stage
@@ -49,6 +60,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s \
     CMD node -e "require('http').get('http://localhost:8080/', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
 # Run the Nitro server
-# Nitro reads PUBLIC_DATASET_API_URL from Cloud Run environment at runtime
+# Nitro reads DATASET_API_URL from Cloud Run environment at runtime
 CMD ["node", ".output/server/index.mjs"]
 
