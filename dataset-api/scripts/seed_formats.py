@@ -54,6 +54,30 @@ DEFAULT_FORMATS = [
         "description": "GeoServer service providing multiple OGC-compliant interfaces (WFS, WMS, OGC API Features, GeoPackage export)",
         "mime_type": None,  # Multiple formats available depending on request
     },
+    {
+        "format_type": "geopackage",
+        "name": "GeoPackage",
+        "description": "GeoPackage file format for portable spatial datasets",
+        "mime_type": "application/geopackage+sqlite3",
+    },
+    {
+        "format_type": "shapefile",
+        "name": "Shapefile",
+        "description": "ESRI Shapefile dataset packaged as a multi-file vector format",
+        "mime_type": "application/zip",
+    },
+    {
+        "format_type": "geojson",
+        "name": "GeoJSON",
+        "description": "GeoJSON feature collection format for web-friendly spatial data",
+        "mime_type": "application/geo+json",
+    },
+    {
+        "format_type": "file_geodatabase",
+        "name": "File Geodatabase",
+        "description": "Esri File Geodatabase dataset format",
+        "mime_type": "application/octet-stream",
+    },
 ]
 
 

@@ -10,7 +10,12 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { getDatasetFileById, getDatasetFileBySlug, getCollectionBySlug, getDatasetBySlug } from "@/lib/api-client";
+import {
+  getDatasetFileById,
+  getDatasetFileBySlug,
+  getCollectionBySlug,
+  getDatasetBySlug,
+} from "@/lib/api-client";
 import type { DatasetFile } from "@/lib/api-client";
 import { FileFormatTree } from "@/components/dataset/FileFormatTree";
 import { ParquetViewerPanel } from "@/components/dataset/ParquetViewerPanel";
@@ -26,7 +31,7 @@ import {
 const GEOSERVER_EXPORT_SIZE_LIMIT_MB = 250;
 
 export const Route = createFileRoute(
-  "/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/"
+  "/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/",
 )({
   loader: async ({ params }) => {
     try {
@@ -36,7 +41,7 @@ export const Route = createFileRoute(
       if (!collection) {
         throw notFound();
       }
-      
+
       // Try to get dataset to find file ID (for optimization)
       // If files are already loaded (e.g., from parent route), we can use IDs
       const dataset = await getDatasetBySlug({
@@ -49,7 +54,7 @@ export const Route = createFileRoute(
       if (!dataset) {
         throw notFound();
       }
-      
+
       // If dataset has files loaded, find file by slug and use ID-based endpoint
       const file = dataset.files?.find((f) => f.slug === params.fileSlug);
       if (file?.id && dataset.id) {
@@ -66,7 +71,7 @@ export const Route = createFileRoute(
         }
         return { collection, dataset: result.dataset, file: result.file };
       }
-      
+
       // Fallback to slug-based lookup if file not found in dataset files
       // (This happens when includeUrls=false doesn't return files)
       const result = await getDatasetFileBySlug({
@@ -115,9 +120,7 @@ function FileDetailPage() {
       const formatType = formatEntry.format.format_type;
       if (formatEntry.sources && formatEntry.sources.length > 0) {
         // Find the latest version for each storage location, then pick the first one
-        type SourceType = NonNullable<
-          DatasetFile["formats"]
-        >[0]["sources"][0];
+        type SourceType = NonNullable<DatasetFile["formats"]>[0]["sources"][0];
         type SourceEntry = { source: SourceType; version: string | number };
         const sourcesByLocation: Record<number, SourceEntry> = {};
         formatEntry.sources.forEach((source: SourceType) => {
@@ -131,7 +134,10 @@ function FileDetailPage() {
               // Compare versions: dates (YYYY-MM-DD) or numbers
               const existingVersion = String(existing.version);
               const currentVersion = String(version);
-              if (existingVersion.match(/^\d{4}-\d{2}-\d{2}$/) && currentVersion.match(/^\d{4}-\d{2}-\d{2}$/)) {
+              if (
+                existingVersion.match(/^\d{4}-\d{2}-\d{2}$/) &&
+                currentVersion.match(/^\d{4}-\d{2}-\d{2}$/)
+              ) {
                 // Both are dates, compare as strings (descending)
                 if (currentVersion > existingVersion) {
                   sourcesByLocation[locId] = { source, version };
@@ -167,13 +173,13 @@ function FileDetailPage() {
 
   // Helper to get selected source for a format
   const getSelectedSource = (
-    formatType: string
+    formatType: string,
   ): NonNullable<DatasetFile["formats"]>[0]["sources"][0] | null => {
     const selection = selectedSources[formatType];
     if (!selection) return null;
 
     const formatEntry = file.formats?.find(
-      (f) => f.format.format_type === formatType
+      (f) => f.format.format_type === formatType,
     );
     if (!formatEntry || !formatEntry.sources) return null;
 
@@ -181,14 +187,14 @@ function FileDetailPage() {
       formatEntry.sources.find(
         (s) =>
           s.storage_location?.id === selection.storageLocationId &&
-          String(s.version || "1") === String(selection.version)
+          String(s.version || "1") === String(selection.version),
       ) || null
     );
   };
 
   // Helper to get URL from a source
   const getUrlFromSource = (
-    source: NonNullable<DatasetFile["formats"]>[0]["sources"][0] | null
+    source: NonNullable<DatasetFile["formats"]>[0]["sources"][0] | null,
   ): string | null => {
     return source?.url || null;
   };
@@ -202,8 +208,7 @@ function FileDetailPage() {
   const geoserverExportsEnabled =
     typeof geoserverTotalSizeBytes !== "number"
       ? true
-      : geoserverTotalSizeBytes <=
-        GEOSERVER_EXPORT_SIZE_LIMIT_MB * 1024 * 1024;
+      : geoserverTotalSizeBytes <= GEOSERVER_EXPORT_SIZE_LIMIT_MB * 1024 * 1024;
 
   // Extract URLs from selected sources
   const pmtilesUrl = getUrlFromSource(pmtilesSource);
@@ -235,7 +240,7 @@ function FileDetailPage() {
   // Helper to get first parquet file for data table preview
   const getFirstParquetFile = (): { url: string; fileName: string } | null => {
     const geoparquetFormat = file.formats?.find(
-      (f) => f.format.format_type === "geoparquet"
+      (f) => f.format.format_type === "geoparquet",
     );
 
     if (!geoparquetFormat?.sources || geoparquetFormat.sources.length === 0) {
@@ -244,7 +249,7 @@ function FileDetailPage() {
 
     // Use selected source if available, otherwise find first individual file
     const selectedSource = geoparquetSource;
-    
+
     if (selectedSource?.url) {
       // Extract filename from location path
       const location = selectedSource.location as { path?: string };
@@ -280,136 +285,138 @@ function FileDetailPage() {
     <div className="max-w-4xl mx-auto space-y-8 p-4 sm:p-6 md:p-8">
       {/* Header */}
       <div>
-                <Button variant="ghost" asChild className="mb-4">
-                  <Link
-                    to="/collections/$collectionSlug/datasets/$datasetSlug"
-                    params={{
-                      collectionSlug,
-                      datasetSlug,
-                    }}
-                  >
-                    <ArrowLeft className="h-4 w-4 mr-2" />
-                    Back to {dataset.name}
-                  </Link>
-                </Button>
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <h1 className="text-2xl sm:text-3xl md:text-4xl font-mono font-bold tracking-tight break-words">
-                      {file.name}
-                    </h1>
-                    {file.layer_name && (
-                      <p className="text-muted-foreground mt-2 break-words">
-                        Layer: <code className="text-sm">{file.layer_name}</code>
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex flex-col gap-2 min-w-0 sm:min-w-[200px]">
-                    <Button variant="outline" asChild className="font-mono w-full">
-                      <a
-                        href={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        View Metadata
-                      </a>
-                    </Button>
-                    <Button asChild className="w-full">
-                      <Link
-                        to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer"
-                        params={{
-                          collectionSlug,
-                          datasetSlug,
-                          fileSlug,
-                        }}
-                      >
-                        Map Viewer
-                      </Link>
-                    </Button>
-                    {firstParquetFile && (
-                      <Button
-                        variant="outline"
-                        onClick={() => setParquetViewer(firstParquetFile)}
-                        className="w-full"
-                      >
-                        <Table className="h-4 w-4 mr-2 shrink-0" />
-                        Data Table
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
+        <Button variant="ghost" asChild className="mb-4">
+          <Link
+            to="/collections/$collectionSlug/datasets/$datasetSlug"
+            params={{
+              collectionSlug,
+              datasetSlug,
+            }}
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to {dataset.name}
+          </Link>
+        </Button>
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-mono font-bold tracking-tight break-words">
+              {file.name}
+            </h1>
+            {file.layer_name && (
+              <p className="text-muted-foreground mt-2 break-words">
+                Layer: <code className="text-sm">{file.layer_name}</code>
+              </p>
+            )}
+          </div>
+          <div className="flex flex-col gap-2 min-w-0 sm:min-w-[200px]">
+            <Button variant="outline" asChild className="font-mono w-full">
+              <a
+                href={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                View Metadata
+              </a>
+            </Button>
+            <Button asChild className="w-full">
+              <Link
+                to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer"
+                params={{
+                  collectionSlug,
+                  datasetSlug,
+                  fileSlug,
+                }}
+              >
+                Map Viewer
+              </Link>
+            </Button>
+            {firstParquetFile && (
+              <Button
+                variant="outline"
+                onClick={() => setParquetViewer(firstParquetFile)}
+                className="w-full"
+              >
+                <Table className="h-4 w-4 mr-2 shrink-0" />
+                Data Table
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
 
-              <div className="space-y-6">
-                {cleanDescription && (
-                  <>
-                    <div>
-                      <h4 className="font-medium mb-2">Description</h4>
-                      <p className="text-sm text-muted-foreground break-words">
-                        {cleanDescription}
-                      </p>
-                    </div>
-                    <Separator />
-                  </>
-                )}
+      <div className="space-y-6">
+        {cleanDescription && (
+          <>
+            <div>
+              <h4 className="font-medium mb-2">Description</h4>
+              <p className="text-sm text-muted-foreground break-words">
+                {cleanDescription}
+              </p>
+            </div>
+            <Separator />
+          </>
+        )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {featureCount && (
-                    <div>
-                      <p className="text-sm text-muted-foreground mb-1">Features</p>
-                      <p className="font-medium">{featureCount.toLocaleString()}</p>
-                    </div>
-                  )}
-                  {file.file_metadata?.geometry_type && (
-                    <div>
-                      <p className="text-sm text-muted-foreground mb-1">Geometry Type</p>
-                      <p className="font-medium">{file.file_metadata.geometry_type}</p>
-                    </div>
-                  )}
-                  {file.file_metadata?.bounds && (
-                    <div>
-                      <p className="text-sm text-muted-foreground mb-1">Bounds</p>
-                      <p className="font-mono text-xs">
-                        [{file.file_metadata.bounds.join(", ")}]
-                      </p>
-                    </div>
-                  )}
-                </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {featureCount && (
+            <div>
+              <p className="text-sm text-muted-foreground mb-1">Features</p>
+              <p className="font-medium">{featureCount.toLocaleString()}</p>
+            </div>
+          )}
+          {file.file_metadata?.geometry_type && (
+            <div>
+              <p className="text-sm text-muted-foreground mb-1">
+                Geometry Type
+              </p>
+              <p className="font-medium">{file.file_metadata.geometry_type}</p>
+            </div>
+          )}
+          {file.file_metadata?.bounds && (
+            <div>
+              <p className="text-sm text-muted-foreground mb-1">Bounds</p>
+              <p className="font-mono text-xs">
+                [{file.file_metadata.bounds.join(", ")}]
+              </p>
+            </div>
+          )}
+        </div>
 
-                <Separator />
+        <Separator />
 
-                {/* Filesystem-like format tree */}
-                <FileFormatTree
-                  file={file}
-                  selectedSources={selectedSources}
-                  onSourceChange={(formatType, storageLocationId, version) => {
-                    setSelectedSources((prev) => ({
-                      ...prev,
-                      [formatType]: { storageLocationId, version },
-                    }));
-                  }}
-                  onViewParquet={(url, fileName) => {
-                    setParquetViewer({ url, fileName });
-                  }}
-                  ogcFeaturesUrl={ogcFeaturesUrl}
-                  fullLayerName={fullLayerName}
-                  geopackageUrl={geopackageUrl}
-                  geojsonUrl={geojsonUrl}
-                  shapefileUrl={shapefileUrl}
-                  geoserverExportsEnabled={geoserverExportsEnabled}
-                  pmtilesUrl={pmtilesUrl}
-                  collectionId={collection.id}
-                  collectionSlug={collectionSlug}
-                  datasetSlug={datasetSlug}
-                  fileSlug={fileSlug}
-                />
+        {/* Filesystem-like format tree */}
+        <FileFormatTree
+          file={file}
+          selectedSources={selectedSources}
+          onSourceChange={(formatType, storageLocationId, version) => {
+            setSelectedSources((prev) => ({
+              ...prev,
+              [formatType]: { storageLocationId, version },
+            }));
+          }}
+          onViewParquet={(url, fileName) => {
+            setParquetViewer({ url, fileName });
+          }}
+          ogcFeaturesUrl={ogcFeaturesUrl}
+          fullLayerName={fullLayerName}
+          geopackageUrl={geopackageUrl}
+          geojsonUrl={geojsonUrl}
+          shapefileUrl={shapefileUrl}
+          geoserverExportsEnabled={geoserverExportsEnabled}
+          pmtilesUrl={pmtilesUrl}
+          collectionId={collection.id}
+          collectionSlug={collectionSlug}
+          datasetSlug={datasetSlug}
+          fileSlug={fileSlug}
+        />
 
-                <Separator />
+        <Separator />
 
-                <div className="text-xs text-muted-foreground space-y-1">
-                  <p>Created: {new Date(file.created_at).toLocaleString()}</p>
-                  <p>Updated: {new Date(file.updated_at).toLocaleString()}</p>
-                </div>
-              </div>
+        <div className="text-xs text-muted-foreground space-y-1">
+          <p>Created: {new Date(file.created_at).toLocaleString()}</p>
+          <p>Updated: {new Date(file.updated_at).toLocaleString()}</p>
+        </div>
+      </div>
     </div>
   );
 
@@ -447,4 +454,3 @@ function FileDetailPage() {
     </div>
   );
 }
-

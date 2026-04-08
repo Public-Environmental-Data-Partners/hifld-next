@@ -12,7 +12,15 @@ from pydantic import BaseModel, field_validator, model_validator
 BackendType = Literal["s3", "geoserver"]
 
 # Format type literals
-FormatType = Literal["geoparquet", "pmtiles", "geoserver"]
+FormatType = Literal[
+    "geoparquet",
+    "pmtiles",
+    "geoserver",
+    "geopackage",
+    "shapefile",
+    "geojson",
+    "file_geodatabase",
+]
 
 
 class BucketStorageLocationConfig(BaseModel):
@@ -76,6 +84,22 @@ class ApiLocation(BaseModel):
     method: Optional[str] = None  # HTTP method (default: GET)
 
 
+class ColumnSchema(BaseModel):
+    """Typed column schema derived from data_dictionary.json."""
+
+    name: str
+    type: str
+    description: Optional[str] = None
+    nullable: bool = True
+    num_null_values: Optional[int] = None
+    num_unique_values: Optional[int] = None
+    example_values: Optional[list[str]] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    length: Optional[int] = None
+    possible_values: Optional[list[str]] = None
+
+
 class SpatialDatasetFileMetadata(BaseModel):
     """Pydantic schema for spatial dataset file metadata."""
 
@@ -97,6 +121,7 @@ class SpatialDatasetFileMetadata(BaseModel):
     invalid_geometry_count: Optional[int] = None
     quality_check_passed: Optional[bool] = None
     columns_hash: Optional[str] = None
+    columns: Optional[list[ColumnSchema]] = None
 
 
 class PydanticJSON(TypeDecorator):
@@ -367,7 +392,15 @@ class Format(SQLModel, table=True):
     @classmethod
     def validate_format_type(cls, v: str) -> str:
         """Validate format_type is one of the allowed values."""
-        allowed = ["geoparquet", "pmtiles", "geoserver"]
+        allowed = [
+            "geoparquet",
+            "pmtiles",
+            "geoserver",
+            "geopackage",
+            "shapefile",
+            "geojson",
+            "file_geodatabase",
+        ]
         if v not in allowed:
             raise ValueError(f"format_type must be one of {allowed}, got '{v}'")
         return v

@@ -27,6 +27,7 @@ class Config:
     # Database configuration
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./local.db")
     DATABASE_ECHO: bool = os.getenv("DATABASE_ECHO", "false").lower() == "true"
+    ADMIN_API_KEY: str | None = os.getenv("ADMIN_API_KEY")
 
     @classmethod
     def is_sqlite(cls) -> bool:

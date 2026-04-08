@@ -23,6 +23,22 @@ services:
     networks:
       - hifld-network
 
+  discover-job:
+    build:
+      context: ./dataset-api
+    command: uv run python jobs/discover.py
+    environment:
+      DATASET_API_URL: ${DATASET_API_URL:-http://host.docker.internal:8000}
+      DATASET_API_KEY: ${ADMIN_API_KEY:-}
+      STORAGE_LOCATION_IDS: ${STORAGE_LOCATION_IDS:-}
+      DISCOVER_PREFIX: ${DISCOVER_PREFIX:-}
+      DISCOVER_DRY_RUN: ${DISCOVER_DRY_RUN:-false}
+      DISCOVER_LIMIT: ${DISCOVER_LIMIT:-}
+    profiles:
+      - tools
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
   # PostgreSQL database for GeoServer (optional - comment out if using Cloud SQL or external DB)
   # To use GCP Cloud SQL, comment out this service and configure GeoServer to connect
   # to your Cloud SQL instance using the DB_* environment variables below
