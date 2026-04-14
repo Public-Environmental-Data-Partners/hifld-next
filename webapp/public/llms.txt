@@ -1,0 +1,27 @@
+# HIFLD webapp - agent index
+
+> This site exposes a **public JSON API** for geospatial dataset metadata (collections, datasets, files, sources). Prefer **OpenAPI** and JSON over scraping HTML; the UI is a client-rendered SPA.
+
+## Machine-readable contract
+
+- [OpenAPI 3.1 document](/api/openapi): paths, query parameters (`limit`, `offset`, `omit`, `tag_filters`, etc.), and response shapes including `links` objects.
+
+## Collections
+
+- [List collections](/api/collections): array of collections; each item includes `links.self`.
+- [Collection + datasets](/api/collections/{slug}): paginated envelope. When `limit` is omitted, the server applies a default cap (see OpenAPI). Use `omit=description` to omit long per-row descriptions. Pagination: JSON `links` (`first`, `prev`, `next`, `last`) and optional `Link` response header.
+- [Tag facets](/api/collections/{slug}/datasets/tags): values for building `tag_filters` on the collection datasets route.
+
+## Global dataset views
+
+- [Dataset list](/api/datasets): aggregated across collections (bounded list; see OpenAPI).
+- [Dataset stats](/api/datasets/stats): aggregate counters.
+- [Dataset by id](/api/datasets/{id}): detail for a single dataset id.
+
+## Files and downloads
+
+- File metadata and sources live under `/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/...` (see OpenAPI). Source zip proxy endpoints return `application/zip` on success; errors use `application/problem+json`.
+
+## Upstream
+
+- JSON routes **proxy** a separate **dataset-api** service configured at deploy time (`DATASET_API_URL`). This `llms.txt` describes only routes served from **this origin** (the webapp).

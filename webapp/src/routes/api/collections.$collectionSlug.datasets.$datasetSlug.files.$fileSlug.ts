@@ -4,22 +4,28 @@ import {
   getDatasetBySlug,
   getDatasetFileBySlug,
 } from "@/lib/api-client";
+import { attachDownloadZipLinksToFile } from "@/lib/api-file-sources";
+import {
+  collectionSelf,
+  datasetSelf,
+  fileSelf,
+  requestOrigin,
+} from "@/lib/api-links";
+import { jsonProblem } from "@/lib/api-problem";
 
 export const Route = createFileRoute(
   "/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug"
 )({
   server: {
     handlers: {
-      // GET /api/collections/:collectionSlug/datasets/:datasetSlug/files/:fileSlug - Get file details
-      GET: async ({ params }) => {
+      GET: async ({ params, request }) => {
         const collection = await getCollectionBySlug({
           data: { slug: params.collectionSlug },
         });
         if (!collection) {
-          return Response.json({ error: "Collection not found" }, { status: 404 });
+          return jsonProblem(404, "Collection not found");
         }
 
-        // Try to get dataset to find file ID (for optimization)
         const dataset = await getDatasetBySlug({
           data: {
             collectionSlug: params.collectionSlug,
@@ -28,10 +34,9 @@ export const Route = createFileRoute(
           },
         });
         if (!dataset) {
-          return Response.json({ error: "Dataset not found" }, { status: 404 });
+          return jsonProblem(404, "Dataset not found");
         }
 
-        // Get file by slug (this includes URLs)
         const result = await getDatasetFileBySlug({
           data: {
             collectionSlug: params.collectionSlug,
@@ -40,13 +45,30 @@ export const Route = createFileRoute(
           },
         });
         if (!result) {
-          return Response.json({ error: "File not found" }, { status: 404 });
+          return jsonProblem(404, "File not found");
         }
 
+        const origin = requestOrigin(request);
+        const cs = params.collectionSlug;
+        const ds = params.datasetSlug;
+        const fs = params.fileSlug;
+        const file = attachDownloadZipLinksToFile(
+          result.file,
+          origin,
+          cs,
+          ds,
+          fs
+        );
+
         return Response.json({
+          links: {
+            self: fileSelf(origin, cs, ds, fs),
+            dataset: datasetSelf(origin, cs, ds),
+            collection: collectionSelf(origin, cs),
+          },
           collection,
           dataset: result.dataset,
-          file: result.file,
+          file,
         });
       },
     },

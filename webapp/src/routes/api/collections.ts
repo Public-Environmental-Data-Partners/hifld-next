@@ -1,15 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { getCollections } from "@/lib/api-client";
+import { getCollections, type Collection } from "@/lib/api-client";
+import { collectionSelf, requestOrigin } from "@/lib/api-links";
 
 export const Route = createFileRoute("/api/collections")({
   server: {
     handlers: {
-      // GET /api/collections - Get all collections
-      GET: async () => {
+      GET: async ({ request }) => {
         const collections = await getCollections();
-        return Response.json(collections);
+        const origin = requestOrigin(request);
+        const body = (collections as Collection[]).map((c) => ({
+          ...c,
+          links: { self: collectionSelf(origin, c.slug) },
+        }));
+        return Response.json(body);
       },
     },
   },
 });
-

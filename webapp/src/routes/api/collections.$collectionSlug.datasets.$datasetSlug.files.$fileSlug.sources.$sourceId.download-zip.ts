@@ -1,53 +1,35 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getCollectionBySlug } from "@/lib/api-client";
 import { env } from "@/env/server";
+import { jsonProblem } from "@/lib/api-problem";
 
 export const Route = createFileRoute(
   "/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip"
 )({
   server: {
     handlers: {
-      // GET /api/collections/:collectionSlug/datasets/:datasetSlug/files/:fileSlug/sources/:sourceId/download-zip
-      // Proxies to FastAPI endpoint to download shapefile as zip
       GET: async ({ params, request }) => {
         try {
-          console.log("Download zip request:", params);
-          
-          // Validate DATASET_API_URL is set
           if (!env.DATASET_API_URL) {
-            console.error("DATASET_API_URL environment variable is not set");
-            return new Response(
-              "Server configuration error: DATASET_API_URL is not configured",
-              { 
-                status: 500,
-                headers: { "Content-Type": "text/plain" }
-              }
+            return jsonProblem(
+              500,
+              "Server configuration error",
+              "DATASET_API_URL is not configured"
             );
           }
-          
-          // Get collection to get the ID
+
           const collection = await getCollectionBySlug({
             data: { slug: params.collectionSlug },
           });
           if (!collection) {
-            console.error("Collection not found:", params.collectionSlug);
-            return new Response(
-              `Collection not found: ${params.collectionSlug}`,
-              { 
-                status: 404,
-                headers: { "Content-Type": "text/plain" }
-              }
-            );
+            return jsonProblem(404, "Collection not found");
           }
 
-          // Construct the FastAPI endpoint URL
           const fastApiUrl = `${env.DATASET_API_URL}/api/collections/${collection.id}/datasets/by-slug/${params.datasetSlug}/files/${params.fileSlug}/sources/${params.sourceId}/download-zip`;
-          console.log("Fetching from FastAPI:", fastApiUrl);
 
-          // Fetch from FastAPI with timeout
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout for large files
-          
+          const timeoutId = setTimeout(() => controller.abort(), 300000);
+
           let response: Response;
           try {
             response = await fetch(fastApiUrl, {
@@ -60,93 +42,59 @@ export const Route = createFileRoute(
             clearTimeout(timeoutId);
           } catch (fetchError) {
             clearTimeout(timeoutId);
-            
-            // Handle network errors
-            if (fetchError instanceof Error) {
-              if (fetchError.name === "AbortError") {
-                console.error("Request timeout when fetching from FastAPI:", fastApiUrl);
-                return new Response(
-                  "Request timeout: The download took too long. Please try again.",
-                  { 
-                    status: 504,
-                    headers: { "Content-Type": "text/plain" }
-                  }
-                );
-              }
-              
-              // Check for common network errors
-              const errorMessage = fetchError.message.toLowerCase();
-              if (errorMessage.includes("fetch failed") || 
-                  errorMessage.includes("network") ||
-                  errorMessage.includes("dns") ||
-                  errorMessage.includes("econnrefused") ||
-                  errorMessage.includes("enotfound")) {
-                console.error("Network error when fetching from FastAPI:", fastApiUrl, fetchError.message);
-                return new Response(
-                  `Unable to connect to dataset API. Please check that the service is running and accessible at ${env.DATASET_API_URL}`,
-                  { 
-                    status: 503,
-                    headers: { "Content-Type": "text/plain" }
-                  }
-                );
-              }
+            if (fetchError instanceof Error && fetchError.name === "AbortError") {
+              return jsonProblem(
+                504,
+                "Request timeout",
+                "The download took too long. Please try again."
+              );
             }
-            
-            console.error("Unexpected error when fetching from FastAPI:", fastApiUrl, fetchError);
-            return new Response(
-              `Failed to connect to dataset API: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`,
-              { 
-                status: 500,
-                headers: { "Content-Type": "text/plain" }
-              }
-            );
+            const msg =
+              fetchError instanceof Error ? fetchError.message : String(fetchError);
+            const lower = msg.toLowerCase();
+            if (
+              lower.includes("fetch failed") ||
+              lower.includes("network") ||
+              lower.includes("dns") ||
+              lower.includes("econnrefused") ||
+              lower.includes("enotfound")
+            ) {
+              return jsonProblem(
+                503,
+                "Unable to connect to dataset API",
+                `Check that the service is running at ${env.DATASET_API_URL}`
+              );
+            }
+            return jsonProblem(500, "Failed to connect to dataset API", msg);
           }
 
           if (!response.ok) {
-            let errorText = response.statusText;
-            let errorDetail = "";
+            let detail = response.statusText;
             try {
               const contentType = response.headers.get("content-type") || "";
               if (contentType.includes("application/json")) {
-                const errorJson = await response.json().catch(() => null);
-                if (errorJson && errorJson.detail) {
-                  errorDetail = errorJson.detail;
-                } else if (errorJson) {
-                  errorDetail = JSON.stringify(errorJson);
-                }
+                const errorJson = (await response.json().catch(() => null)) as {
+                  detail?: string;
+                } | null;
+                if (errorJson?.detail) detail = String(errorJson.detail);
+                else if (errorJson) detail = JSON.stringify(errorJson);
               } else {
-                errorText = await response.text().catch(() => response.statusText);
-                errorDetail = errorText;
+                detail = await response.text().catch(() => response.statusText);
               }
-            } catch (e) {
-              console.error("Error reading error response:", e);
+            } catch {
+              /* keep detail */
             }
-            
-            const fullError = errorDetail || errorText;
-            console.error("FastAPI error:", {
-              status: response.status,
-              statusText: response.statusText,
-              error: fullError,
-              url: fastApiUrl
-            });
-            
-            return new Response(
-              `Failed to download zip (${response.status}): ${fullError}`,
-              { 
-                status: response.status,
-                headers: { "Content-Type": "text/plain" }
-              }
+            return jsonProblem(
+              response.status,
+              "Failed to download zip",
+              detail
             );
           }
 
-          // Stream the zip through to the client instead of buffering. Cloud Run has a 32MB
-          // limit for non-streaming responses; streaming uses chunked encoding and avoids that.
           if (!response.body) {
-            return new Response("Empty response from dataset API", {
-              status: 502,
-              headers: { "Content-Type": "text/plain" },
-            });
+            return jsonProblem(502, "Empty response from dataset API");
           }
+
           const contentDisposition =
             response.headers.get("Content-Disposition") ||
             `attachment; filename="${params.datasetSlug}_${params.fileSlug}_shapefile.zip"`;
@@ -154,7 +102,6 @@ export const Route = createFileRoute(
           const filename = filenameMatch
             ? filenameMatch[1]
             : `${params.datasetSlug}_${params.fileSlug}_shapefile.zip`;
-          console.log("Streaming zip to client, filename:", filename);
 
           return new Response(response.body, {
             status: 200,
@@ -164,14 +111,8 @@ export const Route = createFileRoute(
             },
           });
         } catch (error) {
-          console.error("Error proxying zip download:", error);
-          return new Response(
-            `Internal server error: ${error instanceof Error ? error.message : String(error)}`,
-            { 
-              status: 500,
-              headers: { "Content-Type": "text/plain" }
-            }
-          );
+          const msg = error instanceof Error ? error.message : String(error);
+          return jsonProblem(500, "Internal server error", msg);
         }
       },
     },
