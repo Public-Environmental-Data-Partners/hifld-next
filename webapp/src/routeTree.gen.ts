@@ -15,11 +15,13 @@ import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CommonsIndexRouteImport } from './routes/commons.index'
 import { Route as CollectionsIndexRouteImport } from './routes/collections.index'
+import { Route as ApiIndexRouteImport } from './routes/api/index'
 import { Route as AboutIndexRouteImport } from './routes/about.index'
 import { Route as CollectionsSlugRouteImport } from './routes/collections.$slug'
 import { Route as ApiOpenapiRouteImport } from './routes/api/openapi'
 import { Route as ApiDatasetsRouteImport } from './routes/api/datasets'
 import { Route as ApiCollectionsRouteImport } from './routes/api/collections'
+import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as ApiDatasetsStatsRouteImport } from './routes/api/datasets.stats'
 import { Route as ApiDatasetsIdRouteImport } from './routes/api/datasets.$id'
 import { Route as ApiCollectionsSlugRouteImport } from './routes/api/collections.$slug'
@@ -62,6 +64,11 @@ const CollectionsIndexRoute = CollectionsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => CollectionsRoute,
 } as any)
+const ApiIndexRoute = ApiIndexRouteImport.update({
+  id: '/api/',
+  path: '/api/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AboutIndexRoute = AboutIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -85,6 +92,11 @@ const ApiDatasetsRoute = ApiDatasetsRouteImport.update({
 const ApiCollectionsRoute = ApiCollectionsRouteImport.update({
   id: '/api/collections',
   path: '/api/collections',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSplatRoute = ApiSplatRouteImport.update({
+  id: '/api/$',
+  path: '/api/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiDatasetsStatsRoute = ApiDatasetsStatsRouteImport.update({
@@ -168,11 +180,13 @@ export interface FileRoutesByFullPath {
   '/about': typeof AboutRouteWithChildren
   '/collections': typeof CollectionsRouteWithChildren
   '/commons': typeof CommonsRouteWithChildren
+  '/api/$': typeof ApiSplatRoute
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
   '/api/openapi': typeof ApiOpenapiRoute
   '/collections/$slug': typeof CollectionsSlugRoute
   '/about/': typeof AboutIndexRoute
+  '/api': typeof ApiIndexRoute
   '/collections/': typeof CollectionsIndexRoute
   '/commons/': typeof CommonsIndexRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
@@ -189,11 +203,13 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/$': typeof ApiSplatRoute
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
   '/api/openapi': typeof ApiOpenapiRoute
   '/collections/$slug': typeof CollectionsSlugRoute
   '/about': typeof AboutIndexRoute
+  '/api': typeof ApiIndexRoute
   '/collections': typeof CollectionsIndexRoute
   '/commons': typeof CommonsIndexRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
@@ -213,11 +229,13 @@ export interface FileRoutesById {
   '/about': typeof AboutRouteWithChildren
   '/collections': typeof CollectionsRouteWithChildren
   '/commons': typeof CommonsRouteWithChildren
+  '/api/$': typeof ApiSplatRoute
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
   '/api/openapi': typeof ApiOpenapiRoute
   '/collections/$slug': typeof CollectionsSlugRoute
   '/about/': typeof AboutIndexRoute
+  '/api/': typeof ApiIndexRoute
   '/collections/': typeof CollectionsIndexRoute
   '/commons/': typeof CommonsIndexRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
@@ -239,11 +257,13 @@ export interface FileRouteTypes {
     | '/about'
     | '/collections'
     | '/commons'
+    | '/api/$'
     | '/api/collections'
     | '/api/datasets'
     | '/api/openapi'
     | '/collections/$slug'
     | '/about/'
+    | '/api'
     | '/collections/'
     | '/commons/'
     | '/api/collections/$slug'
@@ -260,11 +280,13 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/api/$'
     | '/api/collections'
     | '/api/datasets'
     | '/api/openapi'
     | '/collections/$slug'
     | '/about'
+    | '/api'
     | '/collections'
     | '/commons'
     | '/api/collections/$slug'
@@ -283,11 +305,13 @@ export interface FileRouteTypes {
     | '/about'
     | '/collections'
     | '/commons'
+    | '/api/$'
     | '/api/collections'
     | '/api/datasets'
     | '/api/openapi'
     | '/collections/$slug'
     | '/about/'
+    | '/api/'
     | '/collections/'
     | '/commons/'
     | '/api/collections/$slug'
@@ -308,9 +332,11 @@ export interface RootRouteChildren {
   AboutRoute: typeof AboutRouteWithChildren
   CollectionsRoute: typeof CollectionsRouteWithChildren
   CommonsRoute: typeof CommonsRouteWithChildren
+  ApiSplatRoute: typeof ApiSplatRoute
   ApiCollectionsRoute: typeof ApiCollectionsRouteWithChildren
   ApiDatasetsRoute: typeof ApiDatasetsRouteWithChildren
   ApiOpenapiRoute: typeof ApiOpenapiRoute
+  ApiIndexRoute: typeof ApiIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -357,6 +383,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CollectionsIndexRouteImport
       parentRoute: typeof CollectionsRoute
     }
+    '/api/': {
+      id: '/api/'
+      path: '/api'
+      fullPath: '/api'
+      preLoaderRoute: typeof ApiIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/about/': {
       id: '/about/'
       path: '/'
@@ -390,6 +423,13 @@ declare module '@tanstack/react-router' {
       path: '/api/collections'
       fullPath: '/api/collections'
       preLoaderRoute: typeof ApiCollectionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/$': {
+      id: '/api/$'
+      path: '/api/$'
+      fullPath: '/api/$'
+      preLoaderRoute: typeof ApiSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/datasets/stats': {
@@ -610,9 +650,11 @@ const rootRouteChildren: RootRouteChildren = {
   AboutRoute: AboutRouteWithChildren,
   CollectionsRoute: CollectionsRouteWithChildren,
   CommonsRoute: CommonsRouteWithChildren,
+  ApiSplatRoute: ApiSplatRoute,
   ApiCollectionsRoute: ApiCollectionsRouteWithChildren,
   ApiDatasetsRoute: ApiDatasetsRouteWithChildren,
   ApiOpenapiRoute: ApiOpenapiRoute,
+  ApiIndexRoute: ApiIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
