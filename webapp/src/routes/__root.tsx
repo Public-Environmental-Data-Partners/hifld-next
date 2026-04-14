@@ -35,6 +35,18 @@ export const Route = createRootRoute({
         href: PEDP_FAVICON,
         type: 'image/x-icon',
       },
+      {
+        rel: 'alternate',
+        type: 'application/json',
+        href: '/api',
+        title: 'Public JSON API index',
+      },
+      {
+        rel: 'alternate',
+        type: 'text/markdown',
+        href: '/llms.txt',
+        title: 'Agent-oriented API overview',
+      },
     ],
   }),
 

@@ -7,6 +7,11 @@ import tailwindcss from '@tailwindcss/vite'
 import { nitro } from 'nitro/vite'
 
 const config = defineConfig({
+  // Nitro's node_modules trace copies only part of this package (e.g. dist/index.mjs),
+  // while Node's resolver still targets dist/index.cjs from "main" — breaks Docker/Cloud Run.
+  ssr: {
+    noExternal: ["@asteasolutions/zod-to-openapi"],
+  },
   plugins: [
     devtools(),
     nitro(),

@@ -25,6 +25,20 @@ This project uses [Vitest](https://vitest.dev/) for testing. You can run the tes
 npm run test
 ```
 
+### Public JSON API (local)
+
+The webapp exposes JSON under `/api/...` and proxies [dataset-api](../dataset-api/) using `DATASET_API_URL` (see `src/env/server.ts`). Start **dataset-api** first (from `../dataset-api`, e.g. `uv run uvicorn main:app --reload --port 8000`), then the webapp with `DATASET_API_URL=http://127.0.0.1:8000 npm run dev`.
+
+- **Bootstrap:** `GET /api` (JSON with `links` to OpenAPI, `llms.txt`, collections, and hints for agents).
+- **OpenAPI:** `GET /api/openapi` (machine-readable contract for the webapp routes).
+- **Agent index:** `GET /llms.txt` (markdown directory of API entry points; see [`public/llms.txt`](./public/llms.txt)).
+- **Unknown API paths:** `GET` under `/api` with no matching handler returns **404** `application/problem+json` with `detail` and `links` to `/api`, OpenAPI, and `llms.txt`.
+- **Collection datasets:** `GET /api/collections/{slug}` defaults to **`limit=50`** when `limit` is omitted (no unbounded page). Use `omit=description` to shrink list rows. Pagination URLs are in the JSON `links` object and in the **`Link`** response header where applicable.
+- **Tags:** `GET /api/collections/{slug}/datasets/tags` for facet values to use with `tag_filters`.
+- **Global list/stats:** `GET /api/datasets` aggregates across collections (capped at 200 rows); `GET /api/datasets/stats` sums per-collection stats. Prefer collection-scoped URLs for full catalogs.
+
+Same-origin is the default for browsers; Nitro `routeRules` enable CORS on `/api/**` for cross-origin tooling.
+
 ## Styling
 
 This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.

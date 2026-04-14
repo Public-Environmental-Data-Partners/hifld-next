@@ -1,0 +1,69 @@
+# HIFLD webapp - agent index
+
+> This site exposes a **public JSON API** for geospatial dataset metadata (collections, datasets, files, sources). Prefer **OpenAPI** and JSON over scraping HTML; the UI is a client-rendered SPA.
+
+## Read this first (avoid 404 loops)
+
+1. **[GET /api](/api)** - Bootstrap JSON: `links` to OpenAPI, `llms.txt`, collections, and short `hints` on URL shape.
+2. **[GET /api/openapi](/api/openapi)** - OpenAPI 3.1: every path, query param, and problem response shape.
+3. This API is **not** OGC API-Features or STAC: there is **no** `/items`, `/features`, `/download`, or `/map` on these JSON routes. Dataset paths use **string slugs**, not numeric IDs in the URL (not `/api/collections/hifld/3418`).
+
+## Search and pagination (one place only)
+
+**GET /api/collections/{slug}** is the only route that lists datasets in a collection with text search and paging.
+
+Supported query parameters on that route only:
+
+- `search` or `query` - text filter (do not use `q=` on made-up paths like `.../items`)
+- `tag_filters` - use **[GET /api/collections/{slug}/datasets/tags](/api/collections/hifld/datasets/tags)** to discover values
+- `limit`, `offset` - pagination (`limit` defaults to 50 when omitted)
+- `omit` - e.g. `omit=description` to shrink rows
+- `include_urls` - `true` / `false`
+
+Example (replace host with your origin):
+
+```
+GET /api/collections/hifld?search=wastewater&limit=25&omit=description
+```
+
+Then open one dataset:
+
+```
+GET /api/collections/hifld/datasets/epa-frs-icis-wastewater-treatment-plants
+```
+
+Then file metadata (slug from the dataset JSON):
+
+```
+GET /api/collections/hifld/datasets/epa-frs-icis-wastewater-treatment-plants/files/{fileSlug}
+```
+
+Unknown paths under `/api` return **404** with **application/problem+json** and a `links` object pointing back to `/api`, OpenAPI, and this file.
+
+## Machine-readable contract
+
+- [OpenAPI 3.1 document](/api/openapi): full schema including extended Problem bodies (`instance`, `links`).
+
+## Collections
+
+- [List collections](/api/collections): array of collections; each item includes `links.self`.
+- [Collection + datasets](/api/collections/{slug}): paginated envelope; see "Search and pagination" above.
+- [Tag facets](/api/collections/{slug}/datasets/tags): values for building `tag_filters`.
+
+## Global dataset views
+
+- [Dataset list](/api/datasets): aggregated across collections (capped; see OpenAPI).
+- [Dataset stats](/api/datasets/stats): aggregate counters.
+- [Dataset by id](/api/datasets/{id}): detail for a numeric id (path is `/api/datasets/{id}`, not `/api/collections/.../3418`).
+
+## Files and downloads
+
+- File metadata and sources: `/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}` (see OpenAPI). Use response `links` and source URLs; zip proxy uses `.../sources/{id}/download-zip`. Errors use `application/problem+json`.
+
+## Bulk analysis
+
+For statewide filters or heavy analytics, **download GeoParquet (or other formats) from file metadata** and use **DuckDB**, **GeoPandas**, or similar locally. The HTTP API is for discovery and metadata, not a spatial database.
+
+## Upstream
+
+- JSON routes **proxy** **dataset-api** (`DATASET_API_URL` at deploy time). This file describes routes on **this** origin only.

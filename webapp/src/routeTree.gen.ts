@@ -15,14 +15,18 @@ import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CommonsIndexRouteImport } from './routes/commons.index'
 import { Route as CollectionsIndexRouteImport } from './routes/collections.index'
+import { Route as ApiIndexRouteImport } from './routes/api/index'
 import { Route as AboutIndexRouteImport } from './routes/about.index'
 import { Route as CollectionsSlugRouteImport } from './routes/collections.$slug'
+import { Route as ApiOpenapiRouteImport } from './routes/api/openapi'
 import { Route as ApiDatasetsRouteImport } from './routes/api/datasets'
 import { Route as ApiCollectionsRouteImport } from './routes/api/collections'
+import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as ApiDatasetsStatsRouteImport } from './routes/api/datasets.stats'
 import { Route as ApiDatasetsIdRouteImport } from './routes/api/datasets.$id'
 import { Route as ApiCollectionsSlugRouteImport } from './routes/api/collections.$slug'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug'
+import { Route as ApiCollectionsCollectionSlugDatasetsTagsRouteImport } from './routes/api/collections.$collectionSlug.datasets.tags'
 import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.index'
@@ -60,6 +64,11 @@ const CollectionsIndexRoute = CollectionsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => CollectionsRoute,
 } as any)
+const ApiIndexRoute = ApiIndexRouteImport.update({
+  id: '/api/',
+  path: '/api/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AboutIndexRoute = AboutIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -70,6 +79,11 @@ const CollectionsSlugRoute = CollectionsSlugRouteImport.update({
   path: '/$slug',
   getParentRoute: () => CollectionsRoute,
 } as any)
+const ApiOpenapiRoute = ApiOpenapiRouteImport.update({
+  id: '/api/openapi',
+  path: '/api/openapi',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiDatasetsRoute = ApiDatasetsRouteImport.update({
   id: '/api/datasets',
   path: '/api/datasets',
@@ -78,6 +92,11 @@ const ApiDatasetsRoute = ApiDatasetsRouteImport.update({
 const ApiCollectionsRoute = ApiCollectionsRouteImport.update({
   id: '/api/collections',
   path: '/api/collections',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSplatRoute = ApiSplatRouteImport.update({
+  id: '/api/$',
+  path: '/api/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiDatasetsStatsRoute = ApiDatasetsStatsRouteImport.update({
@@ -100,6 +119,12 @@ const CollectionsCollectionSlugDatasetsDatasetSlugRoute =
     id: '/$collectionSlug/datasets/$datasetSlug',
     path: '/$collectionSlug/datasets/$datasetSlug',
     getParentRoute: () => CollectionsRoute,
+  } as any)
+const ApiCollectionsCollectionSlugDatasetsTagsRoute =
+  ApiCollectionsCollectionSlugDatasetsTagsRouteImport.update({
+    id: '/$collectionSlug/datasets/tags',
+    path: '/$collectionSlug/datasets/tags',
+    getParentRoute: () => ApiCollectionsRoute,
   } as any)
 const ApiCollectionsCollectionSlugDatasetsDatasetSlugRoute =
   ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteImport.update({
@@ -155,10 +180,13 @@ export interface FileRoutesByFullPath {
   '/about': typeof AboutRouteWithChildren
   '/collections': typeof CollectionsRouteWithChildren
   '/commons': typeof CommonsRouteWithChildren
+  '/api/$': typeof ApiSplatRoute
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
+  '/api/openapi': typeof ApiOpenapiRoute
   '/collections/$slug': typeof CollectionsSlugRoute
   '/about/': typeof AboutIndexRoute
+  '/api': typeof ApiIndexRoute
   '/collections/': typeof CollectionsIndexRoute
   '/commons/': typeof CommonsIndexRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
@@ -166,6 +194,7 @@ export interface FileRoutesByFullPath {
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
+  '/api/collections/$collectionSlug/datasets/tags': typeof ApiCollectionsCollectionSlugDatasetsTagsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
@@ -174,10 +203,13 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/$': typeof ApiSplatRoute
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
+  '/api/openapi': typeof ApiOpenapiRoute
   '/collections/$slug': typeof CollectionsSlugRoute
   '/about': typeof AboutIndexRoute
+  '/api': typeof ApiIndexRoute
   '/collections': typeof CollectionsIndexRoute
   '/commons': typeof CommonsIndexRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
@@ -185,6 +217,7 @@ export interface FileRoutesByTo {
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
+  '/api/collections/$collectionSlug/datasets/tags': typeof ApiCollectionsCollectionSlugDatasetsTagsRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
@@ -196,10 +229,13 @@ export interface FileRoutesById {
   '/about': typeof AboutRouteWithChildren
   '/collections': typeof CollectionsRouteWithChildren
   '/commons': typeof CommonsRouteWithChildren
+  '/api/$': typeof ApiSplatRoute
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
+  '/api/openapi': typeof ApiOpenapiRoute
   '/collections/$slug': typeof CollectionsSlugRoute
   '/about/': typeof AboutIndexRoute
+  '/api/': typeof ApiIndexRoute
   '/collections/': typeof CollectionsIndexRoute
   '/commons/': typeof CommonsIndexRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
@@ -207,6 +243,7 @@ export interface FileRoutesById {
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
+  '/api/collections/$collectionSlug/datasets/tags': typeof ApiCollectionsCollectionSlugDatasetsTagsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
@@ -220,10 +257,13 @@ export interface FileRouteTypes {
     | '/about'
     | '/collections'
     | '/commons'
+    | '/api/$'
     | '/api/collections'
     | '/api/datasets'
+    | '/api/openapi'
     | '/collections/$slug'
     | '/about/'
+    | '/api'
     | '/collections/'
     | '/commons/'
     | '/api/collections/$slug'
@@ -231,6 +271,7 @@ export interface FileRouteTypes {
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
+    | '/api/collections/$collectionSlug/datasets/tags'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
@@ -239,10 +280,13 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/api/$'
     | '/api/collections'
     | '/api/datasets'
+    | '/api/openapi'
     | '/collections/$slug'
     | '/about'
+    | '/api'
     | '/collections'
     | '/commons'
     | '/api/collections/$slug'
@@ -250,6 +294,7 @@ export interface FileRouteTypes {
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
+    | '/api/collections/$collectionSlug/datasets/tags'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
@@ -260,10 +305,13 @@ export interface FileRouteTypes {
     | '/about'
     | '/collections'
     | '/commons'
+    | '/api/$'
     | '/api/collections'
     | '/api/datasets'
+    | '/api/openapi'
     | '/collections/$slug'
     | '/about/'
+    | '/api/'
     | '/collections/'
     | '/commons/'
     | '/api/collections/$slug'
@@ -271,6 +319,7 @@ export interface FileRouteTypes {
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
+    | '/api/collections/$collectionSlug/datasets/tags'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
@@ -283,8 +332,11 @@ export interface RootRouteChildren {
   AboutRoute: typeof AboutRouteWithChildren
   CollectionsRoute: typeof CollectionsRouteWithChildren
   CommonsRoute: typeof CommonsRouteWithChildren
+  ApiSplatRoute: typeof ApiSplatRoute
   ApiCollectionsRoute: typeof ApiCollectionsRouteWithChildren
   ApiDatasetsRoute: typeof ApiDatasetsRouteWithChildren
+  ApiOpenapiRoute: typeof ApiOpenapiRoute
+  ApiIndexRoute: typeof ApiIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -331,6 +383,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CollectionsIndexRouteImport
       parentRoute: typeof CollectionsRoute
     }
+    '/api/': {
+      id: '/api/'
+      path: '/api'
+      fullPath: '/api'
+      preLoaderRoute: typeof ApiIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/about/': {
       id: '/about/'
       path: '/'
@@ -345,6 +404,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CollectionsSlugRouteImport
       parentRoute: typeof CollectionsRoute
     }
+    '/api/openapi': {
+      id: '/api/openapi'
+      path: '/api/openapi'
+      fullPath: '/api/openapi'
+      preLoaderRoute: typeof ApiOpenapiRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/datasets': {
       id: '/api/datasets'
       path: '/api/datasets'
@@ -357,6 +423,13 @@ declare module '@tanstack/react-router' {
       path: '/api/collections'
       fullPath: '/api/collections'
       preLoaderRoute: typeof ApiCollectionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/$': {
+      id: '/api/$'
+      path: '/api/$'
+      fullPath: '/api/$'
+      preLoaderRoute: typeof ApiSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/datasets/stats': {
@@ -386,6 +459,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/collections/$collectionSlug/datasets/$datasetSlug'
       preLoaderRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteImport
       parentRoute: typeof CollectionsRoute
+    }
+    '/api/collections/$collectionSlug/datasets/tags': {
+      id: '/api/collections/$collectionSlug/datasets/tags'
+      path: '/$collectionSlug/datasets/tags'
+      fullPath: '/api/collections/$collectionSlug/datasets/tags'
+      preLoaderRoute: typeof ApiCollectionsCollectionSlugDatasetsTagsRouteImport
+      parentRoute: typeof ApiCollectionsRoute
     }
     '/api/collections/$collectionSlug/datasets/$datasetSlug': {
       id: '/api/collections/$collectionSlug/datasets/$datasetSlug'
@@ -536,12 +616,15 @@ const ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren =
 interface ApiCollectionsRouteChildren {
   ApiCollectionsSlugRoute: typeof ApiCollectionsSlugRoute
   ApiCollectionsCollectionSlugDatasetsDatasetSlugRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
+  ApiCollectionsCollectionSlugDatasetsTagsRoute: typeof ApiCollectionsCollectionSlugDatasetsTagsRoute
 }
 
 const ApiCollectionsRouteChildren: ApiCollectionsRouteChildren = {
   ApiCollectionsSlugRoute: ApiCollectionsSlugRoute,
   ApiCollectionsCollectionSlugDatasetsDatasetSlugRoute:
     ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren,
+  ApiCollectionsCollectionSlugDatasetsTagsRoute:
+    ApiCollectionsCollectionSlugDatasetsTagsRoute,
 }
 
 const ApiCollectionsRouteWithChildren = ApiCollectionsRoute._addFileChildren(
@@ -567,8 +650,11 @@ const rootRouteChildren: RootRouteChildren = {
   AboutRoute: AboutRouteWithChildren,
   CollectionsRoute: CollectionsRouteWithChildren,
   CommonsRoute: CommonsRouteWithChildren,
+  ApiSplatRoute: ApiSplatRoute,
   ApiCollectionsRoute: ApiCollectionsRouteWithChildren,
   ApiDatasetsRoute: ApiDatasetsRouteWithChildren,
+  ApiOpenapiRoute: ApiOpenapiRoute,
+  ApiIndexRoute: ApiIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

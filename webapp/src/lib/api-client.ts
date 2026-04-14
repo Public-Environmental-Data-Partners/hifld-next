@@ -167,43 +167,85 @@ export interface Collection {
   updated_at: string;
 }
 
+/** Max rows returned by aggregate global dataset list (no unbounded fetch). */
+const GLOBAL_DATASET_LIST_CAP = 200;
+
 /**
- * Get all datasets across all collections
- * Server function - can be called from loaders or components
+ * List datasets across all collections by paging each collection's API.
+ * Does not call a global /api/datasets on dataset-api (not exposed there).
  */
 export const getDatasets = createServerFn({ method: "GET" })
   .inputValidator((data: { search?: string; includeUrls?: boolean }) => data)
   .handler(async ({ data }) => {
-    const params = new URLSearchParams();
-    if (data.search) params.set("search", data.search);
-    if (data.includeUrls) params.set("include_urls", "true");
-
-    const url = `${env.DATASET_API_URL}/api/datasets${params.toString() ? `?${params}` : ""}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(
-        `Failed to fetch datasets: ${response.status} ${errorText}`
-      );
+    const base = env.DATASET_API_URL;
+    const colRes = await fetch(`${base}/api/collections`);
+    if (!colRes.ok) {
+      const t = await colRes.text().catch(() => colRes.statusText);
+      throw new Error(`Failed to fetch collections: ${colRes.status} ${t}`);
     }
-    return response.json();
+    const collections = (await colRes.json()) as Collection[];
+    const out: DatasetWithUrls[] = [];
+    const pageSize = 50;
+
+    for (const c of collections) {
+      let offset = 0;
+      while (out.length < GLOBAL_DATASET_LIST_CAP) {
+        const params = new URLSearchParams();
+        if (data.search) params.set("search", data.search);
+        if (data.includeUrls) params.set("include_urls", "true");
+        params.set("limit", String(pageSize));
+        params.set("offset", String(offset));
+        const url = `${base}/api/collections/${c.id}/datasets?${params}`;
+        const pageRes = await fetch(url);
+        if (!pageRes.ok) {
+          const t = await pageRes.text().catch(() => pageRes.statusText);
+          throw new Error(
+            `Failed to fetch datasets for collection ${c.id}: ${pageRes.status} ${t}`
+          );
+        }
+        const page = (await pageRes.json()) as PaginatedResponse<DatasetWithUrls>;
+        for (const item of page.items) {
+          out.push(item);
+          if (out.length >= GLOBAL_DATASET_LIST_CAP) {
+            return out;
+          }
+        }
+        if (page.items.length < pageSize) break;
+        if (offset + page.items.length >= page.total) break;
+        offset += pageSize;
+      }
+    }
+    return out;
   });
 
 /**
- * Get a single dataset by ID with optional URLs
- * Note: We need to get the collection ID first, then fetch from collection endpoint
- * For now, we'll use the global endpoint and filter
- * Server function - can be called from loaders or components
+ * Get a single dataset by ID by probing collection-scoped dataset-api routes.
  */
 export const getDatasetById = createServerFn({ method: "GET" })
   .inputValidator((data: { id: number; includeUrls?: boolean }) => data)
   .handler(async ({ data }) => {
-    // Get all datasets and find the one we want
-    const datasets = await getDatasets({
-      data: { includeUrls: data.includeUrls },
-    });
-    const dataset = datasets.find((d: Dataset) => d.id === data.id);
-    return (dataset as DatasetWithUrls) || null;
+    const base = env.DATASET_API_URL;
+    const colRes = await fetch(`${base}/api/collections`);
+    if (!colRes.ok) {
+      const t = await colRes.text().catch(() => colRes.statusText);
+      throw new Error(`Failed to fetch collections: ${colRes.status} ${t}`);
+    }
+    const collections = (await colRes.json()) as Collection[];
+    const suffix = data.includeUrls ? "/urls" : "/files";
+
+    for (const c of collections) {
+      const url = `${base}/api/collections/${c.id}/datasets/${data.id}${suffix}`;
+      const response = await fetch(url);
+      if (response.status === 404) continue;
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => response.statusText);
+        throw new Error(
+          `Failed to fetch dataset: ${response.status} ${errorText}`
+        );
+      }
+      return (await response.json()) as DatasetWithUrls;
+    }
+    return null;
   });
 
 /**
@@ -301,12 +343,21 @@ export const getDatasetFileBySlug = createServerFn({ method: "GET" })
  */
 export const getDatasetStats = createServerFn({ method: "GET" }).handler(
   async () => {
-    const response = await fetch(`${env.DATASET_API_URL}/api/datasets/stats`);
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(`Failed to fetch stats: ${response.status} ${errorText}`);
+    const base = env.DATASET_API_URL;
+    const colRes = await fetch(`${base}/api/collections`);
+    if (!colRes.ok) {
+      const t = await colRes.text().catch(() => colRes.statusText);
+      throw new Error(`Failed to fetch collections: ${colRes.status} ${t}`);
     }
-    return response.json();
+    const collections = (await colRes.json()) as Collection[];
+    let total = 0;
+    for (const c of collections) {
+      const r = await fetch(`${base}/api/collections/${c.id}/datasets/stats`);
+      if (!r.ok) continue;
+      const j = (await r.json()) as { total?: number };
+      total += typeof j.total === "number" ? j.total : 0;
+    }
+    return { total } satisfies DatasetStats;
   }
 );
 
