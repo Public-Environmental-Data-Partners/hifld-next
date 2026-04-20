@@ -5,7 +5,6 @@ import Header from '../components/Header'
 import Footer from '../components/Footer'
 import { PostHogProvider } from '../components/PostHogProvider'
 import { usePageTracking } from '../hooks/usePageTracking'
-import { SurveyButton } from '../components/SurveyButton'
 import { PageLoader } from '../components/ui/page-loader'
 
 const PEDP_FAVICON =
@@ -82,7 +81,6 @@ function RootLayout() {
           <Outlet />
         </main>
         <Footer />
-        <SurveyButton />
       </div>
     </PostHogProvider>
   )

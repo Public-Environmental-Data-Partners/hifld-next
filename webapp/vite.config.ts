@@ -20,7 +20,9 @@ const config = defineConfig({
       projects: ['./tsconfig.json'],
     }),
     tailwindcss(),
-    tanstackStart(),
+    tanstackStart({
+      routeFileIgnorePattern: '(/__tests__/|\\.(test|spec)\\.(ts|tsx)$)',
+    }),
     viteReact(),
   ],
   test: {

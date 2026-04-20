@@ -20,25 +20,30 @@ export default function Header() {
     <>
       <Link
         to="/"
-        className="rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+        className="px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        activeProps={{ className: "px-3 py-2 text-sm font-bold text-foreground" }}
+        activeOptions={{ exact: true }}
       >
         Home
       </Link>
       <Link
         to="/collections"
-        className="rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+        className="px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        activeProps={{ className: "px-3 py-2 text-sm font-bold text-foreground" }}
       >
         Collections
       </Link>
       <Link
         to="/commons"
-        className="rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+        className="px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        activeProps={{ className: "px-3 py-2 text-sm font-bold text-foreground" }}
       >
         Commons
       </Link>
       <Link
         to="/about"
-        className="rounded-md px-3 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+        className="px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        activeProps={{ className: "px-3 py-2 text-sm font-bold text-foreground" }}
       >
         About
       </Link>
@@ -46,7 +51,7 @@ export default function Header() {
   );
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background">
+    <header className="sticky top-0 z-50 w-full border-b-2 bg-background">
       <div className="flex h-14 items-center justify-between px-4 gap-4">
         <div className="flex items-center gap-4 min-w-0">
           <Sheet open={open} onOpenChange={setOpen}>
@@ -103,7 +108,7 @@ export default function Header() {
               alt="Public Environmental Data Partners"
               className="h-8 w-auto object-contain"
             />
-            <span className="font-semibold text-sm sm:text-base truncate">
+            <span className="font-bold text-base sm:text-lg tracking-tight truncate">
               HIFLD Next
             </span>
           </Link>

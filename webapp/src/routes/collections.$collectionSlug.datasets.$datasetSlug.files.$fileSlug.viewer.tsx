@@ -371,28 +371,84 @@ function FileViewerContent({
   legendItems: Array<{ label: string; color: string }>;
   propertyEntries: Array<[string, any]>;
 }) {
-  const [isEditorCollapsed, setIsEditorCollapsed] = useState(false);
+  const isMobileInitial = typeof window !== "undefined" && window.innerWidth < 768;
+  const [isEditorCollapsed, setIsEditorCollapsed] = useState(isMobileInitial);
   const editorPanelRef = useRef<PanelImperativeHandle | null>(null);
 
   const toggleEditorPanel = () => {
     if (!editorPanelRef.current) return;
     if (editorPanelRef.current.isCollapsed()) {
       editorPanelRef.current.expand();
-      setIsEditorCollapsed(false);
     } else {
       editorPanelRef.current.collapse();
-      setIsEditorCollapsed(true);
     }
   };
+
+  const sidebarContent = (
+    <div className="p-4 space-y-4 w-full min-w-0 overflow-hidden [&_[data-slot=select-trigger]]:w-full [&_input]:w-full">
+      <Card className="w-full min-w-0">
+        <CardHeader>
+          <CardTitle className="text-base">PMTiles Source</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {pmtilesFormatEntry ? (
+            <FormatSourceSelector
+              formatType="pmtiles"
+              formatEntry={pmtilesFormatEntry}
+              selectedSource={
+                selectedSources.pmtiles
+                  ? {
+                      storageLocationId: selectedSources.pmtiles.storageLocationId,
+                      version: Number(selectedSources.pmtiles.version),
+                    }
+                  : null
+              }
+              onSourceChange={(storageLocationId, version) => {
+                setSelectedSources((prev) => ({
+                  ...prev,
+                  pmtiles: { storageLocationId, version },
+                }));
+              }}
+            />
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              PMTiles format not available for this file.
+            </div>
+          )}
+          {pmtilesUrl && (
+            <div className="w-full min-w-0 rounded-md border bg-muted/30 px-3 py-2 text-xs break-all">
+              {pmtilesUrl}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <LayerStylingEditor
+        activeLayer={activeLayer}
+        activeStyle={activeStyle}
+        activeBreaks={activeBreaks}
+        activeColors={activeColors}
+        mapRef={mapRef}
+        colorSectionOpen={colorSectionOpen}
+        setColorSectionOpen={setColorSectionOpen}
+        sizeSectionOpen={sizeSectionOpen}
+        setSizeSectionOpen={setSizeSectionOpen}
+        onStyleChange={(style) => {
+          if (activeLayer) {
+            setLayerStyles((prev) => ({
+              ...prev,
+              [activeLayer.id]: style,
+            }));
+          }
+        }}
+      />
+    </div>
+  );
 
   const mapContent = pmtilesUrl ? (
     <div className="relative h-full w-full overflow-hidden">
       <div ref={mapContainerRef} className="h-full w-full" />
-      <MapControls
-        mapRef={mapRef}
-        onToggleEditor={toggleEditorPanel}
-        isEditorCollapsed={isEditorCollapsed}
-      />
+      <MapControls mapRef={mapRef} />
       {hoverInfo && hoverInfo.features.length > 0 && (
         <FeatureHoverPopup
           hoverInfo={hoverInfo}
@@ -427,22 +483,24 @@ function FileViewerContent({
   );
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] w-full flex-col overflow-hidden">
+    <div className="flex h-[calc(100svh-3.5rem)] w-full flex-col overflow-hidden">
       <ViewerHeader
         collectionSlug={collectionSlug}
         datasetSlug={datasetSlug}
         file={file}
         datasetName={dataset.name}
+        onToggleEditor={toggleEditorPanel}
+        isEditorCollapsed={isEditorCollapsed}
       />
-      
+
       <ResizablePanelGroup
         orientation="horizontal"
         className="flex-1 min-h-0 w-full"
       >
         <ResizablePanel
-          defaultSize="34%"
-          minSize="34%"
-          maxSize="50%"
+          defaultSize={isMobileInitial ? "0%" : "34%"}
+          minSize={isMobileInitial ? "75%" : "34%"}
+          maxSize={isMobileInitial ? "90%" : "50%"}
           collapsible
           collapsedSize="0%"
           panelRef={editorPanelRef}
@@ -452,71 +510,14 @@ function FileViewerContent({
           className="min-w-0 flex flex-col overflow-hidden"
         >
           <ScrollArea className="flex-1 overflow-auto">
-            <div className="p-4 space-y-4 w-full min-w-0 overflow-hidden [&_[data-slot=select-trigger]]:w-full [&_input]:w-full">
-              <Card className="w-full min-w-0">
-                <CardHeader>
-                  <CardTitle className="text-base">PMTiles Source</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {pmtilesFormatEntry ? (
-                    <FormatSourceSelector
-                      formatType="pmtiles"
-                      formatEntry={pmtilesFormatEntry}
-                      selectedSource={
-                        selectedSources.pmtiles
-                          ? {
-                              storageLocationId: selectedSources.pmtiles.storageLocationId,
-                              version: Number(selectedSources.pmtiles.version),
-                            }
-                          : null
-                      }
-                      onSourceChange={(storageLocationId, version) => {
-                        setSelectedSources((prev) => ({
-                          ...prev,
-                          pmtiles: { storageLocationId, version },
-                        }));
-                      }}
-                    />
-                  ) : (
-                    <div className="text-sm text-muted-foreground">
-                      PMTiles format not available for this file.
-                    </div>
-                  )}
-                  {pmtilesUrl && (
-                    <div className="w-full min-w-0 rounded-md border bg-muted/30 px-3 py-2 text-xs break-all">
-                      {pmtilesUrl}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <LayerStylingEditor
-                activeLayer={activeLayer}
-                activeStyle={activeStyle}
-                activeBreaks={activeBreaks}
-                activeColors={activeColors}
-                mapRef={mapRef}
-                colorSectionOpen={colorSectionOpen}
-                setColorSectionOpen={setColorSectionOpen}
-                sizeSectionOpen={sizeSectionOpen}
-                setSizeSectionOpen={setSizeSectionOpen}
-                onStyleChange={(style) => {
-                  if (activeLayer) {
-                    setLayerStyles((prev) => ({
-                      ...prev,
-                      [activeLayer.id]: style,
-                    }));
-                  }
-                }}
-              />
-            </div>
+            {sidebarContent}
           </ScrollArea>
         </ResizablePanel>
-        
+
         <ResizableHandle withHandle className="z-20" />
-        
+
         <ResizablePanel
-          defaultSize="70%"
+          defaultSize={isMobileInitial ? "100%" : "66%"}
           className="min-w-0 flex flex-col overflow-hidden"
           onResize={() => {
             mapRef.current?.resize();

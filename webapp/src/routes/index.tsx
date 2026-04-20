@@ -7,14 +7,14 @@ export const Route = createFileRoute("/")({ component: HomePage });
 
 function HomePage() {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center p-4 sm:p-6 lg:p-10">
-      <div className="mx-auto w-full max-w-4xl px-1 sm:px-0">
-        {/* Hero */}
-        <div className="flex flex-col items-center text-center">
-          <h1 className="text-3xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
+    <div>
+      {/* Hero — vertically centered in the viewport */}
+      <div className="flex min-h-[calc(100svh-3.5rem)] flex-col items-center justify-center p-4 sm:p-6 lg:p-10">
+        <div className="mx-auto w-full max-w-4xl px-1 sm:px-0 text-center">
+          <h1 className="text-5xl font-bold tracking-tighter sm:text-7xl lg:text-8xl">
             HIFLD Next
           </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-muted-foreground sm:mt-6 sm:text-lg">
+          <p className="font-serif mx-auto mt-10 max-w-2xl text-base leading-relaxed text-muted-foreground sm:mt-12 sm:text-lg">
             The Public Environmental Data Partners are committed to preserving
             and providing public access to federal infrastructure and
             environmental data. When the original HIFLD Open portal went
@@ -27,15 +27,12 @@ function HomePage() {
             >
               Data Rescue Project
             </a>{" "}
-            archived the repository; this catalog hosts that preserved
-            collection and makes it available in modern formats for research,
-            advocacy, policy, and mapping.
+            archived the repository. This catalog hosts that preserved
+            collection—400+ datasets available in GeoParquet, PMTiles,
+            geodatabase, and other formats—for research, advocacy, policy, and
+            mapping.
           </p>
-          <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-muted-foreground sm:mt-6 sm:text-lg">
-            Data is available in GeoParquet, PMTiles, geodatabase, and other
-            formats. Browse collections to explore and download.
-          </p>
-          <div className="mt-4 sm:mt-6">
+          <div className="mt-10 sm:mt-12">
             <Button asChild size="default" className="sm:h-10 sm:px-6">
               <Link to="/collections">
                 Browse Collections
@@ -43,7 +40,13 @@ function HomePage() {
               </Link>
             </Button>
           </div>
-          <p className="mx-auto mt-8 max-w-2xl text-base leading-relaxed text-muted-foreground sm:mt-10 sm:text-lg">
+        </div>
+      </div>
+
+      {/* Commons — below the fold */}
+      <div className="border-t border-border">
+        <div className="mx-auto max-w-4xl px-4 py-16 sm:px-6 sm:py-24 text-center">
+          <p className="font-serif mx-auto max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
             Alongside the platform, we are forming the{" "}
             <a
               href="/commons"
@@ -54,7 +57,7 @@ function HomePage() {
             —a coalition of mission-driven organizations committed to
             stewarding and expanding the catalog. Stewards:
           </p>
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-6 sm:gap-8">
+          <div className="mt-10 mx-auto grid w-fit grid-cols-2 gap-x-12 gap-y-6">
             <CommonsMemberBanner />
           </div>
         </div>

@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Database, ArrowRight, Folder } from "lucide-react";
+import { Database, Folder } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -26,7 +26,7 @@ function CollectionsListPage() {
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Header */}
         <div className="text-center">
-          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight break-words">Collections</h1>
+          <h1 className="text-4xl font-bold tracking-tighter sm:text-5xl md:text-6xl break-words">Collections</h1>
           <p className="text-base sm:text-lg text-muted-foreground mt-2">
             Browse datasets organized by collection
           </p>
@@ -41,14 +41,12 @@ function CollectionsListPage() {
         {collections && collections.length > 0 ? (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {collections.map((collection) => (
-              <Card
+              <Link
                 key={collection.id}
-                className="cursor-pointer hover:bg-muted/60 transition-colors"
+                to="/collections/$slug"
+                params={{ slug: collection.slug }}
               >
-                <Link
-                  to="/collections/$slug"
-                  params={{ slug: collection.slug }}
-                >
+                <Card className="cursor-pointer hover:bg-muted/60 transition-colors h-full">
                   <CardHeader>
                     <div className="flex items-center gap-2 mb-2 min-w-0">
                       <Folder className="h-5 w-5 text-muted-foreground shrink-0" />
@@ -62,16 +60,8 @@ function CollectionsListPage() {
                       </CardDescription>
                     )}
                   </CardHeader>
-                  <CardContent>
-                    <Button variant="ghost" className="w-full" asChild>
-                      <span>
-                        View Datasets
-                        <ArrowRight className="ml-2 h-4 w-4" />
-                      </span>
-                    </Button>
-                  </CardContent>
-                </Link>
-              </Card>
+                </Card>
+              </Link>
             ))}
           </div>
         ) : (

@@ -12,7 +12,7 @@ export const Route = createFileRoute("/about/")({
 
 function AboutPage() {
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
+    <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6 sm:py-20">
       <Button variant="ghost" size="sm" asChild className="mb-6 -ml-1">
         <Link to="/">
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -20,11 +20,11 @@ function AboutPage() {
         </Link>
       </Button>
 
-      <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+      <h1 className="text-4xl font-bold tracking-tighter sm:text-5xl">
         HIFLD Next: Resilient Public Data Infrastructure for America’s Infrastructure Datasets
       </h1>
 
-      <p className="mt-4 text-lg font-medium text-muted-foreground">
+      <p className="font-serif mt-10 text-lg text-muted-foreground">
         Public Environmental Data Partners and Fulton Ring are launching a new hub for GIS infrastructure data that the federal government stopped producing for the public—restoring access and building a more resilient ecosystem for the future.
       </p>
 
@@ -51,26 +51,26 @@ function AboutPage() {
       </section>
 
       {/* Background: HIFLD Open */}
-      <section className="mt-12">
-        <h2 className="text-xl font-semibold tracking-tight">
+      <section className="mt-32 border-t border-border pt-16">
+        <h2 className="text-2xl font-bold tracking-tight">
           Background: What was HIFLD Open?
         </h2>
-        <div className="mt-4 space-y-4 text-muted-foreground">
-          <p className="leading-relaxed">
+        <div className="mt-8 space-y-4 text-muted-foreground">
+          <p className="font-serif leading-relaxed">
             Before its shutdown, <strong className="text-foreground">HIFLD Open</strong> was a public data portal known as Homeland Infrastructure Foundation-Level Data (HIFLD). Managed by the Department of Homeland Security (DHS), it was a convenient place to access several agencies’ data on critical infrastructure—power substations, nursing homes, water-treatment plants, and more.
           </p>
-          <p className="leading-relaxed">
+          <p className="font-serif leading-relaxed">
             Built after 9/11, federal civil servants and contractors began curating data on America’s most important infrastructure. Prior to that, agencies’ and state governments’ data was everywhere and nowhere: on hard drives, buried in long email chains, copied to DVDs. The result was a shared, authoritative point of reference—finally, everyone was on the same page, or map.
           </p>
-          <p className="leading-relaxed">
+          <p className="font-serif leading-relaxed">
             After DHS took down HIFLD Open, multiple grassroots efforts successfully archived the most recent versions of its data layers. HIFLD Next sources its archive from the Data Rescue Project, which captured a full snapshot of 400-plus HIFLD Open data layers and their associated metadata before the portal was taken offline.
           </p>
         </div>
       </section>
 
       {/* What HIFLD Next offers */}
-      <section className="mt-12">
-        <h2 className="text-xl font-semibold tracking-tight">
+      <section className="mt-32 border-t border-border pt-16">
+        <h2 className="text-2xl font-bold tracking-tight">
           What HIFLD Next offers
         </h2>
         <p className="mt-3 text-muted-foreground">
@@ -97,12 +97,12 @@ function AboutPage() {
       </section>
 
       {/* The Commons */}
-      <section className="mt-12">
-        <h2 className="text-xl font-semibold tracking-tight">
+      <section className="mt-32 border-t border-border pt-16">
+        <h2 className="text-2xl font-bold tracking-tight">
           The HIFLD Next Commons
         </h2>
-        <div className="mt-4 space-y-4 text-muted-foreground">
-          <p className="leading-relaxed">
+        <div className="mt-8 space-y-4 text-muted-foreground">
+          <p className="font-serif leading-relaxed">
             Alongside the platform launch, we are forming the{" "}
             <Link to="/commons" className="font-medium text-foreground underline underline-offset-2 hover:no-underline">
               HIFLD Next Commons
@@ -113,27 +113,27 @@ function AboutPage() {
       </section>
 
       {/* Future plans */}
-      <section className="mt-12">
-        <h2 className="text-xl font-semibold tracking-tight">
+      <section className="mt-32 border-t border-border pt-16">
+        <h2 className="text-2xl font-bold tracking-tight">
           Future plans
         </h2>
-        <div className="mt-4 space-y-4 text-muted-foreground">
-          <p className="leading-relaxed">
+        <div className="mt-8 space-y-4 text-muted-foreground">
+          <p className="font-serif leading-relaxed">
             This is just the beginning. HIFLD Next shows how civil society can support the future stewardship of open infrastructure data through open approaches. It’s open data infrastructure for open infrastructure data—fueling research, innovation, and decisions with countless ramifications for the environment, community resilience, and everyday life.
           </p>
-          <p className="leading-relaxed">
+          <p className="font-serif leading-relaxed">
             We will continue to improve the platform through use, critique, and collaboration—evolving to meet the shifting needs of data users and stakeholders.
           </p>
         </div>
       </section>
 
       {/* How to get involved */}
-      <section className="mt-12">
-        <h2 className="text-xl font-semibold tracking-tight">
+      <section className="mt-32 border-t border-border pt-16">
+        <h2 className="text-2xl font-bold tracking-tight">
           How to get involved
         </h2>
-        <div className="mt-4 space-y-4 text-muted-foreground">
-          <p className="leading-relaxed">
+        <div className="mt-8 space-y-4 text-muted-foreground">
+          <p className="font-serif leading-relaxed">
             HIFLD Next will improve through use, critique, and collaboration. We encourage you to:
           </p>
           <ul className="list-disc space-y-2 pl-6">
@@ -141,7 +141,7 @@ function AboutPage() {
             <li>Share your use cases with us</li>
             <li>Send feedback so we can improve the platform</li>
           </ul>
-          <p className="leading-relaxed">
+          <p className="font-serif leading-relaxed">
             We are extending an open invitation to organizations that have a stake in these data layers and want to contribute funding, data, or other resources. If your organization is interested in joining the HIFLD Next Commons as a steward or partner, we’d like to hear from you.
           </p>
         </div>

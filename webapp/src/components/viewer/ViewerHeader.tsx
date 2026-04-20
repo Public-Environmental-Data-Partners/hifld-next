@@ -1,4 +1,4 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, PanelLeft } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -9,6 +9,8 @@ interface ViewerHeaderProps {
   datasetSlug: string;
   file: DatasetFile;
   datasetName: string;
+  onToggleEditor?: () => void;
+  isEditorCollapsed?: boolean;
 }
 
 export function ViewerHeader({
@@ -16,6 +18,8 @@ export function ViewerHeader({
   datasetSlug,
   file,
   datasetName,
+  onToggleEditor,
+  isEditorCollapsed,
 }: ViewerHeaderProps) {
   return (
     <div className="flex items-center gap-4 px-4 py-3 border-b bg-background shrink-0">
@@ -42,6 +46,17 @@ export function ViewerHeader({
           {file.name || file.slug}
         </span>
       </div>
+      {onToggleEditor && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onToggleEditor}
+          title={isEditorCollapsed ? "Show settings" : "Hide settings"}
+        >
+          <PanelLeft className="h-4 w-4" />
+          {isEditorCollapsed ? "Settings" : "Hide"}
+        </Button>
+      )}
     </div>
   );
 }

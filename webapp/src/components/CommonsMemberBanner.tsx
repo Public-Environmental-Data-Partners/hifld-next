@@ -40,18 +40,17 @@ function MemberLogo({
       className="flex flex-col items-center gap-2 transition-opacity hover:opacity-80"
       title={member.name}
     >
-      {!imgError ? (
+      {!imgError && (
         <img
           src={member.logo}
           alt=""
           className={`shrink-0 object-contain object-center ${imgClass}`}
           onError={() => setImgError(true)}
         />
-      ) : (
-        <span className="text-center text-xs font-medium text-muted-foreground sm:text-sm">
-          {member.name}
-        </span>
       )}
+      <span className="text-center text-xs text-muted-foreground">
+        {member.name}
+      </span>
     </a>
   );
 }

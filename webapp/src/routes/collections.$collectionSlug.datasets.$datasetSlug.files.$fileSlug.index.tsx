@@ -304,7 +304,7 @@ function FileDetailPage() {
                     )}
                   </div>
                   <div className="flex flex-col gap-2 min-w-0 sm:min-w-[200px]">
-                    <Button variant="outline" asChild className="font-mono w-full sm:w-auto">
+                    <Button variant="outline" asChild className="font-mono w-full">
                       <a
                         href={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}`}
                         target="_blank"
@@ -313,32 +313,28 @@ function FileDetailPage() {
                         View Metadata
                       </a>
                     </Button>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Button asChild className="flex-1 sm:flex-initial min-w-0">
-                        <Link
-                          to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer"
-                          params={{
-                            collectionSlug,
-                            datasetSlug,
-                            fileSlug,
-                          }}
-                        >
-                          <span className="hidden sm:inline">Open Map Viewer</span>
-                          <span className="sm:hidden">Map Viewer</span>
-                        </Link>
+                    <Button asChild className="w-full">
+                      <Link
+                        to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer"
+                        params={{
+                          collectionSlug,
+                          datasetSlug,
+                          fileSlug,
+                        }}
+                      >
+                        Map Viewer
+                      </Link>
+                    </Button>
+                    {firstParquetFile && (
+                      <Button
+                        variant="outline"
+                        onClick={() => setParquetViewer(firstParquetFile)}
+                        className="w-full"
+                      >
+                        <Table className="h-4 w-4 mr-2 shrink-0" />
+                        Data Table
                       </Button>
-                      {firstParquetFile && (
-                        <Button
-                          variant="outline"
-                          onClick={() => setParquetViewer(firstParquetFile)}
-                          className="flex-1 sm:flex-initial min-w-0"
-                        >
-                          <Table className="h-4 w-4 sm:mr-2 shrink-0" />
-                          <span className="hidden sm:inline">Open Data Table</span>
-                          <span className="sm:hidden">Data Table</span>
-                        </Button>
-                      )}
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
