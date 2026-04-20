@@ -4,21 +4,20 @@ FROM node:20-slim AS builder
 # Set working directory
 WORKDIR /app
 
-# Build-time args (do not set NODE_ENV=production before npm install — npm would skip
-# devDependencies, but vite.config.ts imports @tanstack/devtools-vite and Vite lives in devDependencies.)
-ARG NODE_ENV=production
-
-# Client-side environment variables (VITE_PUBLIC_*), embedded at `vite build`
-ARG VITE_PUBLIC_DATASET_API_URL=""
-ARG VITE_PUBLIC_POSTHOG_KEY=""
-ARG VITE_PUBLIC_POSTHOG_HOST="https://us.i.posthog.com"
-
 # Copy package files first (for better layer caching)
 COPY package.json ./
 COPY package-lock.json* ./
 
-# Install dependencies (includes devDependencies: vite, @tanstack/devtools-vite, etc.)
+# Install ALL dependencies (dev + prod). ARG/ENV NODE_ENV must NOT be set to production
+# before this step — npm skips devDependencies when NODE_ENV=production, which breaks
+# the build because vite.config.ts imports @tanstack/devtools-vite (a devDependency).
 RUN npm install
+
+# Declare build-time args AFTER install so they don't affect the npm install environment.
+ARG NODE_ENV=production
+ARG VITE_PUBLIC_DATASET_API_URL=""
+ARG VITE_PUBLIC_POSTHOG_KEY=""
+ARG VITE_PUBLIC_POSTHOG_HOST="https://us.i.posthog.com"
 
 ENV NODE_ENV=${NODE_ENV}
 ENV VITE_PUBLIC_DATASET_API_URL=${VITE_PUBLIC_DATASET_API_URL}
