@@ -4,37 +4,30 @@ FROM node:20-slim AS builder
 # Set working directory
 WORKDIR /app
 
-# Accept build arguments for environment variables
+# Build-time args (do not set NODE_ENV=production before npm install — npm would skip
+# devDependencies, but vite.config.ts imports @tanstack/devtools-vite and Vite lives in devDependencies.)
 ARG NODE_ENV=production
 
-# Client-side environment variables (VITE_PUBLIC_*)
-# These are embedded in the client bundle at build time by Vite
+# Client-side environment variables (VITE_PUBLIC_*), embedded at `vite build`
 ARG VITE_PUBLIC_DATASET_API_URL=""
 ARG VITE_PUBLIC_POSTHOG_KEY=""
 ARG VITE_PUBLIC_POSTHOG_HOST="https://us.i.posthog.com"
-
-# Set environment variables at build time (before compilation)
-# These will be available during the build process
-ENV NODE_ENV=${NODE_ENV}
-ENV VITE_PUBLIC_DATASET_API_URL=${VITE_PUBLIC_DATASET_API_URL}
-ENV VITE_PUBLIC_POSTHOG_KEY=${VITE_PUBLIC_POSTHOG_KEY}
-ENV VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST}
 
 # Copy package files first (for better layer caching)
 COPY package.json ./
 COPY package-lock.json* ./
 
-# Install dependencies
-# Using npm install for better compatibility across platforms
-# npm ci can fail if lock file was generated on different platform/Node version
+# Install dependencies (includes devDependencies: vite, @tanstack/devtools-vite, etc.)
 RUN npm install
+
+ENV NODE_ENV=${NODE_ENV}
+ENV VITE_PUBLIC_DATASET_API_URL=${VITE_PUBLIC_DATASET_API_URL}
+ENV VITE_PUBLIC_POSTHOG_KEY=${VITE_PUBLIC_POSTHOG_KEY}
+ENV VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST}
 
 # Copy source code
 COPY . .
 
-# Build the application
-# VITE_PUBLIC_* variables are embedded in the client bundle at build time
-# These are passed as build args and set as ENV variables above
 RUN npm run build
 
 # Production stage
