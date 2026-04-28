@@ -57,6 +57,23 @@ registry.registerPath({
 
 registry.registerPath({
   method: "get",
+  path: "/api/health",
+  summary: "Liveness / health",
+  description: "Returns JSON suitable for RFC 9727 API catalog status links.",
+  responses: {
+    200: {
+      description: "OK",
+      content: {
+        "application/json": {
+          schema: z.object({ status: z.literal("ok") }),
+        },
+      },
+    },
+  },
+});
+
+registry.registerPath({
+  method: "get",
   path: "/api/collections",
   summary: "List collections",
   responses: {
