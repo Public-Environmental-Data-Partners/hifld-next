@@ -2,8 +2,34 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CommonsMemberBanner } from "@/components/CommonsMemberBanner";
+import {
+  discoveryLinkHeaderValue,
+  homePageMarkdown,
+} from "@/lib/agent-discovery";
 
-export const Route = createFileRoute("/")({ component: HomePage });
+export const Route = createFileRoute("/")({
+  component: HomePage,
+  server: {
+    handlers: {
+      GET: async ({ request, next }) => {
+        const accept = request.headers.get("accept") ?? "";
+        const wantsMarkdown =
+          /\btext\/markdown\b/i.test(accept) && !/\btext\/html\b/i.test(accept);
+        if (wantsMarkdown) {
+          const origin = new URL(request.url).origin;
+          return new Response(homePageMarkdown(origin), {
+            headers: {
+              "Content-Type": "text/markdown; charset=utf-8",
+              Link: discoveryLinkHeaderValue(),
+              "Cache-Control": "public, max-age=300",
+            },
+          });
+        }
+        return next();
+      },
+    },
+  },
+});
 
 function HomePage() {
   return (

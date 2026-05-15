@@ -39,6 +39,13 @@ The webapp exposes JSON under `/api/...` and proxies [dataset-api](../dataset-ap
 
 Same-origin is the default for browsers; Nitro `routeRules` enable CORS on `/api/**` for cross-origin tooling.
 
+### Crawler and agent discovery (HTTP)
+
+- **`GET /`** includes an RFC 8288 **`Link`** response header pointing at `/api`, `/api/openapi`, `/llms.txt`, and `/.well-known/api-catalog`.
+- **`Accept: text/markdown`** on **`GET /`** (without `text/html`) returns a short markdown homepage instead of the SPA shell (for tools like “Markdown negotiation” probes).
+- **`GET /sitemap.xml`** and **`GET /robots.txt`** are generated per-origin (`robots.txt` lists **`Sitemap: {origin}/sitemap.xml`**).
+- **`GET /.well-known/api-catalog`** returns JSON linking to OpenAPI and **`GET /api`**.
+
 ## Styling
 
 This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
