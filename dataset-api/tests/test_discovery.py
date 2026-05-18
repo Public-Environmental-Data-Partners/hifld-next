@@ -1,20 +1,15 @@
 import asyncio
 import importlib
 import json
+import logging
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from fastapi.testclient import TestClient
-from httpx import ASGITransport, AsyncClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config import config
-from api import admin as admin_api
 from models.dataset import (
     BucketStorageLocationConfig,
     ColumnSchema,
@@ -28,8 +23,8 @@ from models.dataset import (
     StorageLocation,
 )
 from scripts.seed_formats import DEFAULT_FORMATS, seed_formats
+from services.catalog_ingest import CatalogIngestService
 from services.discovery import DiscoveredVersion, DiscoveryService
-from services.datasets import DatasetService
 
 
 class FakeStorageClient:
@@ -111,38 +106,37 @@ def make_storage_files() -> dict[str, bytes]:
                 "type": "INTEGER",
                 "description": "Population estimate",
                 "nullable": True,
-                "num_null_values": 1,
+                "numNullValues": 1,
+                "numUniqueValues": 11,
+                "exampleValues": ["10", "20"],
+                "possibleValues": ["10", "20", "30"],
             },
         ]
     }
 
     return {
-        "test-dataset/test-dataset/v20260101/geoparquet/test-dataset-0.parquet": b"parquet-v1",
-        "test-dataset/test-dataset/v20260101/pmtiles/tiles.pmtiles": b"pmtiles-v1",
-        "test-dataset/test-dataset/v20260101/metadata/quality_manifest.json": json.dumps(
+        "test-dataset/test-dataset/v1.0.0/geoparquet/test-dataset-0.parquet": b"parquet-v1",
+        "test-dataset/test-dataset/v1.0.0/pmtiles/tiles.pmtiles": b"pmtiles-v1",
+        "test-dataset/test-dataset/v1.0.0/metadata/quality_manifest.json": json.dumps(
             quality_manifest_v1
         ).encode("utf-8"),
-        "test-dataset/test-dataset/v20260101/metadata/data_dictionary.json": json.dumps(
+        "test-dataset/test-dataset/v1.0.0/metadata/data_dictionary.json": json.dumps(
             data_dictionary_v1
         ).encode("utf-8"),
-        "test-dataset/test-dataset/v20260214/geoparquet/test-dataset-0.parquet": b"parquet-v2",
-        "test-dataset/test-dataset/v20260214/pmtiles/tiles.pmtiles": b"pmtiles-v2",
-        "test-dataset/test-dataset/v20260214/metadata/quality_manifest.json": json.dumps(
+        "test-dataset/test-dataset/v1.1.0/geoparquet/test-dataset-0.parquet": b"parquet-v2",
+        "test-dataset/test-dataset/v1.1.0/geoparquet/test-dataset-1.parquet": b"parquet-v2-part2",
+        "test-dataset/test-dataset/v1.1.0/pmtiles/tiles.pmtiles": b"pmtiles-v2",
+        "test-dataset/test-dataset/v1.1.0/metadata/quality_manifest.json": json.dumps(
             quality_manifest_v2
         ).encode("utf-8"),
-        "test-dataset/test-dataset/v20260214/metadata/data_dictionary.json": json.dumps(
+        "test-dataset/test-dataset/v1.1.0/metadata/data_dictionary.json": json.dumps(
             data_dictionary_v2
         ).encode("utf-8"),
+        "test-dataset/test-dataset/v20260214/geoparquet/legacy.parquet": b"legacy",
+        "metadata-only/metadata-only/v1.0.0/metadata/quality_manifest.json": b"{}",
+        "too/short/geoparquet/file.parquet": b"short",
+        "test-dataset/test-dataset/v1.1.0/unknown_format/file.bin": b"unknown",
     }
-
-
-def make_admin_test_client(monkeypatch, session: Session, api_key: str | None) -> TestClient:
-    monkeypatch.setattr(config, "ADMIN_API_KEY", api_key, raising=False)
-
-    app = FastAPI()
-    app.include_router(admin_api.router)
-    app.dependency_overrides[admin_api.get_dataset_service] = lambda: DatasetService(session)
-    return TestClient(app)
 
 
 def test_spatial_dataset_file_metadata_uses_typed_columns():
@@ -193,78 +187,55 @@ def test_discovery_service_yields_discovered_versions():
     latest_geoparquet = next(
         item
         for item in discovered_versions
-        if item.version == "v20260214" and item.format_type == "geoparquet"
+        if item.version == "v1.1.0" and item.format_type == "geoparquet"
     )
-    assert latest_geoparquet.location_path.endswith("test-dataset-0.parquet")
+    assert latest_geoparquet.location_path.endswith("*.parquet")
+    assert latest_geoparquet.object_paths == [
+        "test-dataset/test-dataset/v1.1.0/geoparquet/test-dataset-0.parquet",
+        "test-dataset/test-dataset/v1.1.0/geoparquet/test-dataset-1.parquet",
+    ]
     assert latest_geoparquet.metadata is not None
     assert latest_geoparquet.metadata.columns is not None
     assert latest_geoparquet.metadata.columns[1].description == "Population estimate"
+    assert latest_geoparquet.metadata.columns[1].num_null_values == 1
+    assert latest_geoparquet.metadata.columns[1].num_unique_values == 11
+    assert latest_geoparquet.metadata.columns[1].example_values == ["10", "20"]
+    assert latest_geoparquet.metadata.columns[1].possible_values == ["10", "20", "30"]
+    assert latest_geoparquet.dataset_description == "Dataset description"
+    assert {item.version for item in discovered_versions} == {"v1.0.0", "v1.1.0"}
 
 
-def test_admin_storage_location_requires_api_key_when_configured(monkeypatch):
+def test_discovery_service_ignores_non_semver_and_metadata_only_groups():
+    fake_storage = FakeStorageClient(make_storage_files())
+    service = DiscoveryService(storage_client=fake_storage)
+
+    async def collect_versions() -> list[DiscoveredVersion]:
+        return [item async for item in service.scan()]
+
+    discovered_versions = asyncio.run(collect_versions())
+
+    assert all(item.version != "v20260214" for item in discovered_versions)
+    assert all(item.dataset_slug != "metadata-only" for item in discovered_versions)
+    assert all(item.format_type != "unknown_format" for item in discovered_versions)
+
+
+def test_catalog_ingest_preview_does_not_write():
     with make_session() as session:
         storage_location = make_storage_location()
         session.add(storage_location)
         session.commit()
         session.refresh(storage_location)
-        client = make_admin_test_client(monkeypatch, session, api_key="secret-key")
+        ingest = CatalogIngestService(session)
 
-        response = client.get(f"/api/admin/storage-locations/{storage_location.id}")
-        assert response.status_code == 403
-
-        response = client.get(
-            f"/api/admin/storage-locations/{storage_location.id}",
-            headers={"X-API-Key": "wrong-key"},
+        result = ingest.preview_discovered_version(
+            storage_location_id=storage_location.id,
+            dataset_slug="test-dataset",
+            file_slug="test-dataset",
+            format_type="geoparquet",
+            version="v1.0.0",
         )
-        assert response.status_code == 403
 
-        response = client.get(
-            f"/api/admin/storage-locations/{storage_location.id}",
-            headers={"X-API-Key": "secret-key"},
-        )
-        assert response.status_code == 200
-        assert response.json()["id"] == storage_location.id
-
-
-def test_admin_get_storage_location_allows_requests_when_api_key_unset(monkeypatch):
-    with make_session() as session:
-        storage_location = make_storage_location()
-        session.add(storage_location)
-        session.commit()
-        session.refresh(storage_location)
-        client = make_admin_test_client(monkeypatch, session, api_key=None)
-
-        response = client.get(f"/api/admin/storage-locations/{storage_location.id}")
-        assert response.status_code == 200
-        assert response.json()["id"] == storage_location.id
-
-
-def test_admin_create_version_dry_run_does_not_write(monkeypatch):
-    with make_session() as session:
-        storage_location = make_storage_location()
-        session.add(storage_location)
-        session.commit()
-        session.refresh(storage_location)
-        client = make_admin_test_client(monkeypatch, session, api_key="secret-key")
-
-        response = client.post(
-            (
-                f"/api/admin/storage-locations/{storage_location.id}"
-                "/datasets/test-dataset/files/test-dataset/formats/geoparquet/versions"
-            ),
-            headers={"X-API-Key": "secret-key"},
-            json={
-                "version": "v20260214",
-                "location_path": "test-dataset/test-dataset/v20260214/geoparquet/test-dataset-0.parquet",
-                "source_metadata": {
-                    "version": "v1",
-                    "feature_count": 12,
-                },
-                "dry_run": True,
-            },
-        )
-        assert response.status_code == 200
-        assert response.json() == {
+        assert result.model_dump() == {
             "created": True,
             "dry_run": True,
             "file_source_id": None,
@@ -273,34 +244,27 @@ def test_admin_create_version_dry_run_does_not_write(monkeypatch):
         assert session.exec(select(FileSource)).all() == []
 
 
-def test_admin_create_version_writes_and_deduplicates(monkeypatch):
+def test_catalog_ingest_upserts_discovered_version():
     with make_session() as session:
         storage_location = make_storage_location()
         session.add(storage_location)
         session.commit()
         session.refresh(storage_location)
-        client = make_admin_test_client(monkeypatch, session, api_key="secret-key")
+        ingest = CatalogIngestService(session)
 
-        create_response = client.post(
-            (
-                f"/api/admin/storage-locations/{storage_location.id}"
-                "/datasets/test-dataset/files/test-dataset/formats/geoparquet/versions"
-            ),
-            headers={"X-API-Key": "secret-key"},
-            json={
-                "version": "v20260214",
-                "location_path": "test-dataset/test-dataset/v20260214/geoparquet/test-dataset-0.parquet",
-                "source_metadata": {
-                    "version": "v1",
-                    "feature_count": 12,
-                },
-            },
+        create_result = ingest.upsert_discovered_version(
+            storage_location_id=storage_location.id,
+            dataset_slug="test-dataset",
+            file_slug="test-dataset",
+            format_type="geoparquet",
+            version="v1.0.0",
+            location_path="test-dataset/test-dataset/v1.0.0/geoparquet/test-dataset-0.parquet",
+            source_metadata=SpatialDatasetFileMetadata(version="v1", feature_count=12),
+            dataset_description="Dataset description",
         )
-        assert create_response.status_code == 200
-        create_payload = create_response.json()
-        assert create_payload["created"] is True
-        assert create_payload["dry_run"] is False
-        assert isinstance(create_payload["file_source_id"], int)
+        assert create_result.created is True
+        assert create_result.dry_run is False
+        assert isinstance(create_result.file_source_id, int)
 
         dataset = session.exec(select(Dataset).where(Dataset.slug == "test-dataset")).one()
         collection = session.exec(select(Collection).where(Collection.slug == "hifld")).one()
@@ -309,50 +273,50 @@ def test_admin_create_version_writes_and_deduplicates(monkeypatch):
         file_source = session.exec(select(FileSource).where(FileSource.file_format_id == file_format.id)).one()
 
         assert dataset.collection_id == collection.id
+        assert dataset.description == "Dataset description"
         assert file_obj.slug == "test-dataset"
-        assert file_source.version == "v20260214"
+        assert file_source.version == "v1.0.0"
         assert file_source.source_metadata is not None
 
-        duplicate_response = client.post(
-            (
-                f"/api/admin/storage-locations/{storage_location.id}"
-                "/datasets/test-dataset/files/test-dataset/formats/geoparquet/versions"
+        upsert_result = ingest.upsert_discovered_version(
+            storage_location_id=storage_location.id,
+            dataset_slug="test-dataset",
+            file_slug="test-dataset",
+            format_type="geoparquet",
+            version="v1.0.0",
+            location_path="test-dataset/test-dataset/v1.0.0/geoparquet/test-dataset-updated.parquet",
+            source_metadata=SpatialDatasetFileMetadata(
+                version="v1",
+                feature_count=24,
+                geometry_type="Polygon",
             ),
-            headers={"X-API-Key": "secret-key"},
-            json={
-                "version": "v20260214",
-                "location_path": "test-dataset/test-dataset/v20260214/geoparquet/test-dataset-0.parquet",
-            },
         )
-        assert duplicate_response.status_code == 200
-        assert duplicate_response.json() == {
-            "created": False,
-            "dry_run": False,
-            "file_source_id": file_source.id,
-        }
+        assert upsert_result.created is False
+        assert upsert_result.dry_run is False
+        assert upsert_result.file_source_id == file_source.id
 
+        session.refresh(file_source)
         assert len(session.exec(select(FileSource)).all()) == 1
-
-
-def test_admin_old_versions_path_is_removed(monkeypatch):
-    with make_session() as session:
-        storage_location = make_storage_location()
-        session.add(storage_location)
-        session.commit()
-        session.refresh(storage_location)
-        client = make_admin_test_client(monkeypatch, session, api_key="secret-key")
-
-        response = client.post(
-            "/api/admin/storage-locations/1/versions",
-            headers={"X-API-Key": "secret-key"},
-            json={},
+        location_path = (
+            file_source.location["path"]
+            if isinstance(file_source.location, dict)
+            else file_source.location.path
         )
-        assert response.status_code == 404
+        assert (
+            location_path
+            == "test-dataset/test-dataset/v1.0.0/geoparquet/test-dataset-updated.parquet"
+        )
+        assert file_source.source_metadata is not None
+        metadata = (
+            file_source.source_metadata
+            if isinstance(file_source.source_metadata, dict)
+            else file_source.source_metadata.model_dump()
+        )
+        assert metadata["feature_count"] == 24
+        assert metadata["geometry_type"] == "Polygon"
 
 
 def test_discover_job_loads_required_env_vars(monkeypatch):
-    monkeypatch.setenv("DATASET_API_URL", "https://dataset-api.example.com")
-    monkeypatch.setenv("DATASET_API_KEY", "secret-key")
     monkeypatch.setenv("STORAGE_LOCATION_IDS", "6, 7")
     monkeypatch.setenv("DISCOVER_PREFIX", "foo/bar")
     monkeypatch.setenv("DISCOVER_DRY_RUN", "true")
@@ -361,207 +325,223 @@ def test_discover_job_loads_required_env_vars(monkeypatch):
     discover_job = importlib.import_module("jobs.discover")
     config = discover_job.load_config_from_env()
 
-    assert config.dataset_api_url == "https://dataset-api.example.com"
-    assert config.dataset_api_key == "secret-key"
     assert config.storage_location_ids == [6, 7]
     assert config.discover_prefix == "foo/bar"
     assert config.discover_dry_run is True
     assert config.discover_limit == 5
 
 
-def test_discover_job_fetches_storage_location_scans_and_posts_versions(monkeypatch):
+def test_discover_job_loads_storage_location_scans_and_upserts_versions(monkeypatch):
     discover_job = importlib.import_module("jobs.discover")
-    captured_get_requests: list[tuple[int, str | None]] = []
-    captured_post_requests: list[tuple[str, str | None, dict[str, object]]] = []
 
-    storage_location = make_storage_location()
-    storage_location.id = 6
+    with make_session() as session:
+        storage_location = make_storage_location()
+        session.add(storage_location)
+        session.commit()
+        session.refresh(storage_location)
 
-    class FakeScanner:
-        def __init__(self, storage_client):
-            self.storage_client = storage_client
+        class FakeScanner:
+            def __init__(self, storage_client):
+                self.storage_client = storage_client
 
-        async def scan(self, prefix: str = "", limit: int | None = None):
-            yield DiscoveredVersion(
-                dataset_slug="test-dataset",
-                file_slug="test-dataset",
-                version="v20260214",
-                format_type="geoparquet",
-                location_path="test-dataset/test-dataset/v20260214/geoparquet/test-dataset-0.parquet",
-                metadata=SpatialDatasetFileMetadata(version="v1", feature_count=12),
-            )
-            yield DiscoveredVersion(
-                dataset_slug="test-dataset",
-                file_slug="test-dataset",
-                version="v20260214",
-                format_type="pmtiles",
-                location_path="test-dataset/test-dataset/v20260214/pmtiles/tiles.pmtiles",
-                metadata=None,
-            )
+            async def scan(self, prefix: str = "", limit: int | None = None):
+                assert prefix == "foo/bar"
+                assert limit == 5
+                yield DiscoveredVersion(
+                    dataset_slug="test-dataset",
+                    file_slug="test-dataset",
+                    version="v1.0.0",
+                    format_type="geoparquet",
+                    location_path="test-dataset/test-dataset/v1.0.0/geoparquet/test-dataset-0.parquet",
+                    object_paths=[
+                        "test-dataset/test-dataset/v1.0.0/geoparquet/test-dataset-0.parquet"
+                    ],
+                    metadata=SpatialDatasetFileMetadata(version="v1", feature_count=12),
+                )
+                yield DiscoveredVersion(
+                    dataset_slug="test-dataset",
+                    file_slug="test-dataset",
+                    version="v1.0.0",
+                    format_type="pmtiles",
+                    location_path="test-dataset/test-dataset/v1.0.0/pmtiles/tiles.pmtiles",
+                    object_paths=[
+                        "test-dataset/test-dataset/v1.0.0/pmtiles/tiles.pmtiles"
+                    ],
+                    metadata=None,
+                )
 
-    fake_storage_client = object()
-    monkeypatch.setattr(discover_job, "DiscoveryService", FakeScanner)
-    monkeypatch.setattr(
-        discover_job,
-        "create_storage_client_from_location",
-        lambda _: fake_storage_client,
-    )
-
-    app = FastAPI()
-
-    @app.get("/api/admin/storage-locations/{storage_location_id}")
-    async def get_storage_location_endpoint(storage_location_id: int, request: Request):
-        captured_get_requests.append(
-            (
-                storage_location_id,
-                request.headers.get("x-api-key"),
-            )
+        fake_storage_client = object()
+        monkeypatch.setattr(discover_job, "DiscoveryService", FakeScanner)
+        monkeypatch.setattr(
+            discover_job,
+            "create_storage_client_from_location",
+            lambda _: fake_storage_client,
         )
-        return storage_location.model_dump()
 
-    @app.post(
-        "/api/admin/storage-locations/{storage_location_id}/datasets/{dataset_slug}/files/{file_slug}/formats/{format_type}/versions"
-    )
-    async def create_version_endpoint(
-        storage_location_id: int,
-        dataset_slug: str,
-        file_slug: str,
-        format_type: str,
-        payload: dict[str, object],
-        request: Request,
-    ):
-        captured_post_requests.append(
-            (
-                f"{storage_location_id}:{dataset_slug}:{file_slug}:{format_type}",
-                request.headers.get("x-api-key"),
-                payload,
-            )
-        )
-        return {"created": True, "dry_run": False, "file_source_id": storage_location_id}
-
-    async def run_test() -> int:
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="https://dataset-api.example.com",
-        ) as client:
-            return await discover_job.run_job(
+        exit_code = asyncio.run(
+            discover_job.run_job(
                 discover_job.DiscoverJobConfig(
-                    dataset_api_url="https://dataset-api.example.com",
-                    dataset_api_key="secret-key",
-                    storage_location_ids=[6],
+                    storage_location_ids=[storage_location.id],
                     discover_prefix="foo/bar",
-                    discover_dry_run=True,
+                    discover_dry_run=False,
                     discover_limit=5,
                 ),
-                client=client,
+                db_session=session,
             )
+        )
 
-    exit_code = asyncio.run(run_test())
+        assert exit_code == 0
+        assert session.exec(select(Dataset).where(Dataset.slug == "test-dataset")).one()
+        assert len(session.exec(select(FileSource)).all()) == 2
+
+
+def test_discover_job_logs_dry_run_object_paths_and_summary(monkeypatch, caplog):
+    discover_job = importlib.import_module("jobs.discover")
+    with make_session() as session:
+        storage_location = make_storage_location()
+        session.add(storage_location)
+        session.commit()
+        session.refresh(storage_location)
+
+        class FakeScanner:
+            def __init__(self, storage_client):
+                self.storage_client = storage_client
+
+            async def scan(self, prefix: str = "", limit: int | None = None):
+                yield DiscoveredVersion(
+                    dataset_slug="test-dataset",
+                    file_slug="test-dataset",
+                    version="v1.0.0",
+                    format_type="geoparquet",
+                    location_path="test-dataset/test-dataset/v1.0.0/geoparquet/*.parquet",
+                    object_paths=[
+                        "test-dataset/test-dataset/v1.0.0/geoparquet/part-0.parquet",
+                        "test-dataset/test-dataset/v1.0.0/geoparquet/part-1.parquet",
+                    ],
+                    metadata_object_paths=[
+                        "test-dataset/test-dataset/v1.0.0/metadata/quality_manifest.json",
+                        "test-dataset/test-dataset/v1.0.0/metadata/data_dictionary.json",
+                    ],
+                    metadata=SpatialDatasetFileMetadata(
+                        version="v1",
+                        feature_count=12,
+                        columns=[{"name": "id", "type": "INTEGER"}],
+                    ),
+                )
+
+        monkeypatch.setattr(discover_job, "DiscoveryService", FakeScanner)
+        monkeypatch.setattr(
+            discover_job, "create_storage_client_from_location", lambda _: object()
+        )
+
+        with caplog.at_level(logging.INFO, logger=discover_job.logger.name):
+            exit_code = asyncio.run(
+                discover_job.run_job(
+                    discover_job.DiscoverJobConfig(
+                        storage_location_ids=[storage_location.id],
+                        discover_dry_run=True,
+                    ),
+                    db_session=session,
+                )
+            )
 
     assert exit_code == 0
-    assert captured_get_requests == [
-        (
-            6,
-            "secret-key",
-        ),
+    assert session.exec(select(FileSource)).all() == []
+    log_payloads = [json.loads(record.message) for record in caplog.records]
+    discovery_log = next(item for item in log_payloads if item["event"] == "dataset_discovery")
+    assert discovery_log["dry_run"] is True
+    assert discovery_log["would_write"] is True
+    assert discovery_log["request_payload"] == {
+        "version": "v1.0.0",
+        "location_path": "test-dataset/test-dataset/v1.0.0/geoparquet/*.parquet",
+        "source_metadata": {
+            "version": "v1",
+            "size_bytes": None,
+            "mime_type": None,
+            "feature_count": 12,
+            "bounds": None,
+            "geometry_type": None,
+            "invalid_geometry_count": None,
+            "quality_check_passed": None,
+            "columns_hash": None,
+            "columns": [
+                {
+                    "name": "id",
+                    "type": "INTEGER",
+                    "description": None,
+                    "nullable": True,
+                    "num_null_values": None,
+                    "num_unique_values": None,
+                    "example_values": None,
+                    "min": None,
+                    "max": None,
+                    "length": None,
+                    "possible_values": None,
+                }
+            ],
+        },
+        "dry_run": True,
+    }
+    assert discovery_log["location_path"].endswith("*.parquet")
+    assert discovery_log["source_object_count"] == 2
+    assert discovery_log["object_paths"] == [
+        "test-dataset/test-dataset/v1.0.0/geoparquet/part-0.parquet",
+        "test-dataset/test-dataset/v1.0.0/geoparquet/part-1.parquet",
     ]
-    assert captured_post_requests == [
-        (
-            "6:test-dataset:test-dataset:geoparquet",
-            "secret-key",
-            {
-                "version": "v20260214",
-                "location_path": "test-dataset/test-dataset/v20260214/geoparquet/test-dataset-0.parquet",
-                "source_metadata": {
-                    "version": "v1",
-                    "size_bytes": None,
-                    "mime_type": None,
-                    "feature_count": 12,
-                    "bounds": None,
-                    "geometry_type": None,
-                    "invalid_geometry_count": None,
-                    "quality_check_passed": None,
-                    "columns_hash": None,
-                    "columns": None,
-                },
-                "dry_run": True,
-            },
-        ),
-        (
-            "6:test-dataset:test-dataset:pmtiles",
-            "secret-key",
-            {
-                "version": "v20260214",
-                "location_path": "test-dataset/test-dataset/v20260214/pmtiles/tiles.pmtiles",
-                "source_metadata": None,
-                "dry_run": True,
-            },
-        ),
-    ]
+    assert discovery_log["has_quality_metadata"] is True
+    assert discovery_log["has_data_dictionary"] is True
+
+    summary_log = next(
+        item for item in log_payloads if item["event"] == "dataset_discovery_summary"
+    )
+    assert summary_log["discovered_versions"] == 1
+    assert summary_log["source_objects"] == 2
+    assert summary_log["metadata_records"] == 1
+    assert summary_log["metadata_objects"] == 2
+    assert summary_log["format_counts"] == {"geoparquet": 1}
+    assert summary_log["written_versions"] == 0
 
 
-def test_discover_job_returns_one_when_fetch_or_create_fails(monkeypatch):
+def test_discover_job_returns_one_when_storage_location_or_write_fails(monkeypatch):
     discover_job = importlib.import_module("jobs.discover")
 
-    class FakeScanner:
-        def __init__(self, storage_client):
-            self.storage_client = storage_client
-
-        async def scan(self, prefix: str = "", limit: int | None = None):
-            yield DiscoveredVersion(
-                dataset_slug="test-dataset",
-                file_slug="test-dataset",
-                version="v20260214",
-                format_type="geoparquet",
-                location_path="test-dataset/test-dataset/v20260214/geoparquet/test-dataset-0.parquet",
-                metadata=None,
-            )
-
-    monkeypatch.setattr(discover_job, "DiscoveryService", FakeScanner)
-    monkeypatch.setattr(
-        discover_job,
-        "create_storage_client_from_location",
-        lambda _: object(),
-    )
-
-    app = FastAPI()
-
-    @app.get("/api/admin/storage-locations/{storage_location_id}")
-    async def get_storage_location_endpoint(storage_location_id: int):
-        if storage_location_id == 7:
-            return JSONResponse(
-                status_code=500,
-                content={"detail": "boom"},
-            )
+    with make_session() as session:
         storage_location = make_storage_location()
-        storage_location.id = storage_location_id
-        return storage_location.model_dump()
+        session.add(storage_location)
+        session.commit()
+        session.refresh(storage_location)
 
-    @app.post(
-        "/api/admin/storage-locations/{storage_location_id}/datasets/{dataset_slug}/files/{file_slug}/formats/{format_type}/versions"
-    )
-    async def create_version_endpoint(storage_location_id: int):
-        if storage_location_id == 6:
-            return JSONResponse(
-                status_code=500,
-                content={"detail": "boom"},
-            )
-        return {"created": True, "dry_run": False, "file_source_id": storage_location_id}
+        class FakeScanner:
+            def __init__(self, storage_client):
+                self.storage_client = storage_client
 
-    async def run_test() -> int:
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="https://dataset-api.example.com",
-        ) as client:
-            return await discover_job.run_job(
+            async def scan(self, prefix: str = "", limit: int | None = None):
+                yield DiscoveredVersion(
+                    dataset_slug="test-dataset",
+                    file_slug="test-dataset",
+                    version="v1.0.0",
+                    format_type="geoparquet",
+                    location_path="test-dataset/test-dataset/v1.0.0/geoparquet/test-dataset-0.parquet",
+                    object_paths=[
+                        "test-dataset/test-dataset/v1.0.0/geoparquet/test-dataset-0.parquet"
+                    ],
+                    metadata=None,
+                )
+
+        monkeypatch.setattr(discover_job, "DiscoveryService", FakeScanner)
+        monkeypatch.setattr(
+            discover_job,
+            "create_storage_client_from_location",
+            lambda _: object(),
+        )
+
+        exit_code = asyncio.run(
+            discover_job.run_job(
                 discover_job.DiscoverJobConfig(
-                    dataset_api_url="https://dataset-api.example.com",
-                    dataset_api_key="secret-key",
-                    storage_location_ids=[6, 7],
+                    storage_location_ids=[storage_location.id, 999999],
                 ),
-                client=client,
+                db_session=session,
             )
-
-    exit_code = asyncio.run(run_test())
+        )
 
     assert exit_code == 1

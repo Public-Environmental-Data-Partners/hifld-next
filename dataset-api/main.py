@@ -15,7 +15,6 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from database.db import init_db
-from api import admin as admin_router
 from api import collections as collections_router
 from api import datasets as datasets_router
 from api import geoserver as geoserver_router
@@ -141,7 +140,6 @@ app.add_middleware(
 app.include_router(collections_router.router)  # GET only
 app.include_router(datasets_router.router)  # GET only, nested under collections
 app.include_router(geoserver_router.router)  # GeoServer proxy endpoints
-app.include_router(admin_router.router)
 # Processing router removed - use scripts/import_datasets.py for dataset ingestion
 
 

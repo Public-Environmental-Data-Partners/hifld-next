@@ -271,6 +271,7 @@ class Dataset(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+# TODO: rename "File" to "Layer"
 class File(SQLModel, table=True):
     """
     File model representing a file (or layer) within a dataset.

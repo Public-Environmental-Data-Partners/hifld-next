@@ -2,15 +2,17 @@
 
 import json
 import logging
+import re
 import tempfile
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 from models.dataset import SpatialDatasetFileMetadata
 
 logger = logging.getLogger(__name__)
+SEMVER_VERSION_RE = re.compile(r"^v\d+\.\d+\.\d+$")
 
 KNOWN_FORMATS = {
     "geoparquet",
@@ -30,7 +32,10 @@ class DiscoveredVersion:
     version: str
     format_type: str
     location_path: str
+    object_paths: list[str]
     metadata: Optional[SpatialDatasetFileMetadata]
+    metadata_object_paths: list[str] = field(default_factory=list)
+    dataset_description: Optional[str] = None
 
 
 class DiscoveryService:
@@ -39,21 +44,21 @@ class DiscoveryService:
     def __init__(self, storage_client: Any):
         self.storage_client = storage_client
 
-    async def scan(self, prefix: str = "", limit: Optional[int] = None) -> AsyncIterator[DiscoveredVersion]:
+    async def scan(
+        self, prefix: str = "", limit: Optional[int] = None
+    ) -> AsyncIterator[DiscoveredVersion]:
         files = await self.storage_client.list_files(prefix)
         grouped: dict[tuple[str, str, str], dict[str, list[str]]] = defaultdict(
             lambda: defaultdict(list)
         )
 
         for path in files:
-            parts = [part for part in path.split("/") if part]
-            if len(parts) < 4:
+            parsed = self._parse_discovery_path(path)
+            if not parsed:
                 continue
 
-            dataset_slug, file_slug, version = parts[0], parts[1], parts[2]
-            group_name = parts[3]
-            if group_name == "metadata" or group_name in KNOWN_FORMATS:
-                grouped[(dataset_slug, file_slug, version)][group_name].append(path)
+            dataset_slug, file_slug, version, group_name = parsed
+            grouped[(dataset_slug, file_slug, version)][group_name].append(path)
 
         yielded = 0
         for dataset_slug, file_slug, version in sorted(grouped):
@@ -61,7 +66,8 @@ class DiscoveryService:
                 break
 
             group = grouped[(dataset_slug, file_slug, version)]
-            metadata = await self._load_metadata(group.get("metadata", []))
+            metadata_paths = sorted(group.get("metadata", []))
+            metadata_result = await self._load_metadata(metadata_paths)
             formats = sorted(fmt for fmt in group.keys() if fmt in KNOWN_FORMATS)
 
             for format_type in formats:
@@ -79,12 +85,32 @@ class DiscoveryService:
                     version=version,
                     format_type=format_type,
                     location_path=self._build_location_path(format_type, format_files),
-                    metadata=metadata,
+                    object_paths=format_files,
+                    metadata=metadata_result.metadata,
+                    metadata_object_paths=metadata_paths,
+                    dataset_description=metadata_result.dataset_description,
                 )
 
-    async def _load_metadata(
-        self, metadata_paths: list[str]
-    ) -> Optional[SpatialDatasetFileMetadata]:
+    def _parse_discovery_path(
+        self, path: str
+    ) -> Optional[tuple[str, str, str, str]]:
+        parts = [part for part in path.split("/") if part]
+        if len(parts) < 5:
+            return None
+
+        dataset_slug, file_slug, version, group_name = parts[:4]
+        if not SEMVER_VERSION_RE.match(version):
+            return None
+        if group_name != "metadata" and group_name not in KNOWN_FORMATS:
+            return None
+        return dataset_slug, file_slug, version, group_name
+
+    @dataclass(slots=True)
+    class MetadataResult:
+        metadata: Optional[SpatialDatasetFileMetadata]
+        dataset_description: Optional[str]
+
+    async def _load_metadata(self, metadata_paths: list[str]) -> MetadataResult:
         quality_manifest = await self._read_json_from_candidates(
             metadata_paths, "quality_manifest.json"
         )
@@ -93,7 +119,7 @@ class DiscoveryService:
         )
 
         if not quality_manifest and not data_dictionary:
-            return None
+            return self.MetadataResult(metadata=None, dataset_description=None)
 
         metadata_payload: dict[str, Any] = {}
         if quality_manifest:
@@ -123,7 +149,12 @@ class DiscoveryService:
         if "version" not in metadata_payload:
             metadata_payload["version"] = "v1"
 
-        return SpatialDatasetFileMetadata(**metadata_payload)
+        return self.MetadataResult(
+            metadata=SpatialDatasetFileMetadata(**metadata_payload),
+            dataset_description=self._extract_dataset_description(
+                quality_manifest, data_dictionary
+            ),
+        )
 
     async def _read_json_from_candidates(
         self, metadata_paths: list[str], filename: str
@@ -139,13 +170,46 @@ class DiscoveryService:
             await self.storage_client.download_file(remote_path, local_path)
             return json.loads(local_path.read_text(encoding="utf-8"))
 
-    def _extract_columns(self, data_dictionary: Optional[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _extract_columns(
+        self, data_dictionary: Optional[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         if not data_dictionary:
             return []
         columns = data_dictionary.get("columns", data_dictionary)
         if isinstance(columns, list):
-            return [column for column in columns if isinstance(column, dict)]
+            return [
+                self._normalize_column(column)
+                for column in columns
+                if isinstance(column, dict)
+            ]
         return []
+
+    def _normalize_column(self, column: dict[str, Any]) -> dict[str, Any]:
+        aliases = {
+            "numNullValues": "num_null_values",
+            "numUniqueValues": "num_unique_values",
+            "exampleValues": "example_values",
+            "possibleValues": "possible_values",
+        }
+        normalized = dict(column)
+        for source_key, target_key in aliases.items():
+            if source_key in normalized and target_key not in normalized:
+                normalized[target_key] = normalized[source_key]
+            normalized.pop(source_key, None)
+        return normalized
+
+    def _extract_dataset_description(
+        self,
+        quality_manifest: Optional[dict[str, Any]],
+        data_dictionary: Optional[dict[str, Any]],
+    ) -> Optional[str]:
+        for metadata in (quality_manifest, data_dictionary):
+            if not metadata:
+                continue
+            description = metadata.get("description")
+            if isinstance(description, str) and description.strip():
+                return description.strip()
+        return None
 
     def _build_location_path(self, format_type: str, format_files: list[str]) -> str:
         first_path = format_files[0]

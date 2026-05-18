@@ -11,6 +11,7 @@ import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import quote
 
 import httpx
 import gcsfs
@@ -308,35 +309,40 @@ class SeaweedFSFilerClient(StorageClient):
 
     async def list_files(self, prefix: str) -> List[str]:
         """List all files in SeaweedFS with the given prefix recursively."""
-        try:
-            import s3fs
+        clean_prefix = prefix.strip("/")
+        start_path = self._get_filer_path(clean_prefix).rstrip("/") + "/"
+        bucket_prefix = f"/buckets/{self.bucket}/"
+        files: List[str] = []
+        pending = [start_path]
 
-            clean_prefix = prefix.lstrip("/")
-            full_prefix = f"s3://{self.bucket}/{clean_prefix}" if clean_prefix else f"s3://{self.bucket}"
-            fs = s3fs.S3FileSystem(
-                client_kwargs={"endpoint_url": self.s3_url},
-                key="",
-                secret="",
-            )
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            while pending:
+                current_path = pending.pop()
+                encoded_path = quote(current_path, safe="/")
+                url = f"{self.filer_url}{encoded_path}?limit=10000"
+                response = await client.get(url, headers={"Accept": "application/json"})
+                if response.status_code == 404:
+                    continue
+                response.raise_for_status()
 
-            def _find():
-                return fs.find(full_prefix, detail=False)
+                for entry in response.json().get("Entries") or []:
+                    full_path = str(entry.get("FullPath", "")).rstrip("/")
+                    if not full_path:
+                        continue
+                    if self._is_filer_directory(entry):
+                        pending.append(f"{full_path}/")
+                        continue
+                    if full_path.startswith(bucket_prefix):
+                        files.append(full_path[len(bucket_prefix) :])
 
-            loop = asyncio.get_event_loop()
-            found_paths = await loop.run_in_executor(None, _find)
+        return sorted(files)
 
-            cleaned_files = []
-            for file_path in found_paths:
-                while file_path.startswith(f"{self.bucket}/"):
-                    file_path = file_path[len(f"{self.bucket}/") :]
-                file_path = file_path.lstrip("/")
-                if file_path and not file_path.endswith("/"):
-                    cleaned_files.append(file_path)
-
-            return cleaned_files
-        except Exception as e:
-            logger.warning(f"Error listing SeaweedFS files recursively: {e}")
-            return []
+    def _is_filer_directory(self, entry: dict) -> bool:
+        return (
+            not entry.get("Mime")
+            and not entry.get("Md5")
+            and int(entry.get("FileSize") or 0) == 0
+        )
 
     def parse_url_to_path(self, url: str) -> Optional[str]:
         """Parse a SeaweedFS URL to extract the relative path."""

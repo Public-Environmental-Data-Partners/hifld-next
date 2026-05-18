@@ -1,15 +1,18 @@
-"""Cloud Run Job entrypoint for triggering dataset discovery via the dataset API."""
+"""Cloud Run Job entrypoint for discovering datasets into the catalog database."""
 
 import asyncio
 import json
 import logging
 import os
+from collections import Counter
 from dataclasses import dataclass
 from typing import Mapping
 
-import httpx
+from sqlmodel import Session
 
-from models.dataset import StorageLocation
+from database.db import get_db_session
+from services.catalog_ingest import CatalogIngestService
+from services.datasets import DatasetService
 from services.discovery import DiscoveryService
 from storage.storage_client import create_storage_client_from_location
 
@@ -18,8 +21,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class DiscoverJobConfig:
-    dataset_api_url: str
-    dataset_api_key: str
     storage_location_ids: list[int]
     discover_prefix: str = ""
     discover_dry_run: bool = False
@@ -45,14 +46,6 @@ def parse_bool(raw_value: str | None) -> bool:
 def load_config_from_env(env: Mapping[str, str] | None = None) -> DiscoverJobConfig:
     env_map = env or os.environ
 
-    dataset_api_url = env_map.get("DATASET_API_URL")
-    if not dataset_api_url:
-        raise ValueError("DATASET_API_URL is required")
-
-    dataset_api_key = env_map.get("DATASET_API_KEY")
-    if not dataset_api_key:
-        raise ValueError("DATASET_API_KEY is required")
-
     storage_location_ids_raw = env_map.get("STORAGE_LOCATION_IDS")
     if not storage_location_ids_raw:
         raise ValueError("STORAGE_LOCATION_IDS is required")
@@ -61,8 +54,6 @@ def load_config_from_env(env: Mapping[str, str] | None = None) -> DiscoverJobCon
     discover_limit = int(discover_limit_raw) if discover_limit_raw else None
 
     return DiscoverJobConfig(
-        dataset_api_url=dataset_api_url.rstrip("/"),
-        dataset_api_key=dataset_api_key,
         storage_location_ids=parse_storage_location_ids(storage_location_ids_raw),
         discover_prefix=env_map.get("DISCOVER_PREFIX", ""),
         discover_dry_run=parse_bool(env_map.get("DISCOVER_DRY_RUN")),
@@ -70,28 +61,11 @@ def load_config_from_env(env: Mapping[str, str] | None = None) -> DiscoverJobCon
     )
 
 
-def build_headers(config: DiscoverJobConfig) -> dict[str, str]:
-    return {"X-API-Key": config.dataset_api_key}
-
-
-async def fetch_storage_location(
-    storage_location_id: int,
-    config: DiscoverJobConfig,
-    client: httpx.AsyncClient,
-) -> StorageLocation:
-    response = await client.get(
-        f"/api/admin/storage-locations/{storage_location_id}",
-        headers=build_headers(config),
-    )
-    response.raise_for_status()
-    return StorageLocation(**response.json())
-
-
-def build_create_version_payload(
+def build_discovered_version_payload(
     config: DiscoverJobConfig,
     discovered_version,
 ) -> dict[str, object]:
-    return {
+    payload = {
         "version": discovered_version.version,
         "location_path": discovered_version.location_path,
         "source_metadata": (
@@ -101,28 +75,39 @@ def build_create_version_payload(
         ),
         "dry_run": config.discover_dry_run,
     }
+    if discovered_version.dataset_description:
+        payload["dataset_description"] = discovered_version.dataset_description
+    return payload
 
 
 async def run_job(
     config: DiscoverJobConfig,
-    client: httpx.AsyncClient | None = None,
+    db_session: Session | None = None,
 ) -> int:
-    owns_client = client is None
-    http_client = client or httpx.AsyncClient(
-        base_url=config.dataset_api_url,
-        timeout=httpx.Timeout(300.0),
-    )
+    owns_session = db_session is None
+    db = db_session or get_db_session()
+    dataset_service = DatasetService(db)
+    ingest_service = CatalogIngestService(db)
 
     has_failures = False
+    discovered_versions_count = 0
+    source_objects_count = 0
+    metadata_records_count = 0
+    metadata_object_paths: set[str] = set()
+    format_counts: Counter[str] = Counter()
+    format_source_object_counts: Counter[str] = Counter()
+    written_versions_count = 0
 
     try:
         for storage_location_id in config.storage_location_ids:
             try:
-                storage_location = await fetch_storage_location(
-                    storage_location_id,
-                    config,
-                    http_client,
+                storage_location = dataset_service.get_storage_location(
+                    storage_location_id
                 )
+                if not storage_location:
+                    raise ValueError(
+                        f"Storage location {storage_location_id} not found"
+                    )
                 storage_client = create_storage_client_from_location(storage_location)
                 if storage_client is None:
                     raise ValueError(
@@ -134,53 +119,83 @@ async def run_job(
                     prefix=config.discover_prefix,
                     limit=config.discover_limit,
                 ):
-                    response = await http_client.post(
-                        (
-                            f"/api/admin/storage-locations/{storage_location_id}"
-                            f"/datasets/{discovered_version.dataset_slug}"
-                            f"/files/{discovered_version.file_slug}"
-                            f"/formats/{discovered_version.format_type}"
-                            "/versions"
-                        ),
-                        headers=build_headers(config),
-                        json=build_create_version_payload(config, discovered_version),
+                    discovered_versions_count += 1
+                    source_object_count = len(discovered_version.object_paths)
+                    source_objects_count += source_object_count
+                    format_counts[discovered_version.format_type] += 1
+                    format_source_object_counts[
+                        discovered_version.format_type
+                    ] += source_object_count
+                    if discovered_version.metadata is not None:
+                        metadata_records_count += 1
+                    metadata_object_paths.update(discovered_version.metadata_object_paths)
+                    request_payload = build_discovered_version_payload(
+                        config, discovered_version
                     )
-                    try:
-                        response_body: object = response.json()
-                    except ValueError:
-                        response_body = response.text
+
+                    if config.discover_dry_run:
+                        ingest_result = ingest_service.preview_discovered_version(
+                            storage_location_id=storage_location_id,
+                            dataset_slug=discovered_version.dataset_slug,
+                            file_slug=discovered_version.file_slug,
+                            format_type=discovered_version.format_type,
+                            version=discovered_version.version,
+                        )
+                    else:
+                        ingest_result = ingest_service.upsert_discovered_version(
+                            storage_location_id=storage_location_id,
+                            dataset_slug=discovered_version.dataset_slug,
+                            file_slug=discovered_version.file_slug,
+                            format_type=discovered_version.format_type,
+                            version=discovered_version.version,
+                            location_path=discovered_version.location_path,
+                            source_metadata=discovered_version.metadata,
+                            dataset_description=discovered_version.dataset_description,
+                        )
+                        written_versions_count += 1
 
                     logger.info(
                         json.dumps(
                             {
                                 "event": "dataset_discovery",
+                                "dry_run": config.discover_dry_run,
                                 "storage_location_id": storage_location_id,
                                 "dataset_slug": discovered_version.dataset_slug,
                                 "file_slug": discovered_version.file_slug,
                                 "format_type": discovered_version.format_type,
                                 "version": discovered_version.version,
-                                "status_code": response.status_code,
-                                "ok": response.is_success,
-                                "response": response_body,
+                                "location_path": discovered_version.location_path,
+                                "request_payload": request_payload,
+                                "would_write": config.discover_dry_run,
+                                "object_paths": discovered_version.object_paths,
+                                "source_object_count": source_object_count,
+                                "metadata_object_count": len(
+                                    discovered_version.metadata_object_paths
+                                ),
+                                "has_quality_metadata": (
+                                    discovered_version.metadata is not None
+                                    and any(
+                                        value is not None
+                                        for value in [
+                                            discovered_version.metadata.feature_count,
+                                            discovered_version.metadata.bounds,
+                                            discovered_version.metadata.geometry_type,
+                                            discovered_version.metadata.invalid_geometry_count,
+                                            discovered_version.metadata.quality_check_passed,
+                                            discovered_version.metadata.columns_hash,
+                                        ]
+                                    )
+                                ),
+                                "has_data_dictionary": (
+                                    discovered_version.metadata is not None
+                                    and bool(discovered_version.metadata.columns)
+                                ),
+                                "ok": True,
+                                "result": ingest_result.model_dump(),
                             },
                             sort_keys=True,
                         )
                     )
-                    if not response.is_success:
-                        has_failures = True
-            except httpx.HTTPError as exc:
-                has_failures = True
-                logger.error(
-                    json.dumps(
-                        {
-                            "event": "dataset_discovery",
-                            "storage_location_id": storage_location_id,
-                            "ok": False,
-                            "error": str(exc),
-                        },
-                        sort_keys=True,
-                    )
-                )
             except Exception as exc:
                 has_failures = True
                 logger.error(
@@ -195,8 +210,27 @@ async def run_job(
                     )
                 )
     finally:
-        if owns_client:
-            await http_client.aclose()
+        logger.info(
+            json.dumps(
+                {
+                    "event": "dataset_discovery_summary",
+                    "dry_run": config.discover_dry_run,
+                    "discovered_versions": discovered_versions_count,
+                    "source_objects": source_objects_count,
+                    "metadata_records": metadata_records_count,
+                    "metadata_objects": len(metadata_object_paths),
+                    "written_versions": written_versions_count,
+                    "format_counts": dict(sorted(format_counts.items())),
+                    "format_source_object_counts": dict(
+                        sorted(format_source_object_counts.items())
+                    ),
+                    "has_failures": has_failures,
+                },
+                sort_keys=True,
+            )
+        )
+        if owns_session:
+            db.close()
 
     return 1 if has_failures else 0
 
