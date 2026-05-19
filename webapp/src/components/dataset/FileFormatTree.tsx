@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { CopyButton } from "./CopyButton";
 import { DownloadButton } from "./DownloadButton";
 import { ShapefileZipDownloadButton } from "./ShapefileZipDownloadButton";
+import { buildSourceFileUrl } from "./sourceUrls";
 import { formatVersionLabel, parseVersionValue } from "./versionLabel";
 import {
   buildCompareSearchForLocation,
@@ -414,7 +415,7 @@ export function FileFormatTree({
 
                 return Array.from(filesByPath.entries()).map(([path, source], index) => {
                   const fileName = path.split("/").pop() || `file-${index + 1}.parquet`;
-                  const fileUrl = source.url;
+                  const fileUrl = buildSourceFileUrl(source);
                   const fileStorageUri = source.storage_uri;
                   const fileSizeBytes = source.source_metadata?.size_bytes;
 
@@ -609,7 +610,7 @@ export function FileFormatTree({
         });
         
         const geopackageSizeBytes = selectedGeopackageSource?.source_metadata?.size_bytes;
-        const geopackageUrl = selectedGeopackageSource?.url;
+        const geopackageUrl = selectedGeopackageSource ? buildSourceFileUrl(selectedGeopackageSource) : null;
         
         return (
           <FormatFileNode
@@ -686,9 +687,10 @@ export function FileFormatTree({
         // Get sources with URLs (expanded sources from glob pattern)
         // Filter out sources that have glob patterns in their URL/path (those are the original glob sources)
         const sourcesWithUrls = matchingSources.filter((source) => {
-          if (!source.url) return false;
+          const sourceUrl = buildSourceFileUrl(source);
+          if (!sourceUrl) return false;
           // Exclude sources where the URL itself contains a glob pattern
-          return !source.url.includes('*');
+          return !sourceUrl.includes('*');
         });
         
         // Check if we have expanded sources (multiple URLs from glob pattern)
@@ -729,7 +731,10 @@ export function FileFormatTree({
                 </p>
                 <div className="flex items-center gap-2">
                   <ShapefileZipDownloadButton
-                    sources={sourcesWithUrls}
+                    sources={sourcesWithUrls.map((source) => ({
+                      ...source,
+                      url: buildSourceFileUrl(source) ?? undefined,
+                    }))}
                     filename={zipFilename}
                     label="Download Zip"
                   />
@@ -754,22 +759,29 @@ export function FileFormatTree({
                   />
                 </div>
               </div>
-            ) : sourcesWithUrls.length === 1 && sourcesWithUrls[0]?.url ? (
+            ) : sourcesWithUrls.length === 1 && buildSourceFileUrl(sourcesWithUrls[0]) ? (
               // Fallback: single URL (no glob pattern)
-              <div className="space-y-2">
-                {shapefileSizeBytes != null && (
-                  <p className="text-xs text-muted-foreground">
-                    Size: {formatFileSize(shapefileSizeBytes)}
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground break-all">
-                  {sourcesWithUrls[0].url}
-                </p>
-                <div className="flex items-center gap-2">
-                  <CopyButton value={sourcesWithUrls[0].url} label="Copy URL" />
-                  <DownloadButton url={sourcesWithUrls[0].url} label="Download" />
-                </div>
-              </div>
+              (() => {
+                const sourceUrl = buildSourceFileUrl(sourcesWithUrls[0]);
+                if (!sourceUrl) return null;
+
+                return (
+                  <div className="space-y-2">
+                    {shapefileSizeBytes != null && (
+                      <p className="text-xs text-muted-foreground">
+                        Size: {formatFileSize(shapefileSizeBytes)}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground break-all">
+                      {sourceUrl}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <CopyButton value={sourceUrl} label="Copy URL" />
+                      <DownloadButton url={sourceUrl} label="Download" />
+                    </div>
+                  </div>
+                );
+              })()
             ) : null}
           </FormatFileNode>
         );
@@ -788,7 +800,9 @@ export function FileFormatTree({
         });
         
         const geojsonSizeBytes = selectedGeojsonSource?.source_metadata?.size_bytes;
-        const geojsonUrl = selectedGeojsonSource?.url;
+        const geojsonUrl = selectedGeojsonSource
+          ? buildSourceFileUrl(selectedGeojsonSource)
+          : null;
         
         return (
           <FormatFileNode
@@ -838,7 +852,9 @@ export function FileFormatTree({
         });
         
         const fileGeodatabaseSizeBytes = selectedFileGeodatabaseSource?.source_metadata?.size_bytes;
-        const fileGeodatabaseUrl = selectedFileGeodatabaseSource?.url;
+        const fileGeodatabaseUrl = selectedFileGeodatabaseSource
+          ? buildSourceFileUrl(selectedFileGeodatabaseSource)
+          : null;
         
         return (
           <FormatFileNode
@@ -1180,4 +1196,3 @@ function SourceSelector({
     </div>
   );
 }
-

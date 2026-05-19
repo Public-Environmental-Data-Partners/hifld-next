@@ -19,6 +19,7 @@ import {
 import type { DatasetFile } from "@/lib/api-client";
 import { FileFormatTree } from "@/components/dataset/FileFormatTree";
 import { ParquetViewerPanel } from "@/components/dataset/ParquetViewerPanel";
+import { buildSourceFileUrl } from "@/components/dataset/sourceUrls";
 import { PageLoader } from "@/components/ui/page-loader";
 import { compareVersionValues } from "@/components/dataset/versionLabel";
 import {
@@ -230,24 +231,26 @@ function FileDetailPage() {
     // Use selected source if available, otherwise find first individual file
     const selectedSource = geoparquetSource;
 
-    if (selectedSource?.url) {
+    if (selectedSource) {
+      const url = buildSourceFileUrl(selectedSource);
       // Extract filename from location path
       const location = selectedSource.location as { path?: string };
       const path = location?.path;
-      if (path && !path.includes("*")) {
+      if (url && path && !path.includes("*")) {
         const fileName = path.split("/").pop() || "data.parquet";
-        return { url: selectedSource.url, fileName };
+        return { url, fileName };
       }
     }
 
     // Fallback: find first individual file (not a glob pattern)
     for (const source of geoparquetFormat.sources) {
-      if (!source.url) continue;
+      const url = buildSourceFileUrl(source);
+      if (!url) continue;
       const location = source.location as { path?: string };
       const path = location?.path;
       if (path && !path.includes("*")) {
         const fileName = path.split("/").pop() || "data.parquet";
-        return { url: source.url, fileName };
+        return { url, fileName };
       }
     }
 
