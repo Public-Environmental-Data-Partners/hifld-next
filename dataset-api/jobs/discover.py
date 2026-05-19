@@ -11,6 +11,7 @@ from typing import Mapping
 from sqlmodel import Session
 
 from database.db import get_db_session
+from models.dataset import Collection
 from services.catalog_ingest import CatalogIngestService
 from services.datasets import DatasetService
 from services.discovery import DiscoveryService
@@ -21,20 +22,21 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class DiscoverJobConfig:
-    storage_location_ids: list[int]
+    storage_location_id: int
+    collection_id: int
     discover_prefix: str = ""
     discover_dry_run: bool = False
     discover_limit: int | None = None
 
 
-def parse_storage_location_ids(raw_value: str) -> list[int]:
-    values = [part.strip() for part in raw_value.split(",") if part.strip()]
-    if not values:
-        raise ValueError("STORAGE_LOCATION_IDS must contain at least one ID")
+def parse_required_int(env_map: Mapping[str, str], name: str) -> int:
+    raw_value = env_map.get(name)
+    if not raw_value:
+        raise ValueError(f"{name} is required")
     try:
-        return [int(value) for value in values]
+        return int(raw_value)
     except ValueError as exc:
-        raise ValueError("STORAGE_LOCATION_IDS must be a comma-separated list of integers") from exc
+        raise ValueError(f"{name} must be an integer") from exc
 
 
 def parse_bool(raw_value: str | None) -> bool:
@@ -46,15 +48,14 @@ def parse_bool(raw_value: str | None) -> bool:
 def load_config_from_env(env: Mapping[str, str] | None = None) -> DiscoverJobConfig:
     env_map = env or os.environ
 
-    storage_location_ids_raw = env_map.get("STORAGE_LOCATION_IDS")
-    if not storage_location_ids_raw:
-        raise ValueError("STORAGE_LOCATION_IDS is required")
-
     discover_limit_raw = env_map.get("DISCOVER_LIMIT")
     discover_limit = int(discover_limit_raw) if discover_limit_raw else None
 
     return DiscoverJobConfig(
-        storage_location_ids=parse_storage_location_ids(storage_location_ids_raw),
+        storage_location_id=parse_required_int(
+            env_map, "DISCOVER_STORAGE_LOCATION_ID"
+        ),
+        collection_id=parse_required_int(env_map, "DISCOVER_COLLECTION_ID"),
         discover_prefix=env_map.get("DISCOVER_PREFIX", ""),
         discover_dry_run=parse_bool(env_map.get("DISCOVER_DRY_RUN")),
         discover_limit=discover_limit,
@@ -77,6 +78,14 @@ def build_discovered_version_payload(
     }
     if discovered_version.dataset_description:
         payload["dataset_description"] = discovered_version.dataset_description
+    if discovered_version.dataset_name:
+        payload["dataset_name"] = discovered_version.dataset_name
+    if discovered_version.dataset_tags:
+        payload["dataset_tags"] = discovered_version.dataset_tags
+    if discovered_version.file_name:
+        payload["file_name"] = discovered_version.file_name
+    if discovered_version.file_description:
+        payload["file_description"] = discovered_version.file_description
     return payload
 
 
@@ -99,122 +108,144 @@ async def run_job(
     written_versions_count = 0
 
     try:
-        for storage_location_id in config.storage_location_ids:
-            try:
-                storage_location = dataset_service.get_storage_location(
-                    storage_location_id
+        collection = db.get(Collection, config.collection_id)
+        if not collection:
+            raise ValueError(f"Collection {config.collection_id} not found")
+
+        storage_location = dataset_service.get_storage_location(
+            config.storage_location_id
+        )
+        if not storage_location:
+            raise ValueError(
+                f"Storage location {config.storage_location_id} not found"
+            )
+        storage_client = create_storage_client_from_location(storage_location)
+        if storage_client is None:
+            raise ValueError(
+                f"Storage location {config.storage_location_id} is not bucket-backed"
+            )
+        discovery = DiscoveryService(storage_client=storage_client)
+
+        async for discovered_version in discovery.scan(
+            prefix=config.discover_prefix,
+            limit=config.discover_limit,
+        ):
+            discovered_versions_count += 1
+            source_object_count = len(discovered_version.object_paths)
+            source_objects_count += source_object_count
+            format_counts[discovered_version.format_type] += 1
+            format_source_object_counts[
+                discovered_version.format_type
+            ] += source_object_count
+            if discovered_version.metadata is not None:
+                metadata_records_count += 1
+            metadata_object_paths.update(discovered_version.metadata_object_paths)
+            request_payload = build_discovered_version_payload(
+                config, discovered_version
+            )
+
+            if config.discover_dry_run:
+                ingest_result = ingest_service.preview_discovered_version(
+                    collection_id=config.collection_id,
+                    storage_location_id=config.storage_location_id,
+                    dataset_slug=discovered_version.dataset_slug,
+                    file_slug=discovered_version.file_slug,
+                    format_type=discovered_version.format_type,
+                    version=discovered_version.version,
                 )
-                if not storage_location:
-                    raise ValueError(
-                        f"Storage location {storage_location_id} not found"
-                    )
-                storage_client = create_storage_client_from_location(storage_location)
-                if storage_client is None:
-                    raise ValueError(
-                        f"Storage location {storage_location_id} is not bucket-backed"
-                    )
-                discovery = DiscoveryService(storage_client=storage_client)
-
-                async for discovered_version in discovery.scan(
-                    prefix=config.discover_prefix,
-                    limit=config.discover_limit,
-                ):
-                    discovered_versions_count += 1
-                    source_object_count = len(discovered_version.object_paths)
-                    source_objects_count += source_object_count
-                    format_counts[discovered_version.format_type] += 1
-                    format_source_object_counts[
-                        discovered_version.format_type
-                    ] += source_object_count
-                    if discovered_version.metadata is not None:
-                        metadata_records_count += 1
-                    metadata_object_paths.update(discovered_version.metadata_object_paths)
-                    request_payload = build_discovered_version_payload(
-                        config, discovered_version
-                    )
-
-                    if config.discover_dry_run:
-                        ingest_result = ingest_service.preview_discovered_version(
-                            storage_location_id=storage_location_id,
-                            dataset_slug=discovered_version.dataset_slug,
-                            file_slug=discovered_version.file_slug,
-                            format_type=discovered_version.format_type,
-                            version=discovered_version.version,
-                        )
-                    else:
-                        ingest_result = ingest_service.upsert_discovered_version(
-                            storage_location_id=storage_location_id,
-                            dataset_slug=discovered_version.dataset_slug,
-                            file_slug=discovered_version.file_slug,
-                            format_type=discovered_version.format_type,
-                            version=discovered_version.version,
-                            location_path=discovered_version.location_path,
-                            source_metadata=discovered_version.metadata,
-                            dataset_description=discovered_version.dataset_description,
-                        )
-                        written_versions_count += 1
-
-                    logger.info(
-                        json.dumps(
-                            {
-                                "event": "dataset_discovery",
-                                "dry_run": config.discover_dry_run,
-                                "storage_location_id": storage_location_id,
-                                "dataset_slug": discovered_version.dataset_slug,
-                                "file_slug": discovered_version.file_slug,
-                                "format_type": discovered_version.format_type,
-                                "version": discovered_version.version,
-                                "location_path": discovered_version.location_path,
-                                "request_payload": request_payload,
-                                "would_write": config.discover_dry_run,
-                                "object_paths": discovered_version.object_paths,
-                                "source_object_count": source_object_count,
-                                "metadata_object_count": len(
-                                    discovered_version.metadata_object_paths
-                                ),
-                                "has_quality_metadata": (
-                                    discovered_version.metadata is not None
-                                    and any(
-                                        value is not None
-                                        for value in [
-                                            discovered_version.metadata.feature_count,
-                                            discovered_version.metadata.bounds,
-                                            discovered_version.metadata.geometry_type,
-                                            discovered_version.metadata.invalid_geometry_count,
-                                            discovered_version.metadata.quality_check_passed,
-                                            discovered_version.metadata.columns_hash,
-                                        ]
-                                    )
-                                ),
-                                "has_data_dictionary": (
-                                    discovered_version.metadata is not None
-                                    and bool(discovered_version.metadata.columns)
-                                ),
-                                "ok": True,
-                                "result": ingest_result.model_dump(),
-                            },
-                            sort_keys=True,
-                        )
-                    )
-            except Exception as exc:
-                has_failures = True
-                logger.error(
-                    json.dumps(
-                        {
-                            "event": "dataset_discovery",
-                            "storage_location_id": storage_location_id,
-                            "ok": False,
-                            "error": str(exc),
-                        },
-                        sort_keys=True,
-                    )
+            else:
+                ingest_result = ingest_service.upsert_discovered_version(
+                    collection_id=config.collection_id,
+                    storage_location_id=config.storage_location_id,
+                    dataset_slug=discovered_version.dataset_slug,
+                    file_slug=discovered_version.file_slug,
+                    format_type=discovered_version.format_type,
+                    version=discovered_version.version,
+                    location_path=discovered_version.location_path,
+                    source_metadata=discovered_version.metadata,
+                    dataset_name=discovered_version.dataset_name,
+                    dataset_description=discovered_version.dataset_description,
+                    dataset_tags=discovered_version.dataset_tags,
+                    file_name=discovered_version.file_name,
+                    file_description=discovered_version.file_description,
                 )
+                written_versions_count += 1
+
+            logger.info(
+                json.dumps(
+                    {
+                        "event": "dataset_discovery",
+                        "dry_run": config.discover_dry_run,
+                        "storage_location_id": config.storage_location_id,
+                        "collection_id": config.collection_id,
+                        "dataset_slug": discovered_version.dataset_slug,
+                        "file_slug": discovered_version.file_slug,
+                        "format_type": discovered_version.format_type,
+                        "version": discovered_version.version,
+                        "location_path": discovered_version.location_path,
+                        "request_payload": request_payload,
+                        "would_write": config.discover_dry_run,
+                        "object_paths": discovered_version.object_paths,
+                        "catalog_metadata_object_paths": (
+                            discovered_version.catalog_metadata_object_paths
+                        ),
+                        "dataset_name": discovered_version.dataset_name,
+                        "file_name": discovered_version.file_name,
+                        "has_catalog_description": bool(
+                            discovered_version.dataset_description
+                            or discovered_version.file_description
+                        ),
+                        "has_catalog_tags": bool(discovered_version.dataset_tags),
+                        "source_object_count": source_object_count,
+                        "metadata_object_count": len(
+                            discovered_version.metadata_object_paths
+                        ),
+                        "has_quality_metadata": (
+                            discovered_version.metadata is not None
+                            and any(
+                                value is not None
+                                for value in [
+                                    discovered_version.metadata.feature_count,
+                                    discovered_version.metadata.bounds,
+                                    discovered_version.metadata.geometry_type,
+                                    discovered_version.metadata.invalid_geometry_count,
+                                    discovered_version.metadata.quality_check_passed,
+                                    discovered_version.metadata.columns_hash,
+                                ]
+                            )
+                        ),
+                        "has_data_dictionary": (
+                            discovered_version.metadata is not None
+                            and bool(discovered_version.metadata.columns)
+                        ),
+                        "ok": True,
+                        "result": ingest_result.model_dump(),
+                    },
+                    sort_keys=True,
+                )
+            )
+    except Exception as exc:
+        has_failures = True
+        logger.error(
+            json.dumps(
+                {
+                    "event": "dataset_discovery",
+                    "storage_location_id": config.storage_location_id,
+                    "collection_id": config.collection_id,
+                    "ok": False,
+                    "error": str(exc),
+                },
+                sort_keys=True,
+            )
+        )
     finally:
         logger.info(
             json.dumps(
                 {
                     "event": "dataset_discovery_summary",
                     "dry_run": config.discover_dry_run,
+                    "storage_location_id": config.storage_location_id,
+                    "collection_id": config.collection_id,
                     "discovered_versions": discovered_versions_count,
                     "source_objects": source_objects_count,
                     "metadata_records": metadata_records_count,

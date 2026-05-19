@@ -35,7 +35,12 @@ class DiscoveredVersion:
     object_paths: list[str]
     metadata: Optional[SpatialDatasetFileMetadata]
     metadata_object_paths: list[str] = field(default_factory=list)
+    catalog_metadata_object_paths: list[str] = field(default_factory=list)
+    dataset_name: Optional[str] = None
     dataset_description: Optional[str] = None
+    dataset_tags: Optional[dict[str, Any]] = None
+    file_name: Optional[str] = None
+    file_description: Optional[str] = None
 
 
 class DiscoveryService:
@@ -51,8 +56,14 @@ class DiscoveryService:
         grouped: dict[tuple[str, str, str], dict[str, list[str]]] = defaultdict(
             lambda: defaultdict(list)
         )
+        catalog_manifest_paths: dict[tuple[str, Optional[str]], str] = {}
 
         for path in files:
+            manifest_key = self._parse_source_manifest_path(path)
+            if manifest_key:
+                catalog_manifest_paths[manifest_key] = path
+                continue
+
             parsed = self._parse_discovery_path(path)
             if not parsed:
                 continue
@@ -68,6 +79,11 @@ class DiscoveryService:
             group = grouped[(dataset_slug, file_slug, version)]
             metadata_paths = sorted(group.get("metadata", []))
             metadata_result = await self._load_metadata(metadata_paths)
+            catalog_metadata = await self._load_catalog_metadata(
+                dataset_slug=dataset_slug,
+                file_slug=file_slug,
+                manifest_paths=catalog_manifest_paths,
+            )
             formats = sorted(fmt for fmt in group.keys() if fmt in KNOWN_FORMATS)
 
             for format_type in formats:
@@ -88,7 +104,12 @@ class DiscoveryService:
                     object_paths=format_files,
                     metadata=metadata_result.metadata,
                     metadata_object_paths=metadata_paths,
-                    dataset_description=metadata_result.dataset_description,
+                    catalog_metadata_object_paths=catalog_metadata.object_paths,
+                    dataset_name=catalog_metadata.dataset_name,
+                    dataset_description=catalog_metadata.dataset_description,
+                    dataset_tags=catalog_metadata.dataset_tags,
+                    file_name=catalog_metadata.file_name,
+                    file_description=catalog_metadata.file_description,
                 )
 
     def _parse_discovery_path(
@@ -105,10 +126,28 @@ class DiscoveryService:
             return None
         return dataset_slug, file_slug, version, group_name
 
+    def _parse_source_manifest_path(
+        self, path: str
+    ) -> Optional[tuple[str, Optional[str]]]:
+        parts = [part for part in path.split("/") if part]
+        if len(parts) == 3 and parts[1:] == ["metadata", "source_manifest.json"]:
+            return (parts[0], None)
+        if len(parts) == 4 and parts[2:] == ["metadata", "source_manifest.json"]:
+            return (parts[0], parts[1])
+        return None
+
     @dataclass(slots=True)
     class MetadataResult:
         metadata: Optional[SpatialDatasetFileMetadata]
+
+    @dataclass(slots=True)
+    class CatalogMetadataResult:
+        object_paths: list[str]
+        dataset_name: str
         dataset_description: Optional[str]
+        dataset_tags: Optional[dict[str, Any]]
+        file_name: str
+        file_description: Optional[str]
 
     async def _load_metadata(self, metadata_paths: list[str]) -> MetadataResult:
         quality_manifest = await self._read_json_from_candidates(
@@ -119,7 +158,7 @@ class DiscoveryService:
         )
 
         if not quality_manifest and not data_dictionary:
-            return self.MetadataResult(metadata=None, dataset_description=None)
+            return self.MetadataResult(metadata=None)
 
         metadata_payload: dict[str, Any] = {}
         if quality_manifest:
@@ -149,11 +188,52 @@ class DiscoveryService:
         if "version" not in metadata_payload:
             metadata_payload["version"] = "v1"
 
-        return self.MetadataResult(
-            metadata=SpatialDatasetFileMetadata(**metadata_payload),
-            dataset_description=self._extract_dataset_description(
-                quality_manifest, data_dictionary
-            ),
+        return self.MetadataResult(metadata=SpatialDatasetFileMetadata(**metadata_payload))
+
+    async def _load_catalog_metadata(
+        self,
+        dataset_slug: str,
+        file_slug: str,
+        manifest_paths: dict[tuple[str, Optional[str]], str],
+    ) -> CatalogMetadataResult:
+        dataset_manifest_path = manifest_paths.get((dataset_slug, None))
+        layer_manifest_path = manifest_paths.get((dataset_slug, file_slug))
+        dataset_manifest = (
+            await self._read_json(dataset_manifest_path)
+            if dataset_manifest_path
+            else None
+        )
+        layer_manifest = (
+            await self._read_json(layer_manifest_path)
+            if layer_manifest_path
+            else None
+        )
+        catalog_paths = [
+            path for path in [dataset_manifest_path, layer_manifest_path] if path
+        ]
+        dataset_title = self._extract_manifest_string(dataset_manifest, "title")
+        dataset_description = self._extract_manifest_string(
+            dataset_manifest, "description"
+        )
+        dataset_tags = self._extract_manifest_tags(dataset_manifest)
+
+        file_title = (
+            self._extract_manifest_string(layer_manifest, "title")
+            or dataset_title
+            or file_slug
+        )
+        file_description = (
+            self._extract_manifest_string(layer_manifest, "description")
+            or dataset_description
+        )
+
+        return self.CatalogMetadataResult(
+            object_paths=catalog_paths,
+            dataset_name=dataset_title or dataset_slug,
+            dataset_description=dataset_description,
+            dataset_tags=dataset_tags,
+            file_name=file_title,
+            file_description=file_description,
         )
 
     async def _read_json_from_candidates(
@@ -198,17 +278,24 @@ class DiscoveryService:
             normalized.pop(source_key, None)
         return normalized
 
-    def _extract_dataset_description(
-        self,
-        quality_manifest: Optional[dict[str, Any]],
-        data_dictionary: Optional[dict[str, Any]],
+    def _extract_manifest_string(
+        self, manifest: Optional[dict[str, Any]], key: str
     ) -> Optional[str]:
-        for metadata in (quality_manifest, data_dictionary):
-            if not metadata:
-                continue
-            description = metadata.get("description")
-            if isinstance(description, str) and description.strip():
-                return description.strip()
+        if not manifest:
+            return None
+        value = manifest.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
+    def _extract_manifest_tags(
+        self, manifest: Optional[dict[str, Any]]
+    ) -> Optional[dict[str, Any]]:
+        if not manifest:
+            return None
+        tags = manifest.get("tags")
+        if isinstance(tags, dict):
+            return tags
         return None
 
     def _build_location_path(self, format_type: str, format_files: list[str]) -> str:

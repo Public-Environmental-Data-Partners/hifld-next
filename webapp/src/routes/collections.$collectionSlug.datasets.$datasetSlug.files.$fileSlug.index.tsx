@@ -20,6 +20,7 @@ import type { DatasetFile } from "@/lib/api-client";
 import { FileFormatTree } from "@/components/dataset/FileFormatTree";
 import { ParquetViewerPanel } from "@/components/dataset/ParquetViewerPanel";
 import { PageLoader } from "@/components/ui/page-loader";
+import { compareVersionValues } from "@/components/dataset/versionLabel";
 import {
   getOgcFeaturesUrl,
   getFullLayerName,
@@ -130,29 +131,8 @@ function FileDetailPage() {
             const existing = sourcesByLocation[locId];
             if (!existing) {
               sourcesByLocation[locId] = { source, version };
-            } else {
-              // Compare versions: dates (YYYY-MM-DD) or numbers
-              const existingVersion = String(existing.version);
-              const currentVersion = String(version);
-              if (
-                existingVersion.match(/^\d{4}-\d{2}-\d{2}$/) &&
-                currentVersion.match(/^\d{4}-\d{2}-\d{2}$/)
-              ) {
-                // Both are dates, compare as strings (descending)
-                if (currentVersion > existingVersion) {
-                  sourcesByLocation[locId] = { source, version };
-                }
-              } else {
-                const existingNum = Number(existingVersion);
-                const currentNum = Number(currentVersion);
-                if (!isNaN(existingNum) && !isNaN(currentNum)) {
-                  if (currentNum > existingNum) {
-                    sourcesByLocation[locId] = { source, version };
-                  }
-                } else if (currentVersion > existingVersion) {
-                  sourcesByLocation[locId] = { source, version };
-                }
-              }
+            } else if (compareVersionValues(version, existing.version) < 0) {
+              sourcesByLocation[locId] = { source, version };
             }
           }
         });

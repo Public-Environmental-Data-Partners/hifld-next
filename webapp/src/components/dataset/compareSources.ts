@@ -1,6 +1,8 @@
 import type { DatasetFormat, DatasetSource } from "@/lib/api-client";
 import { compareVersionValues } from "./versionLabel";
 
+export { compareVersionValues } from "./versionLabel";
+
 export interface CompareSearchState {
   format: string;
   location: number;

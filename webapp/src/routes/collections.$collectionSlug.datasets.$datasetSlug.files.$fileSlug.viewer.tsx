@@ -29,6 +29,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { FormatSourceSelector } from "@/components/dataset/FormatSourceSelector";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { PageLoader } from "@/components/ui/page-loader";
+import { compareVersionValues } from "@/components/dataset/versionLabel";
 
 export const Route = createFileRoute(
   "/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer"
@@ -125,7 +126,7 @@ function FileViewerPage() {
             const existing = sourcesByLocation[locId];
             if (!existing) {
               sourcesByLocation[locId] = { source, version };
-            } else if (String(version) > String(existing.version)) {
+            } else if (compareVersionValues(version, existing.version) < 0) {
               sourcesByLocation[locId] = { source, version };
             }
           }
@@ -531,4 +532,3 @@ function FileViewerContent({
     </div>
   );
 }
-

@@ -1,12 +1,11 @@
 """Shared catalog ingest logic for dataset discovery."""
 
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from models.dataset import (
-    Collection,
     Dataset,
     File,
     FileFormat,
@@ -22,11 +21,6 @@ class CatalogIngestResult(BaseModel):
     file_source_id: Optional[int] = None
 
 
-def humanize_slug(slug: str) -> str:
-    words = [part for part in slug.replace("_", "-").split("-") if part]
-    return " ".join(word.capitalize() for word in words) or slug
-
-
 class CatalogIngestService:
     """Create or update catalog records discovered from bucket storage."""
 
@@ -36,6 +30,7 @@ class CatalogIngestService:
 
     def preview_discovered_version(
         self,
+        collection_id: int,
         storage_location_id: int,
         dataset_slug: str,
         file_slug: str,
@@ -43,6 +38,7 @@ class CatalogIngestService:
         version: str,
     ) -> CatalogIngestResult:
         file_format = self._get_existing_file_format(
+            collection_id=collection_id,
             dataset_slug=dataset_slug,
             file_slug=file_slug,
             format_type=format_type,
@@ -64,6 +60,7 @@ class CatalogIngestService:
 
     def upsert_discovered_version(
         self,
+        collection_id: int,
         storage_location_id: int,
         dataset_slug: str,
         file_slug: str,
@@ -71,15 +68,25 @@ class CatalogIngestService:
         version: str,
         location_path: str,
         source_metadata: Optional[SpatialDatasetFileMetadata] = None,
+        dataset_name: Optional[str] = None,
         dataset_description: Optional[str] = None,
+        dataset_tags: Optional[dict[str, Any]] = None,
+        file_name: Optional[str] = None,
+        file_description: Optional[str] = None,
     ) -> CatalogIngestResult:
-        collection = self._get_or_create_hifld_collection()
         dataset = self._get_or_create_dataset(
             dataset_slug=dataset_slug,
-            collection_id=collection.id,
+            collection_id=collection_id,
+            name=dataset_name,
             description=dataset_description,
+            tags=dataset_tags,
         )
-        file_obj = self._get_or_create_file(file_slug=file_slug, dataset=dataset)
+        file_obj = self._get_or_create_file(
+            file_slug=file_slug,
+            dataset=dataset,
+            name=file_name,
+            description=file_description,
+        )
         file_format = self.dataset_service.get_or_create_file_format_for_file(
             file_obj.id, format_type
         )
@@ -115,37 +122,30 @@ class CatalogIngestService:
             file_source_id=file_source.id,
         )
 
-    def _get_or_create_hifld_collection(self) -> Collection:
-        statement = select(Collection).where(Collection.slug == "hifld")
-        collection = self.db.exec(statement).first()
-        if collection:
-            return collection
-
-        collection = Collection(
-            slug="hifld",
-            name="HIFLD",
-            description="HIFLD discovered datasets",
-        )
-        self.db.add(collection)
-        self.db.commit()
-        self.db.refresh(collection)
-        return collection
-
     def _get_or_create_dataset(
         self,
         dataset_slug: str,
         collection_id: int,
+        name: Optional[str] = None,
         description: Optional[str] = None,
+        tags: Optional[dict[str, Any]] = None,
     ) -> Dataset:
         statement = select(Dataset).where(Dataset.slug == dataset_slug)
         dataset = self.db.exec(statement).first()
         if dataset:
+            if dataset.collection_id != collection_id:
+                raise ValueError(
+                    f"Dataset slug {dataset_slug!r} already belongs to a different collection"
+                )
             changed = False
-            if dataset.collection_id is None:
-                dataset.collection_id = collection_id
+            if name and dataset.name != name:
+                dataset.name = name
                 changed = True
-            if dataset.description is None and description:
+            if description is not None and dataset.description != description:
                 dataset.description = description
+                changed = True
+            if tags is not None and dataset.tags != tags:
+                dataset.tags = tags
                 changed = True
             if changed:
                 self.db.add(dataset)
@@ -155,8 +155,9 @@ class CatalogIngestService:
 
         dataset = Dataset(
             slug=dataset_slug,
-            name=humanize_slug(dataset_slug),
+            name=name or dataset_slug,
             description=description,
+            tags=tags,
             collection_id=collection_id,
         )
         self.db.add(dataset)
@@ -164,20 +165,37 @@ class CatalogIngestService:
         self.db.refresh(dataset)
         return dataset
 
-    def _get_or_create_file(self, file_slug: str, dataset: Dataset) -> File:
+    def _get_or_create_file(
+        self,
+        file_slug: str,
+        dataset: Dataset,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> File:
         statement = select(File).where(
             File.dataset_id == dataset.id,
             File.slug == file_slug,
         )
         file_obj = self.db.exec(statement).first()
         if file_obj:
+            changed = False
+            if name and file_obj.name != name:
+                file_obj.name = name
+                changed = True
+            if description is not None and file_obj.description != description:
+                file_obj.description = description
+                changed = True
+            if changed:
+                self.db.add(file_obj)
+                self.db.commit()
+                self.db.refresh(file_obj)
             return file_obj
 
         file_obj = File(
             dataset_id=dataset.id,
             slug=file_slug,
-            name=humanize_slug(file_slug),
-            description=dataset.description,
+            name=name or file_slug,
+            description=description,
         )
         self.db.add(file_obj)
         self.db.commit()
@@ -186,6 +204,7 @@ class CatalogIngestService:
 
     def _get_existing_file_format(
         self,
+        collection_id: int,
         dataset_slug: str,
         file_slug: str,
         format_type: str,
@@ -194,6 +213,10 @@ class CatalogIngestService:
         dataset = self.db.exec(statement).first()
         if not dataset:
             return None
+        if dataset.collection_id != collection_id:
+            raise ValueError(
+                f"Dataset slug {dataset_slug!r} already belongs to a different collection"
+            )
 
         file_obj = self.dataset_service.get_file_by_slug(dataset.id, file_slug)
         if not file_obj:
