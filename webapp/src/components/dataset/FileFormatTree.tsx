@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { CopyButton } from "./CopyButton";
 import { DownloadButton } from "./DownloadButton";
 import { ShapefileZipDownloadButton } from "./ShapefileZipDownloadButton";
-import { buildSourceFileUrl } from "./sourceUrls";
+import { buildSourceFileUrl, buildSourceStorageUri } from "./sourceUrls";
 import { formatVersionLabel, parseVersionValue } from "./versionLabel";
 import {
   buildCompareSearchForLocation,
@@ -269,7 +269,16 @@ export function FileFormatTree({
 
                 // Get glob pattern from API (it's added to each source in the group)
                 const sourceWithGlob = allSources.find((s) => s.glob_pattern);
-                const globPattern = sourceWithGlob?.glob_pattern || null;
+                const globPattern =
+                  sourceWithGlob?.glob_pattern ||
+                  (allSources[0]
+                    ? buildSourceStorageUri(allSources[0], {
+                        globExtension: "parquet",
+                      })
+                    : null);
+                if (!globPattern) {
+                  return null;
+                }
                 
                 // Calculate total size from all sources (for glob pattern, use the first source's total size)
                 const totalSizeBytes = allSources.reduce((sum, source) => {
@@ -297,7 +306,7 @@ export function FileFormatTree({
                     showSourceSelector={false}
                   >
                     <div className="space-y-2">
-                      {globPattern ? (() => {
+                      {(() => {
                         // Check if this is SeaweedFS (has endpoint_url parameter)
                         const hasEndpointUrl = globPattern.includes("?endpoint_url=");
                         let s3Uri = globPattern;
@@ -379,11 +388,7 @@ export function FileFormatTree({
                             )}
                           </>
                         );
-                      })() : (
-                        <p className="text-xs text-muted-foreground">
-                          No glob pattern available for the selected location and version
-                        </p>
-                      )}
+                      })()}
                     </div>
                   </FormatFileNode>
                 );
@@ -416,7 +421,7 @@ export function FileFormatTree({
                 return Array.from(filesByPath.entries()).map(([path, source], index) => {
                   const fileName = path.split("/").pop() || `file-${index + 1}.parquet`;
                   const fileUrl = buildSourceFileUrl(source);
-                  const fileStorageUri = source.storage_uri;
+                  const fileStorageUri = buildSourceStorageUri(source);
                   const fileSizeBytes = source.source_metadata?.size_bytes;
 
                   return (

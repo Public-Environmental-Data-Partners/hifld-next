@@ -172,6 +172,7 @@ class StorageLocation(SQLModel, table=True):
     __tablename__ = "storage_locations"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    # TODO: potentially add "slug" field, make name not unique
     name: str = Field(
         unique=True
     )  # e.g. "S3 Local", "GCS Production", "SeaweedFS Local"

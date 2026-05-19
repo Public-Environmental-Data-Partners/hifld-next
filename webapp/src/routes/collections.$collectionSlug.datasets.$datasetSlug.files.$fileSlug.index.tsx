@@ -177,7 +177,7 @@ function FileDetailPage() {
   const getUrlFromSource = (
     source: NonNullable<DatasetFile["formats"]>[0]["sources"][0] | null,
   ): string | null => {
-    return source?.url || null;
+    return source ? buildSourceFileUrl(source) : null;
   };
 
   // Get selected sources for each format

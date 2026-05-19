@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { DatasetSource } from "@/lib/api-client";
-import { buildSourceFileUrl, usesNativeBrowserDownload } from "../sourceUrls";
+import {
+  buildSourceFileUrl,
+  buildSourceStorageUri,
+  usesNativeBrowserDownload,
+} from "../sourceUrls";
 
 function makeFileSource(baseUrl: string, path: string, fallbackUrl?: string): DatasetSource {
   return {
@@ -38,6 +42,58 @@ describe("source URL helpers", () => {
         ),
       ),
     ).toBe("https://hifld.publicenvirodata.org/storage/nfhl/water-lines.pmtiles");
+  });
+
+  it("builds SeaweedFS filer URLs with the bucket path", () => {
+    const source = makeFileSource(
+      "http://localhost:8888",
+      "12nm-territorial-sea/12nm-territorial-sea/v1.0.0/pmtiles/12nm-territorial-sea.pmtiles",
+    );
+    if (source.storage_location?.config) {
+      source.storage_location.config = {
+        ...source.storage_location.config,
+        type: "seaweedfs",
+      } as unknown as typeof source.storage_location.config;
+    }
+
+    expect(buildSourceFileUrl(source)).toBe(
+      "http://localhost:8888/buckets/ignored-by-webapp/12nm-territorial-sea/12nm-territorial-sea/v1.0.0/pmtiles/12nm-territorial-sea.pmtiles",
+    );
+  });
+
+  it("builds DuckDB storage glob URIs from source paths", () => {
+    const seaweedSource = makeFileSource(
+      "http://localhost:8888",
+      "12nm-territorial-sea/12nm-territorial-sea/v1.0.0/geoparquet/12nm-territorial-sea.parquet",
+    );
+    if (seaweedSource.storage_location?.config) {
+      seaweedSource.storage_location.config = {
+        ...seaweedSource.storage_location.config,
+        type: "seaweedfs",
+        endpoint_url: "http://localhost:8333",
+      } as unknown as typeof seaweedSource.storage_location.config;
+    }
+
+    expect(
+      buildSourceStorageUri(seaweedSource, { globExtension: "parquet" }),
+    ).toBe(
+      "s3://ignored-by-webapp/12nm-territorial-sea/12nm-territorial-sea/v1.0.0/geoparquet/*.parquet?endpoint_url=http://localhost:8333",
+    );
+
+    const gcsSource = makeFileSource(
+      "https://example.test/storage",
+      "nfhl/alluvial-fans/v1.0.0/geoparquet/alluvial-fans.parquet",
+    );
+    if (gcsSource.storage_location?.config) {
+      gcsSource.storage_location.config = {
+        ...gcsSource.storage_location.config,
+        type: "gcs",
+      } as unknown as typeof gcsSource.storage_location.config;
+    }
+
+    expect(buildSourceStorageUri(gcsSource, { globExtension: "parquet" })).toBe(
+      "gs://ignored-by-webapp/nfhl/alluvial-fans/v1.0.0/geoparquet/*.parquet",
+    );
   });
 
   it("does not require provider-specific storage hostnames for native downloads", () => {
