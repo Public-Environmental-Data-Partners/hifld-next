@@ -1,5 +1,6 @@
 [
   {
+    "slug": "gcs-drp-hifld-copy-formatted-49775666365",
     "name": "GCS drp-hifld-copy-formatted-49775666365",
     "backend_type": "s3",
     "description": "Google Cloud Storage bucket for formatted HIFLD datasets",
@@ -11,6 +12,7 @@
     }
   },
   {
+    "slug": "seaweedfs-drp-hifld-copy-formatted",
     "name": "SeaweedFS drp-hifld-copy-formatted",
     "backend_type": "s3",
     "description": "SeaweedFS bucket for formatted HIFLD datasets (S3-compatible)",
@@ -23,6 +25,7 @@
     }
   },
   {
+    "slug": "geoserver",
     "name": "GeoServer",
     "backend_type": "geoserver",
     "description": "GeoServer instance for spatial data services",

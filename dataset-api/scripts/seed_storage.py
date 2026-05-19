@@ -34,6 +34,7 @@ from sqlmodel import Session, select
 class StorageLocationConfig(TypedDict):
     """Type definition for storage location configuration."""
 
+    slug: str
     name: str
     backend_type: BackendType
     description: str
@@ -43,6 +44,7 @@ class StorageLocationConfig(TypedDict):
 # Default storage locations (fallback if no config provided)
 DEFAULT_STORAGE_LOCATIONS = [
     {
+        "slug": "gcs-drp-hifld-copy-formatted-49775666365",
         "name": "GCS drp-hifld-copy-formatted-49775666365",
         "backend_type": "s3",  # backend_type is still "s3" for bucket storage
         "description": "Google Cloud Storage bucket for formatted HIFLD datasets",
@@ -53,6 +55,7 @@ DEFAULT_STORAGE_LOCATIONS = [
         ).model_dump(),
     },
     {
+        "slug": "seaweedfs-drp-hifld-copy-formatted",
         "name": "SeaweedFS drp-hifld-copy-formatted",
         "backend_type": "s3",  # backend_type is still "s3" for bucket storage
         "description": "SeaweedFS bucket for formatted HIFLD datasets (S3-compatible)",
@@ -63,6 +66,7 @@ DEFAULT_STORAGE_LOCATIONS = [
         ).model_dump(),
     },
     {
+        "slug": "geoserver",
         "name": "GeoServer",
         "backend_type": "geoserver",
         "description": "GeoServer instance for spatial data services",
@@ -107,7 +111,7 @@ def seed_storage_locations(
     for location_data in locations:
         # Check if location already exists
         statement = select(StorageLocation).where(
-            StorageLocation.name == location_data["name"]
+            StorageLocation.slug == location_data["slug"]
         )
         existing = db.exec(statement).first()
 
@@ -153,6 +157,10 @@ def seed_storage_locations(
             # Update other fields if they differ
             if existing.backend_type != location_data.get("backend_type"):
                 existing.backend_type = location_data["backend_type"]
+                needs_update = True
+
+            if existing.name != location_data.get("name"):
+                existing.name = location_data["name"]
                 needs_update = True
             
             if existing.description != location_data.get("description"):

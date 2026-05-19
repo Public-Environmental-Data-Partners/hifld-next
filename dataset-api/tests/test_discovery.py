@@ -51,6 +51,7 @@ def make_session() -> Session:
 
 def make_storage_location() -> StorageLocation:
     return StorageLocation(
+        slug="seaweedfs-test",
         name="SeaweedFS Test",
         backend_type="s3",
         description="Test SeaweedFS bucket",
