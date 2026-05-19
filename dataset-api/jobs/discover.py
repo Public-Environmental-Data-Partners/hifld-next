@@ -8,12 +8,11 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Mapping
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from database.db import get_db_session
-from models.dataset import Collection
+from models.dataset import Collection, StorageLocation
 from services.catalog_ingest import CatalogIngestService
-from services.datasets import DatasetService
 from services.discovery import DiscoveryService
 from storage.storage_client import create_storage_client_from_location
 
@@ -22,21 +21,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class DiscoverJobConfig:
-    storage_location_id: int
-    collection_id: int
+    storage_location_slug: str
+    collection_slug: str
     discover_prefix: str = ""
     discover_dry_run: bool = False
     discover_limit: int | None = None
 
 
-def parse_required_int(env_map: Mapping[str, str], name: str) -> int:
+def parse_required_string(env_map: Mapping[str, str], name: str) -> str:
     raw_value = env_map.get(name)
-    if not raw_value:
+    if raw_value is None or not raw_value.strip():
         raise ValueError(f"{name} is required")
-    try:
-        return int(raw_value)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be an integer") from exc
+    return raw_value.strip()
 
 
 def parse_bool(raw_value: str | None) -> bool:
@@ -46,16 +42,16 @@ def parse_bool(raw_value: str | None) -> bool:
 
 
 def load_config_from_env(env: Mapping[str, str] | None = None) -> DiscoverJobConfig:
-    env_map = env or os.environ
+    env_map = env if env is not None else os.environ
 
     discover_limit_raw = env_map.get("DISCOVER_LIMIT")
     discover_limit = int(discover_limit_raw) if discover_limit_raw else None
 
     return DiscoverJobConfig(
-        storage_location_id=parse_required_int(
-            env_map, "DISCOVER_STORAGE_LOCATION_ID"
+        storage_location_slug=parse_required_string(
+            env_map, "DISCOVER_STORAGE_LOCATION_SLUG"
         ),
-        collection_id=parse_required_int(env_map, "DISCOVER_COLLECTION_ID"),
+        collection_slug=parse_required_string(env_map, "DISCOVER_COLLECTION_SLUG"),
         discover_prefix=env_map.get("DISCOVER_PREFIX", ""),
         discover_dry_run=parse_bool(env_map.get("DISCOVER_DRY_RUN")),
         discover_limit=discover_limit,
@@ -95,7 +91,6 @@ async def run_job(
 ) -> int:
     owns_session = db_session is None
     db = db_session or get_db_session()
-    dataset_service = DatasetService(db)
     ingest_service = CatalogIngestService(db)
 
     has_failures = False
@@ -106,23 +101,31 @@ async def run_job(
     format_counts: Counter[str] = Counter()
     format_source_object_counts: Counter[str] = Counter()
     written_versions_count = 0
+    storage_location_id: int | None = None
+    collection_id: int | None = None
 
     try:
-        collection = db.get(Collection, config.collection_id)
+        collection = db.exec(
+            select(Collection).where(Collection.slug == config.collection_slug)
+        ).first()
         if not collection:
-            raise ValueError(f"Collection {config.collection_id} not found")
+            raise ValueError(f"Collection {config.collection_slug!r} not found")
+        collection_id = collection.id
 
-        storage_location = dataset_service.get_storage_location(
-            config.storage_location_id
-        )
+        storage_location = db.exec(
+            select(StorageLocation).where(
+                StorageLocation.slug == config.storage_location_slug
+            )
+        ).first()
         if not storage_location:
             raise ValueError(
-                f"Storage location {config.storage_location_id} not found"
+                f"Storage location {config.storage_location_slug!r} not found"
             )
+        storage_location_id = storage_location.id
         storage_client = create_storage_client_from_location(storage_location)
         if storage_client is None:
             raise ValueError(
-                f"Storage location {config.storage_location_id} is not bucket-backed"
+                f"Storage location {config.storage_location_slug!r} is not bucket-backed"
             )
         discovery = DiscoveryService(storage_client=storage_client)
 
@@ -146,8 +149,8 @@ async def run_job(
 
             if config.discover_dry_run:
                 ingest_result = ingest_service.preview_discovered_version(
-                    collection_id=config.collection_id,
-                    storage_location_id=config.storage_location_id,
+                    collection_id=collection_id,
+                    storage_location_id=storage_location_id,
                     dataset_slug=discovered_version.dataset_slug,
                     file_slug=discovered_version.file_slug,
                     format_type=discovered_version.format_type,
@@ -155,8 +158,8 @@ async def run_job(
                 )
             else:
                 ingest_result = ingest_service.upsert_discovered_version(
-                    collection_id=config.collection_id,
-                    storage_location_id=config.storage_location_id,
+                    collection_id=collection_id,
+                    storage_location_id=storage_location_id,
                     dataset_slug=discovered_version.dataset_slug,
                     file_slug=discovered_version.file_slug,
                     format_type=discovered_version.format_type,
@@ -176,8 +179,10 @@ async def run_job(
                     {
                         "event": "dataset_discovery",
                         "dry_run": config.discover_dry_run,
-                        "storage_location_id": config.storage_location_id,
-                        "collection_id": config.collection_id,
+                        "storage_location_slug": config.storage_location_slug,
+                        "storage_location_id": storage_location_id,
+                        "collection_slug": config.collection_slug,
+                        "collection_id": collection_id,
                         "dataset_slug": discovered_version.dataset_slug,
                         "file_slug": discovered_version.file_slug,
                         "format_type": discovered_version.format_type,
@@ -230,8 +235,10 @@ async def run_job(
             json.dumps(
                 {
                     "event": "dataset_discovery",
-                    "storage_location_id": config.storage_location_id,
-                    "collection_id": config.collection_id,
+                    "storage_location_slug": config.storage_location_slug,
+                    "storage_location_id": storage_location_id,
+                    "collection_slug": config.collection_slug,
+                    "collection_id": collection_id,
                     "ok": False,
                     "error": str(exc),
                 },
@@ -244,8 +251,10 @@ async def run_job(
                 {
                     "event": "dataset_discovery_summary",
                     "dry_run": config.discover_dry_run,
-                    "storage_location_id": config.storage_location_id,
-                    "collection_id": config.collection_id,
+                    "storage_location_slug": config.storage_location_slug,
+                    "storage_location_id": storage_location_id,
+                    "collection_slug": config.collection_slug,
+                    "collection_id": collection_id,
                     "discovered_versions": discovered_versions_count,
                     "source_objects": source_objects_count,
                     "metadata_records": metadata_records_count,

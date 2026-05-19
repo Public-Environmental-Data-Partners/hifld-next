@@ -479,8 +479,8 @@ def test_catalog_ingest_rejects_dataset_slug_in_different_collection():
 
 
 def test_discover_job_loads_required_env_vars(monkeypatch):
-    monkeypatch.setenv("DISCOVER_STORAGE_LOCATION_ID", "6")
-    monkeypatch.setenv("DISCOVER_COLLECTION_ID", "2")
+    monkeypatch.setenv("DISCOVER_STORAGE_LOCATION_SLUG", "seaweedfs-test")
+    monkeypatch.setenv("DISCOVER_COLLECTION_SLUG", "hifld")
     monkeypatch.setenv("DISCOVER_PREFIX", "foo/bar")
     monkeypatch.setenv("DISCOVER_DRY_RUN", "true")
     monkeypatch.setenv("DISCOVER_LIMIT", "5")
@@ -488,8 +488,8 @@ def test_discover_job_loads_required_env_vars(monkeypatch):
     discover_job = importlib.import_module("jobs.discover")
     config = discover_job.load_config_from_env()
 
-    assert config.storage_location_id == 6
-    assert config.collection_id == 2
+    assert config.storage_location_slug == "seaweedfs-test"
+    assert config.collection_slug == "hifld"
     assert config.discover_prefix == "foo/bar"
     assert config.discover_dry_run is True
     assert config.discover_limit == 5
@@ -497,31 +497,24 @@ def test_discover_job_loads_required_env_vars(monkeypatch):
 
 def test_discover_job_requires_single_target_env_vars(monkeypatch):
     discover_job = importlib.import_module("jobs.discover")
-    monkeypatch.delenv("DISCOVER_STORAGE_LOCATION_ID", raising=False)
-    monkeypatch.delenv("DISCOVER_COLLECTION_ID", raising=False)
+    monkeypatch.delenv("DISCOVER_STORAGE_LOCATION_SLUG", raising=False)
+    monkeypatch.delenv("DISCOVER_COLLECTION_SLUG", raising=False)
 
     try:
         discover_job.load_config_from_env({})
     except ValueError as exc:
-        assert "DISCOVER_STORAGE_LOCATION_ID is required" in str(exc)
+        assert "DISCOVER_STORAGE_LOCATION_SLUG is required" in str(exc)
     else:
-        raise AssertionError("Expected missing storage location ID to fail")
+        raise AssertionError("Expected missing storage location slug to fail")
 
     try:
         discover_job.load_config_from_env(
-            {"DISCOVER_STORAGE_LOCATION_ID": "x", "DISCOVER_COLLECTION_ID": "1"}
+            {"DISCOVER_STORAGE_LOCATION_SLUG": "seaweedfs-test"}
         )
     except ValueError as exc:
-        assert "DISCOVER_STORAGE_LOCATION_ID must be an integer" in str(exc)
+        assert "DISCOVER_COLLECTION_SLUG is required" in str(exc)
     else:
-        raise AssertionError("Expected non-integer storage location ID to fail")
-
-    try:
-        discover_job.load_config_from_env({"DISCOVER_STORAGE_LOCATION_ID": "1"})
-    except ValueError as exc:
-        assert "DISCOVER_COLLECTION_ID is required" in str(exc)
-    else:
-        raise AssertionError("Expected missing collection ID to fail")
+        raise AssertionError("Expected missing collection slug to fail")
 
 
 def test_discover_job_loads_storage_location_scans_and_upserts_versions(monkeypatch):
@@ -586,8 +579,8 @@ def test_discover_job_loads_storage_location_scans_and_upserts_versions(monkeypa
         exit_code = asyncio.run(
             discover_job.run_job(
                 discover_job.DiscoverJobConfig(
-                    storage_location_id=storage_location.id,
-                    collection_id=collection.id,
+                    storage_location_slug=storage_location.slug,
+                    collection_slug=collection.slug,
                     discover_prefix="foo/bar",
                     discover_dry_run=False,
                     discover_limit=5,
@@ -663,8 +656,8 @@ def test_discover_job_logs_dry_run_object_paths_and_summary(monkeypatch, caplog)
             exit_code = asyncio.run(
                 discover_job.run_job(
                     discover_job.DiscoverJobConfig(
-                        storage_location_id=storage_location.id,
-                        collection_id=collection.id,
+                        storage_location_slug=storage_location.slug,
+                        collection_slug=collection.slug,
                         discover_dry_run=True,
                     ),
                     db_session=session,
@@ -755,8 +748,8 @@ def test_discover_job_returns_one_when_storage_location_missing(monkeypatch):
         exit_code = asyncio.run(
             discover_job.run_job(
                 discover_job.DiscoverJobConfig(
-                    storage_location_id=999999,
-                    collection_id=collection.id,
+                    storage_location_slug="missing-storage",
+                    collection_slug=collection.slug,
                 ),
                 db_session=session,
             )
@@ -777,8 +770,8 @@ def test_discover_job_returns_one_when_collection_missing():
         exit_code = asyncio.run(
             discover_job.run_job(
                 discover_job.DiscoverJobConfig(
-                    storage_location_id=storage_location.id,
-                    collection_id=999999,
+                    storage_location_slug=storage_location.slug,
+                    collection_slug="missing-collection",
                 ),
                 db_session=session,
             )
