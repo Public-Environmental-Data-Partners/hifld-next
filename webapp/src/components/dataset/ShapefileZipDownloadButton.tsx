@@ -7,6 +7,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import type {
+  DownloadAnalyticsContext,
+} from "@/lib/analytics";
+import {
+  trackDownloadClicked,
+  trackDownloadFailed,
+  trackDownloadSucceeded,
+} from "@/lib/analytics";
 import { createZipFromUrls, extractShapefileUrls, FileUrl } from "@/lib/zip-utils";
 
 interface ShapefileZipDownloadButtonProps {
@@ -18,39 +26,99 @@ interface ShapefileZipDownloadButtonProps {
   }>;
   filename: string;
   label?: string;
+  analyticsContext?: Omit<Partial<DownloadAnalyticsContext>, "download_method">;
+}
+
+function getUrlHost(url?: string): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url, window.location.origin).host || "local";
+  } catch {
+    return "unknown";
+  }
+}
+
+function elapsedMs(startTime: number): number {
+  return Math.round(performance.now() - startTime);
+}
+
+export async function executeShapefileZipDownload({
+  sources,
+  filename,
+  analyticsContext,
+  onProgress,
+}: {
+  sources: ShapefileZipDownloadButtonProps["sources"];
+  filename: string;
+  analyticsContext?: Omit<Partial<DownloadAnalyticsContext>, "download_method">;
+  onProgress?: (progress: number) => void;
+}) {
+  const startTime = performance.now();
+  const fileUrls = extractShapefileUrls(sources);
+  const sourceCount = fileUrls.length;
+  const baseAnalyticsContext: DownloadAnalyticsContext = {
+    ...analyticsContext,
+    filename,
+    url_host: getUrlHost(fileUrls[0]?.url),
+    download_method: "client_zip",
+    source_count: sourceCount,
+  };
+
+  if (fileUrls.length === 0) {
+    const errorMessage = "No shapefile URLs found in sources";
+    console.error(errorMessage);
+    trackDownloadFailed(baseAnalyticsContext, {
+      error_message: errorMessage,
+      source_count: sourceCount,
+      duration_ms: elapsedMs(startTime),
+    });
+    return;
+  }
+
+  trackDownloadClicked(baseAnalyticsContext);
+
+  try {
+    await createZipFromUrls(fileUrls, filename, onProgress);
+    trackDownloadSucceeded(baseAnalyticsContext, {
+      completion_status: "completed",
+      source_count: sourceCount,
+      received_bytes: analyticsContext?.expected_size_bytes,
+      duration_ms: elapsedMs(startTime),
+    });
+  } catch (error) {
+    console.error("Error creating zip file:", error);
+    trackDownloadFailed(baseAnalyticsContext, {
+      error_message: error instanceof Error ? error.message : String(error),
+      source_count: sourceCount,
+      received_bytes: analyticsContext?.expected_size_bytes,
+      duration_ms: elapsedMs(startTime),
+    });
+    alert(`Failed to create zip file: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export function ShapefileZipDownloadButton({
   sources,
   filename,
   label = "Download Zip",
+  analyticsContext,
 }: ShapefileZipDownloadButtonProps) {
   const [isDownloading, setIsDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
 
   const handleDownload = async () => {
-    // Extract shapefile URLs from sources
-    const fileUrls = extractShapefileUrls(sources);
-    
-    if (fileUrls.length === 0) {
-      console.error("No shapefile URLs found in sources");
-      return;
-    }
-
     setIsDownloading(true);
     setProgress(0);
 
     try {
-      await createZipFromUrls(
-        fileUrls,
+      await executeShapefileZipDownload({
+        sources,
         filename,
-        (progressValue) => {
+        analyticsContext,
+        onProgress: (progressValue) => {
           setProgress(progressValue);
-        }
-      );
-    } catch (error) {
-      console.error("Error creating zip file:", error);
-      alert(`Failed to create zip file: ${error instanceof Error ? error.message : String(error)}`);
+        },
+      });
     } finally {
       setIsDownloading(false);
       setProgress(0);
@@ -86,4 +154,3 @@ export function ShapefileZipDownloadButton({
     </TooltipProvider>
   );
 }
-

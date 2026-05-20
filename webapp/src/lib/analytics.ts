@@ -8,6 +8,64 @@ import { env } from '@/env/client';
 // Initialize PostHog on the client side
 let posthogInitialized = false;
 
+export type DownloadMethod = 'native_link' | 'fetch_stream' | 'client_zip';
+
+export interface DownloadAnalyticsContext {
+  collection_slug?: string;
+  dataset_slug?: string;
+  file_slug?: string;
+  format?: string;
+  source_id?: number;
+  storage_location_id?: number;
+  version?: string | number;
+  expected_size_bytes?: number;
+  filename?: string;
+  url_host?: string;
+  download_method: DownloadMethod;
+  source_count?: number;
+}
+
+export interface DownloadSuccessProperties {
+  completion_status: 'completed' | 'handoff';
+  received_bytes?: number;
+  content_length_bytes?: number;
+  duration_ms?: number;
+  source_count?: number;
+}
+
+export interface DownloadFailureProperties {
+  error_message: string;
+  received_bytes?: number;
+  content_length_bytes?: number;
+  duration_ms?: number;
+  source_count?: number;
+}
+
+function compactProperties(properties: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(properties).filter(([, value]) => value !== undefined)
+  );
+}
+
+function captureDownloadEvent(
+  eventName: 'dataset_download_clicked' | 'dataset_download_succeeded' | 'dataset_download_failed',
+  context: DownloadAnalyticsContext,
+  properties?: Record<string, unknown>
+) {
+  if (typeof window === 'undefined') return;
+  if (!posthogInitialized) initPostHog();
+  if (!posthogInitialized || typeof posthog.capture !== 'function') return;
+
+  try {
+    posthog.capture(eventName, compactProperties({
+      ...context,
+      ...properties,
+    }));
+  } catch (error) {
+    console.error(`Failed to track ${eventName}:`, error);
+  }
+}
+
 export function initPostHog() {
   if (typeof window === 'undefined') return;
   if (posthogInitialized) return;
@@ -144,6 +202,24 @@ export function trackDownload(
   }
 }
 
+export function trackDownloadClicked(context: DownloadAnalyticsContext) {
+  captureDownloadEvent('dataset_download_clicked', context);
+}
+
+export function trackDownloadSucceeded(
+  context: DownloadAnalyticsContext,
+  properties: DownloadSuccessProperties
+) {
+  captureDownloadEvent('dataset_download_succeeded', context, properties);
+}
+
+export function trackDownloadFailed(
+  context: DownloadAnalyticsContext,
+  properties: DownloadFailureProperties
+) {
+  captureDownloadEvent('dataset_download_failed', context, properties);
+}
+
 /**
  * Track map viewer opened
  */
@@ -225,4 +301,3 @@ export function getPostHog() {
   if (!posthogInitialized) initPostHog();
   return posthog;
 }
-

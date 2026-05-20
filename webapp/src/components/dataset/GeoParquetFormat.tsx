@@ -45,7 +45,15 @@ export function GeoParquetFormat({
                 </p>
               </div>
               <div className="flex shrink-0 gap-1">
-                <DownloadButton url={geoparquetUrl} label="GeoParquet" />
+                <DownloadButton
+                  url={geoparquetUrl}
+                  label="GeoParquet"
+                  analyticsContext={{
+                    format: "geoparquet",
+                    storage_location_id: selectedSource?.storageLocationId,
+                    version: selectedSource?.version,
+                  }}
+                />
               </div>
             </div>
           </div>
@@ -77,4 +85,3 @@ export function GeoParquetFormat({
     </div>
   );
 }
-

@@ -32,9 +32,16 @@ export function PMTilesFormat({
       </div>
       <div className="flex shrink-0 gap-1">
         <CopyButton value={pmtilesUrl} label="URL" />
-        <DownloadButton url={pmtilesUrl} label="PMTiles" />
+        <DownloadButton
+          url={pmtilesUrl}
+          label="PMTiles"
+          analyticsContext={{
+            format: "pmtiles",
+            storage_location_id: selectedSource?.storageLocationId,
+            version: selectedSource?.version,
+          }}
+        />
       </div>
     </div>
   );
 }
-
