@@ -43,3 +43,13 @@ jobs: {}
 #     pruneStale: false
 #     prefix: ""
 #     limit: null
+
+configSyncJobs: {}
+# Example:
+# configSyncJobs:
+#   prod:
+#     enabled: true
+#     schedule: "15 * * * *"
+#     formatConfigUri: gs://hifld-next-config-prod/catalog/formats.json
+#     storageConfigUri: gs://hifld-next-config-prod/catalog/storage-locations.json
+#     dryRun: false

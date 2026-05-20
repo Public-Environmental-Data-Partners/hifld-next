@@ -32,6 +32,7 @@ class BucketStorageLocationConfig(BaseModel):
     version: str = "v1"  # Schema version
     base_url: str  # Base URL for accessing files
     bucket: str  # Bucket name
+    endpoint_url: Optional[str] = None  # Optional S3-compatible endpoint URL
     # Add other storage-specific config fields as needed
 
 

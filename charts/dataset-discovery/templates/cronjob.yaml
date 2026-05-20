@@ -139,3 +139,141 @@ spec:
           {{- end }}
 {{- end }}
 {{- end }}
+{{- range $jobKey := keys .Values.configSyncJobs | sortAlpha }}
+{{- $job := index $root.Values.configSyncJobs $jobKey }}
+{{- if ($job.enabled | default false) }}
+{{- if not $root.Values.image.repository }}
+{{- fail "image.repository is required when configSyncJobs are enabled" }}
+{{- end }}
+{{- if not $root.Values.database.existingSecret }}
+{{- fail "database.existingSecret is required when configSyncJobs are enabled" }}
+{{- end }}
+{{- if not $job.schedule }}
+{{- fail (printf "configSyncJobs.%s.schedule is required" $jobKey) }}
+{{- end }}
+{{- if not $job.formatConfigUri }}
+{{- fail (printf "configSyncJobs.%s.formatConfigUri is required" $jobKey) }}
+{{- end }}
+{{- if not $job.storageConfigUri }}
+{{- fail (printf "configSyncJobs.%s.storageConfigUri is required" $jobKey) }}
+{{- end }}
+{{- $name := include "dataset-discovery.jobName" (dict "root" $root "jobKey" (printf "config-sync-%s" $jobKey)) }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ include "dataset-discovery.name" $root }}
+    helm.sh/chart: {{ include "dataset-discovery.chart" $root }}
+    app.kubernetes.io/instance: {{ $root.Release.Name }}
+    app.kubernetes.io/managed-by: {{ $root.Release.Service }}
+    app.kubernetes.io/component: config-sync
+    dataset-discovery/job: {{ $jobKey | quote }}
+    {{- with $root.Values.defaults.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with $job.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if or $root.Values.defaults.annotations $job.annotations }}
+  annotations:
+    {{- with $root.Values.defaults.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with $job.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  schedule: {{ $job.schedule | quote }}
+  {{- if hasKey $job "suspend" }}
+  suspend: {{ $job.suspend }}
+  {{- end }}
+  concurrencyPolicy: {{ default $root.Values.defaults.concurrencyPolicy $job.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ default $root.Values.defaults.successfulJobsHistoryLimit $job.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ default $root.Values.defaults.failedJobsHistoryLimit $job.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ default $root.Values.defaults.backoffLimit $job.backoffLimit }}
+      activeDeadlineSeconds: {{ default $root.Values.defaults.activeDeadlineSeconds $job.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ include "dataset-discovery.name" $root }}
+            app.kubernetes.io/instance: {{ $root.Release.Name }}
+            app.kubernetes.io/component: config-sync
+            dataset-discovery/job: {{ $jobKey | quote }}
+            {{- with $root.Values.defaults.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with $job.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if or $root.Values.defaults.podAnnotations $job.podAnnotations }}
+          annotations:
+            {{- with $root.Values.defaults.podAnnotations }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with $job.podAnnotations }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+        spec:
+          serviceAccountName: {{ include "dataset-discovery.serviceAccountName" $root }}
+          restartPolicy: {{ default $root.Values.defaults.restartPolicy $job.restartPolicy }}
+          {{- with (default $root.Values.defaults.podSecurityContext $job.podSecurityContext) }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: config-sync
+              image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+              imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+              command:
+                - uv
+                - run
+                - python
+                - -m
+                - jobs.config_sync
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $root.Values.database.existingSecret }}
+                      key: {{ $root.Values.database.urlKey }}
+                - name: FORMAT_CONFIG_URI
+                  value: {{ $job.formatConfigUri | quote }}
+                - name: STORAGE_CONFIG_URI
+                  value: {{ $job.storageConfigUri | quote }}
+                - name: CONFIG_SYNC_DRY_RUN
+                  value: {{ ($job.dryRun | default false) | quote }}
+                {{- with $root.Values.defaults.env }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+                {{- with $job.env }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              {{- with (default $root.Values.defaults.resources $job.resources) }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- with (default $root.Values.defaults.securityContext $job.securityContext) }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+          {{- with (default $root.Values.defaults.nodeSelector $job.nodeSelector) }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with (default $root.Values.defaults.affinity $job.affinity) }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with (default $root.Values.defaults.tolerations $job.tolerations) }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}
+{{- end }}

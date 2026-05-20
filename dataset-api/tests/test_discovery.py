@@ -22,7 +22,9 @@ from models.dataset import (
     SpatialDatasetFileMetadata,
     StorageLocation,
 )
+from scripts.config_loader import load_json_config
 from scripts.seed_formats import DEFAULT_FORMATS, seed_formats
+from scripts.seed_storage import seed_storage_locations
 from services.catalog_ingest import CatalogIngestService
 from services.discovery import DiscoveredVersion, DiscoveryService
 
@@ -1094,3 +1096,300 @@ def test_discover_job_returns_one_when_collection_missing():
         )
 
     assert exit_code == 1
+
+
+def test_config_sync_job_loads_required_env_vars(monkeypatch):
+    monkeypatch.setenv("FORMAT_CONFIG_URI", "seaweedfs://config/catalog/formats.json")
+    monkeypatch.setenv(
+        "STORAGE_CONFIG_URI", "seaweedfs://config/catalog/storage-locations.json"
+    )
+    monkeypatch.setenv("CONFIG_SYNC_DRY_RUN", "true")
+
+    config_sync_job = importlib.import_module("jobs.config_sync")
+    config = config_sync_job.load_config_from_env()
+
+    assert config.format_config_uri == "seaweedfs://config/catalog/formats.json"
+    assert (
+        config.storage_config_uri
+        == "seaweedfs://config/catalog/storage-locations.json"
+    )
+    assert config.dry_run is True
+
+
+def test_config_sync_job_requires_config_uri_env_vars():
+    config_sync_job = importlib.import_module("jobs.config_sync")
+
+    try:
+        config_sync_job.load_config_from_env({})
+    except ValueError as exc:
+        assert "FORMAT_CONFIG_URI is required" in str(exc)
+    else:
+        raise AssertionError("Expected missing format config URI to fail")
+
+    try:
+        config_sync_job.load_config_from_env({"FORMAT_CONFIG_URI": "formats.json"})
+    except ValueError as exc:
+        assert "STORAGE_CONFIG_URI is required" in str(exc)
+    else:
+        raise AssertionError("Expected missing storage config URI to fail")
+
+
+def test_seed_formats_updates_existing_rows_and_supports_dry_run():
+    with make_session() as session:
+        session.add(
+            Format(
+                format_type="geoparquet",
+                name="Old GeoParquet",
+                description="Old description",
+                mime_type="old/type",
+            )
+        )
+        session.commit()
+
+        updated_format = {
+            "format_type": "geoparquet",
+            "name": "GeoParquet",
+            "description": "Updated description",
+            "mime_type": "application/parquet",
+        }
+
+        dry_run_results = seed_formats(session, [updated_format], dry_run=True)
+        unchanged = session.exec(
+            select(Format).where(Format.format_type == "geoparquet")
+        ).one()
+        assert dry_run_results == {"created": 0, "updated": 1, "unchanged": 0}
+        assert unchanged.name == "Old GeoParquet"
+        assert unchanged.description == "Old description"
+        assert unchanged.mime_type == "old/type"
+
+        results = seed_formats(session, [updated_format])
+        changed = session.exec(
+            select(Format).where(Format.format_type == "geoparquet")
+        ).one()
+        assert results == {"created": 0, "updated": 1, "unchanged": 0}
+        assert changed.name == "GeoParquet"
+        assert changed.description == "Updated description"
+        assert changed.mime_type == "application/parquet"
+
+
+def test_seed_storage_updates_config_when_other_fields_change_and_supports_dry_run():
+    with make_session() as session:
+        session.add(
+            StorageLocation(
+                slug="seaweedfs-config-sync-test",
+                name="Old Name",
+                backend_type="s3",
+                description="Old description",
+                config=BucketStorageLocationConfig(
+                    type="seaweedfs",
+                    base_url="http://localhost:8888",
+                    bucket="old-bucket",
+                ),
+            )
+        )
+        session.commit()
+
+        updated_location = {
+            "slug": "seaweedfs-config-sync-test",
+            "name": "SeaweedFS Config Sync Test",
+            "backend_type": "s3",
+            "description": "Updated description",
+            "config": {
+                "type": "seaweedfs",
+                "version": "v1",
+                "base_url": "http://localhost:8888",
+                "bucket": "new-bucket",
+                "endpoint_url": "http://localhost:8333",
+            },
+        }
+
+        dry_run_results = seed_storage_locations(
+            session, [updated_location], dry_run=True
+        )
+        unchanged = session.exec(
+            select(StorageLocation).where(
+                StorageLocation.slug == "seaweedfs-config-sync-test"
+            )
+        ).one()
+        assert dry_run_results == {"created": 0, "updated": 1, "unchanged": 0}
+        assert unchanged.name == "Old Name"
+        assert unchanged.config["bucket"] == "old-bucket"
+
+        results = seed_storage_locations(session, [updated_location])
+        changed = session.exec(
+            select(StorageLocation).where(
+                StorageLocation.slug == "seaweedfs-config-sync-test"
+            )
+        ).one()
+        assert results == {"created": 0, "updated": 1, "unchanged": 0}
+        assert changed.name == "SeaweedFS Config Sync Test"
+        assert changed.description == "Updated description"
+        assert changed.config["bucket"] == "new-bucket"
+        assert changed.config["endpoint_url"] == "http://localhost:8333"
+
+
+def test_config_sync_job_creates_config_rows_and_logs_summary(monkeypatch, caplog):
+    config_sync_job = importlib.import_module("jobs.config_sync")
+    formats = [
+        {
+            "format_type": "geoparquet",
+            "name": "GeoParquet",
+            "description": "GeoParquet format",
+            "mime_type": "application/parquet",
+        }
+    ]
+    storage_locations = [
+        {
+            "slug": "seaweedfs-config-sync-test",
+            "name": "SeaweedFS Config Sync Test",
+            "backend_type": "s3",
+            "description": "Local SeaweedFS storage location",
+            "config": {
+                "type": "seaweedfs",
+                "version": "v1",
+                "base_url": "http://localhost:8888",
+                "bucket": "config-sync-test",
+            },
+        }
+    ]
+
+    def fake_load_json_config(uri: str):
+        if uri == "formats.json":
+            return formats
+        if uri == "storage.json":
+            return storage_locations
+        raise AssertionError(f"Unexpected URI: {uri}")
+
+    monkeypatch.setattr(config_sync_job, "load_json_config", fake_load_json_config)
+
+    with make_session() as session:
+        with caplog.at_level(logging.INFO, logger=config_sync_job.logger.name):
+            exit_code = config_sync_job.run_job(
+                config_sync_job.ConfigSyncJobConfig(
+                    format_config_uri="formats.json",
+                    storage_config_uri="storage.json",
+                    dry_run=False,
+                ),
+                db_session=session,
+            )
+
+        assert exit_code == 0
+        assert session.exec(select(Format)).one().format_type == "geoparquet"
+        assert (
+            session.exec(select(StorageLocation)).one().slug
+            == "seaweedfs-config-sync-test"
+        )
+
+    log_payloads = [json.loads(record.message) for record in caplog.records]
+    summary = next(
+        item for item in log_payloads if item["event"] == "catalog_config_sync_summary"
+    )
+    assert summary["dry_run"] is False
+    assert summary["format_results"] == {
+        "created": 1,
+        "updated": 0,
+        "unchanged": 0,
+    }
+    assert summary["storage_results"] == {
+        "created": 1,
+        "updated": 0,
+        "unchanged": 0,
+    }
+    assert summary["has_failures"] is False
+
+
+def test_config_sync_job_dry_run_leaves_database_unchanged(monkeypatch):
+    config_sync_job = importlib.import_module("jobs.config_sync")
+    monkeypatch.setattr(
+        config_sync_job,
+        "load_json_config",
+        lambda uri: [
+            {
+                "format_type": "pmtiles",
+                "name": "PMTiles",
+                "description": "PMTiles format",
+                "mime_type": "application/x-protobuf",
+            }
+        ]
+        if uri == "formats.json"
+        else [],
+    )
+
+    with make_session() as session:
+        exit_code = config_sync_job.run_job(
+            config_sync_job.ConfigSyncJobConfig(
+                format_config_uri="formats.json",
+                storage_config_uri="storage.json",
+                dry_run=True,
+            ),
+            db_session=session,
+        )
+
+        assert exit_code == 0
+        assert session.exec(select(Format)).all() == []
+
+
+def test_config_sync_job_returns_one_for_invalid_config(monkeypatch, caplog):
+    config_sync_job = importlib.import_module("jobs.config_sync")
+    monkeypatch.setattr(
+        config_sync_job,
+        "load_json_config",
+        lambda uri: [
+            {
+                "format_type": "not-a-format",
+                "name": "Broken",
+                "description": "Broken format",
+                "mime_type": None,
+            }
+        ],
+    )
+
+    with make_session() as session:
+        with caplog.at_level(logging.INFO, logger=config_sync_job.logger.name):
+            exit_code = config_sync_job.run_job(
+                config_sync_job.ConfigSyncJobConfig(
+                    format_config_uri="formats.json",
+                    storage_config_uri="storage.json",
+                    dry_run=False,
+                ),
+                db_session=session,
+            )
+
+    assert exit_code == 1
+    log_payloads = [json.loads(record.message) for record in caplog.records]
+    error_log = next(
+        item
+        for item in log_payloads
+        if item["event"] == "catalog_config_sync" and item["ok"] is False
+    )
+    assert "format_type" in error_log["error"]
+
+
+def test_load_json_config_reads_seaweedfs_uri(monkeypatch):
+    class FakeResponse:
+        def __init__(self, text: str):
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, timeout: float):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+        def get(self, url: str):
+            assert url == "http://localhost:8888/buckets/config/catalog/formats.json"
+            return FakeResponse('[{"format_type": "geoparquet"}]')
+
+    config_loader = importlib.import_module("scripts.config_loader")
+    monkeypatch.setattr(config_loader.httpx, "Client", FakeClient)
+
+    config = load_json_config("seaweedfs://config/catalog/formats.json")
+
+    assert config == [{"format_type": "geoparquet"}]
