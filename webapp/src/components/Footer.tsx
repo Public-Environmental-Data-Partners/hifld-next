@@ -4,8 +4,8 @@ export default function Footer() {
   return (
     <footer className="border-t-2 bg-background">
       <div className="mx-auto max-w-6xl px-6 py-10 sm:py-12">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-muted-foreground">
+        <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:justify-between sm:text-left">
+          <p className="text-center text-sm text-muted-foreground sm:text-left">
             A{" "}
             <a
               href="https://screening-tools.com/"
@@ -17,7 +17,7 @@ export default function Footer() {
             </a>
             {" "}website
           </p>
-          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+          <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground sm:flex-row sm:gap-4">
             <a
               href={SURVEY_URL}
               target="_blank"
@@ -26,7 +26,7 @@ export default function Footer() {
             >
               Share feedback
             </a>
-            <span aria-hidden>|</span>
+            <span aria-hidden className="hidden sm:inline">|</span>
             <a
               href="https://donorbox.org/open-environmental-data-project-donations-2?default_interval=o"
               target="_blank"
@@ -35,7 +35,7 @@ export default function Footer() {
             >
               Donate
             </a>
-            <span aria-hidden>|</span>
+            <span aria-hidden className="hidden sm:inline">|</span>
             <a
               href="https://fultonring.com/"
               target="_blank"
@@ -50,4 +50,3 @@ export default function Footer() {
     </footer>
   );
 }
-

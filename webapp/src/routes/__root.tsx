@@ -32,7 +32,7 @@ export const Route = createRootRoute({
       {
         rel: 'icon',
         href: PEDP_FAVICON,
-        type: 'image/x-icon',
+        type: 'image/webp',
       },
       {
         rel: 'alternate',

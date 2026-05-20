@@ -5,11 +5,11 @@
     {
       "src": "https://images.squarespace-cdn.com/content/v1/6793060d1570ff20aceb1125/1bf945a1-a73f-4823-a4d5-7cfc42a96bfa/favicon.ico",
       "sizes": "64x64 32x32 24x24 16x16",
-      "type": "image/x-icon"
+      "type": "image/webp"
     }
   ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#000000",
-  "background_color": "#ffffff"
+  "theme_color": "#42413D",
+  "background_color": "#F4F1EC"
 }
