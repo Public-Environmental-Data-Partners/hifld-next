@@ -18,7 +18,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from typing import TypedDict, Optional
+from typing import TypedDict, Optional, get_args
 from database.db import get_db_session
 from models.dataset import Format, FormatType
 from scripts.config_loader import load_json_config
@@ -32,6 +32,21 @@ class FormatConfig(TypedDict):
     name: str
     description: str
     mime_type: Optional[str]
+
+
+ALLOWED_FORMAT_TYPES = set(get_args(FormatType))
+
+
+def validate_format_config(format_data: FormatConfig) -> None:
+    """Validate a format config before writing it to the database."""
+    format_type = format_data.get("format_type")
+    if format_type not in ALLOWED_FORMAT_TYPES:
+        raise ValueError(
+            f"format_type must be one of {sorted(ALLOWED_FORMAT_TYPES)}, got: {format_type}"
+        )
+    for field_name in ("name", "description"):
+        if field_name not in format_data:
+            raise ValueError(f"{field_name} is required for format {format_type}")
 
 
 # Default format definitions (fallback if no config provided)
@@ -81,11 +96,15 @@ DEFAULT_FORMATS = [
 ]
 
 
-def seed_formats(db: Session, formats: list[FormatConfig]) -> dict[str, int]:
+def seed_formats(
+    db: Session, formats: list[FormatConfig], dry_run: bool = False
+) -> dict[str, int]:
     """Seed format definitions into the database."""
-    results = {"created": 0, "existing": 0}
+    results = {"created": 0, "updated": 0, "unchanged": 0}
 
     for format_data in formats:
+        validate_format_config(format_data)
+
         # Check if format already exists
         statement = select(Format).where(
             Format.format_type == format_data["format_type"]
@@ -93,20 +112,43 @@ def seed_formats(db: Session, formats: list[FormatConfig]) -> dict[str, int]:
         existing = db.exec(statement).first()
 
         if existing:
-            print(
-                f"  ✓ Format '{format_data['format_type']}' already exists (ID: {existing.id})"
+            needs_update = (
+                existing.name != format_data["name"]
+                or existing.description != format_data.get("description")
+                or existing.mime_type != format_data.get("mime_type")
             )
-            results["existing"] += 1
+            if needs_update:
+                if not dry_run:
+                    existing.name = format_data["name"]
+                    existing.description = format_data.get("description")
+                    existing.mime_type = format_data.get("mime_type")
+                    db.add(existing)
+                    db.commit()
+                    db.refresh(existing)
+                print(
+                    f"  ✓ Would update format '{format_data['format_type']}' (ID: {existing.id})"
+                    if dry_run
+                    else f"  ✓ Updated format '{format_data['format_type']}' (ID: {existing.id})"
+                )
+                results["updated"] += 1
+            else:
+                print(
+                    f"  ✓ Format '{format_data['format_type']}' already exists and is up to date (ID: {existing.id})"
+                )
+                results["unchanged"] += 1
             continue
 
         # Create new format
         format_obj = Format(**format_data)
-        db.add(format_obj)
-        db.commit()
-        db.refresh(format_obj)
+        if not dry_run:
+            db.add(format_obj)
+            db.commit()
+            db.refresh(format_obj)
 
         print(
-            f"  ✓ Created format '{format_data['format_type']}' (ID: {format_obj.id})"
+            f"  ✓ Would create format '{format_data['format_type']}'"
+            if dry_run
+            else f"  ✓ Created format '{format_data['format_type']}' (ID: {format_obj.id})"
         )
         results["created"] += 1
 
@@ -153,8 +195,9 @@ def main():
 
         print("\nSummary:")
         print(f"  Created: {results['created']}")
-        print(f"  Existing: {results['existing']}")
-        print(f"  Total: {results['created'] + results['existing']}")
+        print(f"  Updated: {results['updated']}")
+        print(f"  Unchanged: {results['unchanged']}")
+        print(f"  Total: {results['created'] + results['updated'] + results['unchanged']}")
     finally:
         db.close()
 

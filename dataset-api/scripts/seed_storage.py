@@ -41,6 +41,13 @@ class StorageLocationConfig(TypedDict):
     config: dict  # Will be BucketStorageLocationConfig or GeoServerStorageLocationConfig dict
 
 
+def validate_storage_location_config(location_data: StorageLocationConfig) -> None:
+    """Validate a storage location config before writing it to the database."""
+    for field_name in ("slug", "name", "backend_type", "config"):
+        if field_name not in location_data:
+            raise ValueError(f"{field_name} is required for storage location config")
+
+
 # Default storage locations (fallback if no config provided)
 DEFAULT_STORAGE_LOCATIONS = [
     {
@@ -102,13 +109,24 @@ def detect_storage_type_from_config(config: dict) -> str:
     return "s3"
 
 
+def config_to_dict(config: object) -> dict:
+    """Convert a config value to a plain dict."""
+    if hasattr(config, "model_dump"):
+        return config.model_dump(exclude_none=True)
+    if isinstance(config, dict):
+        return {key: value for key, value in config.items() if value is not None}
+    return {}
+
+
 def seed_storage_locations(
-    db: Session, locations: list[StorageLocationConfig]
+    db: Session, locations: list[StorageLocationConfig], dry_run: bool = False
 ) -> dict[str, int]:
     """Seed storage locations into the database (upsert mode - updates existing)."""
     results = {"created": 0, "updated": 0, "unchanged": 0}
 
     for location_data in locations:
+        validate_storage_location_config(location_data)
+
         # Check if location already exists
         statement = select(StorageLocation).where(
             StorageLocation.slug == location_data["slug"]
@@ -118,17 +136,12 @@ def seed_storage_locations(
         if existing:
             # Upsert: update existing location if config has changed
             needs_update = False
-            new_config = location_data.get("config", {})
-            
-            # Convert new config to dict if it's a Pydantic model
-            if hasattr(new_config, "model_dump"):
-                new_config_dict = new_config.model_dump()
-            else:
-                new_config_dict = new_config if new_config else {}
-            
+            new_config_dict = config_to_dict(location_data.get("config", {}))
+            existing_config = config_to_dict(existing.config)
+            target_config = new_config_dict.copy() if new_config_dict else existing_config.copy()
+
             # Check if we need to migrate type from "s3" to explicit type
-            if isinstance(existing.config, dict):
-                existing_config = existing.config.copy()  # Work with a copy
+            if existing_config:
                 existing_type = existing_config.get("type", "s3")
                 
                 # If existing has type="s3" or missing type, try to detect and update
@@ -136,6 +149,7 @@ def seed_storage_locations(
                     # First try to use the new config's type if provided
                     if new_config_dict.get("type") in ("gcs", "seaweedfs"):
                         existing_config["type"] = new_config_dict["type"]
+                        target_config["type"] = new_config_dict["type"]
                         needs_update = True
                         print(
                             f"  → Updating '{location_data['name']}' type from '{existing_type}' to '{new_config_dict['type']}'"
@@ -145,55 +159,39 @@ def seed_storage_locations(
                         detected_type = detect_storage_type_from_config(existing_config)
                         if detected_type != "s3" and detected_type != existing_type:
                             existing_config["type"] = detected_type
+                            target_config["type"] = detected_type
                             needs_update = True
                             print(
                                 f"  → Detected and updating '{location_data['name']}' type from '{existing_type}' to '{detected_type}' (from base_url)"
                             )
                 
-                # Update the existing config dict
-                if needs_update:
-                    existing.config = existing_config
-            
             # Update other fields if they differ
             if existing.backend_type != location_data.get("backend_type"):
-                existing.backend_type = location_data["backend_type"]
                 needs_update = True
 
             if existing.name != location_data.get("name"):
-                existing.name = location_data["name"]
                 needs_update = True
             
             if existing.description != location_data.get("description"):
-                existing.description = location_data.get("description")
                 needs_update = True
             
-            # Update config if it's different (only if we haven't already updated it above)
-            if new_config_dict and not needs_update:
-                # Compare configs (convert existing to dict for comparison)
-                existing_config_dict = existing.config
-                if isinstance(existing_config_dict, dict):
-                    # Check if configs are different (excluding type if we just updated it)
-                    # Create comparison dicts
-                    existing_compare = {k: v for k, v in existing_config_dict.items() if k != "type"}
-                    new_compare = {k: v for k, v in new_config_dict.items() if k != "type"}
-                    
-                    if existing_compare != new_compare:
-                        # Merge: keep detected type if we set it, otherwise use new config
-                        if "type" in existing_config_dict and existing_config_dict["type"] in ("gcs", "seaweedfs"):
-                            new_config_dict["type"] = existing_config_dict["type"]
-                        existing.config = new_config_dict
-                        needs_update = True
-                else:
-                    # Existing config is not a dict, update it
-                    existing.config = new_config_dict
-                    needs_update = True
+            if target_config and existing_config != target_config:
+                needs_update = True
             
             if needs_update:
-                db.add(existing)
-                db.commit()
-                db.refresh(existing)
+                if not dry_run:
+                    existing.backend_type = location_data["backend_type"]
+                    existing.name = location_data["name"]
+                    existing.description = location_data.get("description")
+                    if target_config:
+                        existing.config = target_config
+                    db.add(existing)
+                    db.commit()
+                    db.refresh(existing)
                 print(
-                    f"  ✓ Updated storage location '{location_data['name']}' (ID: {existing.id})"
+                    f"  ✓ Would update storage location '{location_data['name']}' (ID: {existing.id})"
+                    if dry_run
+                    else f"  ✓ Updated storage location '{location_data['name']}' (ID: {existing.id})"
                 )
                 results["updated"] += 1
             else:
@@ -205,12 +203,15 @@ def seed_storage_locations(
 
         # Create new storage location
         storage_location = StorageLocation(**location_data)
-        db.add(storage_location)
-        db.commit()
-        db.refresh(storage_location)
+        if not dry_run:
+            db.add(storage_location)
+            db.commit()
+            db.refresh(storage_location)
 
         print(
-            f"  ✓ Created storage location '{location_data['name']}' (ID: {storage_location.id})"
+            f"  ✓ Would create storage location '{location_data['name']}'"
+            if dry_run
+            else f"  ✓ Created storage location '{location_data['name']}' (ID: {storage_location.id})"
         )
         results["created"] += 1
 
