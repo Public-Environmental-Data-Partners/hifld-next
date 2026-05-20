@@ -140,7 +140,7 @@ export function buildColorExpression(
   colors: string[]
 ): maplibregl.Expression {
   if (!property || breaks.length === 0) {
-    return colors[0] || "#3b82f6";
+    return colors[0] || "#C5E8FF";
   }
 
   const expression: maplibregl.Expression = [
@@ -183,4 +183,3 @@ export function getLegendItems(breaks: number[], colors: string[]) {
     };
   });
 }
-

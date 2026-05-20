@@ -142,7 +142,7 @@ export function useMapInitialization(
           "source-layer": layer.id,
           filter: ["==", "$type", "Polygon"],
           paint: {
-            "fill-color": "#3b82f6",
+            "fill-color": "#C5E8FF",
             "fill-opacity": DEFAULT_STYLE.opacity,
           },
         });
@@ -154,7 +154,7 @@ export function useMapInitialization(
           "source-layer": layer.id,
           filter: ["==", "$type", "LineString"],
           paint: {
-            "line-color": "#2563eb",
+            "line-color": "#6D6659",
             "line-opacity": DEFAULT_STYLE.opacity,
             "line-width": DEFAULT_STYLE.lineWidth,
           },
@@ -167,7 +167,7 @@ export function useMapInitialization(
           "source-layer": layer.id,
           filter: ["==", "$type", "Point"],
           paint: {
-            "circle-color": "#1d4ed8",
+            "circle-color": "#C0E6AA",
             "circle-opacity": DEFAULT_STYLE.opacity,
             "circle-radius": DEFAULT_STYLE.radius,
           },
@@ -260,4 +260,3 @@ export function useMapInitialization(
     clearHoverFeature,
   };
 }
-
