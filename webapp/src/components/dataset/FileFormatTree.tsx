@@ -12,7 +12,8 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { DatasetFile } from "@/lib/api-client";
+import type { DatasetFile, DatasetFormat, DatasetSource } from "@/lib/api-client";
+import type { DownloadAnalyticsContext } from "@/lib/analytics";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "./CopyButton";
@@ -48,6 +49,36 @@ function formatFileSize(bytes: number | null | undefined): string {
     unitIndex++;
   }
   return `${size.toFixed(unitIndex > 0 ? 1 : 0)} ${units[unitIndex]}`;
+}
+
+function downloadAnalyticsContext({
+  collectionSlug,
+  datasetSlug,
+  fileSlug,
+  format,
+  source,
+  sizeBytes,
+  filename,
+}: {
+  collectionSlug?: string;
+  datasetSlug?: string;
+  fileSlug?: string;
+  format: string;
+  source?: DatasetSource;
+  sizeBytes?: number;
+  filename?: string;
+}): Omit<Partial<DownloadAnalyticsContext>, "download_method"> {
+  return {
+    collection_slug: collectionSlug,
+    dataset_slug: datasetSlug,
+    file_slug: fileSlug,
+    format,
+    source_id: source?.id,
+    storage_location_id: source?.storage_location?.id,
+    version: source?.version,
+    expected_size_bytes: sizeBytes,
+    filename,
+  };
 }
 
 interface FileFormatTreeProps {
@@ -106,6 +137,15 @@ export function FileFormatTree({
   const shapefileFormat = file.formats?.find((f) => f.format.format_type === "shapefile");
   const geojsonFormat = file.formats?.find((f) => f.format.format_type === "geojson");
   const fileGeodatabaseFormat = file.formats?.find((f) => f.format.format_type === "file_geodatabase");
+  const selectedSourceFor = (formatType: string, formatEntry?: DatasetFormat): DatasetSource | undefined => {
+    const selectedLocationId = selectedSources[formatType]?.storageLocationId;
+    const selectedVersion = selectedSources[formatType]?.version;
+    return formatEntry?.sources?.find((source) => (
+      source.storage_location?.id === selectedLocationId &&
+      String(source.version || "1") === String(selectedVersion || "1")
+    ));
+  };
+  const selectedGeoserverSource = selectedSourceFor("geoserver", geoserverFormat);
 
   return (
     <div className="space-y-1 border rounded-md p-4">
@@ -136,7 +176,17 @@ export function FileFormatTree({
                       Download as GeoJSON format from GeoServer
                     </p>
                     <div className="flex items-center gap-2">
-                      <DownloadButton url={geojsonUrl} label="Download" />
+                      <DownloadButton
+                        url={geojsonUrl}
+                        label="Download"
+                        analyticsContext={downloadAnalyticsContext({
+                          collectionSlug,
+                          datasetSlug,
+                          fileSlug,
+                          format: "geoserver_geojson",
+                          source: selectedGeoserverSource,
+                        })}
+                      />
                     </div>
                   </div>
                 )}
@@ -162,7 +212,17 @@ export function FileFormatTree({
                       Download as GeoPackage format from GeoServer
                     </p>
                     <div className="flex items-center gap-2">
-                      <DownloadButton url={geopackageUrl} label="Download" />
+                      <DownloadButton
+                        url={geopackageUrl}
+                        label="Download"
+                        analyticsContext={downloadAnalyticsContext({
+                          collectionSlug,
+                          datasetSlug,
+                          fileSlug,
+                          format: "geoserver_geopackage",
+                          source: selectedGeoserverSource,
+                        })}
+                      />
                     </div>
                   </div>
                 )}
@@ -188,7 +248,17 @@ export function FileFormatTree({
                       Download as Shapefile (zip) from GeoServer
                     </p>
                     <div className="flex items-center gap-2">
-                      <DownloadButton url={shapefileUrl} label="Download" />
+                      <DownloadButton
+                        url={shapefileUrl}
+                        label="Download"
+                        analyticsContext={downloadAnalyticsContext({
+                          collectionSlug,
+                          datasetSlug,
+                          fileSlug,
+                          format: "geoserver_shapefile",
+                          source: selectedGeoserverSource,
+                        })}
+                      />
                     </div>
                   </div>
                 )}
@@ -549,7 +619,19 @@ export function FileFormatTree({
                                 {fileUrl}
                               </p>
                               <div className="flex items-center gap-2">
-                                <DownloadButton url={fileUrl} label="Download" />
+                                <DownloadButton
+                                  url={fileUrl}
+                                  label="Download"
+                                  analyticsContext={downloadAnalyticsContext({
+                                    collectionSlug,
+                                    datasetSlug,
+                                    fileSlug,
+                                    format: "geoparquet",
+                                    source,
+                                    sizeBytes: fileSizeBytes,
+                                    filename: fileName,
+                                  })}
+                                />
                                 {onViewParquet && (
                                   <Button
                                     size="sm"
@@ -618,7 +700,18 @@ export function FileFormatTree({
                 </p>
                 <div className="flex items-center gap-2">
                   <CopyButton value={pmtilesUrl} label="Copy URL" />
-                  <DownloadButton url={pmtilesUrl} label="Download" />
+                  <DownloadButton
+                    url={pmtilesUrl}
+                    label="Download"
+                    analyticsContext={downloadAnalyticsContext({
+                      collectionSlug,
+                      datasetSlug,
+                      fileSlug,
+                      format: "pmtiles",
+                      source: selectedPmtilesSource,
+                      sizeBytes: pmtilesSizeBytes,
+                    })}
+                  />
                 </div>
               </div>
             )}
@@ -668,7 +761,19 @@ export function FileFormatTree({
                 </p>
                 <div className="flex items-center gap-2">
                   <CopyButton value={geopackageUrl} label="Copy URL" />
-                  <DownloadButton url={geopackageUrl} label="Download" sizeBytes={geopackageSizeBytes ?? undefined} />
+                  <DownloadButton
+                    url={geopackageUrl}
+                    label="Download"
+                    sizeBytes={geopackageSizeBytes ?? undefined}
+                    analyticsContext={downloadAnalyticsContext({
+                      collectionSlug,
+                      datasetSlug,
+                      fileSlug,
+                      format: "geopackage",
+                      source: selectedGeopackageSource,
+                      sizeBytes: geopackageSizeBytes,
+                    })}
+                  />
                 </div>
               </div>
             )}
@@ -766,6 +871,15 @@ export function FileFormatTree({
                     }))}
                     filename={zipFilename}
                     label="Download Zip"
+                    analyticsContext={downloadAnalyticsContext({
+                      collectionSlug,
+                      datasetSlug,
+                      fileSlug,
+                      format: "shapefile",
+                      source: originalSource,
+                      sizeBytes: shapefileSizeBytes,
+                      filename: zipFilename,
+                    })}
                   />
                 </div>
               </div>
@@ -785,6 +899,15 @@ export function FileFormatTree({
                     url={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}/sources/${originalSource.id}/download-zip`}
                     label="Download Zip"
                     filename={zipFilename}
+                    analyticsContext={downloadAnalyticsContext({
+                      collectionSlug,
+                      datasetSlug,
+                      fileSlug,
+                      format: "shapefile",
+                      source: originalSource,
+                      sizeBytes: shapefileSizeBytes,
+                      filename: zipFilename,
+                    })}
                   />
                 </div>
               </div>
@@ -806,7 +929,18 @@ export function FileFormatTree({
                     </p>
                     <div className="flex items-center gap-2">
                       <CopyButton value={sourceUrl} label="Copy URL" />
-                      <DownloadButton url={sourceUrl} label="Download" />
+                      <DownloadButton
+                        url={sourceUrl}
+                        label="Download"
+                        analyticsContext={downloadAnalyticsContext({
+                          collectionSlug,
+                          datasetSlug,
+                          fileSlug,
+                          format: "shapefile",
+                          source: sourcesWithUrls[0],
+                          sizeBytes: shapefileSizeBytes,
+                        })}
+                      />
                     </div>
                   </div>
                 );
@@ -860,7 +994,18 @@ export function FileFormatTree({
                 </p>
                 <div className="flex items-center gap-2">
                   <CopyButton value={geojsonUrl} label="Copy URL" />
-                  <DownloadButton url={geojsonUrl} label="Download" />
+                  <DownloadButton
+                    url={geojsonUrl}
+                    label="Download"
+                    analyticsContext={downloadAnalyticsContext({
+                      collectionSlug,
+                      datasetSlug,
+                      fileSlug,
+                      format: "geojson",
+                      source: selectedGeojsonSource,
+                      sizeBytes: geojsonSizeBytes,
+                    })}
+                  />
                 </div>
               </div>
             )}
@@ -912,7 +1057,18 @@ export function FileFormatTree({
                 </p>
                 <div className="flex items-center gap-2">
                   <CopyButton value={fileGeodatabaseUrl} label="Copy URL" />
-                  <DownloadButton url={fileGeodatabaseUrl} label="Download" />
+                  <DownloadButton
+                    url={fileGeodatabaseUrl}
+                    label="Download"
+                    analyticsContext={downloadAnalyticsContext({
+                      collectionSlug,
+                      datasetSlug,
+                      fileSlug,
+                      format: "file_geodatabase",
+                      source: selectedFileGeodatabaseSource,
+                      sizeBytes: fileGeodatabaseSizeBytes,
+                    })}
+                  />
                 </div>
               </div>
             )}

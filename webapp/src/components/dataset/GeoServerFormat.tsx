@@ -84,7 +84,15 @@ export function GeoServerFormat({
                 </p>
               </div>
               <div className="flex shrink-0 gap-1">
-                <DownloadButton url={geojsonUrl} label="GeoJSON" />
+                <DownloadButton
+                  url={geojsonUrl}
+                  label="GeoJSON"
+                  analyticsContext={{
+                    format: "geoserver_geojson",
+                    storage_location_id: selectedSource?.storageLocationId,
+                    version: selectedSource?.version,
+                  }}
+                />
               </div>
             </div>
           )}
@@ -101,7 +109,15 @@ export function GeoServerFormat({
               </p>
             </div>
             <div className="flex shrink-0 gap-1">
-              <DownloadButton url={geopackageUrl || ""} label="GeoPackage" />
+              <DownloadButton
+                url={geopackageUrl || ""}
+                label="GeoPackage"
+                analyticsContext={{
+                  format: "geoserver_geopackage",
+                  storage_location_id: selectedSource?.storageLocationId,
+                  version: selectedSource?.version,
+                }}
+              />
             </div>
           </div>
         </div>
@@ -109,4 +125,3 @@ export function GeoServerFormat({
     </div>
   );
 }
-
