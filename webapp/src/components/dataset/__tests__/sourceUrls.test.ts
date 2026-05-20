@@ -96,6 +96,29 @@ describe("source URL helpers", () => {
     );
   });
 
+  it("preserves recursive GeoParquet glob storage URIs", () => {
+    const recursiveSource = makeFileSource(
+      "https://example.test/storage",
+      "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/**/*.parquet",
+    );
+    recursiveSource.storage_uri =
+      "gs://hifld-next-datasets-prod/wbd/10-digit-hu-watershed/v1.0.0/geoparquet/**/*.parquet";
+    if (recursiveSource.storage_location?.config) {
+      recursiveSource.storage_location.config = {
+        ...recursiveSource.storage_location.config,
+        type: "gcs",
+        bucket: "hifld-next-datasets-prod",
+      } as unknown as typeof recursiveSource.storage_location.config;
+    }
+
+    expect(buildSourceStorageUri(recursiveSource)).toBe(
+      "gs://hifld-next-datasets-prod/wbd/10-digit-hu-watershed/v1.0.0/geoparquet/**/*.parquet",
+    );
+    expect(buildSourceStorageUri(recursiveSource, { globExtension: "parquet" })).toBe(
+      "gs://hifld-next-datasets-prod/wbd/10-digit-hu-watershed/v1.0.0/geoparquet/**/*.parquet",
+    );
+  });
+
   it("does not require provider-specific storage hostnames for native downloads", () => {
     vi.stubGlobal("window", {
       location: {

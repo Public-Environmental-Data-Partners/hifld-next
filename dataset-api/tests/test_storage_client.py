@@ -1,12 +1,14 @@
 import asyncio
 import sys
+import types
 from pathlib import Path
 
 import httpx
+import gcsfs
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from storage.storage_client import SeaweedFSFilerClient
+from storage.storage_client import GCSStorageClient, SeaweedFSFilerClient
 
 
 def test_seaweedfs_list_files_uses_filer_http_recursively(monkeypatch):
@@ -77,4 +79,77 @@ def test_seaweedfs_list_files_uses_filer_http_recursively(monkeypatch):
     assert files == [
         "root/dataset/file.parquet",
         "root/top.json",
+    ]
+
+
+def test_gcs_expand_glob_pattern_includes_nested_recursive_parquet(monkeypatch):
+    class FakeBucket:
+        pass
+
+    class FakeStorageClient:
+        def bucket(self, bucket_name):
+            return FakeBucket()
+
+    class FakeGoogleStorage:
+        @staticmethod
+        def Client(project=None):
+            return FakeStorageClient()
+
+    class FakeGCSFileSystem:
+        def find(self, prefix, detail=False):
+            assert (
+                prefix
+                == "gs://hifld-next-datasets-prod/wbd/10-digit-hu-watershed/v1.0.0/geoparquet/"
+            )
+            assert detail is False
+            return [
+                "gs://hifld-next-datasets-prod/wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=01/part-000.parquet",
+                "gs://hifld-next-datasets-prod/wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=02/part-000.parquet",
+                "gs://hifld-next-datasets-prod/wbd/10-digit-hu-watershed/v1.0.0/geoparquet/_metadata",
+            ]
+
+    fake_cloud = types.SimpleNamespace(storage=FakeGoogleStorage)
+    monkeypatch.setitem(sys.modules, "google", types.SimpleNamespace(cloud=fake_cloud))
+    monkeypatch.setitem(sys.modules, "google.cloud", fake_cloud)
+    monkeypatch.setitem(sys.modules, "google.cloud.storage", FakeGoogleStorage)
+    monkeypatch.setattr(gcsfs, "GCSFileSystem", FakeGCSFileSystem)
+
+    client = GCSStorageClient(bucket="hifld-next-datasets-prod")
+    files = asyncio.run(
+        client.expand_glob_pattern(
+            "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/**/*.parquet"
+        )
+    )
+
+    assert files == [
+        "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=01/part-000.parquet",
+        "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=02/part-000.parquet",
+    ]
+
+
+def test_seaweedfs_expand_glob_pattern_uses_filer_listing(monkeypatch):
+    async def fake_list_files(self, prefix):
+        assert prefix == "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/"
+        return [
+            "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=01/part-000.parquet",
+            "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=02/part-000.parquet",
+            "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/_metadata",
+        ]
+
+    monkeypatch.setattr(SeaweedFSFilerClient, "list_files", fake_list_files)
+
+    client = SeaweedFSFilerClient(
+        filer_url="http://localhost:8888",
+        s3_url="http://localhost:8333",
+        bucket="drp-hifld-copy-formatted",
+    )
+    files = asyncio.run(
+        client.expand_glob_pattern(
+            "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/**/*.parquet"
+        )
+    )
+
+    assert files == [
+        "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=01/part-000.parquet",
+        "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=02/part-000.parquet",
     ]

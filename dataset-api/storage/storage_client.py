@@ -8,6 +8,7 @@ allowing the upload processor to work with different storage backends.
 import asyncio
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -391,7 +392,7 @@ class SeaweedFSFilerClient(StorageClient):
         return url
 
     async def expand_glob_pattern(self, glob_path: str) -> List[str]:
-        """Expand a glob pattern to list of matching file paths using fsspec.
+        """Expand a glob pattern to list of matching file paths using the filer API.
 
         Args:
             glob_path: Glob pattern path (e.g., "dataset/*.parquet")
@@ -399,59 +400,63 @@ class SeaweedFSFilerClient(StorageClient):
         Returns:
             List of relative paths (not full URLs) matching the glob pattern
         """
-        import s3fs
-
-        # Construct full S3 URI with endpoint
-        full_glob_path = f"s3://{self.bucket}/{glob_path.lstrip('/')}"
+        clean_glob = glob_path.lstrip("/")
+        prefix = clean_glob.split("*", 1)[0] if "*" in clean_glob else clean_glob
+        if not prefix.endswith("/"):
+            prefix = "/".join(prefix.split("/")[:-1])
+            if prefix:
+                prefix = f"{prefix}/"
 
         logger.info(
-            "Expanding glob pattern: path=%s bucket=%s endpoint=%s",
-            glob_path,
+            "Expanding SeaweedFS glob pattern through filer listing: path=%s bucket=%s prefix=%s",
+            clean_glob,
             self.bucket,
-            self.s3_url,
+            prefix,
         )
 
-        # Use s3fs with custom endpoint
-        fs = s3fs.S3FileSystem(
-            client_kwargs={"endpoint_url": self.s3_url},
-            key="",  # SeaweedFS doesn't require auth
-            secret="",
-        )
-
-        # Use fsspec glob to find all matching files
-        # Note: s3fs.glob() returns paths without s3:// prefix, just "bucket/path/to/file"
-        matching_files = fs.glob(full_glob_path)
+        candidate_files = await self.list_files(prefix)
+        glob_regex = self._glob_pattern_to_regex(clean_glob)
+        matching_files = [
+            path
+            for path in candidate_files
+            if path and not path.endswith("/") and glob_regex.fullmatch(path)
+        ]
 
         logger.info(
-            "s3fs.glob found %d files matching %s",
-            len(matching_files),
-            full_glob_path,
-        )
-
-        # Remove the bucket prefix to get relative paths
-        # s3fs.glob() returns paths like "bucket/path/to/file" (no s3:// prefix)
-        cleaned_files = []
-        for f in matching_files:
-            # Remove all occurrences of bucket prefix
-            # Handle cases where bucket name might appear multiple times in the path
-            while f.startswith(f"{self.bucket}/"):
-                f = f[len(f"{self.bucket}/") :]
-            f = f.lstrip("/")
-            cleaned_files.append(f)
-
-        # Filter out directories (they might end with /)
-        matching_files = [f for f in cleaned_files if f and not f.endswith("/")]
-
-        logger.info(
-            "After cleaning, found %d individual files: %s",
+            "Filer glob expansion found %d individual files: %s",
             len(matching_files),
             matching_files[:5] if matching_files else [],
         )
 
         return matching_files
 
+    def _glob_pattern_to_regex(self, glob_path: str) -> re.Pattern[str]:
+        pattern = glob_path.lstrip("/")
+        regex = ""
+        index = 0
+        while index < len(pattern):
+            char = pattern[index]
+            if char == "*":
+                if index + 1 < len(pattern) and pattern[index + 1] == "*":
+                    if index + 2 < len(pattern) and pattern[index + 2] == "/":
+                        regex += "(?:.*/)?"
+                        index += 3
+                    else:
+                        regex += ".*"
+                        index += 2
+                else:
+                    regex += "[^/]*"
+                    index += 1
+            elif char == "?":
+                regex += "[^/]"
+                index += 1
+            else:
+                regex += re.escape(char)
+                index += 1
+        return re.compile(regex)
+
     async def get_file_size(self, remote_path: str) -> int:
-        """Get the size of a file in bytes using s3fs.
+        """Get the size of a file in bytes using the filer HTTP API.
 
         Args:
             remote_path: Relative path to the file
@@ -460,22 +465,14 @@ class SeaweedFSFilerClient(StorageClient):
             File size in bytes, or 0 if file doesn't exist or size cannot be determined
         """
         try:
-            import s3fs
-
-            # Construct full S3 URI with endpoint
-            full_path = f"s3://{self.bucket}/{remote_path.lstrip('/')}"
-
-            # Use s3fs with custom endpoint
-            fs = s3fs.S3FileSystem(
-                client_kwargs={"endpoint_url": self.s3_url},
-                key="",  # SeaweedFS doesn't require auth
-                secret="",
-            )
-
-            # Get file info (includes size)
-            info = fs.info(full_path)
-            if info and "size" in info:
-                return info["size"]
+            filer_path = self._get_filer_path(remote_path)
+            url = f"{self.filer_url}{filer_path}"
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.head(url)
+                response.raise_for_status()
+                content_length = response.headers.get("content-length")
+                if content_length:
+                    return int(content_length)
             return 0
         except Exception as e:
             logger.warning(f"Could not get size for {remote_path}: {e}")

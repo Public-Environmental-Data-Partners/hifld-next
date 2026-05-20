@@ -19,6 +19,11 @@ import { CopyButton } from "./CopyButton";
 import { DownloadButton } from "./DownloadButton";
 import { ShapefileZipDownloadButton } from "./ShapefileZipDownloadButton";
 import { buildSourceFileUrl, buildSourceStorageUri } from "./sourceUrls";
+import {
+  buildGeoparquetSourceTree,
+  formatGeoparquetGlobLabel,
+  type GeoparquetTreeNode,
+} from "./geoparquetTree";
 import { formatVersionLabel, parseVersionValue } from "./versionLabel";
 import {
   buildCompareSearchForLocation,
@@ -295,7 +300,7 @@ export function FileFormatTree({
                 return (
                   <FormatFileNode
                     icon={<FileJson className="h-4 w-4 text-green-600" />}
-                    name="*.parquet (glob)"
+                    name={formatGeoparquetGlobLabel(globPattern)}
                     badge={displaySize > 0 ? formatFileSize(displaySize) : "pattern"}
                     formatType="geoparquet"
                     formatEntry={geoparquetFormat}
@@ -407,146 +412,165 @@ export function FileFormatTree({
                   );
                 }) || [];
 
-                // Group by file path to show individual files
-                // Filter out glob patterns (paths containing "*") - those are shown separately
-                const filesByPath = new Map<string, typeof allSources[0]>();
-                allSources.forEach((source) => {
-                  const path = (source.location as any)?.path;
-                  // Only include individual files, not glob patterns
-                  if (path && !path.includes("*") && !filesByPath.has(path)) {
-                    filesByPath.set(path, source);
-                  }
-                });
+                const renderTreeNodes = (nodes: GeoparquetTreeNode[]): React.ReactNode =>
+                  nodes.map((node) => {
+                    if (node.type === "folder") {
+                      const expansionKey = `geoparquet-folder-${node.path}`;
+                      return (
+                        <FormatFileNode
+                          key={node.path}
+                          icon={<Folder className="h-4 w-4 text-yellow-600" />}
+                          name={node.name}
+                          badge={`${node.children.length} item${node.children.length === 1 ? "" : "s"}`}
+                          formatType="geoparquet"
+                          formatEntry={geoparquetFormat}
+                          selectedSources={selectedSources}
+                          onSourceChange={onSourceChange}
+                          isExpanded={expandedFormats.has(expansionKey)}
+                          onToggle={() => toggleFormat(expansionKey)}
+                          showSourceSelector={false}
+                        >
+                          <div className="space-y-1">
+                            {renderTreeNodes(node.children)}
+                          </div>
+                        </FormatFileNode>
+                      );
+                    }
 
-                return Array.from(filesByPath.entries()).map(([path, source], index) => {
-                  const fileName = path.split("/").pop() || `file-${index + 1}.parquet`;
-                  const fileUrl = buildSourceFileUrl(source);
-                  const fileStorageUri = buildSourceStorageUri(source);
-                  const fileSizeBytes = source.source_metadata?.size_bytes;
+                    const source = node.source;
+                    if (!source) {
+                      return null;
+                    }
+                    const fileName = node.name;
+                    const fileUrl = buildSourceFileUrl(source);
+                    const fileStorageUri = buildSourceStorageUri(source);
+                    const fileSizeBytes = source.source_metadata?.size_bytes;
 
-                  return (
-                    <FormatFileNode
-                      key={`${path}-${index}`}
-                      icon={<File className="h-4 w-4 text-green-600" />}
-                      name={fileName}
-                      badge={fileSizeBytes != null ? formatFileSize(fileSizeBytes) : undefined}
-                      formatType="geoparquet"
-                      formatEntry={geoparquetFormat}
-                      selectedSources={selectedSources}
-                      onSourceChange={onSourceChange}
-                      isExpanded={expandedFormats.has(`geoparquet-file-${index}`)}
-                      onToggle={() => toggleFormat(`geoparquet-file-${index}`)}
-                      showSourceSelector={false}
-                    >
-                      <div className="space-y-2">
-                        {fileSizeBytes != null && (
-                          <p className="text-xs text-muted-foreground">
-                            Size: {formatFileSize(fileSizeBytes)}
-                          </p>
-                        )}
-                        {fileStorageUri && (() => {
-                          // Check if this is SeaweedFS (has endpoint_url parameter)
-                          const hasEndpointUrl = fileStorageUri.includes("?endpoint_url=");
-                          let s3Uri = fileStorageUri;
-                          let endpointUrl = "";
-                          let host = "";
-                          let port = "";
-                          
-                          if (hasEndpointUrl) {
-                            // Extract endpoint URL and clean S3 URI
-                            const [uriPart, queryPart] = fileStorageUri.split("?");
-                            s3Uri = uriPart;
-                            const params = new URLSearchParams(queryPart);
-                            endpointUrl = params.get("endpoint_url") || "";
+                    return (
+                      <FormatFileNode
+                        key={node.path}
+                        icon={<File className="h-4 w-4 text-green-600" />}
+                        name={fileName}
+                        badge={fileSizeBytes != null ? formatFileSize(fileSizeBytes) : undefined}
+                        formatType="geoparquet"
+                        formatEntry={geoparquetFormat}
+                        selectedSources={selectedSources}
+                        onSourceChange={onSourceChange}
+                        isExpanded={expandedFormats.has(`geoparquet-file-${node.path}`)}
+                        onToggle={() => toggleFormat(`geoparquet-file-${node.path}`)}
+                        showSourceSelector={false}
+                      >
+                        <div className="space-y-2">
+                          {fileSizeBytes != null && (
+                            <p className="text-xs text-muted-foreground">
+                              Size: {formatFileSize(fileSizeBytes)}
+                            </p>
+                          )}
+                          {fileStorageUri && (() => {
+                            // Check if this is SeaweedFS (has endpoint_url parameter)
+                            const hasEndpointUrl = fileStorageUri.includes("?endpoint_url=");
+                            let s3Uri = fileStorageUri;
+                            let endpointUrl = "";
+                            let host = "";
+                            let port = "";
                             
-                            // Parse endpoint URL to extract host and port
-                            try {
-                              const url = new URL(endpointUrl);
-                              host = url.hostname;
-                              port = url.port || (url.protocol === "https:" ? "443" : "80");
-                            } catch {
-                              // If parsing fails, try to extract from endpoint_url string
-                              const match = endpointUrl.match(/\/\/([^:]+)(?::(\d+))?/);
-                              if (match) {
-                                host = match[1];
-                                port = match[2] || "8333";
+                            if (hasEndpointUrl) {
+                              // Extract endpoint URL and clean S3 URI
+                              const [uriPart, queryPart] = fileStorageUri.split("?");
+                              s3Uri = uriPart;
+                              const params = new URLSearchParams(queryPart);
+                              endpointUrl = params.get("endpoint_url") || "";
+                              
+                              // Parse endpoint URL to extract host and port
+                              try {
+                                const url = new URL(endpointUrl);
+                                host = url.hostname;
+                                port = url.port || (url.protocol === "https:" ? "443" : "80");
+                              } catch {
+                                // If parsing fails, try to extract from endpoint_url string
+                                const match = endpointUrl.match(/\/\/([^:]+)(?::(\d+))?/);
+                                if (match) {
+                                  host = match[1];
+                                  port = match[2] || "8333";
+                                }
                               }
                             }
-                          }
-                          
-                          return (
+                            
+                            return (
+                              <div>
+                                <p className="text-xs text-muted-foreground mb-1">Storage URI:</p>
+                                {hasEndpointUrl ? (
+                                  <>
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                      For DuckDB, configure the S3 endpoint first:
+                                    </p>
+                                    <div className="space-y-1 mb-2">
+                                      <code className="text-xs bg-muted px-2 py-1 rounded block">
+                                        SET s3_endpoint='{host}:{port}';
+                                      </code>
+                                      <code className="text-xs bg-muted px-2 py-1 rounded block">
+                                        SET s3_use_ssl=false;
+                                      </code>
+                                      <code className="text-xs bg-muted px-2 py-1 rounded block">
+                                        SET s3_url_style='path';
+                                      </code>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground mb-1">
+                                      Then use this URI in your query:
+                                    </p>
+                                    <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
+                                      {s3Uri}
+                                    </code>
+                                    <div className="flex items-center gap-2 mt-1">
+                                      <CopyButton 
+                                        value={`SET s3_endpoint='${host}:${port}';\nSET s3_use_ssl=false;\nSET s3_url_style='path';\n\nSELECT * FROM '${s3Uri}';`} 
+                                        label="Copy DuckDB Config" 
+                                      />
+                                      <CopyButton value={s3Uri} label="Copy URI" />
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
+                                      {fileStorageUri}
+                                    </code>
+                                    <div className="flex items-center gap-2 mt-1">
+                                      <CopyButton value={fileStorageUri} label="Copy URI" />
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            );
+                          })()}
+                          {fileUrl && (
                             <div>
-                              <p className="text-xs text-muted-foreground mb-1">Storage URI:</p>
-                              {hasEndpointUrl ? (
-                                <>
-                                  <p className="text-xs text-muted-foreground mb-2">
-                                    For DuckDB, configure the S3 endpoint first:
-                                  </p>
-                                  <div className="space-y-1 mb-2">
-                                    <code className="text-xs bg-muted px-2 py-1 rounded block">
-                                      SET s3_endpoint='{host}:{port}';
-                                    </code>
-                                    <code className="text-xs bg-muted px-2 py-1 rounded block">
-                                      SET s3_use_ssl=false;
-                                    </code>
-                                    <code className="text-xs bg-muted px-2 py-1 rounded block">
-                                      SET s3_url_style='path';
-                                    </code>
-                                  </div>
-                                  <p className="text-xs text-muted-foreground mb-1">
-                                    Then use this URI in your query:
-                                  </p>
-                                  <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
-                                    {s3Uri}
-                                  </code>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <CopyButton 
-                                      value={`SET s3_endpoint='${host}:${port}';\nSET s3_use_ssl=false;\nSET s3_url_style='path';\n\nSELECT * FROM '${s3Uri}';`} 
-                                      label="Copy DuckDB Config" 
-                                    />
-                                    <CopyButton value={s3Uri} label="Copy URI" />
-                                  </div>
-                                </>
-                              ) : (
-                                <>
-                                  <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
-                                    {fileStorageUri}
-                                  </code>
-                                  <div className="flex items-center gap-2 mt-1">
-                                    <CopyButton value={fileStorageUri} label="Copy URI" />
-                                  </div>
-                                </>
-                              )}
+                              <p className="text-xs text-muted-foreground mb-1">Download URL:</p>
+                              <p className="text-xs text-muted-foreground break-all mb-1">
+                                {fileUrl}
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <DownloadButton url={fileUrl} label="Download" />
+                                {onViewParquet && (
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      onViewParquet(fileUrl, fileName);
+                                    }}
+                                  >
+                                    View Data
+                                  </Button>
+                                )}
+                              </div>
                             </div>
-                          );
-                        })()}
-                        {fileUrl && (
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">Download URL:</p>
-                            <p className="text-xs text-muted-foreground break-all mb-1">
-                              {fileUrl}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <DownloadButton url={fileUrl} label="Download" />
-                              {onViewParquet && (
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    onViewParquet(fileUrl, fileName);
-                                  }}
-                                >
-                                  View Data
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </FormatFileNode>
-                  );
-                });
+                          )}
+                        </div>
+                      </FormatFileNode>
+                    );
+                  });
+
+                return renderTreeNodes(buildGeoparquetSourceTree(allSources));
               })()}
             </div>
           </FormatFolderNode>

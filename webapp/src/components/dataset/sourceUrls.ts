@@ -23,11 +23,25 @@ function buildBucketFileUrl(
 
 function pathToGlob(path: string, extension: string): string {
   const cleanPath = path.replace(/^\/+/, "");
+  if (cleanPath.includes("*")) {
+    return cleanPath;
+  }
   const lastSlash = cleanPath.lastIndexOf("/");
   const globName = `*.${extension.replace(/^\./, "")}`;
   return lastSlash === -1
     ? globName
     : `${cleanPath.slice(0, lastSlash + 1)}${globName}`;
+}
+
+function replaceStorageUriPath(storageUri: string, path: string): string {
+  const [uriPart, queryPart] = storageUri.split("?");
+  const match = uriPart.match(/^([a-z][a-z0-9+.-]*:\/\/[^/]+)(?:\/.*)?$/i);
+  if (!match) {
+    return storageUri;
+  }
+
+  const nextUri = `${match[1]}/${path.replace(/^\/+/, "")}`;
+  return queryPart ? `${nextUri}?${queryPart}` : nextUri;
 }
 
 export function buildSourceFileUrl(source: DatasetSource): string | null {
@@ -72,13 +86,7 @@ export function buildSourceStorageUri(
     : sourcePath.replace(/^\/+/, "");
 
   if (source.storage_uri) {
-    const [uriPart, queryPart] = source.storage_uri.split("?");
-    const lastSlash = uriPart.lastIndexOf("/");
-    if (lastSlash === -1) {
-      return source.storage_uri;
-    }
-    const nextUri = `${uriPart.slice(0, lastSlash + 1)}${uriPath.split("/").pop()}`;
-    return queryPart ? `${nextUri}?${queryPart}` : nextUri;
+    return replaceStorageUriPath(source.storage_uri, uriPath);
   }
 
   const config = source.storage_location?.config as Record<string, unknown> | undefined;

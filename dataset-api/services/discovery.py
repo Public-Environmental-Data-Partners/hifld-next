@@ -300,12 +300,40 @@ class DiscoveryService:
 
     def _build_location_path(self, format_type: str, format_files: list[str]) -> str:
         first_path = format_files[0]
+        if format_type == "geoparquet":
+            return self._build_geoparquet_location_path(format_files)
+
         if len(format_files) == 1:
             return first_path
 
         parent = str(Path(first_path).parent)
-        if format_type == "geoparquet":
-            return f"{parent}/*.parquet"
         if format_type == "shapefile":
             return f"{parent}/{Path(first_path).stem}.*"
         return first_path
+
+    def _build_geoparquet_location_path(self, format_files: list[str]) -> str:
+        first_path = format_files[0]
+        format_root = self._format_root_from_path(first_path)
+        if not format_root:
+            return first_path
+
+        has_nested_parquet = any(
+            self._parent_path(path) != format_root for path in format_files
+        )
+        if has_nested_parquet:
+            return f"{format_root}/**/*.parquet"
+
+        if len(format_files) == 1:
+            return first_path
+
+        return f"{format_root}/*.parquet"
+
+    def _format_root_from_path(self, path: str) -> Optional[str]:
+        parts = [part for part in path.split("/") if part]
+        if len(parts) < 5:
+            return None
+        return "/".join(parts[:4])
+
+    def _parent_path(self, path: str) -> str:
+        parts = [part for part in path.split("/") if part]
+        return "/".join(parts[:-1])

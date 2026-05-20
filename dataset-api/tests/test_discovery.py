@@ -154,6 +154,9 @@ def make_storage_files() -> dict[str, bytes]:
             {"title": "Fallback Layer Name", "description": "Fallback layer description"}
         ).encode("utf-8"),
         "fallback-dataset/fallback-layer/v1.0.0/geoparquet/fallback.parquet": b"fallback",
+        "partitioned-dataset/partitioned-layer/v1.0.0/geoparquet/huc2=01/part-000.parquet": b"partition-01",
+        "partitioned-dataset/partitioned-layer/v1.0.0/geoparquet/huc2=02/part-000.parquet": b"partition-02",
+        "single-partitioned/single-partitioned/v1.0.0/geoparquet/huc2=01/part-000.parquet": b"single-partition",
         "slug-only/slug-file/v1.0.0/geoparquet/slug.parquet": b"slug-only",
         "metadata-only/metadata-only/v1.0.0/metadata/quality_manifest.json": b"{}",
         "too/short/geoparquet/file.parquet": b"short",
@@ -268,6 +271,60 @@ def test_discovery_service_resolves_manifest_fallbacks_and_exact_slugs():
     assert slug_only.file_name == "slug-file"
     assert slug_only.file_description is None
     assert slug_only.catalog_metadata_object_paths == []
+
+
+def test_discovery_service_builds_recursive_geoparquet_globs_for_partitioned_files():
+    fake_storage = FakeStorageClient(make_storage_files())
+    service = DiscoveryService(storage_client=fake_storage)
+
+    async def collect_versions() -> list[DiscoveredVersion]:
+        return [item async for item in service.scan()]
+
+    discovered_versions = asyncio.run(collect_versions())
+
+    flat_multiple = next(
+        item
+        for item in discovered_versions
+        if item.dataset_slug == "test-dataset"
+        and item.version == "v1.1.0"
+        and item.format_type == "geoparquet"
+    )
+    assert (
+        flat_multiple.location_path
+        == "test-dataset/test-dataset/v1.1.0/geoparquet/*.parquet"
+    )
+
+    flat_single = next(
+        item for item in discovered_versions if item.dataset_slug == "slug-only"
+    )
+    assert (
+        flat_single.location_path
+        == "slug-only/slug-file/v1.0.0/geoparquet/slug.parquet"
+    )
+
+    nested_multiple = next(
+        item
+        for item in discovered_versions
+        if item.dataset_slug == "partitioned-dataset"
+    )
+    assert (
+        nested_multiple.location_path
+        == "partitioned-dataset/partitioned-layer/v1.0.0/geoparquet/**/*.parquet"
+    )
+    assert nested_multiple.object_paths == [
+        "partitioned-dataset/partitioned-layer/v1.0.0/geoparquet/huc2=01/part-000.parquet",
+        "partitioned-dataset/partitioned-layer/v1.0.0/geoparquet/huc2=02/part-000.parquet",
+    ]
+
+    nested_single = next(
+        item
+        for item in discovered_versions
+        if item.dataset_slug == "single-partitioned"
+    )
+    assert (
+        nested_single.location_path
+        == "single-partitioned/single-partitioned/v1.0.0/geoparquet/**/*.parquet"
+    )
 
 
 def test_discovery_service_ignores_non_semver_and_metadata_only_groups():
