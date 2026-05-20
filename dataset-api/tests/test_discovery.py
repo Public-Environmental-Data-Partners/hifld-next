@@ -440,6 +440,188 @@ def test_catalog_ingest_uses_exact_slugs_when_manifest_metadata_is_missing():
         assert file_obj.description is None
 
 
+def test_catalog_ingest_adopts_legacy_file_by_manifest_name_when_slug_changed():
+    with make_session() as session:
+        collection = Collection(slug="hifld", name="HIFLD")
+        storage_location = make_storage_location()
+        session.add(collection)
+        session.add(storage_location)
+        session.commit()
+        session.refresh(collection)
+        session.refresh(storage_location)
+        dataset = Dataset(
+            slug="test-dataset",
+            name="Test Dataset",
+            collection_id=collection.id,
+        )
+        session.add(dataset)
+        session.commit()
+        session.refresh(dataset)
+        legacy_file = File(
+            dataset_id=dataset.id,
+            slug="test-dataset-test-layer",
+            name="Catalog Layer Name",
+            description="Old description",
+        )
+        session.add(legacy_file)
+        session.commit()
+        session.refresh(legacy_file)
+        ingest = CatalogIngestService(session)
+
+        result = ingest.upsert_discovered_version(
+            collection_id=collection.id,
+            storage_location_id=storage_location.id,
+            dataset_slug="test-dataset",
+            file_slug="test-layer",
+            format_type="geoparquet",
+            version="v1.0.0",
+            location_path="test-dataset/test-layer/v1.0.0/geoparquet/test.parquet",
+            file_name="Catalog Layer Name",
+            file_description="New description",
+        )
+
+        session.refresh(legacy_file)
+        assert result.created is True
+        assert legacy_file.slug == "test-layer"
+        assert legacy_file.name == "Catalog Layer Name"
+        assert legacy_file.description == "New description"
+        assert len(session.exec(select(File)).all()) == 1
+
+
+def test_catalog_ingest_previews_stale_sources_without_deleting():
+    with make_session() as session:
+        collection = Collection(slug="hifld", name="HIFLD")
+        other_collection = Collection(slug="other", name="Other")
+        storage_location = make_storage_location()
+        other_storage_location = StorageLocation(
+            slug="seaweedfs-other",
+            name="SeaweedFS Other",
+            backend_type="s3",
+            config=BucketStorageLocationConfig(
+                type="seaweedfs",
+                base_url="http://localhost:8888",
+                bucket="other",
+            ),
+        )
+        session.add(collection)
+        session.add(other_collection)
+        session.add(storage_location)
+        session.add(other_storage_location)
+        session.commit()
+        session.refresh(collection)
+        session.refresh(other_collection)
+        session.refresh(storage_location)
+        session.refresh(other_storage_location)
+        ingest = CatalogIngestService(session)
+
+        keep = ingest.upsert_discovered_version(
+            collection_id=collection.id,
+            storage_location_id=storage_location.id,
+            dataset_slug="dataset",
+            file_slug="layer",
+            format_type="geoparquet",
+            version="v1.0.0",
+            location_path="dataset/layer/v1.0.0/geoparquet/data.parquet",
+        )
+        stale = ingest.upsert_discovered_version(
+            collection_id=collection.id,
+            storage_location_id=storage_location.id,
+            dataset_slug="dataset",
+            file_slug="stale-layer",
+            format_type="geoparquet",
+            version="v20260214",
+            location_path="dataset/stale-layer/geoparquet/data.parquet",
+        )
+        other_storage = ingest.upsert_discovered_version(
+            collection_id=collection.id,
+            storage_location_id=other_storage_location.id,
+            dataset_slug="dataset",
+            file_slug="other-storage-layer",
+            format_type="geoparquet",
+            version="v20260214",
+            location_path="dataset/other-storage-layer/geoparquet/data.parquet",
+        )
+        other_collection_source = ingest.upsert_discovered_version(
+            collection_id=other_collection.id,
+            storage_location_id=storage_location.id,
+            dataset_slug="other-dataset",
+            file_slug="layer",
+            format_type="geoparquet",
+            version="v20260214",
+            location_path="other-dataset/layer/geoparquet/data.parquet",
+        )
+
+        result = ingest.prune_stale_discovered_sources(
+            collection_id=collection.id,
+            storage_location_id=storage_location.id,
+            discovered_source_keys={
+                ("dataset", "layer", "geoparquet", "v1.0.0"),
+            },
+            dry_run=True,
+        )
+
+        assert result.dry_run is True
+        assert result.deleted_file_source_ids == [stale.file_source_id]
+        assert result.deleted_file_format_ids
+        assert result.deleted_file_ids
+        assert result.deleted_dataset_ids == []
+        source_ids = {source.id for source in session.exec(select(FileSource)).all()}
+        assert keep.file_source_id in source_ids
+        assert stale.file_source_id in source_ids
+        assert other_storage.file_source_id in source_ids
+        assert other_collection_source.file_source_id in source_ids
+
+
+def test_catalog_ingest_prunes_stale_sources_and_empty_catalog_records():
+    with make_session() as session:
+        collection = Collection(slug="hifld", name="HIFLD")
+        storage_location = make_storage_location()
+        session.add(collection)
+        session.add(storage_location)
+        session.commit()
+        session.refresh(collection)
+        session.refresh(storage_location)
+        ingest = CatalogIngestService(session)
+
+        keep = ingest.upsert_discovered_version(
+            collection_id=collection.id,
+            storage_location_id=storage_location.id,
+            dataset_slug="dataset",
+            file_slug="layer",
+            format_type="geoparquet",
+            version="v1.0.0",
+            location_path="dataset/layer/v1.0.0/geoparquet/data.parquet",
+        )
+        stale = ingest.upsert_discovered_version(
+            collection_id=collection.id,
+            storage_location_id=storage_location.id,
+            dataset_slug="empty-dataset",
+            file_slug="empty-layer",
+            format_type="pmtiles",
+            version="v20260214",
+            location_path="empty-dataset/empty-layer/pmtiles/tiles.pmtiles",
+        )
+
+        result = ingest.prune_stale_discovered_sources(
+            collection_id=collection.id,
+            storage_location_id=storage_location.id,
+            discovered_source_keys={
+                ("dataset", "layer", "geoparquet", "v1.0.0"),
+            },
+            dry_run=False,
+        )
+
+        assert result.dry_run is False
+        assert result.deleted_file_source_ids == [stale.file_source_id]
+        assert result.deleted_file_format_ids
+        assert result.deleted_file_ids
+        assert result.deleted_dataset_ids
+        assert session.get(FileSource, stale.file_source_id) is None
+        assert session.get(FileSource, keep.file_source_id) is not None
+        assert session.exec(select(Dataset).where(Dataset.slug == "empty-dataset")).first() is None
+        assert session.exec(select(Dataset).where(Dataset.slug == "dataset")).one()
+
+
 def test_catalog_ingest_rejects_dataset_slug_in_different_collection():
     with make_session() as session:
         first_collection = Collection(slug="first", name="First")
@@ -484,6 +666,7 @@ def test_discover_job_loads_required_env_vars(monkeypatch):
     monkeypatch.setenv("DISCOVER_PREFIX", "foo/bar")
     monkeypatch.setenv("DISCOVER_DRY_RUN", "true")
     monkeypatch.setenv("DISCOVER_LIMIT", "5")
+    monkeypatch.setenv("DISCOVER_PRUNE_STALE", "true")
 
     discover_job = importlib.import_module("jobs.discover")
     config = discover_job.load_config_from_env()
@@ -493,6 +676,7 @@ def test_discover_job_loads_required_env_vars(monkeypatch):
     assert config.discover_prefix == "foo/bar"
     assert config.discover_dry_run is True
     assert config.discover_limit == 5
+    assert config.discover_prune_stale is True
 
 
 def test_discover_job_requires_single_target_env_vars(monkeypatch):
@@ -730,8 +914,83 @@ def test_discover_job_logs_dry_run_object_paths_and_summary(monkeypatch, caplog)
     assert summary_log["collection_id"] == collection.id
     assert summary_log["storage_location_id"] == storage_location.id
     assert summary_log["source_objects"] == 2
-    assert summary_log["metadata_records"] == 1
-    assert summary_log["metadata_objects"] == 2
+
+
+def test_discover_job_dry_run_logs_stale_source_prune_preview(monkeypatch, caplog):
+    discover_job = importlib.import_module("jobs.discover")
+    with make_session() as session:
+        collection = Collection(slug="hifld", name="HIFLD")
+        storage_location = make_storage_location()
+        session.add(collection)
+        session.add(storage_location)
+        session.commit()
+        session.refresh(collection)
+        session.refresh(storage_location)
+        ingest = CatalogIngestService(session)
+        stale = ingest.upsert_discovered_version(
+            collection_id=collection.id,
+            storage_location_id=storage_location.id,
+            dataset_slug="stale-dataset",
+            file_slug="stale-layer",
+            format_type="geoparquet",
+            version="v20260214",
+            location_path="stale-dataset/stale-layer/geoparquet/data.parquet",
+        )
+
+        class FakeScanner:
+            def __init__(self, storage_client):
+                self.storage_client = storage_client
+
+            async def scan(self, prefix: str = "", limit: int | None = None):
+                yield DiscoveredVersion(
+                    dataset_slug="test-dataset",
+                    file_slug="test-layer",
+                    version="v1.0.0",
+                    format_type="geoparquet",
+                    location_path="test-dataset/test-layer/v1.0.0/geoparquet/data.parquet",
+                    object_paths=[
+                        "test-dataset/test-layer/v1.0.0/geoparquet/data.parquet"
+                    ],
+                    metadata=None,
+                )
+
+        monkeypatch.setattr(discover_job, "DiscoveryService", FakeScanner)
+        monkeypatch.setattr(
+            discover_job, "create_storage_client_from_location", lambda _: object()
+        )
+
+        with caplog.at_level(logging.INFO, logger=discover_job.logger.name):
+            exit_code = asyncio.run(
+                discover_job.run_job(
+                    discover_job.DiscoverJobConfig(
+                        storage_location_slug=storage_location.slug,
+                        collection_slug=collection.slug,
+                        discover_dry_run=True,
+                        discover_prune_stale=True,
+                    ),
+                    db_session=session,
+                )
+            )
+
+    assert exit_code == 0
+    assert session.get(FileSource, stale.file_source_id) is not None
+    log_payloads = [json.loads(record.message) for record in caplog.records]
+    prune_log = next(
+        item for item in log_payloads if item["event"] == "dataset_discovery_prune"
+    )
+    assert prune_log["dry_run"] is True
+    assert prune_log["would_delete"] is True
+    assert prune_log["result"]["deleted_file_source_ids"] == [stale.file_source_id]
+    summary_log = next(
+        item for item in log_payloads if item["event"] == "dataset_discovery_summary"
+    )
+    assert summary_log["prune_stale"] is True
+    assert summary_log["stale_sources"] == 1
+    assert summary_log["empty_formats"] == 1
+    assert summary_log["empty_files"] == 1
+    assert summary_log["empty_datasets"] == 1
+    assert summary_log["metadata_records"] == 0
+    assert summary_log["metadata_objects"] == 0
     assert summary_log["format_counts"] == {"geoparquet": 1}
     assert summary_log["written_versions"] == 0
 

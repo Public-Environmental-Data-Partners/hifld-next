@@ -33,6 +33,7 @@ services:
       DISCOVER_COLLECTION_SLUG: ${DISCOVER_COLLECTION_SLUG:-hifld}
       DISCOVER_PREFIX: ${DISCOVER_PREFIX:-}
       DISCOVER_DRY_RUN: ${DISCOVER_DRY_RUN:-false}
+      DISCOVER_PRUNE_STALE: ${DISCOVER_PRUNE_STALE:-false}
       DISCOVER_LIMIT: ${DISCOVER_LIMIT:-}
     depends_on:
       dataset-api-postgres:

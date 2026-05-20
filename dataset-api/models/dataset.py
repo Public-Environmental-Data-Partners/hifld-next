@@ -291,7 +291,7 @@ class File(SQLModel, table=True):
 
     __tablename__ = "files"
     __table_args__ = (
-        UniqueConstraint("dataset_id", "name", name="uq_dataset_file_name"),
+        UniqueConstraint("dataset_id", "slug", name="uq_dataset_file_slug"),
         # Note: For multi-layer files, consider also ensuring uniqueness of
         # (dataset_id, source_file_path, layer_name) when source_file_path is not NULL
         # This can be enforced via a partial unique index in the database if needed

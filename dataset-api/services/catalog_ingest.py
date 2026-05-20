@@ -10,6 +10,8 @@ from models.dataset import (
     File,
     FileFormat,
     FileLocation,
+    FileSource,
+    Format,
     SpatialDatasetFileMetadata,
 )
 from services.datasets import DatasetService
@@ -19,6 +21,14 @@ class CatalogIngestResult(BaseModel):
     created: bool
     dry_run: bool
     file_source_id: Optional[int] = None
+
+
+class CatalogPruneResult(BaseModel):
+    dry_run: bool
+    deleted_file_source_ids: list[int]
+    deleted_file_format_ids: list[int]
+    deleted_file_ids: list[int]
+    deleted_dataset_ids: list[int]
 
 
 class CatalogIngestService:
@@ -122,6 +132,75 @@ class CatalogIngestService:
             file_source_id=file_source.id,
         )
 
+    def prune_stale_discovered_sources(
+        self,
+        collection_id: int,
+        storage_location_id: int,
+        discovered_source_keys: set[tuple[str, str, str, str]],
+        dry_run: bool = False,
+    ) -> CatalogPruneResult:
+        """Delete discovered catalog records that are no longer in the source bucket.
+
+        Pruning is scoped to one collection and one storage location. A source is
+        kept only when its dataset slug, file slug, format type, and version were
+        observed in the current discovery scan.
+        """
+        existing_sources = self._list_sources_for_target(
+            collection_id=collection_id,
+            storage_location_id=storage_location_id,
+        )
+        stale_source_ids = sorted(
+            source.id
+            for source, file_format, file_obj, dataset, format_obj in existing_sources
+            if source.id is not None
+            and (
+                dataset.slug,
+                file_obj.slug,
+                format_obj.format_type,
+                source.version,
+            )
+            not in discovered_source_keys
+        )
+
+        cleanup_ids = self._collect_empty_catalog_ids_after_source_prune(
+            collection_id=collection_id,
+            stale_source_ids=set(stale_source_ids),
+        )
+        result = CatalogPruneResult(
+            dry_run=dry_run,
+            deleted_file_source_ids=stale_source_ids,
+            deleted_file_format_ids=cleanup_ids["file_format_ids"],
+            deleted_file_ids=cleanup_ids["file_ids"],
+            deleted_dataset_ids=cleanup_ids["dataset_ids"],
+        )
+        if dry_run:
+            return result
+
+        for source_id in stale_source_ids:
+            source = self.db.get(FileSource, source_id)
+            if source:
+                self.db.delete(source)
+        self.db.commit()
+
+        for file_format_id in cleanup_ids["file_format_ids"]:
+            file_format = self.db.get(FileFormat, file_format_id)
+            if file_format:
+                self.db.delete(file_format)
+        self.db.commit()
+
+        for file_id in cleanup_ids["file_ids"]:
+            file_obj = self.db.get(File, file_id)
+            if file_obj:
+                self.db.delete(file_obj)
+        self.db.commit()
+
+        for dataset_id in cleanup_ids["dataset_ids"]:
+            dataset = self.db.get(Dataset, dataset_id)
+            if dataset:
+                self.db.delete(dataset)
+        self.db.commit()
+        return result
+
     def _get_or_create_dataset(
         self,
         dataset_slug: str,
@@ -191,6 +270,21 @@ class CatalogIngestService:
                 self.db.refresh(file_obj)
             return file_obj
 
+        if name:
+            statement = select(File).where(
+                File.dataset_id == dataset.id,
+                File.name == name,
+            )
+            file_obj = self.db.exec(statement).first()
+            if file_obj:
+                file_obj.slug = file_slug
+                if description is not None and file_obj.description != description:
+                    file_obj.description = description
+                self.db.add(file_obj)
+                self.db.commit()
+                self.db.refresh(file_obj)
+                return file_obj
+
         file_obj = File(
             dataset_id=dataset.id,
             slug=file_slug,
@@ -231,3 +325,86 @@ class CatalogIngestService:
             FileFormat.format_id == format_obj.id,
         )
         return self.db.exec(statement).first()
+
+    def _list_sources_for_target(
+        self,
+        collection_id: int,
+        storage_location_id: int,
+    ) -> list[tuple[FileSource, FileFormat, File, Dataset, Format]]:
+        statement = (
+            select(FileSource, FileFormat, File, Dataset, Format)
+            .join(FileFormat, FileSource.file_format_id == FileFormat.id)
+            .join(File, FileFormat.file_id == File.id)
+            .join(Dataset, File.dataset_id == Dataset.id)
+            .join(Format, FileFormat.format_id == Format.id)
+            .where(Dataset.collection_id == collection_id)
+            .where(FileSource.storage_location_id == storage_location_id)
+        )
+        return list(self.db.exec(statement).all())
+
+    def _collect_empty_catalog_ids_after_source_prune(
+        self,
+        collection_id: int,
+        stale_source_ids: set[int],
+    ) -> dict[str, list[int]]:
+        file_formats = self.db.exec(
+            select(FileFormat, File, Dataset)
+            .join(File, FileFormat.file_id == File.id)
+            .join(Dataset, File.dataset_id == Dataset.id)
+            .where(Dataset.collection_id == collection_id)
+        ).all()
+        file_format_ids = sorted(
+            file_format.id
+            for file_format, _, _ in file_formats
+            if file_format.id is not None
+            and all(
+                source.id in stale_source_ids
+                for source in self.db.exec(
+                    select(FileSource).where(
+                        FileSource.file_format_id == file_format.id
+                    )
+                ).all()
+                if source.id is not None
+            )
+        )
+
+        files = self.db.exec(
+            select(File).join(Dataset, File.dataset_id == Dataset.id).where(
+                Dataset.collection_id == collection_id
+            )
+        ).all()
+        file_format_ids_set = set(file_format_ids)
+        file_ids = sorted(
+            file_obj.id
+            for file_obj in files
+            if file_obj.id is not None
+            and all(
+                file_format.id in file_format_ids_set
+                for file_format in self.db.exec(
+                    select(FileFormat).where(FileFormat.file_id == file_obj.id)
+                ).all()
+                if file_format.id is not None
+            )
+        )
+
+        datasets = self.db.exec(
+            select(Dataset).where(Dataset.collection_id == collection_id)
+        ).all()
+        file_ids_set = set(file_ids)
+        dataset_ids = sorted(
+            dataset.id
+            for dataset in datasets
+            if dataset.id is not None
+            and all(
+                file_obj.id in file_ids_set
+                for file_obj in self.db.exec(
+                    select(File).where(File.dataset_id == dataset.id)
+                ).all()
+                if file_obj.id is not None
+            )
+        )
+        return {
+            "file_format_ids": file_format_ids,
+            "file_ids": file_ids,
+            "dataset_ids": dataset_ids,
+        }

@@ -92,7 +92,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["dataset_id"], ["datasets.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("dataset_id", "name", name="uq_dataset_file_name"),
+        sa.UniqueConstraint("dataset_id", "slug", name="uq_dataset_file_slug"),
     )
     op.create_table(
         "file_formats",

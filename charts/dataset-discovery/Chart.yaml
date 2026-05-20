@@ -1,0 +1,6 @@
+apiVersion: v2
+name: dataset-discovery
+description: Generic CronJob chart for discovering dataset catalog sources
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

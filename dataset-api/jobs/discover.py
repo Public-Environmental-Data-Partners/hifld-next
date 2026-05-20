@@ -26,6 +26,7 @@ class DiscoverJobConfig:
     discover_prefix: str = ""
     discover_dry_run: bool = False
     discover_limit: int | None = None
+    discover_prune_stale: bool = False
 
 
 def parse_required_string(env_map: Mapping[str, str], name: str) -> str:
@@ -55,6 +56,7 @@ def load_config_from_env(env: Mapping[str, str] | None = None) -> DiscoverJobCon
         discover_prefix=env_map.get("DISCOVER_PREFIX", ""),
         discover_dry_run=parse_bool(env_map.get("DISCOVER_DRY_RUN")),
         discover_limit=discover_limit,
+        discover_prune_stale=parse_bool(env_map.get("DISCOVER_PRUNE_STALE")),
     )
 
 
@@ -101,10 +103,15 @@ async def run_job(
     format_counts: Counter[str] = Counter()
     format_source_object_counts: Counter[str] = Counter()
     written_versions_count = 0
+    discovered_source_keys: set[tuple[str, str, str, str]] = set()
+    prune_result = None
     storage_location_id: int | None = None
     collection_id: int | None = None
 
     try:
+        if config.discover_prune_stale and config.discover_prefix:
+            raise ValueError("DISCOVER_PRUNE_STALE requires an empty DISCOVER_PREFIX")
+
         collection = db.exec(
             select(Collection).where(Collection.slug == config.collection_slug)
         ).first()
@@ -140,6 +147,14 @@ async def run_job(
             format_source_object_counts[
                 discovered_version.format_type
             ] += source_object_count
+            discovered_source_keys.add(
+                (
+                    discovered_version.dataset_slug,
+                    discovered_version.file_slug,
+                    discovered_version.format_type,
+                    discovered_version.version,
+                )
+            )
             if discovered_version.metadata is not None:
                 metadata_records_count += 1
             metadata_object_paths.update(discovered_version.metadata_object_paths)
@@ -229,6 +244,28 @@ async def run_job(
                     sort_keys=True,
                 )
             )
+        if config.discover_prune_stale and not has_failures:
+            prune_result = ingest_service.prune_stale_discovered_sources(
+                collection_id=collection_id,
+                storage_location_id=storage_location_id,
+                discovered_source_keys=discovered_source_keys,
+                dry_run=config.discover_dry_run,
+            )
+            logger.info(
+                json.dumps(
+                    {
+                        "event": "dataset_discovery_prune",
+                        "dry_run": config.discover_dry_run,
+                        "storage_location_slug": config.storage_location_slug,
+                        "storage_location_id": storage_location_id,
+                        "collection_slug": config.collection_slug,
+                        "collection_id": collection_id,
+                        "would_delete": config.discover_dry_run,
+                        "result": prune_result.model_dump(),
+                    },
+                    sort_keys=True,
+                )
+            )
     except Exception as exc:
         has_failures = True
         logger.error(
@@ -260,6 +297,27 @@ async def run_job(
                     "metadata_records": metadata_records_count,
                     "metadata_objects": len(metadata_object_paths),
                     "written_versions": written_versions_count,
+                    "prune_stale": config.discover_prune_stale,
+                    "stale_sources": (
+                        len(prune_result.deleted_file_source_ids)
+                        if prune_result is not None
+                        else 0
+                    ),
+                    "empty_formats": (
+                        len(prune_result.deleted_file_format_ids)
+                        if prune_result is not None
+                        else 0
+                    ),
+                    "empty_files": (
+                        len(prune_result.deleted_file_ids)
+                        if prune_result is not None
+                        else 0
+                    ),
+                    "empty_datasets": (
+                        len(prune_result.deleted_dataset_ids)
+                        if prune_result is not None
+                        else 0
+                    ),
                     "format_counts": dict(sorted(format_counts.items())),
                     "format_source_object_counts": dict(
                         sorted(format_source_object_counts.items())
