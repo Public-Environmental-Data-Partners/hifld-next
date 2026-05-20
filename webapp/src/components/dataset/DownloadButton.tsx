@@ -7,6 +7,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { usesNativeBrowserDownload } from "./sourceUrls";
 
 interface DownloadButtonProps {
   url: string;
@@ -17,33 +18,7 @@ interface DownloadButtonProps {
 
 export function DownloadButton({ url, label, filename: explicitFilename, sizeBytes }: DownloadButtonProps) {
   const [isDownloading, setIsDownloading] = useState(false);
-  
-  // Determine if this is a direct storage URL (browser can stream) vs server endpoint
-  // Direct URLs: storage.googleapis.com, localhost:8888 (SeaweedFS), etc.
-  // Server endpoints: /api/... paths or GeoServer WFS endpoints
-  const isDirectStorageUrl = (urlString: string): boolean => {
-    try {
-      const urlObj = new URL(urlString, window.location.origin);
-      // Check if it's a storage URL (not a server API endpoint)
-      const isStorageUrl = 
-        urlObj.hostname.includes('storage.googleapis.com') ||
-        urlObj.hostname.includes('storage.cloud.google.com') ||
-        (urlObj.hostname.includes('localhost') && urlObj.port === '8888') ||
-        urlObj.pathname.startsWith('/buckets/');
-      
-      // Check if it's NOT a server API endpoint
-      const isServerEndpoint = 
-        urlObj.pathname.startsWith('/api/') ||
-        urlObj.pathname.includes('/wfs') ||
-        urlObj.pathname.includes('/export/');
-      
-      return isStorageUrl && !isServerEndpoint;
-    } catch {
-      return false;
-    }
-  };
-  
-  const useDirectDownload = isDirectStorageUrl(url);
+  const useDirectDownload = usesNativeBrowserDownload(url);
 
   // Use explicit filename if provided, otherwise extract from URL or generate from label
   let filename: string;
@@ -248,4 +223,3 @@ export function DownloadButton({ url, label, filename: explicitFilename, sizeByt
     </TooltipProvider>
   );
 }
-

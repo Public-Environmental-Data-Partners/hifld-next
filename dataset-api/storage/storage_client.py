@@ -8,9 +8,11 @@ allowing the upload processor to work with different storage backends.
 import asyncio
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import quote
 
 import httpx
 import gcsfs
@@ -307,87 +309,41 @@ class SeaweedFSFilerClient(StorageClient):
         return f"{self.filer_url}/buckets/{self.bucket}/{key}"
 
     async def list_files(self, prefix: str) -> List[str]:
-        """List all files in SeaweedFS with the given prefix."""
-        clean_prefix = prefix.lstrip("/")
+        """List all files in SeaweedFS with the given prefix recursively."""
+        clean_prefix = prefix.strip("/")
+        start_path = self._get_filer_path(clean_prefix).rstrip("/") + "/"
+        bucket_prefix = f"/buckets/{self.bucket}/"
+        files: List[str] = []
+        pending = [start_path]
 
-        # Use the buckets format with JSON accept header
-        url = f"{self.filer_url}/buckets/{self.bucket}/{clean_prefix}"
-
-        async with httpx.AsyncClient(timeout=30) as client:
-            try:
-                # Request JSON response explicitly
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            while pending:
+                current_path = pending.pop()
+                encoded_path = quote(current_path, safe="/")
+                url = f"{self.filer_url}{encoded_path}?limit=10000"
                 response = await client.get(url, headers={"Accept": "application/json"})
+                if response.status_code == 404:
+                    continue
+                response.raise_for_status()
 
-                if response.status_code == 200:
-                    try:
-                        data = response.json()
-                    except Exception:
-                        # If JSON parsing fails, log and return empty
-                        text = response.text[:200] if response.text else "(empty)"
-                        logger.warning(
-                            f"SeaweedFS returned non-JSON response: {text[:100]}..."
-                        )
-                        return []
+                for entry in response.json().get("Entries") or []:
+                    full_path = str(entry.get("FullPath", "")).rstrip("/")
+                    if not full_path:
+                        continue
+                    if self._is_filer_directory(entry):
+                        pending.append(f"{full_path}/")
+                        continue
+                    if full_path.startswith(bucket_prefix):
+                        files.append(full_path[len(bucket_prefix) :])
 
-                    files = []
-                    # Parse the response (format depends on SeaweedFS version)
-                    if "Files" in data:
-                        for item in data["Files"]:
-                            if "FullPath" in item:
-                                # FullPath might include /buckets/{bucket}/ prefix
-                                full_path = item["FullPath"].lstrip("/")
-                                # Remove bucket prefix if present
-                                if full_path.startswith(f"buckets/{self.bucket}/"):
-                                    full_path = full_path[
-                                        len(f"buckets/{self.bucket}/") :
-                                    ]
-                                files.append(full_path)
-                            elif "name" in item:
-                                # Relative path from prefix
-                                full_path = f"{clean_prefix.rstrip('/')}/{item['name']}"
-                                files.append(full_path)
-                    elif "Entries" in data:
-                        # Alternative response format
-                        for item in data["Entries"]:
-                            if "FullPath" in item:
-                                full_path = item["FullPath"].lstrip("/")
-                                if full_path.startswith(f"buckets/{self.bucket}/"):
-                                    full_path = full_path[
-                                        len(f"buckets/{self.bucket}/") :
-                                    ]
-                                files.append(full_path)
-                            elif "name" in item:
-                                full_path = f"{clean_prefix.rstrip('/')}/{item['name']}"
-                                files.append(full_path)
-                    elif isinstance(data, list):
-                        # Response might be a direct list
-                        for item in data:
-                            if isinstance(item, dict):
-                                if "FullPath" in item:
-                                    full_path = item["FullPath"].lstrip("/")
-                                    if full_path.startswith(f"buckets/{self.bucket}/"):
-                                        full_path = full_path[
-                                            len(f"buckets/{self.bucket}/") :
-                                        ]
-                                    files.append(full_path)
-                                elif "name" in item:
-                                    full_path = (
-                                        f"{clean_prefix.rstrip('/')}/{item['name']}"
-                                    )
-                                    files.append(full_path)
-                    # Filter out directories (paths ending with /)
-                    return [f for f in files if not f.endswith("/")]
-                elif response.status_code == 404:
-                    # Directory doesn't exist, return empty list
-                    return []
-                else:
-                    logger.warning(
-                        f"SeaweedFS API returned status {response.status_code} for {url}"
-                    )
-                    return []
-            except Exception as e:
-                logger.warning(f"Error listing SeaweedFS files: {e}")
-                return []
+        return sorted(files)
+
+    def _is_filer_directory(self, entry: dict) -> bool:
+        return (
+            not entry.get("Mime")
+            and not entry.get("Md5")
+            and int(entry.get("FileSize") or 0) == 0
+        )
 
     def parse_url_to_path(self, url: str) -> Optional[str]:
         """Parse a SeaweedFS URL to extract the relative path."""
@@ -436,7 +392,7 @@ class SeaweedFSFilerClient(StorageClient):
         return url
 
     async def expand_glob_pattern(self, glob_path: str) -> List[str]:
-        """Expand a glob pattern to list of matching file paths using fsspec.
+        """Expand a glob pattern to list of matching file paths using the filer API.
 
         Args:
             glob_path: Glob pattern path (e.g., "dataset/*.parquet")
@@ -444,59 +400,63 @@ class SeaweedFSFilerClient(StorageClient):
         Returns:
             List of relative paths (not full URLs) matching the glob pattern
         """
-        import s3fs
-
-        # Construct full S3 URI with endpoint
-        full_glob_path = f"s3://{self.bucket}/{glob_path.lstrip('/')}"
+        clean_glob = glob_path.lstrip("/")
+        prefix = clean_glob.split("*", 1)[0] if "*" in clean_glob else clean_glob
+        if not prefix.endswith("/"):
+            prefix = "/".join(prefix.split("/")[:-1])
+            if prefix:
+                prefix = f"{prefix}/"
 
         logger.info(
-            "Expanding glob pattern: path=%s bucket=%s endpoint=%s",
-            glob_path,
+            "Expanding SeaweedFS glob pattern through filer listing: path=%s bucket=%s prefix=%s",
+            clean_glob,
             self.bucket,
-            self.s3_url,
+            prefix,
         )
 
-        # Use s3fs with custom endpoint
-        fs = s3fs.S3FileSystem(
-            client_kwargs={"endpoint_url": self.s3_url},
-            key="",  # SeaweedFS doesn't require auth
-            secret="",
-        )
-
-        # Use fsspec glob to find all matching files
-        # Note: s3fs.glob() returns paths without s3:// prefix, just "bucket/path/to/file"
-        matching_files = fs.glob(full_glob_path)
+        candidate_files = await self.list_files(prefix)
+        glob_regex = self._glob_pattern_to_regex(clean_glob)
+        matching_files = [
+            path
+            for path in candidate_files
+            if path and not path.endswith("/") and glob_regex.fullmatch(path)
+        ]
 
         logger.info(
-            "s3fs.glob found %d files matching %s",
-            len(matching_files),
-            full_glob_path,
-        )
-
-        # Remove the bucket prefix to get relative paths
-        # s3fs.glob() returns paths like "bucket/path/to/file" (no s3:// prefix)
-        cleaned_files = []
-        for f in matching_files:
-            # Remove all occurrences of bucket prefix
-            # Handle cases where bucket name might appear multiple times in the path
-            while f.startswith(f"{self.bucket}/"):
-                f = f[len(f"{self.bucket}/") :]
-            f = f.lstrip("/")
-            cleaned_files.append(f)
-
-        # Filter out directories (they might end with /)
-        matching_files = [f for f in cleaned_files if f and not f.endswith("/")]
-
-        logger.info(
-            "After cleaning, found %d individual files: %s",
+            "Filer glob expansion found %d individual files: %s",
             len(matching_files),
             matching_files[:5] if matching_files else [],
         )
 
         return matching_files
 
+    def _glob_pattern_to_regex(self, glob_path: str) -> re.Pattern[str]:
+        pattern = glob_path.lstrip("/")
+        regex = ""
+        index = 0
+        while index < len(pattern):
+            char = pattern[index]
+            if char == "*":
+                if index + 1 < len(pattern) and pattern[index + 1] == "*":
+                    if index + 2 < len(pattern) and pattern[index + 2] == "/":
+                        regex += "(?:.*/)?"
+                        index += 3
+                    else:
+                        regex += ".*"
+                        index += 2
+                else:
+                    regex += "[^/]*"
+                    index += 1
+            elif char == "?":
+                regex += "[^/]"
+                index += 1
+            else:
+                regex += re.escape(char)
+                index += 1
+        return re.compile(regex)
+
     async def get_file_size(self, remote_path: str) -> int:
-        """Get the size of a file in bytes using s3fs.
+        """Get the size of a file in bytes using the filer HTTP API.
 
         Args:
             remote_path: Relative path to the file
@@ -505,22 +465,14 @@ class SeaweedFSFilerClient(StorageClient):
             File size in bytes, or 0 if file doesn't exist or size cannot be determined
         """
         try:
-            import s3fs
-
-            # Construct full S3 URI with endpoint
-            full_path = f"s3://{self.bucket}/{remote_path.lstrip('/')}"
-
-            # Use s3fs with custom endpoint
-            fs = s3fs.S3FileSystem(
-                client_kwargs={"endpoint_url": self.s3_url},
-                key="",  # SeaweedFS doesn't require auth
-                secret="",
-            )
-
-            # Get file info (includes size)
-            info = fs.info(full_path)
-            if info and "size" in info:
-                return info["size"]
+            filer_path = self._get_filer_path(remote_path)
+            url = f"{self.filer_url}{filer_path}"
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.head(url)
+                response.raise_for_status()
+                content_length = response.headers.get("content-length")
+                if content_length:
+                    return int(content_length)
             return 0
         except Exception as e:
             logger.warning(f"Could not get size for {remote_path}: {e}")

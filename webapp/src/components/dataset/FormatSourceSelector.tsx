@@ -6,12 +6,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  compareVersionValues,
+  formatVersionLabel,
+  parseVersionValue,
+} from "./versionLabel";
 
 interface FormatSourceSelectorProps {
   formatType: string;
   formatEntry: NonNullable<DatasetWithUrls["formats"]>[0];
-  selectedSource: { storageLocationId: number; version: number } | null;
-  onSourceChange: (storageLocationId: number, version: number) => void;
+  selectedSource: { storageLocationId: number; version: string | number } | null;
+  onSourceChange: (storageLocationId: number, version: string | number) => void;
 }
 
 export function FormatSourceSelector({
@@ -29,7 +34,7 @@ export function FormatSourceSelector({
   // Group sources by storage location
   type LocationData = {
     location: SourceType["storage_location"];
-    versions: Array<{ version: number; source: SourceType }>;
+    versions: Array<{ version: string | number; source: SourceType }>;
   };
   const sourcesByLocation: Record<number, LocationData> = {};
 
@@ -47,11 +52,7 @@ export function FormatSourceSelector({
     const locationData = sourcesByLocation[locId];
     if (locationData) {
       locationData.versions.push({ version, source });
-      // Sort versions descending
-      locationData.versions.sort(
-        (a: { version: number }, b: { version: number }) =>
-          b.version - a.version
-      );
+      locationData.versions.sort((a, b) => compareVersionValues(a.version, b.version));
     }
   });
 
@@ -80,7 +81,7 @@ export function FormatSourceSelector({
   const truncateLabel = (value: string, maxLength = 15) =>
     value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
   const locationLabelShort = truncateLabel(locationLabel);
-  const versionLabel = `v${defaultVersion}`;
+  const versionLabel = formatVersionLabel(defaultVersion);
 
   return (
     <div className="flex flex-col gap-2 mb-2">
@@ -129,7 +130,7 @@ export function FormatSourceSelector({
         <Select
           value={defaultVersion.toString()}
           onValueChange={(value) => {
-            const version = parseInt(value, 10);
+            const version = parseVersionValue(value);
             if (defaultLocationId) {
               onSourceChange(defaultLocationId, version);
             }
@@ -149,7 +150,7 @@ export function FormatSourceSelector({
               const { version } = entry;
               return (
                 <SelectItem key={version} value={version.toString()}>
-                  v{version}
+                  {formatVersionLabel(version)}
                 </SelectItem>
               );
             })}

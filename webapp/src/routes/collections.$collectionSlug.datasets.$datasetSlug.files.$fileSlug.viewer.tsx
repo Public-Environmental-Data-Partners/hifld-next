@@ -29,6 +29,8 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { FormatSourceSelector } from "@/components/dataset/FormatSourceSelector";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { PageLoader } from "@/components/ui/page-loader";
+import { compareVersionValues } from "@/components/dataset/versionLabel";
+import { buildSourceFileUrl } from "@/components/dataset/sourceUrls";
 
 export const Route = createFileRoute(
   "/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer"
@@ -125,7 +127,7 @@ function FileViewerPage() {
             const existing = sourcesByLocation[locId];
             if (!existing) {
               sourcesByLocation[locId] = { source, version };
-            } else if (String(version) > String(existing.version)) {
+            } else if (compareVersionValues(version, existing.version) < 0) {
               sourcesByLocation[locId] = { source, version };
             }
           }
@@ -164,7 +166,7 @@ function FileViewerPage() {
   };
 
   const pmtilesSource = getSelectedSource("pmtiles");
-  const pmtilesUrl = pmtilesSource?.url || null;
+  const pmtilesUrl = pmtilesSource ? buildSourceFileUrl(pmtilesSource) : null;
   const pmtilesFormatEntry = file.formats?.find(
     (entry) => entry.format.format_type === "pmtiles"
   );
@@ -399,7 +401,7 @@ function FileViewerContent({
                 selectedSources.pmtiles
                   ? {
                       storageLocationId: selectedSources.pmtiles.storageLocationId,
-                      version: Number(selectedSources.pmtiles.version),
+                      version: selectedSources.pmtiles.version,
                     }
                   : null
               }
@@ -531,4 +533,3 @@ function FileViewerContent({
     </div>
   );
 }
-

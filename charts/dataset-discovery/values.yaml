@@ -1,0 +1,45 @@
+image:
+  repository: ""
+  tag: latest
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: false
+  name: ""
+
+database:
+  existingSecret: ""
+  urlKey: DATABASE_URL
+
+defaults:
+  command: ["uv", "run", "python", "-m", "jobs.discover"]
+  concurrencyPolicy: Forbid
+  restartPolicy: Never
+  backoffLimit: 1
+  activeDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  resources: {}
+  labels: {}
+  annotations: {}
+  podLabels: {}
+  podAnnotations: {}
+  env: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  securityContext: {}
+  podSecurityContext: {}
+
+jobs: {}
+# Example:
+# jobs:
+#   hifld-prod:
+#     enabled: true
+#     schedule: "0 * * * *"
+#     storageLocationSlug: gcs-hifld-next-datasets-prod
+#     collectionSlug: hifld
+#     dryRun: false
+#     pruneStale: false
+#     prefix: ""
+#     limit: null

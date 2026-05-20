@@ -23,6 +23,26 @@ services:
     networks:
       - hifld-network
 
+  discover-job:
+    build:
+      context: ./dataset-api
+    command: uv run python -m jobs.discover
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://hifld:hifld_dev@dataset-api-postgres:5432/hifld_datasets}
+      DISCOVER_STORAGE_LOCATION_SLUG: ${DISCOVER_STORAGE_LOCATION_SLUG:-seaweedfs-drp-hifld-copy-formatted}
+      DISCOVER_COLLECTION_SLUG: ${DISCOVER_COLLECTION_SLUG:-hifld}
+      DISCOVER_PREFIX: ${DISCOVER_PREFIX:-}
+      DISCOVER_DRY_RUN: ${DISCOVER_DRY_RUN:-false}
+      DISCOVER_PRUNE_STALE: ${DISCOVER_PRUNE_STALE:-false}
+      DISCOVER_LIMIT: ${DISCOVER_LIMIT:-}
+    depends_on:
+      dataset-api-postgres:
+        condition: service_healthy
+    profiles:
+      - tools
+    networks:
+      - hifld-network
+
   # PostgreSQL database for GeoServer (optional - comment out if using Cloud SQL or external DB)
   # To use GCP Cloud SQL, comment out this service and configure GeoServer to connect
   # to your Cloud SQL instance using the DB_* environment variables below

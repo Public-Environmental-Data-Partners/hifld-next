@@ -380,6 +380,33 @@ async def get_dataset_file_by_id(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+@router.get("/{dataset_id}/files/{file_id}/versions")
+async def get_dataset_file_versions_by_id(
+    collection_id: int,
+    dataset_id: int,
+    file_id: int,
+    _collection: Collection = Depends(verify_collection_exists),
+    service: DatasetService = Depends(get_dataset_service),
+):
+    """Get full version history for a file across all formats and storage locations."""
+    dataset = service.get_dataset_by_id(dataset_id)
+    if not dataset or dataset.collection_id != collection_id:
+        raise HTTPException(status_code=404, detail="Dataset not found in this collection")
+
+    result = await service.get_dataset_file_with_urls_by_id(
+        dataset_id=dataset_id,
+        file_id=file_id,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Dataset file not found")
+
+    return {
+        "dataset_id": dataset_id,
+        "file_id": file_id,
+        "formats": result["file"].get("formats", []),
+    }
+
+
 @router.get("/by-slug/{dataset_slug}")
 async def get_dataset_by_slug(
     collection_id: int,

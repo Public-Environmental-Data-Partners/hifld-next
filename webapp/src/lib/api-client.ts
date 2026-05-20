@@ -10,7 +10,14 @@ import { env } from "../env/server";
 
 // Type definitions matching Python Pydantic models
 
-export type FormatType = "geoparquet" | "pmtiles" | "geoserver";
+export type FormatType =
+  | "geoparquet"
+  | "pmtiles"
+  | "geoserver"
+  | "geopackage"
+  | "shapefile"
+  | "geojson"
+  | "file_geodatabase";
 
 export type BackendType = "s3" | "geoserver";
 
@@ -41,6 +48,20 @@ export type DatasetSourceLocation =
   | GeoServerLocation;
 
 // Metadata schemas
+export interface ColumnSchema {
+  name: string;
+  type: string;
+  description?: string;
+  nullable: boolean;
+  num_null_values?: number;
+  num_unique_values?: number;
+  example_values?: string[];
+  min?: number;
+  max?: number;
+  length?: number;
+  possible_values?: string[];
+}
+
 export interface SpatialDatasetFileMetadata {
   version: string;
   size_bytes?: number;
@@ -48,6 +69,10 @@ export interface SpatialDatasetFileMetadata {
   feature_count?: number;
   bounds?: [number, number, number, number]; // [minx, miny, maxx, maxy]
   geometry_type?: string; // Geometry type (e.g. "Point", "Polygon", "LineString", "Mixed")
+  invalid_geometry_count?: number;
+  quality_check_passed?: boolean;
+  columns_hash?: string;
+  columns?: ColumnSchema[];
 }
 
 export interface Dataset {
@@ -63,7 +88,7 @@ export interface Dataset {
 
 export interface DatasetSource {
   id: number;
-  version?: number;
+  version?: string | number;
   url?: string;
   storage_uri?: string; // Storage URI (gs:// or s3://) for file sources
   glob_pattern?: string; // Glob pattern (gs:// or s3://) for multiple files in same location/version
@@ -145,6 +170,12 @@ export interface DatasetWithUrls extends Dataset {
 export interface DatasetFileResponse {
   dataset: Dataset;
   file: DatasetFile;
+}
+
+export interface DatasetFileVersionsResponse {
+  dataset_id: number;
+  file_id: number;
+  formats: DatasetFormat[];
 }
 
 export interface PaginatedResponse<T> {
@@ -307,6 +338,26 @@ export const getDatasetFileById = createServerFn({ method: "GET" })
       );
     }
     return (await response.json()) as DatasetFileResponse;
+  });
+
+export const getFileVersions = createServerFn({ method: "GET" })
+  .inputValidator(
+    (data: {
+      collectionId: number;
+      datasetId: number;
+      fileId: number;
+    }) => data
+  )
+  .handler(async ({ data }) => {
+    const url = `${env.DATASET_API_URL}/api/collections/${data.collectionId}/datasets/${data.datasetId}/files/${data.fileId}/versions`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(
+        `Failed to fetch file versions: ${response.status} ${errorText}`
+      );
+    }
+    return (await response.json()) as DatasetFileVersionsResponse;
   });
 
 /**

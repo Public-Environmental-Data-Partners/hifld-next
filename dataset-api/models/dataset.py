@@ -12,7 +12,15 @@ from pydantic import BaseModel, field_validator, model_validator
 BackendType = Literal["s3", "geoserver"]
 
 # Format type literals
-FormatType = Literal["geoparquet", "pmtiles", "geoserver"]
+FormatType = Literal[
+    "geoparquet",
+    "pmtiles",
+    "geoserver",
+    "geopackage",
+    "shapefile",
+    "geojson",
+    "file_geodatabase",
+]
 
 
 class BucketStorageLocationConfig(BaseModel):
@@ -76,6 +84,22 @@ class ApiLocation(BaseModel):
     method: Optional[str] = None  # HTTP method (default: GET)
 
 
+class ColumnSchema(BaseModel):
+    """Typed column schema derived from data_dictionary.json."""
+
+    name: str
+    type: str
+    description: Optional[str] = None
+    nullable: bool = True
+    num_null_values: Optional[int] = None
+    num_unique_values: Optional[int] = None
+    example_values: Optional[list[str]] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    length: Optional[int] = None
+    possible_values: Optional[list[str]] = None
+
+
 class SpatialDatasetFileMetadata(BaseModel):
     """Pydantic schema for spatial dataset file metadata."""
 
@@ -97,6 +121,7 @@ class SpatialDatasetFileMetadata(BaseModel):
     invalid_geometry_count: Optional[int] = None
     quality_check_passed: Optional[bool] = None
     columns_hash: Optional[str] = None
+    columns: Optional[list[ColumnSchema]] = None
 
 
 class PydanticJSON(TypeDecorator):
@@ -147,9 +172,8 @@ class StorageLocation(SQLModel, table=True):
     __tablename__ = "storage_locations"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(
-        unique=True
-    )  # e.g. "S3 Local", "GCS Production", "SeaweedFS Local"
+    slug: str = Field(unique=True)  # Stable, user-defined identifier for config
+    name: str  # e.g. "S3 Local", "GCS Production", "SeaweedFS Local"
     backend_type: str  # "s3" | "geoserver" - validated by field_validator
     description: Optional[str] = None
 
@@ -246,6 +270,7 @@ class Dataset(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+# TODO: rename "File" to "Layer"
 class File(SQLModel, table=True):
     """
     File model representing a file (or layer) within a dataset.
@@ -266,7 +291,7 @@ class File(SQLModel, table=True):
 
     __tablename__ = "files"
     __table_args__ = (
-        UniqueConstraint("dataset_id", "name", name="uq_dataset_file_name"),
+        UniqueConstraint("dataset_id", "slug", name="uq_dataset_file_slug"),
         # Note: For multi-layer files, consider also ensuring uniqueness of
         # (dataset_id, source_file_path, layer_name) when source_file_path is not NULL
         # This can be enforced via a partial unique index in the database if needed
@@ -367,7 +392,15 @@ class Format(SQLModel, table=True):
     @classmethod
     def validate_format_type(cls, v: str) -> str:
         """Validate format_type is one of the allowed values."""
-        allowed = ["geoparquet", "pmtiles", "geoserver"]
+        allowed = [
+            "geoparquet",
+            "pmtiles",
+            "geoserver",
+            "geopackage",
+            "shapefile",
+            "geojson",
+            "file_geodatabase",
+        ]
         if v not in allowed:
             raise ValueError(f"format_type must be one of {allowed}, got '{v}'")
         return v

@@ -35,6 +35,44 @@ from services.geoserver import GeoServerClient
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_FORMAT_DETAILS: dict[str, dict[str, Optional[str]]] = {
+    "geoparquet": {
+        "name": "GeoParquet",
+        "description": "GeoParquet format for efficient spatial data storage and analysis",
+        "mime_type": "application/parquet",
+    },
+    "pmtiles": {
+        "name": "PMTiles",
+        "description": "PMTiles format for tile serving and web mapping",
+        "mime_type": "application/x-protobuf",
+    },
+    "geoserver": {
+        "name": "GeoServer",
+        "description": "GeoServer service providing multiple OGC-compliant interfaces",
+        "mime_type": None,
+    },
+    "geopackage": {
+        "name": "GeoPackage",
+        "description": "GeoPackage file format for portable spatial datasets",
+        "mime_type": "application/geopackage+sqlite3",
+    },
+    "shapefile": {
+        "name": "Shapefile",
+        "description": "ESRI Shapefile dataset packaged as a multi-file vector format",
+        "mime_type": "application/zip",
+    },
+    "geojson": {
+        "name": "GeoJSON",
+        "description": "GeoJSON feature collection format for web-friendly spatial data",
+        "mime_type": "application/geo+json",
+    },
+    "file_geodatabase": {
+        "name": "File Geodatabase",
+        "description": "Esri File Geodatabase dataset format",
+        "mime_type": "application/octet-stream",
+    },
+}
+
 
 class DatasetService:
     """Service for dataset operations."""
@@ -423,10 +461,18 @@ class DatasetService:
         """Get or create a format definition."""
         format_obj = self.get_format_by_type(format_type)
         if not format_obj:
-            # Format doesn't exist - this shouldn't happen if formats are seeded
-            raise ValueError(
-                f"Format '{format_type}' not found. Run seed_formats.py first."
+            details = DEFAULT_FORMAT_DETAILS.get(
+                format_type,
+                {
+                    "name": format_type.replace("_", " ").title(),
+                    "description": None,
+                    "mime_type": None,
+                },
             )
+            format_obj = Format(format_type=format_type, **details)
+            self.db.add(format_obj)
+            self.db.commit()
+            self.db.refresh(format_obj)
         return format_obj
 
     def get_dataset_format(
