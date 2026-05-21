@@ -1,7 +1,6 @@
 """Dataset service for CRUD operations."""
 
 import logging
-import os
 import traceback
 from datetime import date, datetime
 from typing import Optional, Any, Union
@@ -29,9 +28,7 @@ from models.helpers import (
     get_file_source_storage_uri,
     expand_glob_pattern_in_source,
     construct_glob_pattern_from_sources,
-    get_file_url,
 )
-from services.geoserver import GeoServerClient
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +42,6 @@ DEFAULT_FORMAT_DETAILS: dict[str, dict[str, Optional[str]]] = {
         "name": "PMTiles",
         "description": "PMTiles format for tile serving and web mapping",
         "mime_type": "application/x-protobuf",
-    },
-    "geoserver": {
-        "name": "GeoServer",
-        "description": "GeoServer service providing multiple OGC-compliant interfaces",
-        "mime_type": None,
     },
     "geopackage": {
         "name": "GeoPackage",
@@ -77,9 +69,8 @@ DEFAULT_FORMAT_DETAILS: dict[str, dict[str, Optional[str]]] = {
 class DatasetService:
     """Service for dataset operations."""
 
-    def __init__(self, db: Session, geoserver_client: Optional[GeoServerClient] = None):
+    def __init__(self, db: Session):
         self.db = db
-        self.geoserver = geoserver_client or GeoServerClient()
 
     def get_datasets(
         self,
@@ -750,74 +741,6 @@ class DatasetService:
             .where(File.dataset_id == dataset_id)
         )
         return list(self.db.exec(statement).all())
-
-    def get_geoserver_info(self, dataset_id: int) -> Optional[dict]:
-        """
-        Get GeoServer information from registered GeoServer sources.
-
-        Looks for the 'geoserver' format and returns all registered sources.
-        Each source represents a versioned GeoServer layer/store with full metadata.
-
-        Returns:
-            Dict with dataset name, workspace, and list of GeoServer sources, or None if no geoserver format
-        """
-        # Look for geoserver format
-        geoserver_format = self.get_dataset_format(dataset_id, "geoserver")
-        if not geoserver_format:
-            return None
-
-        # Get ALL geoserver sources (all versions)
-        sources = self.get_format_sources(geoserver_format.id, latest_only=False)
-        if not sources:
-            return None
-
-        dataset = self.get_dataset_by_id(dataset_id)
-        if not dataset:
-            return None
-
-        # Build info for each GeoServer source
-        geoserver_sources = []
-        for source in sources:
-            storage_loc = self.get_storage_location(source.storage_location_id)
-
-            # Extract location info (workspace, store_name, layer_name)
-            location = source.location or {}
-            workspace = location.get("workspace", "hifld")
-            store_name = location.get("store_name")
-            layer_name = location.get("layer_name", store_name)
-
-            # Extract metadata (URLs, linked geoparquet info)
-            metadata = source.source_metadata or {}
-
-            geoserver_sources.append(
-                {
-                    "source_id": source.id,
-                    "version": source.version,
-                    "storage_location_id": source.storage_location_id,
-                    "storage_location_name": storage_loc.name if storage_loc else None,
-                    "workspace": workspace,
-                    "store_name": store_name,
-                    "layer_name": layer_name,
-                    "feature_url": metadata.get("feature_api_url"),
-                    "wfs_url": metadata.get("wfs_url"),
-                    "wms_url": metadata.get("wms_url"),
-                    "source_geoparquet_id": metadata.get("source_geoparquet_id"),
-                    "source_geoparquet_version": metadata.get(
-                        "source_geoparquet_version"
-                    ),
-                    "source_storage_location_id": metadata.get(
-                        "source_storage_location_id"
-                    ),
-                }
-            )
-
-        return {
-            "dataset_name": dataset.name,
-            "workspace": (
-                sources[0].location.get("workspace", "hifld") if sources else "hifld"
-            ),
-            "sources": geoserver_sources,
-        }
 
     def get_dataset_with_files(self, dataset_id: int) -> Optional[dict]:
         """
@@ -1721,76 +1644,20 @@ class DatasetService:
         description: Optional[str] = None,
         collection_id: Optional[int] = None,
         tags: Optional[dict[str, str]] = None,
-        geoserver_workspace: Optional[str] = None,
-        geoserver_store: Optional[str] = None,
-        geoserver_layer: Optional[str] = None,
         add_to_geoserver: bool = True,
     ) -> tuple[Dataset, bool]:
         """
-        Register a dataset in the catalog and optionally add to GeoServer.
+        Register a dataset in the catalog.
 
         Args:
-            dataset_format_id: ID of the FileFormat (must be geoparquet format for GeoServer)
-            storage_location_id: ID of the storage location containing the file
+            dataset_format_id: ID of the FileFormat.
+            storage_location_id: ID of the storage location containing the file.
 
         Returns:
-            Tuple of (dataset, geoserver_success)
+            Tuple of (dataset, False). The boolean is retained for legacy callers.
         """
-        # Default workspace from environment or use "hifld"
-        workspace = geoserver_workspace or os.getenv("GEOSERVER_WORKSPACE", "hifld")
-        store_name = geoserver_store or name
-        layer_name = geoserver_layer or name
-
-        geoserver_success = False
-
         if add_to_geoserver:
-            # Get format and file to construct full URL for GeoServer
-            file_format = self.db.get(FileFormat, dataset_format_id)
-            if not file_format:
-                raise ValueError(f"FileFormat {dataset_format_id} not found")
-
-            # Get the format definition
-            format_obj = self.db.get(Format, file_format.format_id)
-            if not format_obj or format_obj.format_type != "geoparquet":
-                raise ValueError(
-                    "GeoParquet format required for GeoServer registration"
-                )
-
-            # Get the source for this format and storage location
-            file_source = self.get_format_source_by_location(
-                dataset_format_id, storage_location_id
-            )
-            if not file_source:
-                raise ValueError(
-                    "File source not found for format and storage location"
-                )
-
-            # Get storage location to construct full URL
-            storage_location = self.get_storage_location(storage_location_id)
-            if not storage_location:
-                raise ValueError("Storage location required for GeoServer registration")
-
-            # Construct full geoparquet URL for GeoServer
-            geoparquet_url = get_file_url(
-                file_source.source_type, file_source.location, storage_location
-            )
-
-            if not geoparquet_url:
-                raise ValueError(
-                    "Could not construct GeoParquet URL from storage location"
-                )
-
-            # Create store and publish layer
-            store_created = await self.geoserver.create_geoparquet_store(
-                workspace, store_name, geoparquet_url
-            )
-
-            if store_created:
-                geoserver_success = await self.geoserver.publish_layer(
-                    workspace, store_name, layer_name
-                )
-            else:
-                raise ValueError("Failed to create GeoServer store")
+            logger.warning("GeoServer registration is no longer supported; skipping")
 
         # Create dataset
         dataset = self.create_dataset(
@@ -1800,7 +1667,7 @@ class DatasetService:
             tags=tags,
         )
 
-        return dataset, geoserver_success
+        return dataset, False
 
     def get_dataset_stats(self) -> dict[str, int]:
         """Get dataset statistics."""

@@ -34,11 +34,5 @@
     "name": "File Geodatabase",
     "description": "ESRI File Geodatabase format for geospatial data storage",
     "mime_type": "application/x-esri-shape"
-  },
-  {
-    "format_type": "geoserver",
-    "name": "GeoServer",
-    "description": "GeoServer service providing OGC API Features endpoint",
-    "mime_type": null
   }
 ]

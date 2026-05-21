@@ -23,17 +23,5 @@
       "bucket": "drp-hifld-copy-formatted",
       "endpoint_url": "http://localhost:8333"
     }
-  },
-  {
-    "slug": "geoserver",
-    "name": "GeoServer",
-    "backend_type": "geoserver",
-    "description": "GeoServer instance for spatial data services",
-    "config": {
-      "type": "geoserver",
-      "version": "v1",
-      "base_url": "http://localhost:8080/geoserver",
-      "workspace": "hifld"
-    }
   }
 ]

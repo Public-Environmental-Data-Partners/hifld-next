@@ -5,11 +5,9 @@ import {
   File,
   ChevronRight,
   ChevronDown,
-  Globe,
   Package,
   FileJson,
   Map as MapIcon,
-  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DatasetFile, DatasetFormat, DatasetSource } from "@/lib/api-client";
@@ -86,12 +84,6 @@ interface FileFormatTreeProps {
   selectedSources: Record<string, { storageLocationId: number; version: string | number }>;
   onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
   onViewParquet?: (url: string, fileName: string) => void;
-  ogcFeaturesUrl: string | null;
-  fullLayerName: string | null;
-  geopackageUrl: string | null;
-  geojsonUrl: string | null;
-  shapefileUrl: string | null;
-  geoserverExportsEnabled: boolean;
   pmtilesUrl: string | null;
   collectionId?: number;
   collectionSlug?: string;
@@ -104,12 +96,6 @@ export function FileFormatTree({
   selectedSources,
   onSourceChange,
   onViewParquet,
-  ogcFeaturesUrl,
-  fullLayerName,
-  geopackageUrl,
-  geojsonUrl,
-  shapefileUrl,
-  geoserverExportsEnabled,
   pmtilesUrl,
   collectionId,
   collectionSlug,
@@ -130,7 +116,6 @@ export function FileFormatTree({
     });
   };
 
-  const geoserverFormat = file.formats?.find((f) => f.format.format_type === "geoserver");
   const geoparquetFormat = file.formats?.find((f) => f.format.format_type === "geoparquet");
   const pmtilesFormat = file.formats?.find((f) => f.format.format_type === "pmtiles");
   const geopackageFormat = file.formats?.find((f) => f.format.format_type === "geopackage");
@@ -145,172 +130,10 @@ export function FileFormatTree({
       String(source.version || "1") === String(selectedVersion || "1")
     ));
   };
-  const selectedGeoserverSource = selectedSourceFor("geoserver", geoserverFormat);
 
   return (
     <div className="space-y-1 border rounded-md p-4">
       <h4 className="font-medium mb-3">Available Formats</h4>
-
-      {/* GeoServer formats */}
-      {geoserverFormat && (
-        <div className="space-y-1">
-          {geoserverExportsEnabled && (
-            <>
-              {/* GeoJSON */}
-              <FormatFileNode
-                icon={<FileJson className="h-4 w-4 text-orange-500" />}
-                name="geojson"
-                formatType="geoserver"
-                formatEntry={geoserverFormat}
-                selectedSources={selectedSources}
-                onSourceChange={onSourceChange}
-                isExpanded={expandedFormats.has("geoserver-geojson")}
-                onToggle={() => toggleFormat("geoserver-geojson")}
-                collectionSlug={collectionSlug}
-                datasetSlug={datasetSlug}
-                fileSlug={fileSlug}
-              >
-                {geojsonUrl && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">
-                      Download as GeoJSON format from GeoServer
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <DownloadButton
-                        url={geojsonUrl}
-                        label="Download"
-                        analyticsContext={downloadAnalyticsContext({
-                          collectionSlug,
-                          datasetSlug,
-                          fileSlug,
-                          format: "geoserver_geojson",
-                          source: selectedGeoserverSource,
-                        })}
-                      />
-                    </div>
-                  </div>
-                )}
-              </FormatFileNode>
-
-              {/* GeoPackage */}
-              <FormatFileNode
-                icon={<Package className="h-4 w-4 text-purple-500" />}
-                name="geopackage"
-                formatType="geoserver"
-                formatEntry={geoserverFormat}
-                selectedSources={selectedSources}
-                onSourceChange={onSourceChange}
-                isExpanded={expandedFormats.has("geoserver-gpkg")}
-                onToggle={() => toggleFormat("geoserver-gpkg")}
-                collectionSlug={collectionSlug}
-                datasetSlug={datasetSlug}
-                fileSlug={fileSlug}
-              >
-                {geopackageUrl && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">
-                      Download as GeoPackage format from GeoServer
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <DownloadButton
-                        url={geopackageUrl}
-                        label="Download"
-                        analyticsContext={downloadAnalyticsContext({
-                          collectionSlug,
-                          datasetSlug,
-                          fileSlug,
-                          format: "geoserver_geopackage",
-                          source: selectedGeoserverSource,
-                        })}
-                      />
-                    </div>
-                  </div>
-                )}
-              </FormatFileNode>
-
-              {/* Shapefile */}
-              <FormatFileNode
-                icon={<File className="h-4 w-4 text-amber-600" />}
-                name="shapefile"
-                formatType="geoserver"
-                formatEntry={geoserverFormat}
-                selectedSources={selectedSources}
-                onSourceChange={onSourceChange}
-                isExpanded={expandedFormats.has("geoserver-shp")}
-                onToggle={() => toggleFormat("geoserver-shp")}
-                collectionSlug={collectionSlug}
-                datasetSlug={datasetSlug}
-                fileSlug={fileSlug}
-              >
-                {shapefileUrl && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">
-                      Download as Shapefile (zip) from GeoServer
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <DownloadButton
-                        url={shapefileUrl}
-                        label="Download"
-                        analyticsContext={downloadAnalyticsContext({
-                          collectionSlug,
-                          datasetSlug,
-                          fileSlug,
-                          format: "geoserver_shapefile",
-                          source: selectedGeoserverSource,
-                        })}
-                      />
-                    </div>
-                  </div>
-                )}
-              </FormatFileNode>
-            </>
-          )}
-
-          {/* OGC Features API */}
-          <FormatFileNode
-            icon={<Globe className="h-4 w-4 text-blue-500" />}
-            name="OGC API - Features"
-            badge="endpoint"
-            formatType="geoserver"
-            formatEntry={geoserverFormat}
-            selectedSources={selectedSources}
-            onSourceChange={onSourceChange}
-            isExpanded={expandedFormats.has("geoserver-ogc")}
-            onToggle={() => toggleFormat("geoserver-ogc")}
-            collectionSlug={collectionSlug}
-            datasetSlug={datasetSlug}
-            fileSlug={fileSlug}
-          >
-            {ogcFeaturesUrl && (
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground break-all">
-                  {ogcFeaturesUrl}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Collection:{" "}
-                  <code className="bg-muted px-1 rounded text-[10px]">
-                    {fullLayerName}
-                  </code>
-                </p>
-                {!geoserverExportsEnabled && (
-                  <p className="text-xs text-muted-foreground">
-                    Dataset is large; only OGC Features API is offered for this source.
-                  </p>
-                )}
-                <div className="flex items-center gap-2">
-                  <CopyButton value={ogcFeaturesUrl} label="Copy URL" />
-                  <Button variant="ghost" size="sm" asChild>
-                    <a href={ogcFeaturesUrl} target="_blank" rel="noopener">
-                      <ExternalLink className="h-4 w-4 mr-1" />
-                      Open
-                    </a>
-                  </Button>
-                </div>
-              </div>
-            )}
-          </FormatFileNode>
-        </div>
-      )}
 
       {/* GeoParquet - as a folder with multiple files */}
       {geoparquetFormat && (

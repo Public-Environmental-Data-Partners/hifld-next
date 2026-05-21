@@ -17,7 +17,6 @@ SEMVER_VERSION_RE = re.compile(r"^v\d+\.\d+\.\d+$")
 KNOWN_FORMATS = {
     "geoparquet",
     "pmtiles",
-    "geoserver",
     "geopackage",
     "shapefile",
     "geojson",

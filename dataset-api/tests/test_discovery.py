@@ -186,12 +186,13 @@ def test_spatial_dataset_file_metadata_uses_typed_columns():
 def test_seed_formats_includes_new_discoverable_formats():
     with make_session() as session:
         results = seed_formats(session, DEFAULT_FORMATS)
-        assert results["created"] >= 7
+        assert results["created"] >= 6
 
         format_types = {
             row.format_type for row in session.exec(select(Format)).all()
         }
         assert {"geopackage", "shapefile", "geojson", "file_geodatabase"} <= format_types
+        assert "geoserver" not in format_types
 
 
 def test_discovery_service_yields_discovered_versions():

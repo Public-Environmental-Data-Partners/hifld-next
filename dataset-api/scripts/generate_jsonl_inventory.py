@@ -192,14 +192,6 @@ def convert_row_to_jsonl(
         elif "linestring" in keywords_lower or "line" in keywords_lower:
             dataset_config["tags"]["geometry_type"] = "LineString"
 
-    # Import settings
-    dataset_config["import"] = {
-        "add_to_geoserver": True,  # Default to True
-        "geoserver_workspace": None,  # Will use default from env/config
-        "geoserver_store_name": None,  # Will be auto-generated
-        "geoserver_layer_name": None,  # Will be auto-generated
-    }
-
     # File configuration (for multi-layer support)
     # For inventory JSONL, we only include structure, not storage URLs
     file_config = {

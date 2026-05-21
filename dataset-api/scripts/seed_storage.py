@@ -24,7 +24,6 @@ from database.db import get_db_session
 from models.dataset import (
     StorageLocation,
     BucketStorageLocationConfig,
-    GeoServerStorageLocationConfig,
     BackendType,
 )
 from scripts.config_loader import load_json_config
@@ -38,7 +37,7 @@ class StorageLocationConfig(TypedDict):
     name: str
     backend_type: BackendType
     description: str
-    config: dict  # Will be BucketStorageLocationConfig or GeoServerStorageLocationConfig dict
+    config: dict
 
 
 def validate_storage_location_config(location_data: StorageLocationConfig) -> None:
@@ -70,16 +69,6 @@ DEFAULT_STORAGE_LOCATIONS = [
             type="seaweedfs",  # Explicit SeaweedFS type
             base_url=os.getenv("SEAWEEDFS_FILER_URL", "http://localhost:8888"),
             bucket=os.getenv("SEAWEEDFS_BUCKET", "drp-hifld-copy-formatted"),
-        ).model_dump(),
-    },
-    {
-        "slug": "geoserver",
-        "name": "GeoServer",
-        "backend_type": "geoserver",
-        "description": "GeoServer instance for spatial data services",
-        "config": GeoServerStorageLocationConfig(
-            base_url=os.getenv("GEOSERVER_URL", "http://localhost:8080/geoserver"),
-            workspace=os.getenv("GEOSERVER_WORKSPACE", "hifld"),
         ).model_dump(),
     },
 ]

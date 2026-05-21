@@ -1,4 +1,4 @@
-import { Map, FileJson, Database } from "lucide-react";
+import { Map, FileJson } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Link } from "@tanstack/react-router";
@@ -18,9 +18,6 @@ export function DatasetCard({ dataset, collectionSlug }: DatasetCardProps) {
   );
   const hasGeoparquet = dataset.formats?.some(
     (f) => f.format.format_type === "geoparquet"
-  );
-  const hasGeoserver = dataset.formats?.some(
-    (f) => f.format.format_type === "geoserver"
   );
   
   // If formats aren't loaded, don't show format badges (they'll be on detail page)
@@ -104,12 +101,6 @@ export function DatasetCard({ dataset, collectionSlug }: DatasetCardProps) {
                 <Badge variant="secondary" className="font-mono text-xs">
                   <FileJson className="h-3 w-3 mr-1" />
                   GeoParquet
-                </Badge>
-              )}
-              {hasGeoserver && (
-                <Badge variant="secondary" className="font-mono text-xs">
-                  <Database className="h-3 w-3 mr-1" />
-                  GeoServer
                 </Badge>
               )}
             </div>

@@ -11,9 +11,6 @@ import {
   type DatasetWithUrls,
   getGeoparquetUrl,
   getPmtilesUrl,
-  getWfsUrl,
-  getWmsUrl,
-  getFullLayerName,
 } from "@/lib/api-client";
 
 // Re-export types
@@ -68,7 +65,4 @@ export async function getDatasetStats(): Promise<{
 export {
   getGeoparquetUrl,
   getPmtilesUrl,
-  getWfsUrl,
-  getWmsUrl,
-  getFullLayerName,
 };

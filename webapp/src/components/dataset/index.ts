@@ -5,5 +5,3 @@ export { DownloadButton } from "./DownloadButton";
 export { FormatSourceSelector } from "./FormatSourceSelector";
 export { PMTilesFormat } from "./PMTilesFormat";
 export { GeoParquetFormat } from "./GeoParquetFormat";
-export { GeoServerFormat } from "./GeoServerFormat";
-

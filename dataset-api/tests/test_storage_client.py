@@ -1,10 +1,13 @@
 import asyncio
+import os
 import sys
 import types
+import uuid
 from pathlib import Path
 
 import httpx
 import gcsfs
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -153,3 +156,48 @@ def test_seaweedfs_expand_glob_pattern_uses_filer_listing(monkeypatch):
         "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=01/part-000.parquet",
         "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=02/part-000.parquet",
     ]
+
+
+@pytest.mark.skipif(
+    os.getenv("HIFLD_RUN_SEAWEEDFS_INTEGRATION") != "1",
+    reason="Set HIFLD_RUN_SEAWEEDFS_INTEGRATION=1 to test local SeaweedFS",
+)
+def test_seaweedfs_integration_round_trips_file_and_expands_glob(tmp_path):
+    bucket = os.getenv("SEAWEEDFS_BUCKET", "hifld")
+    client = SeaweedFSFilerClient(
+        filer_url=os.getenv("SEAWEEDFS_FILER_URL", "http://localhost:8888"),
+        s3_url=os.getenv("SEAWEEDFS_S3_URL", "http://localhost:8333"),
+        bucket=bucket,
+    )
+    prefix = f"codex-storage-test/{uuid.uuid4().hex}"
+    remote_path = f"{prefix}/metadata/sample.json"
+    local_file = tmp_path / "sample.json"
+    downloaded_file = tmp_path / "downloaded.json"
+    local_file.write_text('{"status":"ok"}', encoding="utf-8")
+
+    async def scenario():
+        try:
+            public_url = await client.upload_file(
+                local_file,
+                remote_path,
+                content_type="application/json",
+            )
+
+            assert public_url == f"{client.filer_url}/buckets/{bucket}/{remote_path}"
+            assert client.path_to_storage_uri(remote_path) == (
+                f"s3://{bucket}/{remote_path}?endpoint_url={client.s3_url}"
+            )
+            assert client.parse_url_to_path(public_url) == remote_path
+            assert await client.file_exists(remote_path)
+            assert await client.list_files(prefix) == [remote_path]
+            assert await client.expand_glob_pattern(f"{prefix}/**/*.json") == [
+                remote_path
+            ]
+            assert await client.get_file_size(remote_path) == len('{"status":"ok"}')
+
+            await client.download_file(remote_path, downloaded_file)
+            assert downloaded_file.read_text(encoding="utf-8") == '{"status":"ok"}'
+        finally:
+            await client.delete_file(remote_path)
+
+    asyncio.run(scenario())

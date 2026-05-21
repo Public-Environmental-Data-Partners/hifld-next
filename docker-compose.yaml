@@ -43,73 +43,6 @@ services:
     networks:
       - hifld-network
 
-  # PostgreSQL database for GeoServer (optional - comment out if using Cloud SQL or external DB)
-  # To use GCP Cloud SQL, comment out this service and configure GeoServer to connect
-  # to your Cloud SQL instance using the DB_* environment variables below
-  # PostgreSQL database for GeoServer (with PostGIS)
-  # JDBCConfig will automatically connect to this database on first startup
-  geoserver-postgres:
-    image: postgis/postgis:15-3.4-alpine
-    container_name: hifld-geoserver-postgres
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-geoserver}
-      POSTGRES_USER: ${POSTGRES_USER:-geoserver}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-geoserver}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-geoserver}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - hifld-network
-
-  # GeoServer - Standalone API service
-  geoserver:
-    build:
-      context: ./geoserver
-      dockerfile: 2.28.0.dockerfile
-    container_name: hifld-geoserver
-    environment:
-      # GeoServer data directory
-      GEOSERVER_DATA_DIR: /var/local/geoserver
-      # Deprecated - use JDBCCONFIG_INITDB to control GeoServer schema initialization.
-      # RECREATE_DATA_DIR is not used in recent entrypoint scripts.
-      JDBCCONFIG_INITDB: "${JDBCCONFIG_INITDB:-false}"
-      JDBCCONFIG_IMPORT: "${JDBCCONFIG_IMPORT:-false}"
-      # Java options
-      JAVA_OPTS: "${JAVA_OPTS:--Xms512m -Xmx2048m -Djava.awt.headless=true}"
-      # Database connection info for JDBCConfig (auto-configured on startup)
-      # These are used by the entrypoint script to configure JDBCConfig
-      DB_HOST: ${DB_HOST:-geoserver-postgres}
-      DB_PORT: ${DB_PORT:-5432}
-      DB_NAME: ${DB_NAME:-${POSTGRES_DB:-geoserver}}
-      DB_USER: ${DB_USER:-${POSTGRES_USER:-geoserver}}
-      DB_PASSWORD: ${DB_PASSWORD:-${POSTGRES_PASSWORD:-geoserver}}
-      # For Cloud SQL: set DB_HOST to your Cloud SQL instance IP or use Cloud SQL Proxy
-    ports:
-      - "${GEOSERVER_PORT:-8080}:8080"
-    volumes:
-      - geoserver_data:/var/local/geoserver
-    depends_on:
-      geoserver-postgres:
-        condition: service_healthy
-    # Only depend on postgres if using local database
-    # For Cloud SQL, remove this dependency and configure connection manually
-    networks:
-      - hifld-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/geoserver"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-
   # SeaweedFS Master
   seaweedfs-master:
     image: chrislusf/seaweedfs:latest
@@ -155,10 +88,6 @@ services:
 
 volumes:
   dataset_api_postgres_data:
-    driver: local
-  postgres_data:
-    driver: local
-  geoserver_data:
     driver: local
   seaweedfs_master_data:
     driver: local

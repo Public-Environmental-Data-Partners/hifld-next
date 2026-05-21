@@ -13,15 +13,14 @@ import { env } from "../env/server";
 export type FormatType =
   | "geoparquet"
   | "pmtiles"
-  | "geoserver"
   | "geopackage"
   | "shapefile"
   | "geojson"
   | "file_geodatabase";
 
-export type BackendType = "s3" | "geoserver";
+export type BackendType = "s3";
 
-export type SourceType = "file" | "api" | "service";
+export type SourceType = "file" | "api";
 
 // Location schemas
 export interface FileLocation {
@@ -35,17 +34,7 @@ export interface ApiLocation {
   method?: string;
 }
 
-export interface GeoServerLocation {
-  version: string;
-  workspace: string;
-  store_name: string;
-  layer_name: string;
-}
-
-export type DatasetSourceLocation =
-  | FileLocation
-  | ApiLocation
-  | GeoServerLocation;
+export type DatasetSourceLocation = FileLocation | ApiLocation;
 
 // Metadata schemas
 export interface ColumnSchema {
@@ -105,15 +94,7 @@ export interface BucketStorageLocationConfig {
   bucket: string;
 }
 
-export interface GeoServerStorageLocationConfig {
-  version: string;
-  base_url: string;
-  workspace: string;
-}
-
-export type StorageLocationConfig =
-  | BucketStorageLocationConfig
-  | GeoServerStorageLocationConfig;
+export type StorageLocationConfig = BucketStorageLocationConfig;
 
 export interface StorageLocation {
   id: number;
@@ -637,152 +618,4 @@ export function getPmtilesUrl(dataset: DatasetWithUrls): string | null {
     (f) => f.format.format_type === "pmtiles"
   );
   return pmtilesFormat?.sources[0]?.url || null;
-}
-
-/**
- * Get GeoServer format from dataset
- */
-export function getGeoServerFormat(
-  dataset: DatasetWithUrls
-): DatasetFormat | null {
-  if (!dataset.formats) return null;
-  return (
-    dataset.formats.find((f) => f.format.format_type === "geoserver") || null
-  );
-}
-
-/**
- * Check if dataset has GeoServer sources available
- */
-export function hasGeoServerSources(dataset: DatasetWithUrls): boolean {
-  const geoserverFormat = getGeoServerFormat(dataset);
-  return !!(geoserverFormat && geoserverFormat.sources.length > 0);
-}
-
-/**
- * Get all GeoServer sources for a dataset
- */
-export function getGeoServerSources(dataset: DatasetWithUrls): DatasetSource[] {
-  const geoserverFormat = getGeoServerFormat(dataset);
-  return geoserverFormat?.sources || [];
-}
-
-/**
- * Get GeoPackage export URL from GeoServer source
- * Constructs URL from storage location + dataset source using WFS GetFeature with outputFormat=geopkg
- */
-export function getGeoPackageUrl(
-  source: DatasetSource,
-  storageLocation: StorageLocation
-): string | null {
-  const config = storageLocation.config as
-    | GeoServerStorageLocationConfig
-    | undefined;
-  if (!config?.base_url) return null;
-  const location = source.location as GeoServerLocation;
-  const workspace = location.workspace || "hifld";
-  const layerName = location.layer_name || location.store_name || "";
-  // GeoServer WFS GetFeature with GeoPackage output format
-  return `${config.base_url}/${workspace}/wfs?service=wfs&version=2.0.0&request=GetFeature&typeNames=${workspace}:${layerName}&outputFormat=geopkg`;
-}
-
-/**
- * Get GeoJSON download URL from GeoServer source
- * Constructs URL from storage location + dataset source
- */
-export function getGeoJsonUrl(
-  source: DatasetSource,
-  storageLocation: StorageLocation
-): string | null {
-  const config = storageLocation.config as
-    | GeoServerStorageLocationConfig
-    | undefined;
-  if (!config?.base_url) return null;
-  const location = source.location as GeoServerLocation;
-  const workspace = location.workspace || "hifld";
-  const layerName = location.layer_name || location.store_name || "";
-  // GeoServer WFS GetFeature with GeoJSON output format
-  return `${config.base_url}/${workspace}/wfs?service=wfs&version=2.0.0&request=GetFeature&typeNames=${workspace}:${layerName}&outputFormat=application/json`;
-}
-
-/**
- * Get Shapefile download URL from GeoServer source.
- * Constructs URL from storage location + dataset source.
- */
-export function getShapefileUrl(
-  source: DatasetSource,
-  storageLocation: StorageLocation
-): string | null {
-  const config = storageLocation.config as
-    | GeoServerStorageLocationConfig
-    | undefined;
-  if (!config?.base_url) return null;
-  const location = source.location as GeoServerLocation;
-  const workspace = location.workspace || "hifld";
-  const layerName = location.layer_name || location.store_name || "";
-  // GeoServer WFS GetFeature with Shapefile output format (zip)
-  return `${config.base_url}/${workspace}/wfs?service=wfs&version=2.0.0&request=GetFeature&typeNames=${workspace}:${layerName}&outputFormat=shape-zip`;
-}
-
-/**
- * Get WFS URL from GeoServer source
- * Constructs URL from storage location + dataset source
- */
-export function getWfsUrl(
-  source: DatasetSource,
-  storageLocation: StorageLocation
-): string | null {
-  const config = storageLocation.config as
-    | GeoServerStorageLocationConfig
-    | undefined;
-  if (!config?.base_url) return null;
-  const location = source.location as GeoServerLocation;
-  const workspace = location.workspace || "hifld";
-  return `${config.base_url}/${workspace}/wfs`;
-}
-
-/**
- * Get WMS URL from GeoServer source
- * Constructs URL from storage location + dataset source
- */
-export function getWmsUrl(
-  source: DatasetSource,
-  storageLocation: StorageLocation
-): string | null {
-  const config = storageLocation.config as
-    | GeoServerStorageLocationConfig
-    | undefined;
-  if (!config?.base_url) return null;
-  const location = source.location as GeoServerLocation;
-  const workspace = location.workspace || "hifld";
-  return `${config.base_url}/${workspace}/wms`;
-}
-
-/**
- * Get OGC Features API URL from GeoServer source
- * Constructs URL from storage location + dataset source
- */
-export function getOgcFeaturesUrl(
-  source: DatasetSource,
-  storageLocation: StorageLocation
-): string | null {
-  const config = storageLocation.config as
-    | GeoServerStorageLocationConfig
-    | undefined;
-  if (!config?.base_url) return null;
-  const location = source.location as GeoServerLocation;
-  const workspace = location.workspace || "hifld";
-  const layerName = location.layer_name || "";
-  return `${config.base_url}/${workspace}/ogc/features/v1/collections/${layerName}`;
-}
-
-/**
- * Get full layer name (workspace:layer) from GeoServer source
- */
-export function getFullLayerName(source: DatasetSource): string | null {
-  const location = source.location as GeoServerLocation;
-  const workspace = location.workspace;
-  const layerName = location.layer_name;
-  if (!workspace || !layerName) return null;
-  return `${workspace}:${layerName}`;
 }

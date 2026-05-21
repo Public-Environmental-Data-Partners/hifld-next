@@ -139,8 +139,7 @@ class StorageClient(ABC):
 
         Args:
             path: Relative path within the storage location
-            for_docker: If True, use host.docker.internal instead of localhost
-                       for Docker container access (e.g., when GeoServer is in Docker)
+            for_docker: Legacy compatibility flag. Ignored by production clients.
 
         Returns:
             Public HTTP URL for accessing the file
@@ -357,12 +356,9 @@ class SeaweedFSFilerClient(StorageClient):
     def path_to_s3_uri(self, path: str) -> str:
         """Convert a SeaweedFS path to S3-compatible URI.
 
-        Note: SeaweedFS doesn't support S3 URIs directly, but we can construct
-        an S3-compatible format for compatibility.
+        SeaweedFS exposes an S3-compatible endpoint for local testing.
         """
         clean_path = path.lstrip("/")
-        # For SeaweedFS, we can't use S3 URIs directly, but return a format
-        # that indicates it's SeaweedFS (though GeoServer won't support this)
         return f"s3://{self.bucket}/{clean_path}"
 
     def path_to_storage_uri(self, path: str) -> str:
@@ -379,12 +375,9 @@ class SeaweedFSFilerClient(StorageClient):
 
         Args:
             path: Relative path within the storage location
-            for_docker: If True, use host.docker.internal instead of localhost
-                       for Docker container access (e.g., when GeoServer is in Docker)
+            for_docker: Legacy compatibility flag. Ignored by production clients.
         """
         url = self.get_public_url(path)
-        # If this URL is for use by Docker containers (like GeoServer),
-        # replace localhost with host.docker.internal
         if for_docker and "localhost" in url:
             url = url.replace("localhost", "host.docker.internal")
         elif for_docker and "127.0.0.1" in url:
@@ -627,10 +620,7 @@ class GCSStorageClient(StorageClient):
         return None
 
     def path_to_s3_uri(self, path: str) -> str:
-        """Convert a GCS path to S3-compatible URI for GeoServer.
-
-        GeoServer's GeoParquet plugin supports S3 URIs for GCS.
-        """
+        """Convert a GCS path to S3-compatible URI."""
         clean_path = path.lstrip("/")
         return f"s3://{self.bucket_name}/{clean_path}"
 
@@ -644,7 +634,7 @@ class GCSStorageClient(StorageClient):
 
         Args:
             path: Relative path within the storage location
-            for_docker: Not used for GCS (always uses public HTTPS URLs)
+            for_docker: Not used for GCS.
         """
         return self.get_public_url(path)
 
