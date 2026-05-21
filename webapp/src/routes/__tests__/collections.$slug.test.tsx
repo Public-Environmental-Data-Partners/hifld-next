@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { waitFor } from '@testing-library/react'
 import { createRouter, createRootRoute, createRoute } from '@tanstack/react-router'
-import { Route as CollectionsSlugRoute } from '../collections.$slug'
+import { getSyncedSearchQuery, Route as CollectionsSlugRoute } from '../collections.$slug'
 import * as apiClient from '@/lib/api-client'
 import type { Collection, DatasetWithUrls, PaginatedResponse } from '@/lib/api-client'
 
@@ -237,6 +237,26 @@ describe('CollectionDetailPage - API Integration Tests', () => {
   })
 
   describe('Search API calls', () => {
+    it('does not sync local search input when the URL query has not changed', () => {
+      expect(
+        getSyncedSearchQuery({
+          currentInput: 'flood',
+          previousUrlQuery: '',
+          nextUrlQuery: '',
+        })
+      ).toBeUndefined()
+    })
+
+    it('syncs local search input when the URL query changes externally', () => {
+      expect(
+        getSyncedSearchQuery({
+          currentInput: 'flood',
+          previousUrlQuery: '',
+          nextUrlQuery: 'school',
+        })
+      ).toBe('school')
+    })
+
     it('should call getCollectionDatasets with search query', async () => {
       const searchResults = [
         {

@@ -78,6 +78,24 @@ function mergeCollectionSearch(current: CollectionSearch, updates: CollectionSea
   return buildCollectionSearch(merged);
 }
 
+interface SearchQuerySyncState {
+  currentInput: string;
+  nextUrlQuery: string;
+  previousUrlQuery: string;
+}
+
+export function getSyncedSearchQuery({
+  currentInput,
+  nextUrlQuery,
+  previousUrlQuery,
+}: SearchQuerySyncState): string | undefined {
+  if (nextUrlQuery === previousUrlQuery || nextUrlQuery === currentInput) {
+    return undefined;
+  }
+
+  return nextUrlQuery;
+}
+
 interface FilteredDatasetFetchArgs {
   collectionId: number;
   limit: number;
@@ -309,6 +327,7 @@ function CollectionDetailPage() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const prevSearchQueryRef = useRef<string>(searchQuery);
+  const lastUrlQueryRef = useRef<string>(search.query ?? "");
   const lastTrackedQueryRef = useRef<string>(""); // Track last query we sent to analytics
 
   // Use loader data directly - it updates automatically when URL changes and loader re-runs
@@ -382,8 +401,15 @@ function CollectionDetailPage() {
   // Sync search query from URL (only when URL changes, not when local state changes)
   useEffect(() => {
     const urlQuery = search.query ?? "";
-    if (urlQuery !== searchQuery) {
-      setSearchQuery(urlQuery);
+    const syncedQuery = getSyncedSearchQuery({
+      currentInput: searchQuery,
+      nextUrlQuery: urlQuery,
+      previousUrlQuery: lastUrlQueryRef.current,
+    });
+
+    lastUrlQueryRef.current = urlQuery;
+    if (syncedQuery !== undefined) {
+      setSearchQuery(syncedQuery);
     }
 
     // Track search when URL query changes (only once per unique query)
@@ -396,7 +422,7 @@ function CollectionDetailPage() {
         queryLength: trimmedQuery.length,
       });
     }
-  }, [search.query, searchQuery, collection.slug, hasTagFilters, initialTotal]);
+  }, [search.query, collection.slug, hasTagFilters, initialTotal, searchQuery]);
 
   // Debounced search handler - wait before updating URL/fetching to avoid
   // firing searches while the user is still typing.
