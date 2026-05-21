@@ -1,9 +1,11 @@
 """Shared catalog ingest logic for dataset discovery."""
 
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import NotRequired, TypedDict, Unpack
 
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlalchemy import select as sa_select
+from sqlmodel import Session, col, select
 
 from models.dataset import (
     Dataset,
@@ -14,16 +16,21 @@ from models.dataset import (
     Format,
     SpatialDatasetFileMetadata,
 )
-from services.datasets import DatasetService
+from schemas.types import DatasetTags
+from services.dataset import DatasetService, FormatSourceCreate
 
 
 class CatalogIngestResult(BaseModel):
+    """Result for previewing or upserting one discovered source."""
+
     created: bool
     dry_run: bool
-    file_source_id: Optional[int] = None
+    file_source_id: int | None = None
 
 
 class CatalogPruneResult(BaseModel):
+    """Result for pruning stale discovered catalog records."""
+
     dry_run: bool
     deleted_file_source_ids: list[int]
     deleted_file_format_ids: list[int]
@@ -31,33 +38,95 @@ class CatalogPruneResult(BaseModel):
     deleted_dataset_ids: list[int]
 
 
+@dataclass(slots=True)
+class DiscoveredVersionKey:
+    """Identity fields for a discovered catalog source."""
+
+    collection_id: int
+    storage_location_id: int
+    dataset_slug: str
+    file_slug: str
+    format_type: str
+    version: str
+
+
+@dataclass(slots=True)
+class DiscoveredVersionUpsert:
+    """Payload for upserting a discovered catalog source."""
+
+    key: DiscoveredVersionKey
+    location_path: str
+    source_metadata: SpatialDatasetFileMetadata | None = None
+    dataset_name: str | None = None
+    dataset_description: str | None = None
+    dataset_tags: DatasetTags | None = None
+    file_name: str | None = None
+    file_description: str | None = None
+
+
+class DiscoveredVersionKeyKwargs(TypedDict):
+    """Compatibility keyword payload for discovered version identity fields."""
+
+    collection_id: int
+    storage_location_id: int
+    dataset_slug: str
+    file_slug: str
+    format_type: str
+    version: str
+
+
+class DiscoveredVersionUpsertKwargs(DiscoveredVersionKeyKwargs):
+    """Compatibility keyword payload for discovered version upserts."""
+
+    location_path: str
+    source_metadata: NotRequired[SpatialDatasetFileMetadata | None]
+    dataset_name: NotRequired[str | None]
+    dataset_description: NotRequired[str | None]
+    dataset_tags: NotRequired[DatasetTags | None]
+    file_name: NotRequired[str | None]
+    file_description: NotRequired[str | None]
+
+
+class CatalogIngestError(ValueError):
+    """Catalog ingest validation error."""
+
+    @classmethod
+    def missing_argument(cls, name: str) -> "CatalogIngestError":
+        """Create an error for a missing compatibility keyword argument."""
+        return cls(f"{name} is required")
+
+    @classmethod
+    def cross_collection_dataset(cls, dataset_slug: str) -> "CatalogIngestError":
+        """Create an error for a dataset slug owned by another collection."""
+        return cls(f"Dataset slug {dataset_slug!r} already belongs to a different collection")
+
+
 class CatalogIngestService:
     """Create or update catalog records discovered from bucket storage."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session) -> None:
+        """Initialize the ingest service."""
         self.db = db
         self.dataset_service = DatasetService(db)
 
     def preview_discovered_version(
         self,
-        collection_id: int,
-        storage_location_id: int,
-        dataset_slug: str,
-        file_slug: str,
-        format_type: str,
-        version: str,
+        key: DiscoveredVersionKey | None = None,
+        **kwargs: Unpack[DiscoveredVersionKeyKwargs],
     ) -> CatalogIngestResult:
+        """Preview whether a discovered source would create a new catalog row."""
+        key = key or self._key_from_kwargs(kwargs)
         file_format = self._get_existing_file_format(
-            collection_id=collection_id,
-            dataset_slug=dataset_slug,
-            file_slug=file_slug,
-            format_type=format_type,
+            collection_id=key.collection_id,
+            dataset_slug=key.dataset_slug,
+            file_slug=key.file_slug,
+            format_type=key.format_type,
         )
         if file_format:
             existing = self.dataset_service.get_format_source_by_location(
                 file_format.id,
-                storage_location_id,
-                version,
+                key.storage_location_id,
+                key.version,
             )
             if existing:
                 return CatalogIngestResult(
@@ -70,47 +139,37 @@ class CatalogIngestService:
 
     def upsert_discovered_version(
         self,
-        collection_id: int,
-        storage_location_id: int,
-        dataset_slug: str,
-        file_slug: str,
-        format_type: str,
-        version: str,
-        location_path: str,
-        source_metadata: Optional[SpatialDatasetFileMetadata] = None,
-        dataset_name: Optional[str] = None,
-        dataset_description: Optional[str] = None,
-        dataset_tags: Optional[dict[str, Any]] = None,
-        file_name: Optional[str] = None,
-        file_description: Optional[str] = None,
+        request: DiscoveredVersionUpsert | None = None,
+        **kwargs: Unpack[DiscoveredVersionUpsertKwargs],
     ) -> CatalogIngestResult:
+        """Upsert one discovered source into the catalog."""
+        request = request or self._upsert_from_kwargs(kwargs)
+        key = request.key
         dataset = self._get_or_create_dataset(
-            dataset_slug=dataset_slug,
-            collection_id=collection_id,
-            name=dataset_name,
-            description=dataset_description,
-            tags=dataset_tags,
+            dataset_slug=key.dataset_slug,
+            collection_id=key.collection_id,
+            name=request.dataset_name,
+            description=request.dataset_description,
+            tags=request.dataset_tags,
         )
         file_obj = self._get_or_create_file(
-            file_slug=file_slug,
+            file_slug=key.file_slug,
             dataset=dataset,
-            name=file_name,
-            description=file_description,
+            name=request.file_name,
+            description=request.file_description,
         )
-        file_format = self.dataset_service.get_or_create_file_format_for_file(
-            file_obj.id, format_type
-        )
+        file_format = self.dataset_service.get_or_create_file_format_for_file(file_obj.id, key.format_type)
 
         existing = self.dataset_service.get_format_source_by_location(
             file_format.id,
-            storage_location_id,
-            version,
+            key.storage_location_id,
+            key.version,
         )
         if existing:
             updated = self.dataset_service.update_format_source(
                 existing.id,
-                location=FileLocation(path=location_path),
-                source_metadata=source_metadata,
+                location=FileLocation(path=request.location_path),
+                source_metadata=request.source_metadata,
             )
             return CatalogIngestResult(
                 created=False,
@@ -119,17 +178,43 @@ class CatalogIngestService:
             )
 
         file_source = self.dataset_service.add_format_source(
-            file_format_id=file_format.id,
-            storage_location_id=storage_location_id,
-            source_type="file",
-            location=FileLocation(path=location_path),
-            source_metadata=source_metadata,
-            version=version,
+            FormatSourceCreate(
+                file_format_id=file_format.id,
+                storage_location_id=key.storage_location_id,
+                source_type="file",
+                location=FileLocation(path=request.location_path),
+                source_metadata=request.source_metadata,
+                version=key.version,
+            )
         )
         return CatalogIngestResult(
             created=True,
             dry_run=False,
             file_source_id=file_source.id,
+        )
+
+    def _key_from_kwargs(self, kwargs: DiscoveredVersionKeyKwargs) -> DiscoveredVersionKey:
+        """Build a discovered version key from compatibility keyword arguments."""
+        return DiscoveredVersionKey(
+            collection_id=kwargs["collection_id"],
+            storage_location_id=kwargs["storage_location_id"],
+            dataset_slug=kwargs["dataset_slug"],
+            file_slug=kwargs["file_slug"],
+            format_type=kwargs["format_type"],
+            version=kwargs["version"],
+        )
+
+    def _upsert_from_kwargs(self, kwargs: DiscoveredVersionUpsertKwargs) -> DiscoveredVersionUpsert:
+        """Build an upsert request from compatibility keyword arguments."""
+        return DiscoveredVersionUpsert(
+            key=self._key_from_kwargs(kwargs),
+            location_path=kwargs["location_path"],
+            source_metadata=kwargs.get("source_metadata"),
+            dataset_name=kwargs.get("dataset_name"),
+            dataset_description=kwargs.get("dataset_description"),
+            dataset_tags=kwargs.get("dataset_tags"),
+            file_name=kwargs.get("file_name"),
+            file_description=kwargs.get("file_description"),
         )
 
     def prune_stale_discovered_sources(
@@ -205,17 +290,15 @@ class CatalogIngestService:
         self,
         dataset_slug: str,
         collection_id: int,
-        name: Optional[str] = None,
-        description: Optional[str] = None,
-        tags: Optional[dict[str, Any]] = None,
+        name: str | None = None,
+        description: str | None = None,
+        tags: DatasetTags | None = None,
     ) -> Dataset:
         statement = select(Dataset).where(Dataset.slug == dataset_slug)
         dataset = self.db.exec(statement).first()
         if dataset:
             if dataset.collection_id != collection_id:
-                raise ValueError(
-                    f"Dataset slug {dataset_slug!r} already belongs to a different collection"
-                )
+                raise CatalogIngestError.cross_collection_dataset(dataset_slug)
             changed = False
             if name and dataset.name != name:
                 dataset.name = name
@@ -248,8 +331,8 @@ class CatalogIngestService:
         self,
         file_slug: str,
         dataset: Dataset,
-        name: Optional[str] = None,
-        description: Optional[str] = None,
+        name: str | None = None,
+        description: str | None = None,
     ) -> File:
         statement = select(File).where(
             File.dataset_id == dataset.id,
@@ -302,15 +385,13 @@ class CatalogIngestService:
         dataset_slug: str,
         file_slug: str,
         format_type: str,
-    ) -> Optional[FileFormat]:
+    ) -> FileFormat | None:
         statement = select(Dataset).where(Dataset.slug == dataset_slug)
         dataset = self.db.exec(statement).first()
         if not dataset:
             return None
         if dataset.collection_id != collection_id:
-            raise ValueError(
-                f"Dataset slug {dataset_slug!r} already belongs to a different collection"
-            )
+            raise CatalogIngestError.cross_collection_dataset(dataset_slug)
 
         file_obj = self.dataset_service.get_file_by_slug(dataset.id, file_slug)
         if not file_obj:
@@ -332,15 +413,15 @@ class CatalogIngestService:
         storage_location_id: int,
     ) -> list[tuple[FileSource, FileFormat, File, Dataset, Format]]:
         statement = (
-            select(FileSource, FileFormat, File, Dataset, Format)
-            .join(FileFormat, FileSource.file_format_id == FileFormat.id)
-            .join(File, FileFormat.file_id == File.id)
-            .join(Dataset, File.dataset_id == Dataset.id)
-            .join(Format, FileFormat.format_id == Format.id)
-            .where(Dataset.collection_id == collection_id)
-            .where(FileSource.storage_location_id == storage_location_id)
+            sa_select(FileSource, FileFormat, File, Dataset, Format)
+            .join(FileFormat, col(FileSource.file_format_id) == col(FileFormat.id))
+            .join(File, col(FileFormat.file_id) == col(File.id))
+            .join(Dataset, col(File.dataset_id) == col(Dataset.id))
+            .join(Format, col(FileFormat.format_id) == col(Format.id))
+            .where(col(Dataset.collection_id) == collection_id)
+            .where(col(FileSource.storage_location_id) == storage_location_id)
         )
-        return list(self.db.exec(statement).all())
+        return [tuple(row) for row in self.db.execute(statement).all()]
 
     def _collect_empty_catalog_ids_after_source_prune(
         self,
@@ -349,9 +430,9 @@ class CatalogIngestService:
     ) -> dict[str, list[int]]:
         file_formats = self.db.exec(
             select(FileFormat, File, Dataset)
-            .join(File, FileFormat.file_id == File.id)
-            .join(Dataset, File.dataset_id == Dataset.id)
-            .where(Dataset.collection_id == collection_id)
+            .join(File, col(FileFormat.file_id) == col(File.id))
+            .join(Dataset, col(File.dataset_id) == col(Dataset.id))
+            .where(col(Dataset.collection_id) == collection_id)
         ).all()
         file_format_ids = sorted(
             file_format.id
@@ -360,18 +441,16 @@ class CatalogIngestService:
             and all(
                 source.id in stale_source_ids
                 for source in self.db.exec(
-                    select(FileSource).where(
-                        FileSource.file_format_id == file_format.id
-                    )
+                    select(FileSource).where(col(FileSource.file_format_id) == file_format.id)
                 ).all()
                 if source.id is not None
             )
         )
 
         files = self.db.exec(
-            select(File).join(Dataset, File.dataset_id == Dataset.id).where(
-                Dataset.collection_id == collection_id
-            )
+            select(File)
+            .join(Dataset, col(File.dataset_id) == col(Dataset.id))
+            .where(col(Dataset.collection_id) == collection_id)
         ).all()
         file_format_ids_set = set(file_format_ids)
         file_ids = sorted(
@@ -380,16 +459,12 @@ class CatalogIngestService:
             if file_obj.id is not None
             and all(
                 file_format.id in file_format_ids_set
-                for file_format in self.db.exec(
-                    select(FileFormat).where(FileFormat.file_id == file_obj.id)
-                ).all()
+                for file_format in self.db.exec(select(FileFormat).where(FileFormat.file_id == file_obj.id)).all()
                 if file_format.id is not None
             )
         )
 
-        datasets = self.db.exec(
-            select(Dataset).where(Dataset.collection_id == collection_id)
-        ).all()
+        datasets = self.db.exec(select(Dataset).where(Dataset.collection_id == collection_id)).all()
         file_ids_set = set(file_ids)
         dataset_ids = sorted(
             dataset.id
@@ -397,9 +472,7 @@ class CatalogIngestService:
             if dataset.id is not None
             and all(
                 file_obj.id in file_ids_set
-                for file_obj in self.db.exec(
-                    select(File).where(File.dataset_id == dataset.id)
-                ).all()
+                for file_obj in self.db.exec(select(File).where(File.dataset_id == dataset.id)).all()
                 if file_obj.id is not None
             )
         )

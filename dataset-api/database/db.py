@@ -1,9 +1,32 @@
 """Database connection and session management using SQLModel."""
 
-import os
 import logging
-from sqlmodel import SQLModel, create_engine, Session
+import os
+from collections.abc import Generator
+
+from sqlmodel import SQLModel, Session, create_engine
+
 from config import config
+from models.dataset import (
+    Collection,
+    Dataset,
+    File,
+    FileFormat,
+    FileSource,
+    Format,
+    StorageLocation,
+)
+
+
+REGISTERED_MODEL_TYPES = (
+    Collection,
+    Dataset,
+    File,
+    FileFormat,
+    FileSource,
+    Format,
+    StorageLocation,
+)
 
 # Set up SQLAlchemy logging to show all database operations
 # This helps debug unnecessary writes
@@ -45,7 +68,7 @@ else:
     )
 
 
-def get_db():
+def get_db() -> Generator[Session]:
     """Dependency for FastAPI to get database sessions."""
     db = Session(engine)
     try:
@@ -63,16 +86,6 @@ def get_db_session() -> Session:
     return Session(engine)
 
 
-def init_db():
+def init_db() -> None:
     """Initialize database tables."""
-    from models.dataset import (  # noqa: F401
-        Collection,
-        Dataset,
-        File,
-        FileFormat,
-        FileSource,
-        StorageLocation,
-        Format,
-    )
-
     SQLModel.metadata.create_all(engine)

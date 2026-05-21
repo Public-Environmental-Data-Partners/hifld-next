@@ -55,7 +55,48 @@ Catalog/data operations should run as named jobs, not request-time work:
 
 ## Tests
 
+Run targeted tests for touched code first, then the full suite before handing off:
+
 ```bash
 uv run pytest
 HIFLD_RUN_SEAWEEDFS_INTEGRATION=1 uv run pytest tests/test_storage_client.py -v
+```
+
+## Quality Gates
+
+Ruff uses the NASA JPL autoRIFT baseline rules adapted for this API. Pyright provides the standard type check, and BasedPyright enforces stricter dynamic-typing rules that upstream Pyright does not expose.
+
+Run all of these before claiming a `dataset-api` change is complete:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run basedpyright
+uv run pytest
+```
+
+## Type Safety
+
+- Do not use `Any`, `dict[str, Any]`, `list[Any]`, or `cast(Any, ...)` in application code.
+- Do not use `object` as a convenience escape hatch. Keep it only at true external boundaries such as JSON validation, Pydantic validators, SQLAlchemy hooks, pandas dtype inspection, or similar APIs that genuinely accept unknown input.
+- Prefer explicit dataclasses, Pydantic models, `TypedDict`, type aliases, or narrow unions over broad dynamic typing.
+- Use native Ruff, Pyright, and BasedPyright checks. Do not add custom type-check scripts to compensate for weak typing.
+
+## Dataset Service Layout
+
+Dataset-specific service logic lives under `services/dataset/`:
+
+| Module | Purpose |
+| --- | --- |
+| `service.py` | Main `DatasetService` and catalog mutation helpers |
+| `queries.py` | Dataset search, count, and tag query construction |
+| `shaping.py` | API response shaping for datasets, files, formats, and sources |
+| `downloads.py` | Download and shapefile ZIP response helpers |
+| `quality.py` | Quality metadata computation and normalization |
+
+Import the public service from `services.dataset`:
+
+```python
+from services.dataset import DatasetService
 ```

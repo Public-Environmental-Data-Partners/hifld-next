@@ -1,11 +1,12 @@
 """Services for dataset management."""
 
-from .datasets import DatasetService
-from .collections import CollectionService
 from .catalog_ingest import CatalogIngestService
+from .collections import CollectionService
+from .dataset import DatasetService
+
 
 __all__ = [
-    "DatasetService",
-    "CollectionService",
     "CatalogIngestService",
+    "CollectionService",
+    "DatasetService",
 ]

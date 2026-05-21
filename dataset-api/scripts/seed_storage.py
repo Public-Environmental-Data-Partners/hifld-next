@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Seed script to initialize storage locations in the database.
+"""Seed script to initialize storage locations in the database.
 
 This creates default storage locations (e.g., SeaweedFS, GCS) that can be used
 for storing dataset files.
@@ -16,18 +15,21 @@ import os
 import sys
 from pathlib import Path
 
+
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from typing import TypedDict
+
+from sqlmodel import Session, select
+
 from database.db import get_db_session
 from models.dataset import (
-    StorageLocation,
-    BucketStorageLocationConfig,
     BackendType,
+    BucketStorageLocationConfig,
+    StorageLocation,
 )
 from scripts.config_loader import load_json_config
-from sqlmodel import Session, select
 
 
 class StorageLocationConfig(TypedDict):
@@ -44,7 +46,7 @@ def validate_storage_location_config(location_data: StorageLocationConfig) -> No
     """Validate a storage location config before writing it to the database."""
     for field_name in ("slug", "name", "backend_type", "config"):
         if field_name not in location_data:
-            raise ValueError(f"{field_name} is required for storage location config")
+            raise ValueError(f"{field_name} is required for storage location config")  # noqa: TRY003
 
 
 # Default storage locations (fallback if no config provided)
@@ -76,24 +78,24 @@ DEFAULT_STORAGE_LOCATIONS = [
 
 def detect_storage_type_from_config(config: dict) -> str:
     """Detect storage type from config base_url if type is 's3' or missing.
-    
+
     Returns: 'gcs', 'seaweedfs', or 's3' (if unable to determine)
     """
     if not config:
         return "s3"
-    
+
     # If type is already explicitly set and not 's3', use it
     config_type = config.get("type")
     if config_type and config_type != "s3":
         return config_type
-    
+
     # Try to determine from base_url
     base_url = config.get("base_url", "")
     if "storage.googleapis.com" in base_url:
         return "gcs"
     elif "localhost" in base_url or "127.0.0.1" in base_url:
         return "seaweedfs"
-    
+
     # Default to s3 if we can't determine
     return "s3"
 
@@ -107,7 +109,7 @@ def config_to_dict(config: object) -> dict:
     return {}
 
 
-def seed_storage_locations(
+def seed_storage_locations(  # noqa: C901, PLR0912, PLR0915
     db: Session, locations: list[StorageLocationConfig], dry_run: bool = False
 ) -> dict[str, int]:
     """Seed storage locations into the database (upsert mode - updates existing)."""
@@ -117,9 +119,7 @@ def seed_storage_locations(
         validate_storage_location_config(location_data)
 
         # Check if location already exists
-        statement = select(StorageLocation).where(
-            StorageLocation.slug == location_data["slug"]
-        )
+        statement = select(StorageLocation).where(StorageLocation.slug == location_data["slug"])
         existing = db.exec(statement).first()
 
         if existing:
@@ -132,7 +132,7 @@ def seed_storage_locations(
             # Check if we need to migrate type from "s3" to explicit type
             if existing_config:
                 existing_type = existing_config.get("type", "s3")
-                
+
                 # If existing has type="s3" or missing type, try to detect and update
                 if existing_type == "s3" or not existing_type:
                     # First try to use the new config's type if provided
@@ -146,27 +146,27 @@ def seed_storage_locations(
                     else:
                         # Try to detect from base_url
                         detected_type = detect_storage_type_from_config(existing_config)
-                        if detected_type != "s3" and detected_type != existing_type:
+                        if detected_type not in ("s3", existing_type):
                             existing_config["type"] = detected_type
                             target_config["type"] = detected_type
                             needs_update = True
                             print(
                                 f"  → Detected and updating '{location_data['name']}' type from '{existing_type}' to '{detected_type}' (from base_url)"
                             )
-                
+
             # Update other fields if they differ
             if existing.backend_type != location_data.get("backend_type"):
                 needs_update = True
 
             if existing.name != location_data.get("name"):
                 needs_update = True
-            
+
             if existing.description != location_data.get("description"):
                 needs_update = True
-            
+
             if target_config and existing_config != target_config:
                 needs_update = True
-            
+
             if needs_update:
                 if not dry_run:
                     existing.backend_type = location_data["backend_type"]
@@ -207,7 +207,7 @@ def seed_storage_locations(
     return results
 
 
-def main():
+def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Seed storage locations")
     parser.add_argument(
@@ -227,9 +227,7 @@ def main():
         if default_config.exists():
             config_path = str(default_config)
         else:
-            print(
-                "No config file provided and storage.local.json not found. Using defaults."
-            )
+            print("No config file provided and storage.local.json not found. Using defaults.")
             locations = DEFAULT_STORAGE_LOCATIONS
             config_path = None
 

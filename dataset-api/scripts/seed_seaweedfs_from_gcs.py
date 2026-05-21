@@ -11,10 +11,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from storage.storage_client import GCSStorageClient, SeaweedFSFilerClient
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("seed-seaweedfs-from-gcs")
@@ -29,14 +31,14 @@ KNOWN_FORMATS = {
 }
 
 
-def build_copy_plan(dataset_slug: str, files: list[str]) -> tuple[list[str], list[str]]:
+def build_copy_plan(dataset_slug: str, files: list[str]) -> tuple[list[str], list[str]]:  # noqa: D103
     metadata_files: list[str] = []
     first_data_file_by_group: dict[tuple[str, str, str], str] = {}
     versions: set[str] = set()
 
     for path in sorted(files):
         parts = [part for part in path.split("/") if part]
-        if len(parts) < 5:
+        if len(parts) < 5:  # noqa: PLR2004
             continue
         root_dataset_slug, file_slug, version, section = parts[:4]
         if root_dataset_slug != dataset_slug:
@@ -52,15 +54,13 @@ def build_copy_plan(dataset_slug: str, files: list[str]) -> tuple[list[str], lis
         key = (file_slug, version, section)
         first_data_file_by_group.setdefault(key, path)
 
-    if len(versions) < 2:
-        raise ValueError(
-            f"Expected at least two versions under {dataset_slug}/, found {sorted(versions)}"
-        )
+    if len(versions) < 2:  # noqa: PLR2004
+        raise ValueError(f"Expected at least two versions under {dataset_slug}/, found {sorted(versions)}")  # noqa: TRY003
 
     return metadata_files, sorted(first_data_file_by_group.values())
 
 
-async def copy_dataset_slice(
+async def copy_dataset_slice(  # noqa: D103
     dataset_slug: str,
     gcs_bucket: str,
     seaweed_bucket: str,
@@ -81,7 +81,7 @@ async def copy_dataset_slice(
     versions: dict[str, list[str]] = defaultdict(list)
     for path in copy_paths:
         parts = path.split("/")
-        if len(parts) >= 3:
+        if len(parts) >= 3:  # noqa: PLR2004
             versions[parts[2]].append(path)
 
     logger.info("Discovered versions for %s: %s", dataset_slug, sorted(versions))
@@ -113,12 +113,10 @@ async def copy_dataset_slice(
     }
 
 
-def main() -> None:
+def main() -> None:  # noqa: D103
     load_dotenv(override=True)
 
-    parser = argparse.ArgumentParser(
-        description="Copy a dataset slice from GCS into local SeaweedFS"
-    )
+    parser = argparse.ArgumentParser(description="Copy a dataset slice from GCS into local SeaweedFS")
     parser.add_argument("--dataset-slug", required=True)
     parser.add_argument("--gcs-bucket", default="hifld-next-datasets-prod")
     parser.add_argument(

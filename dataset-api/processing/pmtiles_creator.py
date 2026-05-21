@@ -4,12 +4,12 @@ import logging
 import subprocess
 from pathlib import Path
 
+
 logger = logging.getLogger(__name__)
 
 
 def create_pmtiles(input_path: Path, output_path: Path, max_zoom: int = 14) -> bool:
-    """
-    Create PMTiles from a GeoDataFrame saved as FlatGeobuf.
+    """Create PMTiles from a GeoDataFrame saved as FlatGeobuf.
 
     Uses tippecanoe if available, otherwise skips PMTiles creation.
     """
@@ -27,6 +27,7 @@ def create_pmtiles(input_path: Path, output_path: Path, max_zoom: int = 14) -> b
                 str(input_path),
             ],
             capture_output=True,
+            check=False,
             text=True,
             timeout=300,
         )
@@ -44,9 +45,3 @@ def create_pmtiles(input_path: Path, output_path: Path, max_zoom: int = 14) -> b
     except Exception as e:
         logger.warning(f"PMTiles creation failed: {e}")
         return False
-
-
-
-
-
-

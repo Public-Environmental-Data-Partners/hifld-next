@@ -6,11 +6,12 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-import geopandas as gpd
+from schemas.types import JSONDict, JSONValue, json_dict
+
 
 logger = logging.getLogger(__name__)
+MAX_PROPERTY_TYPE_COUNT = 2
 
 
 @dataclass
@@ -32,12 +33,12 @@ class ValidationResult:
     warnings: list[ValidationError]
 
     def __bool__(self) -> bool:
+        """Return whether validation passed."""
         return self.valid
 
 
 def validate_geojson_file(file_path: Path) -> ValidationResult:
-    """
-    Validate a GeoJSON file for common data quality issues.
+    """Validate a GeoJSON file for common data quality issues.
 
     Checks for:
     - String coordinates (should be numbers per GeoJSON spec)
@@ -51,8 +52,8 @@ def validate_geojson_file(file_path: Path) -> ValidationResult:
     warnings: list[ValidationError] = []
 
     try:
-        with open(file_path, "r") as f:
-            data = json.load(f)
+        with file_path.open() as f:
+            data = json_dict(json.load(f))
     except json.JSONDecodeError as e:
         errors.append(
             ValidationError(
@@ -75,7 +76,12 @@ def validate_geojson_file(file_path: Path) -> ValidationResult:
         )
         return ValidationResult(valid=False, errors=errors, warnings=warnings)
 
-    features = data.get("features", [])
+    raw_features = data.get("features", [])
+    features = (
+        [json_dict(feature) for feature in raw_features if isinstance(feature, dict)]
+        if isinstance(raw_features, list)
+        else []
+    )
     if not features:
         errors.append(
             ValidationError(
@@ -86,32 +92,35 @@ def validate_geojson_file(file_path: Path) -> ValidationResult:
         )
         return ValidationResult(valid=False, errors=errors, warnings=warnings)
 
-    # Check for string coordinates (common error) - CHECK ALL FEATURES
+    _validate_string_coordinates(features, errors)
+    _validate_property_types(features, errors)
+    _validate_null_geometries(features, warnings)
+
+    valid = len(errors) == 0
+    return ValidationResult(valid=valid, errors=errors, warnings=warnings)
+
+
+def _validate_string_coordinates(features: list[JSONDict], errors: list[ValidationError]) -> None:
+    """Validate that GeoJSON coordinates are numeric."""
     string_coord_count = 0
     first_bad_feature_idx = None
     first_bad_coords = None
 
-    for i, feature in enumerate(features):  # Check ALL features, not just first 100
+    for i, feature in enumerate(features):
         geom = feature.get("geometry")
-        if geom and geom.get("coordinates"):
-            if _has_string_coordinates(geom["coordinates"]):
-                string_coord_count += 1
-                # Save details of first occurrence for error message
-                if first_bad_feature_idx is None:
-                    first_bad_feature_idx = i
-                    first_bad_coords = geom["coordinates"]
+        if isinstance(geom, dict) and geom.get("coordinates") and _has_string_coordinates(geom["coordinates"]):
+            string_coord_count += 1
+            if first_bad_feature_idx is None:
+                first_bad_feature_idx = i
+                first_bad_coords = geom["coordinates"]
 
-    # Report errors if string coordinates found
     if string_coord_count > 0:
         errors.append(
             ValidationError(
                 severity="error",
                 message="Coordinates must be numbers, not strings",
                 details=f"Feature {first_bad_feature_idx} has string coordinates: {first_bad_coords}",
-                suggestion=(
-                    "GeoJSON spec requires numeric coordinates. "
-                    "Convert ['1.23', '4.56'] to [1.23, 4.56]"
-                ),
+                suggestion=("GeoJSON spec requires numeric coordinates. Convert ['1.23', '4.56'] to [1.23, 4.56]"),
             )
         )
 
@@ -124,10 +133,12 @@ def validate_geojson_file(file_path: Path) -> ValidationResult:
                 )
             )
 
-    # Check for mixed types in properties
+
+def _validate_property_types(features: list[JSONDict], errors: list[ValidationError]) -> None:
+    """Validate that each property has a consistent type."""
     property_types = _analyze_property_types(features)
     for prop_name, types in property_types.items():
-        if len(types) > 2:  # More than 2 types (allowing None + one type)
+        if len(types) > MAX_PROPERTY_TYPE_COUNT:
             type_names = [t for t in types if t != "NoneType"]
             if len(type_names) > 1:
                 errors.append(
@@ -142,12 +153,10 @@ def validate_geojson_file(file_path: Path) -> ValidationResult:
                     )
                 )
 
-    # Check for NULL geometries
-    null_geom_count = sum(
-        1
-        for f in features
-        if not f.get("geometry") or not f.get("geometry", {}).get("coordinates")
-    )
+
+def _validate_null_geometries(features: list[JSONDict], warnings: list[ValidationError]) -> None:
+    """Warn when features are missing geometries."""
+    null_geom_count = sum(1 for feature in features if not _feature_geometry_coordinates(feature))
     if null_geom_count > 0:
         warnings.append(
             ValidationError(
@@ -161,70 +170,64 @@ def validate_geojson_file(file_path: Path) -> ValidationResult:
             )
         )
 
-    valid = len(errors) == 0
-    return ValidationResult(valid=valid, errors=errors, warnings=warnings)
 
-
-def _has_string_coordinates(coords: Any) -> bool:
+def _has_string_coordinates(coords: JSONValue) -> bool:
     """Check if coordinates contain strings (recursively)."""
-    if isinstance(coords, list):
-        if len(coords) > 0:
-            first = coords[0]
-            if isinstance(first, str):
-                return True
-            elif isinstance(first, list):
-                return _has_string_coordinates(first)
+    if isinstance(coords, list) and len(coords) > 0:
+        first = coords[0]
+        if isinstance(first, str):
+            return True
+        elif isinstance(first, list):
+            return _has_string_coordinates(first)
     return False
 
 
-def _analyze_property_types(features: list[dict]) -> dict[str, set[str]]:
+def _analyze_property_types(features: list[JSONDict]) -> dict[str, set[str]]:
     """Analyze types of all properties across features."""
     property_types: dict[str, set[str]] = {}
 
     for feature in features:
         props = feature.get("properties", {})
+        if not isinstance(props, dict):
+            continue
         for key, value in props.items():
-            if key not in property_types:
-                property_types[key] = set()
-            property_types[key].add(type(value).__name__)
+            property_types.setdefault(str(key), set()).add(value.__class__.__name__)
 
     return property_types
 
 
+def _feature_geometry_coordinates(feature: JSONDict) -> JSONValue | None:
+    """Return feature geometry coordinates when present."""
+    geometry = feature.get("geometry")
+    if not isinstance(geometry, dict):
+        return None
+    return geometry.get("coordinates")
+
+
 def format_validation_errors(result: ValidationResult) -> str:
     """Format validation errors into a user-friendly message."""
+    if result.valid and result.warnings:
+        return "⚠️  Data validation passed with warnings:\n\n" + _format_validation_messages(result.warnings, "⚠️")
     if result.valid:
-        if result.warnings:
-            msg = "⚠️  Data validation passed with warnings:\n\n"
-            for warning in result.warnings:
-                msg += f"⚠️  {warning.message}\n"
-                if warning.details:
-                    msg += f"   {warning.details}\n"
-                if warning.suggestion:
-                    msg += f"   💡 {warning.suggestion}\n"
-                msg += "\n"
-            return msg
         return "✅ Data validation passed"
 
-    msg = "❌ Data validation failed:\n\n"
-
-    for error in result.errors:
-        msg += f"❌ {error.message}\n"
-        if error.details:
-            msg += f"   {error.details}\n"
-        if error.suggestion:
-            msg += f"   💡 {error.suggestion}\n"
-        msg += "\n"
+    msg = "❌ Data validation failed:\n\n" + _format_validation_messages(result.errors, "❌")
 
     if result.warnings:
         msg += "Additional warnings:\n\n"
-        for warning in result.warnings:
-            msg += f"⚠️  {warning.message}\n"
-            if warning.details:
-                msg += f"   {warning.details}\n"
-            if warning.suggestion:
-                msg += f"   💡 {warning.suggestion}\n"
-            msg += "\n"
+        msg += _format_validation_messages(result.warnings, "⚠️")
 
-    msg += "\n📚 Please fix these issues in your source data and try uploading again."
+    return msg + "\n📚 Please fix these issues in your source data and try uploading again."
+
+
+def _format_validation_messages(messages: list[ValidationError], icon: str) -> str:
+    """Format validation messages with a consistent icon and details."""
+    msg = ""
+    for message in messages:
+        msg += f"{icon} {message.message}\n"
+        if message.details:
+            msg += f"   {message.details}\n"
+        if message.suggestion:
+            msg += f"   💡 {message.suggestion}\n"
+        msg += "\n"
     return msg

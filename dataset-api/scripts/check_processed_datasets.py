@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""
-Check which datasets have already been processed in the destination bucket
+"""Check which datasets have already been processed in the destination bucket
 and determine the offset needed to resume processing.
 
 Usage:
     python check_processed_datasets.py --source gs://bucket --dest gs://dest-bucket
     python check_processed_datasets.py --source gs://bucket --dest seaweedfs://bucket --inventory auto
-"""
+"""  # noqa: D205
 
 import argparse
 import asyncio
@@ -14,10 +13,12 @@ import logging
 import sys
 from pathlib import Path
 
+
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from storage.storage_client import create_storage_client
+from storage.storage_client import StorageClientOptions, create_storage_client
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger("check-processed")
 
 
-def parse_storage_url(url: str):
+def parse_storage_url(url: str):  # noqa: ANN201
     """Parse a storage URL (gs://bucket/path or seaweedfs://bucket/path)."""
     if url.startswith("gs://"):
         parts = url[5:].split("/", 1)
@@ -42,26 +43,23 @@ def parse_storage_url(url: str):
         return ("gcs", url, "")
 
 
-async def list_zip_files_in_folder(storage, folder_path: str):
+async def list_zip_files_in_folder(storage, folder_path: str):  # noqa: ANN001, ANN201
     """List all zip files in a folder."""
     zip_files = []
 
     if hasattr(storage, "bucket_name"):
         # GCS
-        from google.cloud import storage as gcs_storage
+        from google.cloud import storage as gcs_storage  # noqa: PLC0415
 
         client = gcs_storage.Client()
         bucket = client.bucket(storage.bucket_name)
 
-        if not folder_path or folder_path == "/":
-            prefix = ""
-        else:
-            prefix = folder_path.rstrip("/") + "/"
+        prefix = "" if not folder_path or folder_path == "/" else folder_path.rstrip("/") + "/"
         blobs = bucket.list_blobs(prefix=prefix)
 
         for blob in blobs:
             if blob.name.endswith(".zip") and not blob.name.endswith("/"):
-                zip_files.append(blob.name)
+                zip_files.append(blob.name)  # noqa: PERF401
     else:
         # SeaweedFS - not implemented for listing
         logger.warning("Listing files in SeaweedFS folders not yet implemented")
@@ -69,7 +67,7 @@ async def list_zip_files_in_folder(storage, folder_path: str):
     return zip_files
 
 
-async def discover_nested_datasets(source_storage, source_path: str):
+async def discover_nested_datasets(source_storage, source_path: str):  # noqa: ANN001, ANN201
     """Discover nested datasets by listing zip files."""
     datasets_by_name = {}
 
@@ -102,12 +100,11 @@ async def discover_nested_datasets(source_storage, source_path: str):
     return list(datasets_by_name.values())
 
 
-async def check_dataset_processed(dest_storage, dataset_folder: str, base_filename: str):
-    """
-    Check if a dataset has been processed by looking for output files.
+async def check_dataset_processed(dest_storage, dataset_folder: str, base_filename: str) -> bool:  # noqa: ANN001
+    """Check if a dataset has been processed by looking for output files.
     Returns True if at least one parquet or pmtiles file exists.
-    This matches the logic in check_dataset_exists() from process_gcs_datasets.py
-    """
+    This matches the logic in check_dataset_exists() from process_gcs_datasets.py.
+    """  # noqa: D205
     dest_folder = f"{dataset_folder}/" if dataset_folder else ""
 
     # Check for parquet files (could be single or chunked)
@@ -123,32 +120,16 @@ async def check_dataset_processed(dest_storage, dataset_folder: str, base_filena
 
     # Check for pmtiles
     pmtiles_path = f"{dest_folder}{base_filename}.pmtiles"
-    if await dest_storage.file_exists(pmtiles_path):
+    if await dest_storage.file_exists(pmtiles_path):  # noqa: SIM103
         return True
 
-    # Also check for layer-specific files (for multi-layer datasets)
-    # Check a few common layer name patterns
-    # Note: This is a simplified check - we can't know all layer names without
-    # processing the source file, but this should catch most cases
-    common_layer_patterns = [
-        f"{dest_folder}{base_filename}-",  # Any layer suffix
-    ]
-    
-    # For datasets with known layer patterns, we could add more specific checks
-    # But for now, if we find any file starting with base_filename, consider it processed
-    # This is conservative - we'll mark it as processed if ANY output exists
-    
-    # Actually, let's be more conservative: only mark as processed if we find
-    # the base filename files. Layer-specific files are harder to detect without
-    # knowing the layer names, so we'll rely on the base filename check above.
-    
+    # Layer-specific files are harder to detect without knowing the layer names,
+    # so rely on the base filename checks above.
     return False
 
 
-async def main():
-    parser = argparse.ArgumentParser(
-        description="Check which datasets have been processed and determine resume offset"
-    )
+async def main() -> None:  # noqa: C901, D103, PLR0912, PLR0915
+    parser = argparse.ArgumentParser(description="Check which datasets have been processed and determine resume offset")
     parser.add_argument(
         "--source",
         type=str,
@@ -172,16 +153,16 @@ async def main():
 
     # Parse storage URLs
     source_type, source_bucket, source_path = parse_storage_url(args.source)
-    dest_type, dest_bucket, dest_path = parse_storage_url(args.dest)
+    dest_type, dest_bucket, _dest_path = parse_storage_url(args.dest)
 
     # Create storage clients
     source_storage = create_storage_client(
         storage_type=source_type,
-        bucket=source_bucket,
+        options=StorageClientOptions(bucket=source_bucket),
     )
     dest_storage = create_storage_client(
         storage_type=dest_type,
-        bucket=dest_bucket,
+        options=StorageClientOptions(bucket=dest_bucket),
     )
 
     # Discover datasets
@@ -190,10 +171,10 @@ async def main():
         datasets = await discover_nested_datasets(source_storage, source_path)
     else:
         # Load from CSV
-        import csv
+        import csv  # noqa: PLC0415
 
         datasets = []
-        with open(args.inventory, "r") as f:
+        with open(args.inventory) as f:  # noqa: PTH123
             reader = csv.DictReader(f)
             for row in reader:
                 filename = row.get("filename", "").strip()
@@ -203,10 +184,7 @@ async def main():
                     if gcs_path:
                         _, _, path = parse_storage_url(gcs_path)
                         path_parts = path.split("/")
-                        if len(path_parts) > 1:
-                            dataset_folder = "/".join(path_parts[:-1])
-                        else:
-                            dataset_folder = ""
+                        dataset_folder = "/".join(path_parts[:-1]) if len(path_parts) > 1 else ""
                     else:
                         dataset_folder = ""
 
@@ -231,17 +209,15 @@ async def main():
         # Extract base filename (remove any format suffixes that might be in the folder structure)
         base_filename = filename
 
-        is_processed = await check_dataset_processed(
-            dest_storage, dataset_folder, base_filename
-        )
+        is_processed = await check_dataset_processed(dest_storage, dataset_folder, base_filename)
 
         if is_processed:
             processed_count += 1
             processed_datasets.append((i, filename, dataset_folder))
-            logger.info(f"  [{i+1}/{len(datasets)}] ✓ {filename} - PROCESSED")
+            logger.info(f"  [{i + 1}/{len(datasets)}] ✓ {filename} - PROCESSED")
         else:
             unprocessed_datasets.append((i, filename, dataset_folder))
-            logger.info(f"  [{i+1}/{len(datasets)}] ⊘ {filename} - NOT PROCESSED")
+            logger.info(f"  [{i + 1}/{len(datasets)}] ⊘ {filename} - NOT PROCESSED")
 
     # Print summary
     print("\n" + "=" * 80)
@@ -252,27 +228,27 @@ async def main():
     print(f"Unprocessed: {len(datasets) - processed_count}")
 
     if processed_count > 0:
-        print(f"\n✓ Processed datasets (first 10):")
+        print("\n✓ Processed datasets (first 10):")
         for idx, name, folder in processed_datasets[:10]:
             folder_str = f" ({folder})" if folder else ""
             print(f"  [{idx}] {name}{folder_str}")
-        if len(processed_datasets) > 10:
+        if len(processed_datasets) > 10:  # noqa: PLR2004
             print(f"  ... and {len(processed_datasets) - 10} more")
 
     if unprocessed_datasets:
-        print(f"\n⊘ Unprocessed datasets (first 10):")
+        print("\n⊘ Unprocessed datasets (first 10):")
         for idx, name, folder in unprocessed_datasets[:10]:
             folder_str = f" ({folder})" if folder else ""
             print(f"  [{idx}] {name}{folder_str}")
-        if len(unprocessed_datasets) > 10:
+        if len(unprocessed_datasets) > 10:  # noqa: PLR2004
             print(f"  ... and {len(unprocessed_datasets) - 10} more")
 
     # Determine offset
     if processed_count == 0:
         offset = 0
-        print(f"\n→ Resume with: --offset 0")
+        print("\n→ Resume with: --offset 0")
     elif processed_count == len(datasets):
-        print(f"\n→ All datasets have been processed!")
+        print("\n→ All datasets have been processed!")
     else:
         # Find the first unprocessed dataset
         first_unprocessed_idx = unprocessed_datasets[0][0]
@@ -286,4 +262,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

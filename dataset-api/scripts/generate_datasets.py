@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Generate datasets JSONL from inventory and storage locations.
+"""Generate datasets JSONL from inventory and storage locations.
 
 This script:
 1. Loads inventory JSONL (with AI-generated tags)
@@ -23,23 +22,25 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from storage.storage_client import StorageClient, create_storage_client
+from datetime import date
+
 from models.dataset import (
     FileLocation,
     GeoServerLocation,
     SpatialDatasetFileMetadata,
 )
-from datetime import date
+from storage.storage_client import StorageClient, StorageClientOptions, create_storage_client
+
 
 logger = logging.getLogger(__name__)
 
 
-def dataset_has_sources(dataset_entry: Dict) -> bool:
+def dataset_has_sources(dataset_entry: dict) -> bool:
     """Return True if at least one format source exists in the dataset entry."""
     for file_entry in dataset_entry.get("files", []):
         for fmt in file_entry.get("formats", []):
@@ -48,10 +49,10 @@ def dataset_has_sources(dataset_entry: Dict) -> bool:
     return False
 
 
-async def find_processed_files(
+async def find_processed_files(  # noqa: C901, PLR0912, PLR0915
     storage_client: StorageClient,
     filename: str,
-) -> Dict[str, List[str]]:
+) -> dict[str, list[str]]:
     """Find all processed files for a dataset using a storage client.
 
     Args:
@@ -118,21 +119,15 @@ async def find_processed_files(
             + len(file_geodatabase_paths)
         )
         if total_found > 0:
-            logger.debug(
-                "Found %d files via list_files, skipping glob patterns", total_found
-            )
+            logger.debug("Found %d files via list_files, skipping glob patterns", total_found)
         else:
             # No files found with direct prefix, try nested patterns
-            logger.debug(
-                "No files found with direct prefix, trying nested glob patterns"
-            )
-            raise ValueError("No files found, try nested patterns")
+            logger.debug("No files found with direct prefix, trying nested glob patterns")
+            raise ValueError("No files found, try nested patterns")  # noqa: TRY003, TRY301
 
     except Exception as e:
         # Fallback to glob patterns for nested structures (e.g., parent/dataset/...)
-        logger.debug(
-            f"list_files approach failed or found nothing: {e}, trying glob patterns"
-        )
+        logger.debug(f"list_files approach failed or found nothing: {e}, trying glob patterns")
 
         # Use optimized patterns: direct patterns use find() (fast), nested patterns use glob() (slower but necessary)
         all_format_patterns = [
@@ -158,7 +153,7 @@ async def find_processed_files(
             """Expand a glob pattern and return matching paths."""
             try:
                 matches = await storage_client.expand_glob_pattern(pattern)
-                return matches
+                return matches  # noqa: TRY300
             except Exception as e:
                 logger.debug(f"Pattern '{pattern}' failed: {e}")
                 return []
@@ -176,9 +171,7 @@ async def find_processed_files(
                 continue
             all_matching_paths.update(result)
 
-        logger.debug(
-            f"Found {len(all_matching_paths)} total files via glob patterns for '{filename}'"
-        )
+        logger.debug(f"Found {len(all_matching_paths)} total files via glob patterns for '{filename}'")
 
         # Filter files by extension into appropriate sets
         for path in all_matching_paths:
@@ -196,39 +189,24 @@ async def find_processed_files(
                 file_geodatabase_paths.add(path)
 
     return {
-        "geoparquet": sorted(
-            [storage_client.get_public_url(path) for path in geoparquet_paths]
-        ),
-        "pmtiles": sorted(
-            [storage_client.get_public_url(path) for path in pmtiles_paths]
-        ),
-        "geopackage": sorted(
-            [storage_client.get_public_url(path) for path in geopackage_paths]
-        ),
-        "shapefile": sorted(
-            [storage_client.get_public_url(path) for path in shapefile_paths]
-        ),
-        "geojson": sorted(
-            [storage_client.get_public_url(path) for path in geojson_paths]
-        ),
-        "file_geodatabase": sorted(
-            [storage_client.get_public_url(path) for path in file_geodatabase_paths]
-        ),
+        "geoparquet": sorted([storage_client.get_public_url(path) for path in geoparquet_paths]),
+        "pmtiles": sorted([storage_client.get_public_url(path) for path in pmtiles_paths]),
+        "geopackage": sorted([storage_client.get_public_url(path) for path in geopackage_paths]),
+        "shapefile": sorted([storage_client.get_public_url(path) for path in shapefile_paths]),
+        "geojson": sorted([storage_client.get_public_url(path) for path in geojson_paths]),
+        "file_geodatabase": sorted([storage_client.get_public_url(path) for path in file_geodatabase_paths]),
     }
 
 
-def extract_path_from_url(url: str, storage_client: StorageClient) -> Optional[str]:
+def extract_path_from_url(url: str, storage_client: StorageClient) -> str | None:
     """Extract relative path from a storage URL using the storage client."""
     return storage_client.parse_url_to_path(url)
 
 
-def group_parquet_files_by_pattern(
-    parquet_urls: List[str], storage_client: StorageClient
-) -> Dict[str, List[str]]:
-    """
-    Group chunked parquet files by base pattern.
-    Assumes chunked parquet naming: <base>-N.zstd.parquet
-    """
+def group_parquet_files_by_pattern(parquet_urls: list[str], storage_client: StorageClient) -> dict[str, list[str]]:
+    """Group chunked parquet files by base pattern.
+    Assumes chunked parquet naming: <base>-N.zstd.parquet.
+    """  # noqa: D205
     groups = {}
 
     for url in parquet_urls:
@@ -237,7 +215,7 @@ def group_parquet_files_by_pattern(
             continue
 
         path_parts = path.rsplit("/", 1)
-        if len(path_parts) == 2:
+        if len(path_parts) == 2:  # noqa: PLR2004
             dir_part = path_parts[0]
             filename = path_parts[1]
         else:
@@ -248,11 +226,7 @@ def group_parquet_files_by_pattern(
         if chunk_match:
             base_name = chunk_match.group(1)
             ext = chunk_match.group(3) or ""
-            pattern = (
-                f"{dir_part}/{base_name}-*.{ext}parquet"
-                if dir_part
-                else f"{base_name}-*.{ext}parquet"
-            )
+            pattern = f"{dir_part}/{base_name}-*.{ext}parquet" if dir_part else f"{base_name}-*.{ext}parquet"
         else:
             # Keep non-chunk parquet files as valid sources as well.
             # This supports datasets that only have a single parquet file.
@@ -264,11 +238,11 @@ def group_parquet_files_by_pattern(
     return groups
 
 
-def _parse_bounds(raw_bounds: object) -> Optional[List[float]]:
+def _parse_bounds(raw_bounds: object) -> list[float] | None:
     """Parse bounds from list/tuple or string representation."""
     if raw_bounds is None:
         return None
-    if isinstance(raw_bounds, (list, tuple)) and len(raw_bounds) == 4:
+    if isinstance(raw_bounds, (list, tuple)) and len(raw_bounds) == 4:  # noqa: PLR2004
         try:
             return [float(v) for v in raw_bounds]
         except Exception:
@@ -279,7 +253,7 @@ def _parse_bounds(raw_bounds: object) -> Optional[List[float]]:
             text = text[1:-1]
         try:
             values = [float(v.strip()) for v in text.split(",")]
-            if len(values) == 4:
+            if len(values) == 4:  # noqa: PLR2004
                 return values
         except Exception:
             return None
@@ -287,26 +261,20 @@ def _parse_bounds(raw_bounds: object) -> Optional[List[float]]:
 
 
 def _build_metadata_from_inventory(
-    inventory_entry: Dict,
-    inventory_file: Optional[Dict] = None,
+    inventory_entry: dict,
+    inventory_file: dict | None = None,
     *,
-    size_bytes: Optional[int] = None,
-    mime_type: Optional[str] = None,
-) -> Optional[Dict]:
+    size_bytes: int | None = None,
+    mime_type: str | None = None,
+) -> dict | None:
     """Build source/file metadata from inventory fields plus computed size/mime data."""
     tags = inventory_entry.get("tags", {}) or {}
     file_meta = (inventory_file or {}).get("file_metadata", {}) or {}
     geometry_type = (
-        (inventory_file or {}).get("geometry_type")
-        or file_meta.get("geometry_type")
-        or tags.get("geometry_type")
+        (inventory_file or {}).get("geometry_type") or file_meta.get("geometry_type") or tags.get("geometry_type")
     )
-    feature_count = (inventory_file or {}).get("feature_count") or file_meta.get(
-        "feature_count"
-    )
-    bounds = _parse_bounds(
-        (inventory_file or {}).get("bounds") or file_meta.get("bounds")
-    )
+    feature_count = (inventory_file or {}).get("feature_count") or file_meta.get("feature_count")
+    bounds = _parse_bounds((inventory_file or {}).get("bounds") or file_meta.get("bounds"))
 
     metadata = SpatialDatasetFileMetadata(
         size_bytes=size_bytes,
@@ -326,15 +294,14 @@ def _build_metadata_from_inventory(
     return metadata.model_dump()
 
 
-async def create_dataset_entry(
+async def create_dataset_entry(  # noqa: C901, PLR0912, PLR0915
     dataset_slug: str,
-    inventory_entry: Dict,
-    storage_files_by_location: Dict[str, Dict[str, List[str]]],
-    storage_clients_by_location: Dict[str, Optional[StorageClient]],
-    geoserver_storage_location_name: Optional[str] = None,
-) -> Dict:
-    """
-    Create a dataset entry matching the database schema exactly.
+    inventory_entry: dict,
+    storage_files_by_location: dict[str, dict[str, list[str]]],
+    storage_clients_by_location: dict[str, StorageClient | None],
+    geoserver_storage_location_name: str | None = None,
+) -> dict:
+    """Create a dataset entry matching the database schema exactly.
 
     Args:
         dataset_slug: Dataset slug
@@ -373,24 +340,18 @@ async def create_dataset_entry(
 
         # Group parquet files by logical file pattern
         if parquet_urls:
-            parquet_groups = group_parquet_files_by_pattern(
-                parquet_urls, storage_client
-            )
+            parquet_groups = group_parquet_files_by_pattern(parquet_urls, storage_client)
 
-            for pattern, urls in parquet_groups.items():
+            for pattern in parquet_groups:
                 # Extract logical file name from pattern
                 path_parts = pattern.rsplit("/", 1)
-                if len(path_parts) == 2:
+                if len(path_parts) == 2:  # noqa: PLR2004
                     filename = path_parts[1]
                     # New layout always uses chunk globs (file-*.zstd.parquet)
-                    base_name = filename.replace("-*.zstd.parquet", "").replace(
-                        "-*.parquet", ""
-                    )
+                    base_name = filename.replace("-*.zstd.parquet", "").replace("-*.parquet", "")
                     logical_file_name = f"{path_parts[0]}/{base_name}"
                 else:
-                    base_name = pattern.replace("-*.zstd.parquet", "").replace(
-                        "-*.parquet", ""
-                    )
+                    base_name = pattern.replace("-*.zstd.parquet", "").replace("-*.parquet", "")
                     logical_file_name = base_name
 
                 # Initialize logical file if needed
@@ -405,20 +366,13 @@ async def create_dataset_entry(
                     }
 
                 # Add GeoParquet sources for this storage location
-                if (
-                    storage_location_name
-                    not in logical_files[logical_file_name]["sources_by_location"]
-                ):
-                    logical_files[logical_file_name]["sources_by_location"][
-                        storage_location_name
-                    ] = []
+                if storage_location_name not in logical_files[logical_file_name]["sources_by_location"]:
+                    logical_files[logical_file_name]["sources_by_location"][storage_location_name] = []
 
                 # New layout assumes chunked parquet, so we always store glob pattern.
                 location = FileLocation(path=pattern)
 
-                logical_files[logical_file_name]["sources_by_location"][
-                    storage_location_name
-                ].append(
+                logical_files[logical_file_name]["sources_by_location"][storage_location_name].append(
                     {
                         "storage_location_name": storage_location_name,
                         "version": date.today().isoformat(),
@@ -438,16 +392,14 @@ async def create_dataset_entry(
                 if path:
                     # Extract the base filename (without extension) to match to logical files
                     path_parts = path.rsplit("/", 1)
-                    if len(path_parts) == 2:
+                    if len(path_parts) == 2:  # noqa: PLR2004
                         pmtiles_base = path_parts[1].replace(".pmtiles", "")
                         # Try to find matching logical file
                         # PMTiles filename should match the logical file slug
                         matching_logical_file = None
-                        for logical_file_name in logical_files.keys():
+                        for logical_file_name in logical_files:
                             logical_file_slug = (
-                                logical_file_name.rsplit("/", 1)[-1]
-                                if "/" in logical_file_name
-                                else logical_file_name
+                                logical_file_name.rsplit("/", 1)[-1] if "/" in logical_file_name else logical_file_name
                             )
                             if pmtiles_base == logical_file_slug:
                                 matching_logical_file = logical_file_name
@@ -465,32 +417,25 @@ async def create_dataset_entry(
                                 }
 
                         # Store PMTiles URL for this logical file
-                        if (
-                            storage_location_name
-                            not in logical_files[matching_logical_file][
-                                "pmtiles_by_location"
-                            ]
-                        ):
-                            logical_files[matching_logical_file]["pmtiles_by_location"][
-                                storage_location_name
-                            ] = []
-                        logical_files[matching_logical_file]["pmtiles_by_location"][
-                            storage_location_name
-                        ].append(pmtiles_url)
+                        if storage_location_name not in logical_files[matching_logical_file]["pmtiles_by_location"]:
+                            logical_files[matching_logical_file]["pmtiles_by_location"][storage_location_name] = []
+                        logical_files[matching_logical_file]["pmtiles_by_location"][storage_location_name].append(
+                            pmtiles_url
+                        )
 
         # Helper function to match format URLs to logical files
-        def match_format_urls_to_logical_files(
-            format_urls: List[str],
+        def match_format_urls_to_logical_files(  # noqa: C901, PLR0912
+            format_urls: list[str],
             format_ext: str,
             format_key: str,
             mime_type: str,
-        ):
+        ) -> None:
             """Match format URLs to logical files based on directory structure and filename."""
             for format_url in format_urls:
-                path = extract_path_from_url(format_url, storage_client)
+                path = extract_path_from_url(format_url, storage_client)  # noqa: B023
                 if path:
                     path_parts = path.rsplit("/", 1)
-                    if len(path_parts) == 2:
+                    if len(path_parts) == 2:  # noqa: PLR2004
                         dir_part = path_parts[0]
                         format_filename = path_parts[1]
                         format_base = format_filename.replace(format_ext, "")
@@ -505,30 +450,20 @@ async def create_dataset_entry(
                         if len(dir_components) >= 1:
                             # The last component is the format folder, remove it
                             base_dir_components = dir_components[:-1]
-                            base_dir = (
-                                "/".join(base_dir_components)
-                                if base_dir_components
-                                else ""
-                            )
-                            dataset_subfolder = (
-                                base_dir_components[-1] if base_dir_components else ""
-                            )
+                            base_dir = "/".join(base_dir_components) if base_dir_components else ""
+                            dataset_subfolder = base_dir_components[-1] if base_dir_components else ""
                         else:
                             base_dir = ""
                             dataset_subfolder = ""
 
                         # Try to find matching logical file by directory structure
                         matching_logical_file = None
-                        for logical_file_name in logical_files.keys():
+                        for logical_file_name in logical_files:
                             logical_file_slug = (
-                                logical_file_name.rsplit("/", 1)[-1]
-                                if "/" in logical_file_name
-                                else logical_file_name
+                                logical_file_name.rsplit("/", 1)[-1] if "/" in logical_file_name else logical_file_name
                             )
                             logical_dir = (
-                                "/".join(logical_file_name.split("/")[:-1])
-                                if "/" in logical_file_name
-                                else ""
+                                "/".join(logical_file_name.split("/")[:-1]) if "/" in logical_file_name else ""
                             )
 
                             # Match if:
@@ -540,22 +475,14 @@ async def create_dataset_entry(
                             # 6. Both share the same parent directory structure (most important for matching)
                             if (
                                 base_dir == logical_dir
-                                or format_base == logical_file_slug
-                                or dataset_subfolder == logical_file_slug
+                                or logical_file_slug in (format_base, dataset_subfolder)
                                 or (base_dir and base_dir in logical_file_name)
                                 or (logical_dir and logical_dir in base_dir)
                                 or (
                                     base_dir
                                     and logical_dir
-                                    and
-                                    # Check if they share the same parent path components
-                                    set(base_dir.split("/"))
-                                    & set(logical_dir.split("/"))
-                                    and len(
-                                        set(base_dir.split("/"))
-                                        & set(logical_dir.split("/"))
-                                    )
-                                    >= 2
+                                    and set(base_dir.split("/")) & set(logical_dir.split("/"))
+                                    and len(set(base_dir.split("/")) & set(logical_dir.split("/"))) >= 2  # noqa: PLR2004
                                 )
                             ):
                                 matching_logical_file = logical_file_name
@@ -566,9 +493,7 @@ async def create_dataset_entry(
                             # Use the base directory + dataset subfolder (which is the common parent folder)
                             # This ensures format files in the same dataset subfolder are grouped together
                             if base_dir and dataset_subfolder:
-                                matching_logical_file = (
-                                    f"{base_dir}/{dataset_subfolder}"
-                                )
+                                matching_logical_file = f"{base_dir}/{dataset_subfolder}"
                             elif base_dir:
                                 # Fallback: use format base name if dataset subfolder not available
                                 matching_logical_file = f"{base_dir}/{format_base}"
@@ -586,16 +511,9 @@ async def create_dataset_entry(
                                 }
 
                         # Store format URL for this logical file
-                        if (
-                            storage_location_name
-                            not in logical_files[matching_logical_file][format_key]
-                        ):
-                            logical_files[matching_logical_file][format_key][
-                                storage_location_name
-                            ] = []
-                        logical_files[matching_logical_file][format_key][
-                            storage_location_name
-                        ].append(format_url)
+                        if storage_location_name not in logical_files[matching_logical_file][format_key]:  # noqa: B023
+                            logical_files[matching_logical_file][format_key][storage_location_name] = []  # noqa: B023
+                        logical_files[matching_logical_file][format_key][storage_location_name].append(format_url)  # noqa: B023
 
         # Match new formats to logical files
         match_format_urls_to_logical_files(
@@ -604,12 +522,8 @@ async def create_dataset_entry(
             "geopackage_by_location",
             "application/geopackage+sqlite3",
         )
-        match_format_urls_to_logical_files(
-            shapefile_urls, ".shp", "shapefile_by_location", "application/zip"
-        )
-        match_format_urls_to_logical_files(
-            geojson_urls, ".geojson", "geojson_by_location", "application/geo+json"
-        )
+        match_format_urls_to_logical_files(shapefile_urls, ".shp", "shapefile_by_location", "application/zip")
+        match_format_urls_to_logical_files(geojson_urls, ".geojson", "geojson_by_location", "application/geo+json")
         match_format_urls_to_logical_files(
             file_geodatabase_urls,
             ".gdb",
@@ -620,14 +534,10 @@ async def create_dataset_entry(
     # Create File entries from logical files
     files = []
     for logical_file_name, file_data in logical_files.items():
-
         # Extract file slug from logical file name
         # Default to the actual file name from storage.
         path_parts = logical_file_name.rsplit("/", 1)
-        if len(path_parts) == 2:
-            file_slug = path_parts[1]
-        else:
-            file_slug = logical_file_name
+        file_slug = path_parts[1] if len(path_parts) == 2 else logical_file_name  # noqa: PLR2004
 
         # For datasets that resolve to multiple logical files under nested folders
         # (e.g. nhd/flowline/flowline_ak/... and nhd/flowline/flowline_conus/...),
@@ -653,15 +563,13 @@ async def create_dataset_entry(
                 # Fallback for paths where the dataset appears as a prefix segment
                 # instead of a dedicated folder segment (e.g. "flowline_ak/...").
                 for part in logical_parts:
-                    if part.startswith(f"{dataset_slug}_") or part.startswith(
-                        f"{dataset_slug}-"
-                    ):
+                    if part.startswith(f"{dataset_slug}_") or part.startswith(f"{dataset_slug}-"):
                         file_slug = part
                         break
 
         # Use inventory file info if available, but use file_slug for name to ensure uniqueness
         # when there are multiple logical files
-        inv_file: Optional[Dict] = None
+        inv_file: dict | None = None
         if inventory_files and len(inventory_files) == 1 and len(logical_files) == 1:
             # Only use inventory name if there's exactly one logical file
             inv_file = inventory_files[0]
@@ -688,28 +596,20 @@ async def create_dataset_entry(
 
         # GeoParquet format - combine sources from all storage locations
         all_geoparquet_sources = []
-        for storage_location_name, sources in file_data["sources_by_location"].items():
+        for storage_location_name, sources in file_data["sources_by_location"].items():  # noqa: B007
             all_geoparquet_sources.extend(sources)
 
         for source in all_geoparquet_sources:
             source_storage_location = source.get("storage_location_name")
             storage_client = (
-                storage_clients_by_location.get(source_storage_location)
-                if source_storage_location
-                else None
+                storage_clients_by_location.get(source_storage_location) if source_storage_location else None
             )
             location = source.get("location", {}) or {}
-            source_path = (
-                location.get("path")
-                if isinstance(location, dict)
-                else getattr(location, "path", None)
-            )
-            size_bytes: Optional[int] = None
+            source_path = location.get("path") if isinstance(location, dict) else getattr(location, "path", None)
+            size_bytes: int | None = None
             if storage_client and source_path:
                 if "*" in source_path:
-                    size_bytes = await storage_client.calculate_total_size_for_glob(
-                        source_path
-                    )
+                    size_bytes = await storage_client.calculate_total_size_for_glob(source_path)
                 else:
                     size_bytes = await storage_client.get_file_size(source_path)
             source["source_metadata"] = _build_metadata_from_inventory(
@@ -729,9 +629,7 @@ async def create_dataset_entry(
         logical_file_base = file_slug
         pmtiles_sources = []
 
-        for storage_location_name, pmtiles_urls in file_data[
-            "pmtiles_by_location"
-        ].items():
+        for storage_location_name, pmtiles_urls in file_data["pmtiles_by_location"].items():
             storage_client = storage_clients_by_location.get(storage_location_name)
             if not storage_client:
                 continue
@@ -740,7 +638,7 @@ async def create_dataset_entry(
                 path = extract_path_from_url(pmtiles_url, storage_client)
                 if path:
                     path_parts = path.rsplit("/", 1)
-                    if len(path_parts) == 2:
+                    if len(path_parts) == 2:  # noqa: PLR2004
                         pmtiles_filename = path_parts[1].replace(".pmtiles", "")
                         if pmtiles_filename == logical_file_base:
                             location = FileLocation(path=path)
@@ -769,11 +667,11 @@ async def create_dataset_entry(
             }
 
         # Helper function to create format sources from URLs
-        async def create_format_sources(
-            format_urls_by_location: Dict[str, List[str]],
+        async def create_format_sources(  # noqa: C901, PLR0912
+            format_urls_by_location: dict[str, list[str]],
             format_type: str,
             mime_type: str,
-        ) -> List[Dict]:
+        ) -> list[dict]:
             """Create format sources from URLs by location.
 
             This function processes format URLs that were already matched to this logical file
@@ -799,7 +697,7 @@ async def create_dataset_entry(
                         if path:
                             # Extract folder path (remove filename)
                             path_parts = path.rsplit("/", 1)
-                            if len(path_parts) == 2:
+                            if len(path_parts) == 2:  # noqa: PLR2004
                                 folder_path = path_parts[0] + "/"
                                 filename = path_parts[1]
                             else:
@@ -825,7 +723,7 @@ async def create_dataset_entry(
 
                         metadata = _build_metadata_from_inventory(
                             inventory_entry,
-                            inv_file,
+                            inv_file,  # noqa: B023
                             size_bytes=total_size if total_size > 0 else None,
                             mime_type=mime_type,
                         )
@@ -850,7 +748,7 @@ async def create_dataset_entry(
                             size_bytes = await storage_client.get_file_size(path)
                             metadata = _build_metadata_from_inventory(
                                 inventory_entry,
-                                inv_file,
+                                inv_file,  # noqa: B023
                                 size_bytes=size_bytes,
                                 mime_type=mime_type,
                             )
@@ -922,7 +820,7 @@ async def create_dataset_entry(
             has_geoserver_source = False
             geoserver_storage_location = None
             geoserver_loc_upper = geoserver_storage_location_name.upper()
-            for storage_loc_name in file_data["sources_by_location"].keys():
+            for storage_loc_name in file_data["sources_by_location"]:
                 if storage_loc_name.upper() == geoserver_loc_upper:
                     has_geoserver_source = True
                     geoserver_storage_location = storage_loc_name
@@ -934,30 +832,20 @@ async def create_dataset_entry(
                     # Calculate total size of GeoParquet files for this logical file.
                     # Reuse source metadata to avoid extra storage scans where possible.
                     total_size_bytes = 0
-                    geoparquet_sources = file_data["sources_by_location"].get(
-                        geoserver_storage_location, []
-                    )
+                    geoparquet_sources = file_data["sources_by_location"].get(geoserver_storage_location, [])
                     for source in geoparquet_sources:
                         source_metadata = source.get("source_metadata") or {}
                         source_size_bytes = (
-                            source_metadata.get("size_bytes")
-                            if isinstance(source_metadata, dict)
-                            else None
+                            source_metadata.get("size_bytes") if isinstance(source_metadata, dict) else None
                         )
                         if isinstance(source_size_bytes, int):
                             total_size_bytes += source_size_bytes
 
-                    geoserver_workspace = (
-                        import_settings.get("geoserver_workspace") or "hifld"
-                    )
+                    geoserver_workspace = import_settings.get("geoserver_workspace") or "hifld"
                     geoserver_store_name = (
-                        import_settings.get("geoserver_store_name")
-                        or f"{dataset_slug}-{file_slug}-store"
+                        import_settings.get("geoserver_store_name") or f"{dataset_slug}-{file_slug}-store"
                     )
-                    geoserver_layer_name = (
-                        import_settings.get("geoserver_layer_name")
-                        or f"{dataset_slug}-{file_slug}"
-                    )
+                    geoserver_layer_name = import_settings.get("geoserver_layer_name") or f"{dataset_slug}-{file_slug}"
 
                     geoserver_location = GeoServerLocation(
                         workspace=geoserver_workspace,
@@ -989,7 +877,7 @@ async def create_dataset_entry(
     # Merge duplicate file slugs that can occur when the same logical file is
     # discovered via multiple path patterns (legacy + new layouts).
     if files:
-        merged_files: Dict[str, Dict] = {}
+        merged_files: dict[str, dict] = {}
         for file_entry in files:
             slug = file_entry["slug"]
             existing = merged_files.get(slug)
@@ -997,9 +885,7 @@ async def create_dataset_entry(
                 merged_files[slug] = file_entry
                 continue
 
-            existing_formats = {
-                fmt["format_type"]: fmt for fmt in existing.get("formats", [])
-            }
+            existing_formats = {fmt["format_type"]: fmt for fmt in existing.get("formats", [])}
             for fmt in file_entry.get("formats", []):
                 fmt_type = fmt["format_type"]
                 if fmt_type not in existing_formats:
@@ -1008,10 +894,7 @@ async def create_dataset_entry(
 
                 # Merge sources by value to avoid duplicates.
                 existing_sources = existing_formats[fmt_type].get("sources", [])
-                existing_keys = {
-                    json.dumps(src, sort_keys=True, default=str)
-                    for src in existing_sources
-                }
+                existing_keys = {json.dumps(src, sort_keys=True, default=str) for src in existing_sources}
                 for src in fmt.get("sources", []):
                     src_key = json.dumps(src, sort_keys=True, default=str)
                     if src_key not in existing_keys:
@@ -1035,9 +918,7 @@ async def create_dataset_entry(
                         "description": None,
                         "layer_name": inv_file.get("layer_name"),
                         "source_file_path": inv_file.get("source_file_path"),
-                        "file_metadata": _build_metadata_from_inventory(
-                            inventory_entry, inv_file
-                        ),
+                        "file_metadata": _build_metadata_from_inventory(inventory_entry, inv_file),
                         "formats": [],
                     }
                 )
@@ -1056,11 +937,7 @@ async def create_dataset_entry(
 
     # Filter tags to exclude category_confidence and category_reasoning
     raw_tags = inventory_entry.get("tags", {})
-    filtered_tags = {
-        k: v
-        for k, v in raw_tags.items()
-        if k not in ("category_confidence", "category_reasoning")
-    }
+    filtered_tags = {k: v for k, v in raw_tags.items() if k not in ("category_confidence", "category_reasoning")}
 
     return {
         "slug": dataset_slug,
@@ -1072,10 +949,8 @@ async def create_dataset_entry(
     }
 
 
-async def main():
-    parser = argparse.ArgumentParser(
-        description="Generate datasets JSONL from inventory and storage locations"
-    )
+async def main() -> None:  # noqa: C901, D103, PLR0912, PLR0915
+    parser = argparse.ArgumentParser(description="Generate datasets JSONL from inventory and storage locations")
     parser.add_argument(
         "--inventory",
         type=Path,
@@ -1117,7 +992,7 @@ async def main():
 
     print(f"Loading inventory from {args.inventory}...")
     inventory_datasets = {}
-    with open(args.inventory, "r", encoding="utf-8") as f:
+    with open(args.inventory, encoding="utf-8") as f:  # noqa: PTH123
         for line in f:
             if line.strip():
                 dataset = json.loads(line)
@@ -1153,9 +1028,7 @@ async def main():
 
     for i, slug in enumerate(datasets_to_process, 1):
         if slug not in inventory_datasets:
-            print(
-                f"\n[{i}/{len(datasets_to_process)}] {slug} - NOT FOUND in inventory, skipping"
-            )
+            print(f"\n[{i}/{len(datasets_to_process)}] {slug} - NOT FOUND in inventory, skipping")
             continue
 
         inventory_entry = inventory_datasets[slug]
@@ -1172,12 +1045,13 @@ async def main():
             # Create storage client
             if storage_type == "gcs":
                 storage_client = create_storage_client(
-                    storage_type="gcs", bucket=bucket_name
+                    storage_type="gcs",
+                    options=StorageClientOptions(bucket=bucket_name),
                 )
             elif storage_type == "seaweedfs":
                 storage_client = create_storage_client(
                     storage_type="seaweedfs",
-                    bucket=bucket_name,
+                    options=StorageClientOptions(bucket=bucket_name),
                 )
             else:
                 continue
@@ -1199,9 +1073,7 @@ async def main():
             if files["geojson"]:
                 print(f"    → {len(files['geojson'])} GeoJSON file(s)")
             if files["file_geodatabase"]:
-                print(
-                    f"    → {len(files['file_geodatabase'])} File Geodatabase file(s)"
-                )
+                print(f"    → {len(files['file_geodatabase'])} File Geodatabase file(s)")
 
             # Debug: show what we're looking for
             if (
@@ -1212,9 +1084,7 @@ async def main():
                 and len(files["geojson"]) == 0
                 and len(files["file_geodatabase"]) == 0
             ):
-                print(
-                    f"    ⚠ No files found for '{slug}' in {storage_type}://{bucket_name}"
-                )
+                print(f"    ⚠ No files found for '{slug}' in {storage_type}://{bucket_name}")
                 print("       Looking for recursive paths matching patterns like:")
                 print(f"         - {slug}/**/parquet/*.zstd.parquet")
                 print(f"         - **/{slug}/**/parquet/*.zstd.parquet")
@@ -1237,9 +1107,7 @@ async def main():
                     args.geoserver_storage_location.startswith(storage_type.upper())
                     or args.geoserver_storage_location.startswith(storage_type.lower())
                     or args.geoserver_storage_location
-                    == f"{storage_type}_{bucket_name}"
-                    or args.geoserver_storage_location
-                    == f"{storage_type} {bucket_name}"
+                    in (f"{storage_type}_{bucket_name}", f"{storage_type} {bucket_name}")
                 ):
                     # Construct storage location name (format: "GCS BucketName" or "SeaweedFS BucketName")
                     if storage_type == "gcs":
@@ -1247,9 +1115,7 @@ async def main():
                     elif storage_type == "seaweedfs":
                         geoserver_storage_location_name = f"SeaweedFS {bucket_name}"
                     else:
-                        geoserver_storage_location_name = (
-                            f"{storage_type.upper()} {bucket_name}"
-                        )
+                        geoserver_storage_location_name = f"{storage_type.upper()} {bucket_name}"
                     break
 
             # If no match found, use the flag as-is (might be a full storage location name)
@@ -1273,12 +1139,8 @@ async def main():
                 storage_location_name = f"{storage_type.upper()} {bucket_name}"
 
             if location_key in all_storage_files:
-                storage_files_by_location[storage_location_name] = all_storage_files[
-                    location_key
-                ]
-                storage_clients_by_location[storage_location_name] = (
-                    storage_clients.get(location_key)
-                )
+                storage_files_by_location[storage_location_name] = all_storage_files[location_key]
+                storage_clients_by_location[storage_location_name] = storage_clients.get(location_key)
 
         entry = await create_dataset_entry(
             slug,
@@ -1294,7 +1156,7 @@ async def main():
 
     # Write JSONL file
     print(f"\nWriting {len(dataset_entries)} datasets to {args.output}...")
-    with open(args.output, "w", encoding="utf-8") as f:
+    with open(args.output, "w", encoding="utf-8") as f:  # noqa: PTH123
         for entry in dataset_entries:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 

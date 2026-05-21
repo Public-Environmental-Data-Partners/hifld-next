@@ -3,24 +3,25 @@
 import logging
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import cast
 
 import geopandas as gpd
 
 from processing.parquet_loader import load_parquet
 from processing.pmtiles_creator import create_pmtiles
+from schemas.types import JSONValue
 from storage.storage_client import StorageClient
+
 
 logger = logging.getLogger(__name__)
 
 
-async def process_dataset(
+async def process_dataset(  # noqa: C901, PLR0912, PLR0915
     name: str,
     parquet_url: str,
     storage: StorageClient,
-) -> dict:
-    """
-    Process a parquet dataset.
+) -> dict[str, JSONValue]:
+    """Process a parquet dataset.
 
     Steps:
     1. Load parquet directly from URL (gs://, s3://, http://)
@@ -31,7 +32,7 @@ async def process_dataset(
     6. Return URLs and metadata
 
     Returns:
-        Dict with keys: success, name, pmtiles_url, geoparquet_url, 
+        Dict with keys: success, name, pmtiles_url, geoparquet_url,
         feature_count, bounds, geometry_type, error
     """
     try:
@@ -40,7 +41,7 @@ async def process_dataset(
 
             # 1. Load parquet directly from URL
             logger.info(f"Processing {name}: loading from {parquet_url}...")
-            gdf = load_parquet(parquet_url)
+            gdf = cast(gpd.GeoDataFrame, load_parquet(parquet_url))
             feature_count = len(gdf)
 
             # Get geometry info
@@ -91,7 +92,7 @@ async def process_dataset(
 
             geoparquet_path = data_dir / f"{name}.parquet"
             # Write GeoParquet with proper metadata
-            # 
+            #
             # IMPORTANT LIMITATION: GeoServer GeoParquet plugin has a trade-off:
             # - write_covering_bbox=True: Adds bbox STRUCT column for better WFS spatial queries
             #   BUT breaks GeoPackage export (can't map bbox STRUCT type)
@@ -115,7 +116,7 @@ async def process_dataset(
             pmtiles_path = None
 
             # Filter valid geometries for tiles
-            gdf_valid = gdf[~gdf.geometry.isna()].copy()
+            gdf_valid = cast(gpd.GeoDataFrame, gdf[~gdf.geometry.isna()].copy())
 
             if len(gdf_valid) > 0:
                 tiles_dir = working_dir / "tiles"
@@ -164,9 +165,3 @@ async def process_dataset(
             "name": name,
             "error": error,
         }
-
-
-
-
-
-

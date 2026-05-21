@@ -5,11 +5,14 @@ import logging
 import re
 import tempfile
 from collections import defaultdict
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional
+from typing import Protocol
 
 from models.dataset import SpatialDatasetFileMetadata
+from schemas.types import DatasetTags, JSONDict, json_dict, json_value
+
 
 logger = logging.getLogger(__name__)
 SEMVER_VERSION_RE = re.compile(r"^v\d+\.\d+\.\d+$")
@@ -22,40 +25,55 @@ KNOWN_FORMATS = {
     "geojson",
     "file_geodatabase",
 }
+MIN_DISCOVERY_PATH_PARTS = 5
+DATASET_MANIFEST_PARTS = 3
+LAYER_MANIFEST_PARTS = 4
 
 
 @dataclass(slots=True)
 class DiscoveredVersion:
+    """A discovered dataset version and its storage paths."""
+
     dataset_slug: str
     file_slug: str
     version: str
     format_type: str
     location_path: str
     object_paths: list[str]
-    metadata: Optional[SpatialDatasetFileMetadata]
+    metadata: SpatialDatasetFileMetadata | None
     metadata_object_paths: list[str] = field(default_factory=list)
     catalog_metadata_object_paths: list[str] = field(default_factory=list)
-    dataset_name: Optional[str] = None
-    dataset_description: Optional[str] = None
-    dataset_tags: Optional[dict[str, Any]] = None
-    file_name: Optional[str] = None
-    file_description: Optional[str] = None
+    dataset_name: str | None = None
+    dataset_description: str | None = None
+    dataset_tags: DatasetTags | None = None
+    file_name: str | None = None
+    file_description: str | None = None
+
+
+class StorageClient(Protocol):
+    """Storage client operations required by discovery."""
+
+    async def list_files(self, prefix: str = "") -> list[str]:
+        """List file paths under a prefix."""
+        ...
+
+    async def download_file(self, remote_path: str, local_path: Path) -> None:
+        """Download a remote path to a local path."""
+        ...
 
 
 class DiscoveryService:
     """Scan bucket-style storage and yield discovered version records."""
 
-    def __init__(self, storage_client: Any):
+    def __init__(self, storage_client: StorageClient) -> None:
+        """Create a discovery service."""
         self.storage_client = storage_client
 
-    async def scan(
-        self, prefix: str = "", limit: Optional[int] = None
-    ) -> AsyncIterator[DiscoveredVersion]:
+    async def scan(self, prefix: str = "", limit: int | None = None) -> AsyncIterator[DiscoveredVersion]:
+        """Scan storage and yield discovered version records."""
         files = await self.storage_client.list_files(prefix)
-        grouped: dict[tuple[str, str, str], dict[str, list[str]]] = defaultdict(
-            lambda: defaultdict(list)
-        )
-        catalog_manifest_paths: dict[tuple[str, Optional[str]], str] = {}
+        grouped: dict[tuple[str, str, str], dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+        catalog_manifest_paths: dict[tuple[str, str | None], str] = {}
 
         for path in files:
             manifest_key = self._parse_source_manifest_path(path)
@@ -83,7 +101,7 @@ class DiscoveryService:
                 file_slug=file_slug,
                 manifest_paths=catalog_manifest_paths,
             )
-            formats = sorted(fmt for fmt in group.keys() if fmt in KNOWN_FORMATS)
+            formats = sorted(fmt for fmt in group if fmt in KNOWN_FORMATS)
 
             for format_type in formats:
                 if limit is not None and yielded >= limit:
@@ -111,11 +129,9 @@ class DiscoveryService:
                     file_description=catalog_metadata.file_description,
                 )
 
-    def _parse_discovery_path(
-        self, path: str
-    ) -> Optional[tuple[str, str, str, str]]:
+    def _parse_discovery_path(self, path: str) -> tuple[str, str, str, str] | None:
         parts = [part for part in path.split("/") if part]
-        if len(parts) < 5:
+        if len(parts) < MIN_DISCOVERY_PATH_PARTS:
             return None
 
         dataset_slug, file_slug, version, group_name = parts[:4]
@@ -125,41 +141,39 @@ class DiscoveryService:
             return None
         return dataset_slug, file_slug, version, group_name
 
-    def _parse_source_manifest_path(
-        self, path: str
-    ) -> Optional[tuple[str, Optional[str]]]:
+    def _parse_source_manifest_path(self, path: str) -> tuple[str, str | None] | None:
         parts = [part for part in path.split("/") if part]
-        if len(parts) == 3 and parts[1:] == ["metadata", "source_manifest.json"]:
+        if len(parts) == DATASET_MANIFEST_PARTS and parts[1:] == ["metadata", "source_manifest.json"]:
             return (parts[0], None)
-        if len(parts) == 4 and parts[2:] == ["metadata", "source_manifest.json"]:
+        if len(parts) == LAYER_MANIFEST_PARTS and parts[2:] == ["metadata", "source_manifest.json"]:
             return (parts[0], parts[1])
         return None
 
     @dataclass(slots=True)
     class MetadataResult:
-        metadata: Optional[SpatialDatasetFileMetadata]
+        """Loaded quality metadata."""
+
+        metadata: SpatialDatasetFileMetadata | None
 
     @dataclass(slots=True)
     class CatalogMetadataResult:
+        """Loaded catalog metadata."""
+
         object_paths: list[str]
         dataset_name: str
-        dataset_description: Optional[str]
-        dataset_tags: Optional[dict[str, Any]]
+        dataset_description: str | None
+        dataset_tags: DatasetTags | None
         file_name: str
-        file_description: Optional[str]
+        file_description: str | None
 
     async def _load_metadata(self, metadata_paths: list[str]) -> MetadataResult:
-        quality_manifest = await self._read_json_from_candidates(
-            metadata_paths, "quality_manifest.json"
-        )
-        data_dictionary = await self._read_json_from_candidates(
-            metadata_paths, "data_dictionary.json"
-        )
+        quality_manifest = await self._read_json_from_candidates(metadata_paths, "quality_manifest.json")
+        data_dictionary = await self._read_json_from_candidates(metadata_paths, "data_dictionary.json")
 
         if not quality_manifest and not data_dictionary:
             return self.MetadataResult(metadata=None)
 
-        metadata_payload: dict[str, Any] = {}
+        metadata_payload: JSONDict = {}
         if quality_manifest:
             metadata_payload.update(
                 {
@@ -182,49 +196,30 @@ class DiscoveryService:
 
         columns = self._extract_columns(data_dictionary)
         if columns:
-            metadata_payload["columns"] = columns
+            metadata_payload["columns"] = [json_value(column) for column in columns]
 
         if "version" not in metadata_payload:
             metadata_payload["version"] = "v1"
 
-        return self.MetadataResult(metadata=SpatialDatasetFileMetadata(**metadata_payload))
+        return self.MetadataResult(metadata=SpatialDatasetFileMetadata.model_validate(metadata_payload))
 
     async def _load_catalog_metadata(
         self,
         dataset_slug: str,
         file_slug: str,
-        manifest_paths: dict[tuple[str, Optional[str]], str],
+        manifest_paths: dict[tuple[str, str | None], str],
     ) -> CatalogMetadataResult:
         dataset_manifest_path = manifest_paths.get((dataset_slug, None))
         layer_manifest_path = manifest_paths.get((dataset_slug, file_slug))
-        dataset_manifest = (
-            await self._read_json(dataset_manifest_path)
-            if dataset_manifest_path
-            else None
-        )
-        layer_manifest = (
-            await self._read_json(layer_manifest_path)
-            if layer_manifest_path
-            else None
-        )
-        catalog_paths = [
-            path for path in [dataset_manifest_path, layer_manifest_path] if path
-        ]
+        dataset_manifest = await self._read_json(dataset_manifest_path) if dataset_manifest_path else None
+        layer_manifest = await self._read_json(layer_manifest_path) if layer_manifest_path else None
+        catalog_paths = [path for path in [dataset_manifest_path, layer_manifest_path] if path]
         dataset_title = self._extract_manifest_string(dataset_manifest, "title")
-        dataset_description = self._extract_manifest_string(
-            dataset_manifest, "description"
-        )
+        dataset_description = self._extract_manifest_string(dataset_manifest, "description")
         dataset_tags = self._extract_manifest_tags(dataset_manifest)
 
-        file_title = (
-            self._extract_manifest_string(layer_manifest, "title")
-            or dataset_title
-            or file_slug
-        )
-        file_description = (
-            self._extract_manifest_string(layer_manifest, "description")
-            or dataset_description
-        )
+        file_title = self._extract_manifest_string(layer_manifest, "title") or dataset_title or file_slug
+        file_description = self._extract_manifest_string(layer_manifest, "description") or dataset_description
 
         return self.CatalogMetadataResult(
             object_paths=catalog_paths,
@@ -235,35 +230,27 @@ class DiscoveryService:
             file_description=file_description,
         )
 
-    async def _read_json_from_candidates(
-        self, metadata_paths: list[str], filename: str
-    ) -> Optional[dict[str, Any]]:
+    async def _read_json_from_candidates(self, metadata_paths: list[str], filename: str) -> JSONDict | None:
         for path in metadata_paths:
             if path.endswith(filename):
                 return await self._read_json(path)
         return None
 
-    async def _read_json(self, remote_path: str) -> dict[str, Any]:
+    async def _read_json(self, remote_path: str) -> JSONDict:
         with tempfile.TemporaryDirectory(prefix="discovery_metadata_") as tmpdir:
             local_path = Path(tmpdir) / Path(remote_path).name
             await self.storage_client.download_file(remote_path, local_path)
-            return json.loads(local_path.read_text(encoding="utf-8"))
+            return json_dict(json.loads(local_path.read_text(encoding="utf-8")))
 
-    def _extract_columns(
-        self, data_dictionary: Optional[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+    def _extract_columns(self, data_dictionary: JSONDict | None) -> list[JSONDict]:
         if not data_dictionary:
             return []
         columns = data_dictionary.get("columns", data_dictionary)
         if isinstance(columns, list):
-            return [
-                self._normalize_column(column)
-                for column in columns
-                if isinstance(column, dict)
-            ]
+            return [self._normalize_column(column) for column in columns if isinstance(column, dict)]
         return []
 
-    def _normalize_column(self, column: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_column(self, column: JSONDict) -> JSONDict:
         aliases = {
             "numNullValues": "num_null_values",
             "numUniqueValues": "num_unique_values",
@@ -277,9 +264,7 @@ class DiscoveryService:
             normalized.pop(source_key, None)
         return normalized
 
-    def _extract_manifest_string(
-        self, manifest: Optional[dict[str, Any]], key: str
-    ) -> Optional[str]:
+    def _extract_manifest_string(self, manifest: JSONDict | None, key: str) -> str | None:
         if not manifest:
             return None
         value = manifest.get(key)
@@ -287,14 +272,18 @@ class DiscoveryService:
             return value.strip()
         return None
 
-    def _extract_manifest_tags(
-        self, manifest: Optional[dict[str, Any]]
-    ) -> Optional[dict[str, Any]]:
+    def _extract_manifest_tags(self, manifest: JSONDict | None) -> DatasetTags | None:
         if not manifest:
             return None
         tags = manifest.get("tags")
         if isinstance(tags, dict):
-            return tags
+            parsed_tags: DatasetTags = {}
+            for key, value in tags.items():
+                if isinstance(value, str):
+                    parsed_tags[str(key)] = value
+                elif isinstance(value, list) and all(isinstance(item, str) for item in value):
+                    parsed_tags[str(key)] = [item for item in value if isinstance(item, str)]
+            return parsed_tags or None
         return None
 
     def _build_location_path(self, format_type: str, format_files: list[str]) -> str:
@@ -316,9 +305,7 @@ class DiscoveryService:
         if not format_root:
             return first_path
 
-        has_nested_parquet = any(
-            self._parent_path(path) != format_root for path in format_files
-        )
+        has_nested_parquet = any(self._parent_path(path) != format_root for path in format_files)
         if has_nested_parquet:
             return f"{format_root}/**/*.parquet"
 
@@ -327,9 +314,9 @@ class DiscoveryService:
 
         return f"{format_root}/*.parquet"
 
-    def _format_root_from_path(self, path: str) -> Optional[str]:
+    def _format_root_from_path(self, path: str) -> str | None:
         parts = [part for part in path.split("/") if part]
-        if len(parts) < 5:
+        if len(parts) < MIN_DISCOVERY_PATH_PARTS:
             return None
         return "/".join(parts[:4])
 
