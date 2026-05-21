@@ -3,9 +3,7 @@ import { getCollectionBySlug, getCollectionTagValues } from "@/lib/api-client";
 import { collectionDatasetsTagsSelf, requestOrigin } from "@/lib/api-links";
 import { jsonProblem } from "@/lib/api-problem";
 
-export const Route = createFileRoute(
-  "/api/collections/$collectionSlug/datasets/tags"
-)({
+export const Route = createFileRoute("/api/collections/$collectionSlug/datasets/tags")({
   server: {
     handlers: {
       GET: async ({ params, request }) => {

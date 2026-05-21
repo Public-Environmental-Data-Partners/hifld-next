@@ -1,26 +1,23 @@
+import type { ApiLinkMap } from "@/lib/api-links";
+
 /** RFC 7807-style problem response for JSON APIs (application/problem+json). */
 
 export type ProblemBody = {
   type: string;
   title: string;
   status: number;
-  detail?: string;
-  instance?: string;
-  links?: Record<string, string>;
+  detail?: string | undefined;
+  instance?: string | undefined;
+  links?: ApiLinkMap | undefined;
 };
 
 export type JsonProblemOptions = {
-  type?: string;
-  instance?: string;
-  links?: Record<string, string>;
+  type?: string | undefined;
+  instance?: string | undefined;
+  links?: ApiLinkMap | undefined;
 };
 
-export function jsonProblem(
-  status: number,
-  title: string,
-  detail?: string,
-  opts?: JsonProblemOptions
-): Response {
+export function jsonProblem(status: number, title: string, detail?: string, opts?: JsonProblemOptions): Response {
   const type = opts?.type ?? "about:blank";
   const body: ProblemBody = {
     type,

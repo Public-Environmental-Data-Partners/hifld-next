@@ -1,9 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { HIFLD_CATALOG_SKILL_MD } from "@/lib/agent-skills";
 
-export const Route = createFileRoute(
-  "/.well-known/agent-skills/hifld-catalog/SKILL.md",
-)({
+export const Route = createFileRoute("/.well-known/agent-skills/hifld-catalog/SKILL.md")({
   server: {
     handlers: {
       GET: () =>

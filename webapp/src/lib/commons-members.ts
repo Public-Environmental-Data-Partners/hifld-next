@@ -17,8 +17,7 @@ export const COMMONS_MEMBERS = [
     name: "Public Environmental Data Partners",
     url: "https://screening-tools.com/",
     logoSize: "default",
-    logo:
-      "https://images.squarespace-cdn.com/content/v1/6793060d1570ff20aceb1125/807a2f81-c6a3-4a9b-adbc-86a84a81fa7e/pedp_mark_pad.png?format=300w",
+    logo: "https://images.squarespace-cdn.com/content/v1/6793060d1570ff20aceb1125/807a2f81-c6a3-4a9b-adbc-86a84a81fa7e/pedp_mark_pad.png?format=300w",
   },
   {
     name: "Data Rescue Project",

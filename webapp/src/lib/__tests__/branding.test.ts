@@ -16,15 +16,15 @@ describe("PEDP branding", () => {
     expect(packageJson.dependencies).toHaveProperty("@fontsource-variable/figtree");
     expect(styles).toContain('@import "@fontsource-variable/figtree"');
     expect(styles).toContain('--font-sans: "Figtree Variable", "Figtree"');
-    expect(styles).toContain("--background: #F4F1EC");
-    expect(styles).toContain("--foreground: #42413D");
-    expect(styles).toContain("--card: #FFFFF8");
-    expect(styles).toContain("--secondary: #EBE4DB");
-    expect(styles).toContain("--border: #D4CBBF");
-    expect(styles).toContain("--muted-foreground: #6D6659");
-    expect(styles).toContain("--accent: #C0E6AA");
-    expect(styles).toContain("--primary: #42413D");
-    expect(styles).toContain("--chart-1: #C5E8FF");
+    expect(styles).toContain("--background: #f4f1ec");
+    expect(styles).toContain("--foreground: #42413d");
+    expect(styles).toContain("--card: #fffff8");
+    expect(styles).toContain("--secondary: #ebe4db");
+    expect(styles).toContain("--border: #d4cbbf");
+    expect(styles).toContain("--muted-foreground: #6d6659");
+    expect(styles).toContain("--accent: #c0e6aa");
+    expect(styles).toContain("--primary: #42413d");
+    expect(styles).toContain("--chart-1: #c5e8ff");
   });
 
   it("uses PEDP colors for installed app chrome", () => {
@@ -41,6 +41,6 @@ describe("PEDP branding", () => {
     expect(mapInitialization).toContain('"fill-color": "#C5E8FF"');
     expect(mapInitialization).toContain('"line-color": "#6D6659"');
     expect(mapInitialization).toContain('"circle-color": "#C0E6AA"');
-    expect(viewerUtils).toContain('colors[0] || "#C5E8FF"');
+    expect(viewerUtils).toContain('colors[0] ?? "#C5E8FF"');
   });
 });

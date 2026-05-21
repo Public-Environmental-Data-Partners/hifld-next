@@ -1,11 +1,7 @@
-import { useState } from "react";
 import { ClipboardList } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { getPostHog } from "@/lib/analytics";
 
 export const SURVEY_URL = "https://sugary-patio-2bd.notion.site/f7192090b55a41748a182e2e6c1a6114";
@@ -55,28 +51,14 @@ export function SurveyButton() {
             <ClipboardList className="h-6 w-6" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent 
-          side="left" 
-          align="end"
-          className="w-80"
-        >
+        <PopoverContent side="left" align="end" className="w-80">
           <div className="space-y-3">
             <div>
               <h4 className="font-semibold text-sm">Help us improve</h4>
-              <p className="text-sm text-muted-foreground mt-1">
-                Share your feedback about HIFLD Next
-              </p>
+              <p className="text-sm text-muted-foreground mt-1">Share your feedback about HIFLD Next</p>
             </div>
-            <Button
-              asChild
-              className="w-full"
-              onClick={handleSurveyClick}
-            >
-              <a
-                href={SURVEY_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
+            <Button asChild className="w-full" onClick={handleSurveyClick}>
+              <a href={SURVEY_URL} target="_blank" rel="noopener noreferrer">
                 Take Survey
               </a>
             </Button>
@@ -86,4 +68,3 @@ export function SurveyButton() {
     </div>
   );
 }
-

@@ -1,21 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  getCollectionBySlug,
-  getDatasetBySlug,
-  getDatasetFileBySlug,
-} from "@/lib/api-client";
+import { getCollectionBySlug, getDatasetBySlug, getDatasetFileBySlug } from "@/lib/api-client";
 import { attachDownloadZipLinksToFile } from "@/lib/api-file-sources";
-import {
-  collectionSelf,
-  datasetSelf,
-  fileSelf,
-  requestOrigin,
-} from "@/lib/api-links";
+import { collectionSelf, datasetSelf, fileSelf, requestOrigin } from "@/lib/api-links";
 import { jsonProblem } from "@/lib/api-problem";
 
-export const Route = createFileRoute(
-  "/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug"
-)({
+export const Route = createFileRoute("/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug")({
   server: {
     handlers: {
       GET: async ({ params, request }) => {
@@ -52,13 +41,7 @@ export const Route = createFileRoute(
         const cs = params.collectionSlug;
         const ds = params.datasetSlug;
         const fs = params.fileSlug;
-        const file = attachDownloadZipLinksToFile(
-          result.file,
-          origin,
-          cs,
-          ds,
-          fs
-        );
+        const file = attachDownloadZipLinksToFile(result.file, origin, cs, ds, fs);
 
         return Response.json({
           links: {
@@ -74,4 +57,3 @@ export const Route = createFileRoute(
     },
   },
 });
-

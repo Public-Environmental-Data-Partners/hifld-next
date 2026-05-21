@@ -16,47 +16,45 @@ export function getLocationOptions(formatEntry?: DatasetFormat): Array<{ id: num
   }
 
   const locations = new Map<number, { id: number; name: string }>();
-  formatEntry.sources.forEach((source) => {
+  for (const source of formatEntry.sources) {
     const locationId = source.storage_location?.id;
     const locationName = source.storage_location?.name;
     if (locationId && locationName && !locations.has(locationId)) {
       locations.set(locationId, { id: locationId, name: locationName });
     }
-  });
+  }
 
   return Array.from(locations.values());
 }
 
 export function getVersionSourcesForLocation(
   formatEntry: DatasetFormat | undefined,
-  locationId: number | null | undefined
+  locationId: number | null | undefined,
 ): DatasetSource[] {
   if (!formatEntry?.sources || !locationId) {
     return [];
   }
 
   const byVersion = new Map<string, DatasetSource>();
-  formatEntry.sources.forEach((source) => {
+  for (const source of formatEntry.sources) {
     if (source.storage_location?.id !== locationId) {
-      return;
+      continue;
     }
 
     const versionKey = String(source.version ?? "1");
     if (!byVersion.has(versionKey)) {
       byVersion.set(versionKey, source);
     }
-  });
+  }
 
   return Array.from(byVersion.values()).sort((left, right) =>
-    compareVersionValues(left.version ?? "1", right.version ?? "1")
+    compareVersionValues(left.version ?? "1", right.version ?? "1"),
   );
 }
 
-export function getComparableLocations(
-  formatEntry?: DatasetFormat
-): Array<{ id: number; name: string }> {
+export function getComparableLocations(formatEntry?: DatasetFormat): Array<{ id: number; name: string }> {
   return getLocationOptions(formatEntry).filter(
-    (location) => getVersionSourcesForLocation(formatEntry, location.id).length >= 2
+    (location) => getVersionSourcesForLocation(formatEntry, location.id).length >= 2,
   );
 }
 
@@ -66,7 +64,7 @@ export function hasAnyComparableLocations(formatEntry?: DatasetFormat): boolean 
 
 export function buildCompareSearchForLocation(
   formatEntry: DatasetFormat | undefined,
-  locationId: number | null | undefined
+  locationId: number | null | undefined,
 ): CompareSearchState | null {
   if (!formatEntry || !locationId) {
     return null;

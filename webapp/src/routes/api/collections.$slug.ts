@@ -1,20 +1,100 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  getCollectionBySlug,
-  getCollectionDatasets,
-} from "@/lib/api-client";
+import { z } from "zod";
+import type { DatasetTags } from "@/lib/api-client";
+import { getCollectionBySlug, getCollectionDatasets } from "@/lib/api-client";
 import { omitDescriptionsFromDatasets } from "@/lib/api-dataset-shaping";
-import { jsonProblem } from "@/lib/api-problem";
 import {
   buildLinkHeader,
-  collectionDatasetsListUrl,
+  type CollectionDatasetsLinkBase,
   collectionDatasetsPaginationLinks,
   datasetSelf,
   requestOrigin,
-  type ApiLinkMap,
 } from "@/lib/api-links";
+import { jsonProblem } from "@/lib/api-problem";
 
 const DEFAULT_COLLECTION_PAGE_SIZE = 50;
+
+const tagFiltersSchema = z.record(z.string(), z.union([z.string(), z.array(z.string())]));
+
+interface CollectionApiQuery {
+  search?: string;
+  tagFilters?: DatasetTags;
+  tagFiltersParam?: string;
+  omit?: string;
+  includeUrls: boolean;
+  limit: number;
+  offset: number;
+}
+
+function parsePositiveLimit(value: string | null): number | Response {
+  if (value === null || value === "") {
+    return DEFAULT_COLLECTION_PAGE_SIZE;
+  }
+
+  const parsed = parseInt(value, 10);
+  if (Number.isNaN(parsed) || parsed < 1) {
+    return jsonProblem(400, "Invalid limit", "limit must be a positive integer");
+  }
+
+  return parsed;
+}
+
+function parseNonNegativeOffset(value: string | null): number | Response {
+  const parsed = value !== null && value !== "" ? parseInt(value, 10) : 0;
+  if (Number.isNaN(parsed) || parsed < 0) {
+    return jsonProblem(400, "Invalid offset", "offset must be a non-negative integer");
+  }
+
+  return parsed;
+}
+
+function parseTagFilters(value: string | null): DatasetTags | Response | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    return tagFiltersSchema.parse(JSON.parse(value));
+  } catch {
+    return jsonProblem(400, "Invalid tag_filters", "tag_filters must be valid JSON");
+  }
+}
+
+function parseCollectionApiQuery(searchParams: URLSearchParams): CollectionApiQuery | Response {
+  const queryParam = searchParams.get("query");
+  const searchParam = searchParams.get("search");
+  const search = (queryParam ?? searchParam)?.trim();
+  const limit = parsePositiveLimit(searchParams.get("limit"));
+  if (limit instanceof Response) return limit;
+
+  const offset = parseNonNegativeOffset(searchParams.get("offset"));
+  if (offset instanceof Response) return offset;
+
+  const tagFiltersParam = searchParams.get("tag_filters");
+  const tagFilters = parseTagFilters(tagFiltersParam);
+  if (tagFilters instanceof Response) return tagFilters;
+
+  const omit = searchParams.get("omit") ?? undefined;
+  const result: CollectionApiQuery = {
+    includeUrls: searchParams.get("include_urls") === "true",
+    limit,
+    offset,
+  };
+  if (search && search.length > 0) result.search = search;
+  if (tagFilters !== undefined) result.tagFilters = tagFilters;
+  if (tagFiltersParam !== null) result.tagFiltersParam = tagFiltersParam;
+  if (omit !== undefined) result.omit = omit;
+  return result;
+}
+
+function collectionLinkBase(query: CollectionApiQuery): CollectionDatasetsLinkBase {
+  const result: CollectionDatasetsLinkBase = {};
+  if (query.search !== undefined) result.query = query.search;
+  if (query.includeUrls) result.include_urls = true;
+  if (query.tagFiltersParam !== undefined) result.tag_filters = query.tagFiltersParam;
+  if (query.omit !== undefined) result.omit = query.omit;
+  return result;
+}
 
 export const Route = createFileRoute("/api/collections/$slug")({
   server: {
@@ -28,53 +108,10 @@ export const Route = createFileRoute("/api/collections/$slug")({
         }
 
         const url = new URL(request.url);
-        const queryParam = url.searchParams.get("query");
-        const searchParam = url.searchParams.get("search");
-        const search = (queryParam ?? searchParam)?.trim() || undefined;
+        const query = parseCollectionApiQuery(url.searchParams);
+        if (query instanceof Response) return query;
 
-        const limitRaw = url.searchParams.get("limit");
-        let effectiveLimit: number;
-        if (limitRaw === null || limitRaw === "") {
-          effectiveLimit = DEFAULT_COLLECTION_PAGE_SIZE;
-        } else {
-          const n = parseInt(limitRaw, 10);
-          if (Number.isNaN(n) || n < 1) {
-            return jsonProblem(
-              400,
-              "Invalid limit",
-              "limit must be a positive integer"
-            );
-          }
-          effectiveLimit = n;
-        }
-
-        const offsetRaw = url.searchParams.get("offset");
-        const offset =
-          offsetRaw !== null && offsetRaw !== ""
-            ? parseInt(offsetRaw, 10)
-            : 0;
-        if (Number.isNaN(offset) || offset < 0) {
-          return jsonProblem(400, "Invalid offset", "offset must be a non-negative integer");
-        }
-
-        const includeUrls = url.searchParams.get("include_urls") === "true";
-
-        let tagFilters: Record<string, string | string[]> | undefined;
-        const tagFiltersParam = url.searchParams.get("tag_filters");
-        if (tagFiltersParam) {
-          try {
-            tagFilters = JSON.parse(tagFiltersParam);
-          } catch {
-            return jsonProblem(
-              400,
-              "Invalid tag_filters",
-              "tag_filters must be valid JSON"
-            );
-          }
-        }
-
-        const omitDescription = url.searchParams
-          .get("omit")
+        const omitDescription = query.omit
           ?.split(",")
           .map((s) => s.trim())
           .includes("description");
@@ -82,11 +119,11 @@ export const Route = createFileRoute("/api/collections/$slug")({
         const datasetsResponse = await getCollectionDatasets({
           data: {
             collectionId: collection.id,
-            search,
-            includeUrls,
-            limit: effectiveLimit,
-            offset,
-            tagFilters,
+            search: query.search,
+            includeUrls: query.includeUrls,
+            limit: query.limit,
+            offset: query.offset,
+            tagFilters: query.tagFilters,
           },
         });
 
@@ -96,24 +133,13 @@ export const Route = createFileRoute("/api/collections/$slug")({
         }
 
         const origin = requestOrigin(request);
-        const effectiveQuery = (queryParam ?? searchParam)?.trim() || undefined;
-        const linkBase = {
-          query: effectiveQuery,
-          include_urls: includeUrls || undefined,
-          tag_filters: tagFiltersParam ?? undefined,
-          omit: url.searchParams.get("omit") ?? undefined,
-        };
+        const linkBase = collectionLinkBase(query);
 
-        const pageLinks = collectionDatasetsPaginationLinks(
-          origin,
-          params.slug,
-          linkBase,
-          {
-            total: datasetsResponse.total,
-            limit: effectiveLimit,
-            offset,
-          }
-        );
+        const pageLinks = collectionDatasetsPaginationLinks(origin, params.slug, linkBase, {
+          total: datasetsResponse.total,
+          limit: query.limit,
+          offset: query.offset,
+        });
 
         const datasetsWithLinks = items.map((d) => ({
           ...d,
@@ -133,11 +159,11 @@ export const Route = createFileRoute("/api/collections/$slug")({
             collection,
             datasets: datasetsWithLinks,
             total: datasetsResponse.total,
-            limit: datasetsResponse.limit ?? effectiveLimit,
+            limit: datasetsResponse.limit ?? query.limit,
             offset: datasetsResponse.offset,
             links: pageLinks,
           },
-          { headers }
+          { headers },
         );
       },
     },

@@ -1,10 +1,10 @@
-import { defineConfig } from 'vite'
-import { devtools } from '@tanstack/devtools-vite'
-import { tanstackStart } from '@tanstack/react-start/plugin/vite'
-import viteReact from '@vitejs/plugin-react'
-import viteTsConfigPaths from 'vite-tsconfig-paths'
-import tailwindcss from '@tailwindcss/vite'
-import { nitro } from 'nitro/vite'
+import tailwindcss from "@tailwindcss/vite";
+import { devtools } from "@tanstack/devtools-vite";
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import viteReact from "@vitejs/plugin-react";
+import { nitro } from "nitro/vite";
+import viteTsConfigPaths from "vite-tsconfig-paths";
+import { defineConfig } from "vitest/config";
 
 const config = defineConfig({
   // Nitro's node_modules trace copies only part of this package (e.g. dist/index.mjs),
@@ -17,19 +17,21 @@ const config = defineConfig({
     nitro(),
     // this is the plugin that enables path aliases
     viteTsConfigPaths({
-      projects: ['./tsconfig.json'],
+      projects: ["./tsconfig.json"],
     }),
     tailwindcss(),
     tanstackStart({
-      routeFileIgnorePattern: '(/__tests__/|\\.(test|spec)\\.(ts|tsx)$)',
+      router: {
+        routeFileIgnorePattern: "(/__tests__/|\\.(test|spec)\\.(ts|tsx)$)",
+      },
     }),
     viteReact(),
   ],
   test: {
     globals: true,
-    environment: 'jsdom',
-    setupFiles: './src/test/setup.ts',
+    environment: "jsdom",
+    setupFiles: "./src/test/setup.ts",
   },
-})
+});
 
-export default config
+export default config;

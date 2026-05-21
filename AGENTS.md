@@ -16,12 +16,23 @@ uv run pytest
 
 For narrower changes, also run the targeted tests for the touched subsystem first, then the full gate above.
 
+For any change touching `webapp`, run these from `webapp/` before claiming the work is complete:
+
+```bash
+npm run check
+npm run typecheck
+npm test
+```
+
+Run `npm run build` as well for routing, bundling, environment, or deployment-facing changes.
+
 ## Python Type Safety
 
 - Do not use `Any`, `dict[str, Any]`, `list[Any]`, or `cast(Any, ...)` in application code.
 - Do not use `object` as a convenience escape hatch. It is acceptable only at true external boundaries such as JSON validation, Pydantic validators, SQLAlchemy hooks, pandas dtype inspection, or similar APIs that genuinely accept unknown input.
 - Prefer explicit dataclasses, Pydantic models, `TypedDict`, type aliases, or narrow unions over broad dynamic typing.
 - Use native Ruff, Pyright, and BasedPyright checks. Do not add custom type-check scripts to compensate for weak typing.
+- In TypeScript application code, do not use `any`, `unknown`, `object`, `@ts-ignore`, or non-null assertions as escape hatches. Parse external data into explicit zod schemas, interfaces, or narrow unions at the boundary.
 
 ## Ruff And Formatting
 

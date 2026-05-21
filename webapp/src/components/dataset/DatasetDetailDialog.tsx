@@ -1,26 +1,23 @@
-import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import {
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
 import type { DatasetWithUrls } from "@/lib/api-client";
-import { PMTilesFormat } from "./PMTilesFormat";
 import { GeoParquetFormat } from "./GeoParquetFormat";
+import { PMTilesFormat } from "./PMTilesFormat";
+
+interface SelectedFormatSource {
+  storageLocationId: number;
+  version: string | number;
+}
+
+interface SelectedFormatSources {
+  [formatType: string]: SelectedFormatSource | undefined;
+}
 
 interface DatasetDetailDialogProps {
   dataset: DatasetWithUrls;
-  selectedSources: Record<
-    string,
-    { storageLocationId: number; version: number }
-  >;
-  onSourceChange: (
-    formatType: string,
-    storageLocationId: number,
-    version: number
-  ) => void;
+  selectedSources: SelectedFormatSources;
+  onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
   pmtilesUrl: string | null;
   geoparquetUrl: string | null;
   featureCount: number | undefined;
@@ -39,12 +36,8 @@ export function DatasetDetailDialog({
     .replace(/&nbsp;/g, " ")
     .trim();
 
-  const pmtilesFormat = dataset.formats?.find(
-    (f) => f.format.format_type === "pmtiles"
-  );
-  const geoparquetFormat = dataset.formats?.find(
-    (f) => f.format.format_type === "geoparquet"
-  );
+  const pmtilesFormat = dataset.formats?.find((f) => f.format.format_type === "pmtiles");
+  const geoparquetFormat = dataset.formats?.find((f) => f.format.format_type === "geoparquet");
 
   return (
     <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
@@ -84,13 +77,11 @@ export function DatasetDetailDialog({
 
                 return (
                   <div key={key}>
-                    <p className="text-sm text-muted-foreground mb-1">
-                      {label}
-                    </p>
+                    <p className="text-sm text-muted-foreground mb-1">{label}</p>
                     {Array.isArray(value) ? (
                       <div className="flex flex-wrap gap-1">
-                        {value.map((v: string, idx: number) => (
-                          <Badge key={idx} variant="outline">
+                        {value.map((v: string) => (
+                          <Badge key={v} variant="outline">
                             {v}
                           </Badge>
                         ))}
@@ -131,11 +122,7 @@ export function DatasetDetailDialog({
                       geoparquetUrl={geoparquetUrl}
                       selectedSource={selectedSources["geoparquet"] || null}
                       onSourceChange={(storageLocationId, version) => {
-                        onSourceChange(
-                          "geoparquet",
-                          storageLocationId,
-                          version
-                        );
+                        onSourceChange("geoparquet", storageLocationId, version);
                       }}
                     />
                   )}

@@ -1,40 +1,100 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
-import { useRef, useState, useEffect, useMemo } from "react";
-import type { DatasetFile } from "@/lib/api-client";
-import {
-  getCollectionBySlug,
-  getDatasetBySlug,
-  getDatasetFileById,
-  getDatasetFileBySlug,
-} from "@/lib/api-client";
-import { ViewerHeader } from "@/components/viewer/ViewerHeader";
-import { MapControls } from "@/components/viewer/MapControls";
+import type maplibregl from "maplibre-gl";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { PanelImperativeHandle } from "react-resizable-panels";
+import { FormatSourceSelector } from "@/components/dataset/FormatSourceSelector";
+import { buildSourceFileUrl } from "@/components/dataset/sourceUrls";
+import { compareVersionValues } from "@/components/dataset/versionLabel";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageLoader } from "@/components/ui/page-loader";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { FeatureHoverPopup } from "@/components/viewer/FeatureHoverPopup";
-import { MapLegend } from "@/components/viewer/MapLegend";
 import { LayerStylingEditor } from "@/components/viewer/LayerStylingEditor";
-import { useMapInitialization } from "@/components/viewer/useMapInitialization";
+import { MapControls } from "@/components/viewer/MapControls";
+import { MapLegend } from "@/components/viewer/MapLegend";
+import type {
+  HoverInfo,
+  LayerStyle,
+  LayerStylesById,
+  PopupPropertyEntry,
+  VectorLayerInfo,
+} from "@/components/viewer/types";
 import { useLayerStyling } from "@/components/viewer/useLayerStyling";
-import type { VectorLayerInfo, LayerStyle, HoverInfo } from "@/components/viewer/types";
+import { useMapInitialization } from "@/components/viewer/useMapInitialization";
 import {
-  parseBreaks,
+  computeQuantileBreaks,
+  DEFAULT_BREAK_COUNT,
   getColorRamp,
   getLegendItems,
-  computeQuantileBreaks,
   getSampledValues,
-  DEFAULT_BREAK_COUNT,
+  parseBreaks,
 } from "@/components/viewer/utils";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { FormatSourceSelector } from "@/components/dataset/FormatSourceSelector";
-import type { PanelImperativeHandle } from "react-resizable-panels";
-import { PageLoader } from "@/components/ui/page-loader";
-import { compareVersionValues } from "@/components/dataset/versionLabel";
-import { buildSourceFileUrl } from "@/components/dataset/sourceUrls";
+import { ViewerHeader } from "@/components/viewer/ViewerHeader";
+import type { Dataset, DatasetFile, DatasetFormat, DatasetSource } from "@/lib/api-client";
+import { getCollectionBySlug, getDatasetBySlug, getDatasetFileById, getDatasetFileBySlug } from "@/lib/api-client";
 
-export const Route = createFileRoute(
-  "/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer"
-)({
+interface SourceSelection {
+  storageLocationId: number;
+  version: string | number;
+}
+
+interface SelectedSourcesByFormat {
+  pmtiles?: SourceSelection;
+  [formatType: string]: SourceSelection | undefined;
+}
+
+interface SourceEntry {
+  source: DatasetSource;
+  version: string | number;
+}
+
+interface SourcesByLocationId {
+  [storageLocationId: number]: SourceEntry | undefined;
+}
+
+function initialSourceSelection(formatEntry: DatasetFormat): SourceSelection | undefined {
+  const sourcesByLocation: SourcesByLocationId = {};
+
+  for (const source of formatEntry.sources ?? []) {
+    const storageLocationId = source.storage_location?.id;
+    if (storageLocationId === undefined) {
+      continue;
+    }
+
+    const version = source.version ?? "1";
+    const existing = sourcesByLocation[storageLocationId];
+    if (!existing || compareVersionValues(version, existing.version) < 0) {
+      sourcesByLocation[storageLocationId] = { source, version };
+    }
+  }
+
+  const firstEntry = Object.values(sourcesByLocation)[0];
+  const storageLocationId = firstEntry?.source.storage_location?.id;
+  if (storageLocationId === undefined || !firstEntry) {
+    return undefined;
+  }
+
+  return {
+    storageLocationId,
+    version: firstEntry.version,
+  };
+}
+
+function initialSelectedSources(file: DatasetFile): SelectedSourcesByFormat {
+  const selectedSources: SelectedSourcesByFormat = {};
+
+  for (const formatEntry of file.formats ?? []) {
+    const selection = initialSourceSelection(formatEntry);
+    if (selection) {
+      selectedSources[formatEntry.format.format_type] = selection;
+    }
+  }
+
+  return selectedSources;
+}
+
+export const Route = createFileRoute("/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer")({
   loader: async ({ params }) => {
     const collection = await getCollectionBySlug({
       data: { slug: params.collectionSlug },
@@ -95,93 +155,48 @@ function FileViewerPage() {
   const { dataset, file } = Route.useLoaderData();
   const { collectionSlug, datasetSlug } = Route.useParams();
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  
+
   const [vectorLayers, setVectorLayers] = useState<VectorLayerInfo[]>([]);
-  const [layerStyles, setLayerStyles] = useState<Record<string, LayerStyle>>({});
+  const [layerStyles, setLayerStyles] = useState<LayerStylesById>({});
   const [colorSectionOpen, setColorSectionOpen] = useState(true);
   const [sizeSectionOpen, setSizeSectionOpen] = useState(true);
   const [legendVisible, setLegendVisible] = useState(true);
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
   const [pinnedPopupInfo, setPinnedPopupInfo] = useState<HoverInfo | null>(null);
-  const [selectedSources, setSelectedSources] = useState<
-    Record<string, { storageLocationId: number; version: string | number }>
-  >({});
+  const [selectedSources, setSelectedSources] = useState<SelectedSourcesByFormat>({});
 
   // Initialize selected sources from file formats
   useEffect(() => {
-    const initial: Record<
-      string,
-      { storageLocationId: number; version: string | number }
-    > = {};
-    file.formats?.forEach((formatEntry) => {
-      const formatType = formatEntry.format.format_type;
-      if (formatEntry.sources && formatEntry.sources.length > 0) {
-        type SourceType = NonNullable<DatasetFile["formats"]>[0]["sources"][0];
-        type SourceEntry = { source: SourceType; version: string | number };
-        const sourcesByLocation: Record<number, SourceEntry> = {};
-
-        formatEntry.sources.forEach((source: SourceType) => {
-          const locId = source.storage_location?.id;
-          const version = source.version || "1";
-          if (locId) {
-            const existing = sourcesByLocation[locId];
-            if (!existing) {
-              sourcesByLocation[locId] = { source, version };
-            } else if (compareVersionValues(version, existing.version) < 0) {
-              sourcesByLocation[locId] = { source, version };
-            }
-          }
-        });
-
-        const firstEntry = Object.values(sourcesByLocation)[0];
-        if (firstEntry?.source.storage_location?.id) {
-          initial[formatType] = {
-            storageLocationId: firstEntry.source.storage_location.id,
-            version: firstEntry.version,
-          };
-        }
-      }
-    });
-    setSelectedSources(initial);
+    setSelectedSources(initialSelectedSources(file));
   }, [file]);
 
-  const getSelectedSource = (
-    formatType: string
-  ): NonNullable<DatasetFile["formats"]>[0]["sources"][0] | null => {
+  const getSelectedSource = (formatType: string): DatasetSource | null => {
     const selection = selectedSources[formatType];
     if (!selection) return null;
 
-    const formatEntry = file.formats?.find(
-      (entry) => entry.format.format_type === formatType
-    );
-    if (!formatEntry || !formatEntry.sources) return null;
+    const formatEntry = file.formats?.find((entry) => entry.format.format_type === formatType);
+    if (!formatEntry?.sources) return null;
 
     return (
       formatEntry.sources.find(
         (source) =>
           source.storage_location?.id === selection.storageLocationId &&
-          String(source.version || "1") === String(selection.version)
+          String(source.version || "1") === String(selection.version),
       ) || null
     );
   };
 
   const pmtilesSource = getSelectedSource("pmtiles");
   const pmtilesUrl = pmtilesSource ? buildSourceFileUrl(pmtilesSource) : null;
-  const pmtilesFormatEntry = file.formats?.find(
-    (entry) => entry.format.format_type === "pmtiles"
-  );
+  const pmtilesFormatEntry = file.formats?.find((entry) => entry.format.format_type === "pmtiles");
 
   // Map initialization hook
-  const {
-    mapRef,
-    setHoverFeature,
-    clearHoverFeature,
-  } = useMapInitialization(
+  const { mapRef, setHoverFeature, clearHoverFeature } = useMapInitialization(
     mapContainerRef,
     pmtilesUrl,
     setVectorLayers,
     setHoverInfo,
-    setPinnedPopupInfo
+    setPinnedPopupInfo,
   );
 
   // Layer styling hook
@@ -189,27 +204,24 @@ function FileViewerPage() {
 
   // Auto-compute breaks when color property changes
   useEffect(() => {
-    if (!mapRef.current) return;
-    vectorLayers.forEach((layer) => {
+    const map = mapRef.current;
+    if (!map) return;
+    for (const layer of vectorLayers) {
       const style = layerStyles[layer.id];
-      if (!style?.colorProperty || style.breaksText) return;
-      const values = getSampledValues(
-        mapRef.current!,
-        layer.id,
-        style.colorProperty
-      );
+      if (!style?.colorProperty || style.breaksText) continue;
+      const values = getSampledValues(map, layer.id, style.colorProperty);
       const breaks = computeQuantileBreaks(values, DEFAULT_BREAK_COUNT);
       const nextText = breaks.join(", ");
-      if (!nextText) return;
+      if (!nextText) continue;
       setLayerStyles((prev) => ({
         ...prev,
         [layer.id]: {
-          ...prev[layer.id],
+          ...style,
           breaksText: nextText,
         },
       }));
-    });
-  }, [layerStyles, vectorLayers, mapRef, setLayerStyles]);
+    }
+  }, [layerStyles, vectorLayers, mapRef]);
 
   // Update hover feature when hover info changes
   useEffect(() => {
@@ -223,23 +235,21 @@ function FileViewerPage() {
     } else {
       clearHoverFeature();
     }
-  }, [hoverInfo?.selectedIndex, hoverInfo?.features, setHoverFeature, clearHoverFeature]);
+  }, [hoverInfo, setHoverFeature, clearHoverFeature]);
 
   // Update pinned popup position when map moves/zooms
   useEffect(() => {
-    if (!mapRef.current || !pinnedPopupInfo || !pinnedPopupInfo.lngLat) return;
+    if (!mapRef.current || !pinnedPopupInfo?.lngLat) return;
 
     const map = mapRef.current;
     const lngLat = pinnedPopupInfo.lngLat;
 
     const updatePopupPosition = () => {
       if (!mapRef.current || !lngLat) return;
-      
+
       const point = mapRef.current.project(lngLat);
       setPinnedPopupInfo((prev) => {
-        if (!prev || !prev.lngLat || 
-            prev.lngLat.lng !== lngLat.lng || 
-            prev.lngLat.lat !== lngLat.lat) {
+        if (!prev?.lngLat || prev.lngLat.lng !== lngLat.lng || prev.lngLat.lat !== lngLat.lat) {
           return prev;
         }
         return {
@@ -260,28 +270,25 @@ function FileViewerPage() {
       map.off("move", updatePopupPosition);
       map.off("zoom", updatePopupPosition);
     };
-  }, [mapRef, pinnedPopupInfo?.lngLat?.lng, pinnedPopupInfo?.lngLat?.lat]);
+  }, [mapRef, pinnedPopupInfo]);
 
   // Computed values for active layer
   const activeLayer = vectorLayers[0] || null;
   const activeLayerId = activeLayer?.id || null;
-  const activeStyle = activeLayerId ? layerStyles[activeLayerId] : null;
+  const activeStyle = activeLayerId ? (layerStyles[activeLayerId] ?? null) : null;
   const activeBreaks = activeStyle ? parseBreaks(activeStyle.breaksText) : [];
-  const activeColors = activeStyle
-    ? getColorRamp(activeStyle.colorScheme, activeBreaks.length + 1)
-    : [];
-  const legendItems = useMemo(
-    () => getLegendItems(activeBreaks, activeColors),
-    [activeBreaks, activeColors]
-  );
+  const activeColors = activeStyle ? getColorRamp(activeStyle.colorScheme, activeBreaks.length + 1) : [];
+  const legendItems = useMemo(() => getLegendItems(activeBreaks, activeColors), [activeBreaks, activeColors]);
 
   // Determine which popup to show (pinned takes precedence)
   const activePopupInfo = pinnedPopupInfo || (pinnedPopupInfo === null ? hoverInfo : null);
   const selectedFeature = activePopupInfo?.features?.[activePopupInfo?.selectedIndex ?? 0] || null;
-  const selectedProperties = selectedFeature?.properties || {};
-  const propertyEntries = Object.entries(selectedProperties).sort(([a], [b]) =>
-    a.localeCompare(b)
-  );
+  const selectedProperties = selectedFeature?.properties;
+  const propertyEntries: PopupPropertyEntry[] = selectedProperties
+    ? Object.entries(selectedProperties)
+        .map(([key, value]) => [key, String(value)] satisfies PopupPropertyEntry)
+        .sort(([a], [b]) => a.localeCompare(b))
+    : [];
 
   return (
     <FileViewerContent
@@ -304,7 +311,6 @@ function FileViewerPage() {
       setLegendVisible={setLegendVisible}
       hoverInfo={activePopupInfo}
       setHoverInfo={setHoverInfo}
-      pinnedPopupInfo={pinnedPopupInfo}
       setPinnedPopupInfo={setPinnedPopupInfo}
       activeLayer={activeLayer}
       activeStyle={activeStyle}
@@ -336,7 +342,6 @@ function FileViewerContent({
   setLegendVisible,
   hoverInfo,
   setHoverInfo,
-  pinnedPopupInfo,
   setPinnedPopupInfo,
   activeLayer,
   activeStyle,
@@ -347,15 +352,15 @@ function FileViewerContent({
 }: {
   collectionSlug: string;
   datasetSlug: string;
-  dataset: any;
+  dataset: Dataset;
   file: DatasetFile;
   mapContainerRef: React.RefObject<HTMLDivElement | null>;
-  mapRef: React.RefObject<any>;
+  mapRef: React.RefObject<maplibregl.Map | null>;
   pmtilesUrl: string | null;
-  pmtilesFormatEntry: any;
-  selectedSources: Record<string, { storageLocationId: number; version: string | number }>;
-  setSelectedSources: React.Dispatch<React.SetStateAction<Record<string, { storageLocationId: number; version: string | number }>>>;
-  setLayerStyles: React.Dispatch<React.SetStateAction<Record<string, LayerStyle>>>;
+  pmtilesFormatEntry: DatasetFormat | undefined;
+  selectedSources: SelectedSourcesByFormat;
+  setSelectedSources: React.Dispatch<React.SetStateAction<SelectedSourcesByFormat>>;
+  setLayerStyles: React.Dispatch<React.SetStateAction<LayerStylesById>>;
   colorSectionOpen: boolean;
   setColorSectionOpen: React.Dispatch<React.SetStateAction<boolean>>;
   sizeSectionOpen: boolean;
@@ -364,14 +369,13 @@ function FileViewerContent({
   setLegendVisible: React.Dispatch<React.SetStateAction<boolean>>;
   hoverInfo: HoverInfo | null;
   setHoverInfo: React.Dispatch<React.SetStateAction<HoverInfo | null>>;
-  pinnedPopupInfo: HoverInfo | null;
   setPinnedPopupInfo: React.Dispatch<React.SetStateAction<HoverInfo | null>>;
   activeLayer: VectorLayerInfo | null;
   activeStyle: LayerStyle | null;
   activeBreaks: number[];
   activeColors: string[];
   legendItems: Array<{ label: string; color: string }>;
-  propertyEntries: Array<[string, any]>;
+  propertyEntries: PopupPropertyEntry[];
 }) {
   const isMobileInitial = typeof window !== "undefined" && window.innerWidth < 768;
   const [isEditorCollapsed, setIsEditorCollapsed] = useState(isMobileInitial);
@@ -413,14 +417,10 @@ function FileViewerContent({
               }}
             />
           ) : (
-            <div className="text-sm text-muted-foreground">
-              PMTiles format not available for this file.
-            </div>
+            <div className="text-sm text-muted-foreground">PMTiles format not available for this file.</div>
           )}
           {pmtilesUrl && (
-            <div className="w-full min-w-0 rounded-md border bg-muted/30 px-3 py-2 text-xs break-all">
-              {pmtilesUrl}
-            </div>
+            <div className="w-full min-w-0 rounded-md border bg-muted/30 px-3 py-2 text-xs break-all">{pmtilesUrl}</div>
           )}
         </CardContent>
       </Card>
@@ -458,24 +458,16 @@ function FileViewerContent({
           propertyEntries={propertyEntries}
           onIndexChange={(index) => {
             if (hoverInfo.isPinned) {
-              setPinnedPopupInfo((prev) =>
-                prev ? { ...prev, selectedIndex: index } : prev
-              );
+              setPinnedPopupInfo((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
             } else {
-              setHoverInfo((prev) =>
-                prev ? { ...prev, selectedIndex: index } : prev
-              );
+              setHoverInfo((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
             }
           }}
           onClose={() => setPinnedPopupInfo(null)}
         />
       )}
       {activeStyle && (
-        <MapLegend
-          items={legendItems}
-          visible={legendVisible}
-          onToggle={() => setLegendVisible(!legendVisible)}
-        />
+        <MapLegend items={legendItems} visible={legendVisible} onToggle={() => setLegendVisible(!legendVisible)} />
       )}
     </div>
   ) : (
@@ -495,10 +487,7 @@ function FileViewerContent({
         isEditorCollapsed={isEditorCollapsed}
       />
 
-      <ResizablePanelGroup
-        orientation="horizontal"
-        className="flex-1 min-h-0 w-full"
-      >
+      <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0 w-full">
         <ResizablePanel
           defaultSize={isMobileInitial ? "0%" : "34%"}
           minSize={isMobileInitial ? "75%" : "34%"}
@@ -506,14 +495,10 @@ function FileViewerContent({
           collapsible
           collapsedSize="0%"
           panelRef={editorPanelRef}
-          onResize={(panelSize) =>
-            setIsEditorCollapsed(panelSize.asPercentage === 0)
-          }
+          onResize={(panelSize) => setIsEditorCollapsed(panelSize.asPercentage === 0)}
           className="min-w-0 flex flex-col overflow-hidden"
         >
-          <ScrollArea className="flex-1 overflow-auto">
-            {sidebarContent}
-          </ScrollArea>
+          <ScrollArea className="flex-1 overflow-auto">{sidebarContent}</ScrollArea>
         </ResizablePanel>
 
         <ResizableHandle withHandle className="z-20" />
@@ -525,9 +510,7 @@ function FileViewerContent({
             mapRef.current?.resize();
           }}
         >
-          <div className="relative flex-1 w-full overflow-hidden">
-            {mapContent}
-          </div>
+          <div className="relative flex-1 w-full overflow-hidden">{mapContent}</div>
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

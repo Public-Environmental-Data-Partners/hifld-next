@@ -11,20 +11,14 @@ export function attachDownloadZipLinksToFile(
   origin: string,
   collectionSlug: string,
   datasetSlug: string,
-  fileSlug: string
+  fileSlug: string,
 ): DatasetFile {
   const f = structuredClone(file) as DatasetFile;
   for (const df of f.formats ?? []) {
     for (const s of df.sources ?? []) {
       const src = s as SourceWithLinks;
       src.links = {
-        download_zip: sourceDownloadZip(
-          origin,
-          collectionSlug,
-          datasetSlug,
-          fileSlug,
-          s.id
-        ),
+        download_zip: sourceDownloadZip(origin, collectionSlug, datasetSlug, fileSlug, s.id),
       };
     }
   }

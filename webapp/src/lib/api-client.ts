@@ -10,17 +10,26 @@ import { env } from "../env/server";
 
 // Type definitions matching Python Pydantic models
 
-export type FormatType =
-  | "geoparquet"
-  | "pmtiles"
-  | "geopackage"
-  | "shapefile"
-  | "geojson"
-  | "file_geodatabase";
+export type FormatType = "geoparquet" | "pmtiles" | "geopackage" | "shapefile" | "geojson" | "file_geodatabase";
 
 export type BackendType = "s3";
 
 export type SourceType = "file" | "api";
+
+export type DatasetTagValue = string | string[];
+
+export interface DatasetTags {
+  [tagKey: string]: DatasetTagValue;
+}
+
+export interface CollectionDatasetQuery {
+  collectionId: number;
+  search?: string | undefined;
+  includeUrls?: boolean | undefined;
+  limit?: number | undefined;
+  offset?: number | undefined;
+  tagFilters?: DatasetTags | undefined;
+}
 
 // Location schemas
 export interface FileLocation {
@@ -31,7 +40,7 @@ export interface FileLocation {
 export interface ApiLocation {
   version: string;
   url: string;
-  method?: string;
+  method?: string | undefined;
 }
 
 export type DatasetSourceLocation = FileLocation | ApiLocation;
@@ -42,13 +51,13 @@ export interface ColumnSchema {
   type: string;
   description?: string;
   nullable: boolean;
-  num_null_values?: number;
-  num_unique_values?: number;
-  example_values?: string[];
-  min?: number;
-  max?: number;
-  length?: number;
-  possible_values?: string[];
+  num_null_values?: number | undefined;
+  num_unique_values?: number | undefined;
+  example_values?: string[] | undefined;
+  min?: number | undefined;
+  max?: number | undefined;
+  length?: number | undefined;
+  possible_values?: string[] | undefined;
 }
 
 export interface SpatialDatasetFileMetadata {
@@ -68,23 +77,23 @@ export interface Dataset {
   id: number;
   slug: string; // Unique identifier for the dataset
   name: string; // Human-readable name
-  description?: string;
-  tags?: Record<string, string | string[]>; // Searchable metadata tags (e.g. {inventory_name: "...", geometry_type: "Point", categories: ["Boundaries", "Water Supply"]})
-  collection_id?: number;
+  description?: string | undefined;
+  tags?: DatasetTags | undefined; // Searchable metadata tags (e.g. {inventory_name: "...", geometry_type: "Point", categories: ["Boundaries", "Water Supply"]})
+  collection_id?: number | undefined;
   created_at: string;
   updated_at: string;
 }
 
 export interface DatasetSource {
   id: number;
-  version?: string | number;
-  url?: string;
-  storage_uri?: string; // Storage URI (gs:// or s3://) for file sources
-  glob_pattern?: string; // Glob pattern (gs:// or s3://) for multiple files in same location/version
+  version?: string | number | undefined;
+  url?: string | undefined;
+  storage_uri?: string | undefined; // Storage URI (gs:// or s3://) for file sources
+  glob_pattern?: string | undefined; // Glob pattern (gs:// or s3://) for multiple files in same location/version
   source_type: SourceType;
   location: DatasetSourceLocation;
-  source_metadata?: SpatialDatasetFileMetadata;
-  storage_location?: StorageLocation;
+  source_metadata?: SpatialDatasetFileMetadata | undefined;
+  storage_location?: StorageLocation | undefined;
 }
 
 // Storage location config schemas
@@ -100,8 +109,8 @@ export interface StorageLocation {
   id: number;
   name: string;
   backend_type: BackendType;
-  description?: string;
-  config?: StorageLocationConfig;
+  description?: string | undefined;
+  config?: StorageLocationConfig | undefined;
   created_at: string;
   updated_at: string;
 }
@@ -110,8 +119,8 @@ export interface Format {
   id: number;
   format_type: FormatType;
   name: string;
-  description?: string;
-  mime_type?: string;
+  description?: string | undefined;
+  mime_type?: string | undefined;
   created_at: string;
   updated_at: string;
 }
@@ -135,17 +144,18 @@ export interface DatasetFile {
   dataset_id: number;
   name: string;
   slug: string;
-  description?: string;
-  layer_name?: string;
-  source_file_path?: string;
-  file_metadata?: SpatialDatasetFileMetadata;
+  description?: string | undefined;
+  layer_name?: string | undefined;
+  source_file_path?: string | undefined;
+  file_metadata?: SpatialDatasetFileMetadata | undefined;
   created_at: string;
   updated_at: string;
-  formats?: DatasetFormat[];
+  formats?: DatasetFormat[] | undefined;
 }
 
 export interface DatasetWithUrls extends Dataset {
-  files?: DatasetFile[];
+  files?: DatasetFile[] | undefined;
+  formats?: DatasetFormat[] | undefined;
 }
 
 export interface DatasetFileResponse {
@@ -174,57 +184,78 @@ export interface Collection {
   id: number;
   slug: string; // Unique identifier for the collection
   name: string;
-  description?: string;
+  description?: string | undefined;
   created_at: string;
   updated_at: string;
 }
 
 /** Max rows returned by aggregate global dataset list (no unbounded fetch). */
 const GLOBAL_DATASET_LIST_CAP = 200;
+const GLOBAL_DATASET_PAGE_SIZE = 50;
+
+async function fetchCollections(base: string): Promise<Collection[]> {
+  const response = await fetch(`${base}/api/collections`);
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(`Failed to fetch collections: ${response.status} ${text}`);
+  }
+  return (await response.json()) as Collection[];
+}
+
+function appendDatasetListParams(
+  params: URLSearchParams,
+  data: { search?: string | undefined; includeUrls?: boolean | undefined },
+) {
+  if (data.search) params.set("search", data.search);
+  if (data.includeUrls) params.set("include_urls", "true");
+}
+
+async function fetchDatasetPage(
+  base: string,
+  collectionId: number,
+  data: { search?: string | undefined; includeUrls?: boolean | undefined },
+  offset: number,
+): Promise<PaginatedResponse<DatasetWithUrls>> {
+  const params = new URLSearchParams();
+  appendDatasetListParams(params, data);
+  params.set("limit", String(GLOBAL_DATASET_PAGE_SIZE));
+  params.set("offset", String(offset));
+
+  const response = await fetch(`${base}/api/collections/${collectionId}/datasets?${params}`);
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(`Failed to fetch datasets for collection ${collectionId}: ${response.status} ${text}`);
+  }
+  return (await response.json()) as PaginatedResponse<DatasetWithUrls>;
+}
+
+function hasMoreDatasetPages(page: PaginatedResponse<DatasetWithUrls>, offset: number): boolean {
+  return page.items.length >= GLOBAL_DATASET_PAGE_SIZE && offset + page.items.length < page.total;
+}
 
 /**
  * List datasets across all collections by paging each collection's API.
  * Does not call a global /api/datasets on dataset-api (not exposed there).
  */
 export const getDatasets = createServerFn({ method: "GET" })
-  .inputValidator((data: { search?: string; includeUrls?: boolean }) => data)
+  .inputValidator((data: { search?: string | undefined; includeUrls?: boolean | undefined }) => data)
   .handler(async ({ data }) => {
     const base = env.DATASET_API_URL;
-    const colRes = await fetch(`${base}/api/collections`);
-    if (!colRes.ok) {
-      const t = await colRes.text().catch(() => colRes.statusText);
-      throw new Error(`Failed to fetch collections: ${colRes.status} ${t}`);
-    }
-    const collections = (await colRes.json()) as Collection[];
+    const collections = await fetchCollections(base);
     const out: DatasetWithUrls[] = [];
-    const pageSize = 50;
 
     for (const c of collections) {
       let offset = 0;
       while (out.length < GLOBAL_DATASET_LIST_CAP) {
-        const params = new URLSearchParams();
-        if (data.search) params.set("search", data.search);
-        if (data.includeUrls) params.set("include_urls", "true");
-        params.set("limit", String(pageSize));
-        params.set("offset", String(offset));
-        const url = `${base}/api/collections/${c.id}/datasets?${params}`;
-        const pageRes = await fetch(url);
-        if (!pageRes.ok) {
-          const t = await pageRes.text().catch(() => pageRes.statusText);
-          throw new Error(
-            `Failed to fetch datasets for collection ${c.id}: ${pageRes.status} ${t}`
-          );
-        }
-        const page = (await pageRes.json()) as PaginatedResponse<DatasetWithUrls>;
+        const page = await fetchDatasetPage(base, c.id, data, offset);
         for (const item of page.items) {
           out.push(item);
           if (out.length >= GLOBAL_DATASET_LIST_CAP) {
             return out;
           }
         }
-        if (page.items.length < pageSize) break;
-        if (offset + page.items.length >= page.total) break;
-        offset += pageSize;
+        if (!hasMoreDatasetPages(page, offset)) break;
+        offset += GLOBAL_DATASET_PAGE_SIZE;
       }
     }
     return out;
@@ -234,15 +265,10 @@ export const getDatasets = createServerFn({ method: "GET" })
  * Get a single dataset by ID by probing collection-scoped dataset-api routes.
  */
 export const getDatasetById = createServerFn({ method: "GET" })
-  .inputValidator((data: { id: number; includeUrls?: boolean }) => data)
+  .inputValidator((data: { id: number; includeUrls?: boolean | undefined }) => data)
   .handler(async ({ data }) => {
     const base = env.DATASET_API_URL;
-    const colRes = await fetch(`${base}/api/collections`);
-    if (!colRes.ok) {
-      const t = await colRes.text().catch(() => colRes.statusText);
-      throw new Error(`Failed to fetch collections: ${colRes.status} ${t}`);
-    }
-    const collections = (await colRes.json()) as Collection[];
+    const collections = await fetchCollections(base);
     const suffix = data.includeUrls ? "/urls" : "/files";
 
     for (const c of collections) {
@@ -251,9 +277,7 @@ export const getDatasetById = createServerFn({ method: "GET" })
       if (response.status === 404) continue;
       if (!response.ok) {
         const errorText = await response.text().catch(() => response.statusText);
-        throw new Error(
-          `Failed to fetch dataset: ${response.status} ${errorText}`
-        );
+        throw new Error(`Failed to fetch dataset: ${response.status} ${errorText}`);
       }
       return (await response.json()) as DatasetWithUrls;
     }
@@ -272,7 +296,7 @@ export const getDatasetBySlug = createServerFn({ method: "GET" })
     if (!collection) {
       return null;
     }
-    
+
     // Use the appropriate endpoint based on includeUrls
     const includeUrls = data.includeUrls ?? false;
     let endpoint = `/api/collections/${collection.id}/datasets/by-slug/${data.datasetSlug}`;
@@ -281,20 +305,18 @@ export const getDatasetBySlug = createServerFn({ method: "GET" })
     } else {
       endpoint += "/files"; // Default to files endpoint for file tree
     }
-    
+
     const url = `${env.DATASET_API_URL}${endpoint}`;
     const response = await fetch(url);
-    
+
     if (!response.ok) {
       if (response.status === 404) {
         return null;
       }
       const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(
-        `Failed to fetch dataset: ${response.status} ${errorText}`
-      );
+      throw new Error(`Failed to fetch dataset: ${response.status} ${errorText}`);
     }
-    
+
     return (await response.json()) as DatasetWithUrls;
   });
 
@@ -302,41 +324,25 @@ export const getDatasetBySlug = createServerFn({ method: "GET" })
  * Get a single file by ID within a dataset by ID (includes URLs)
  */
 export const getDatasetFileById = createServerFn({ method: "GET" })
-  .inputValidator(
-    (data: {
-      collectionId: number;
-      datasetId: number;
-      fileId: number;
-    }) => data
-  )
+  .inputValidator((data: { collectionId: number; datasetId: number; fileId: number }) => data)
   .handler(async ({ data }) => {
     const url = `${env.DATASET_API_URL}/api/collections/${data.collectionId}/datasets/${data.datasetId}/files/${data.fileId}`;
     const response = await fetch(url);
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(
-        `Failed to fetch dataset file: ${response.status} ${errorText}`
-      );
+      throw new Error(`Failed to fetch dataset file: ${response.status} ${errorText}`);
     }
     return (await response.json()) as DatasetFileResponse;
   });
 
 export const getFileVersions = createServerFn({ method: "GET" })
-  .inputValidator(
-    (data: {
-      collectionId: number;
-      datasetId: number;
-      fileId: number;
-    }) => data
-  )
+  .inputValidator((data: { collectionId: number; datasetId: number; fileId: number }) => data)
   .handler(async ({ data }) => {
     const url = `${env.DATASET_API_URL}/api/collections/${data.collectionId}/datasets/${data.datasetId}/files/${data.fileId}/versions`;
     const response = await fetch(url);
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(
-        `Failed to fetch file versions: ${response.status} ${errorText}`
-      );
+      throw new Error(`Failed to fetch file versions: ${response.status} ${errorText}`);
     }
     return (await response.json()) as DatasetFileVersionsResponse;
   });
@@ -345,13 +351,7 @@ export const getFileVersions = createServerFn({ method: "GET" })
  * Get a single file by slug within a dataset by slug (includes URLs)
  */
 export const getDatasetFileBySlug = createServerFn({ method: "GET" })
-  .inputValidator(
-    (data: {
-      collectionSlug: string;
-      datasetSlug: string;
-      fileSlug: string;
-    }) => data
-  )
+  .inputValidator((data: { collectionSlug: string; datasetSlug: string; fileSlug: string }) => data)
   .handler(async ({ data }) => {
     const collection = await getCollectionBySlug({ data: { slug: data.collectionSlug } });
     if (!collection) {
@@ -362,9 +362,7 @@ export const getDatasetFileBySlug = createServerFn({ method: "GET" })
     const response = await fetch(url);
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(
-        `Failed to fetch dataset file: ${response.status} ${errorText}`
-      );
+      throw new Error(`Failed to fetch dataset file: ${response.status} ${errorText}`);
     }
     return (await response.json()) as DatasetFileResponse;
   });
@@ -373,42 +371,31 @@ export const getDatasetFileBySlug = createServerFn({ method: "GET" })
  * Get dataset statistics
  * Server function - can be called from loaders or components
  */
-export const getDatasetStats = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const base = env.DATASET_API_URL;
-    const colRes = await fetch(`${base}/api/collections`);
-    if (!colRes.ok) {
-      const t = await colRes.text().catch(() => colRes.statusText);
-      throw new Error(`Failed to fetch collections: ${colRes.status} ${t}`);
-    }
-    const collections = (await colRes.json()) as Collection[];
-    let total = 0;
-    for (const c of collections) {
-      const r = await fetch(`${base}/api/collections/${c.id}/datasets/stats`);
-      if (!r.ok) continue;
-      const j = (await r.json()) as { total?: number };
-      total += typeof j.total === "number" ? j.total : 0;
-    }
-    return { total } satisfies DatasetStats;
+export const getDatasetStats = createServerFn({ method: "GET" }).handler(async () => {
+  const base = env.DATASET_API_URL;
+  const collections = await fetchCollections(base);
+  let total = 0;
+  for (const c of collections) {
+    const r = await fetch(`${base}/api/collections/${c.id}/datasets/stats`);
+    if (!r.ok) continue;
+    const j = (await r.json()) as { total?: number };
+    total += typeof j.total === "number" ? j.total : 0;
   }
-);
+  return { total } satisfies DatasetStats;
+});
 
 /**
  * Get collections
  * Server function - can be called from loaders or components
  */
-export const getCollections = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const response = await fetch(`${env.DATASET_API_URL}/api/collections`);
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(
-        `Failed to fetch collections: ${response.status} ${errorText}`
-      );
-    }
-    return response.json();
+export const getCollections = createServerFn({ method: "GET" }).handler(async () => {
+  const response = await fetch(`${env.DATASET_API_URL}/api/collections`);
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    throw new Error(`Failed to fetch collections: ${response.status} ${errorText}`);
   }
-);
+  return (await response.json()) as Collection[];
+});
 
 /**
  * Get a collection by ID
@@ -420,19 +407,15 @@ export const getCollectionById = createServerFn({ method: "GET" })
     if (!data.id) {
       return null;
     }
-    const response = await fetch(
-      `${env.DATASET_API_URL}/api/collections/${data.id}`
-    );
+    const response = await fetch(`${env.DATASET_API_URL}/api/collections/${data.id}`);
     if (!response.ok) {
       if (response.status === 404) {
         return null;
       }
       const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(
-        `Failed to fetch collection: ${response.status} ${errorText}`
-      );
+      throw new Error(`Failed to fetch collection: ${response.status} ${errorText}`);
     }
-    return response.json();
+    return (await response.json()) as Collection;
   });
 
 /**
@@ -456,16 +439,7 @@ export const getCollectionBySlug = createServerFn({ method: "GET" })
  * Server function - can be called from loaders or components
  */
 export const getCollectionDatasets = createServerFn({ method: "GET" })
-  .inputValidator(
-    (data: {
-      collectionId: number;
-      search?: string;
-      includeUrls?: boolean;
-      limit?: number;
-      offset?: number;
-      tagFilters?: Record<string, string | string[]>;
-    }) => data
-  )
+  .inputValidator((data: CollectionDatasetQuery) => data)
   .handler(async ({ data }) => {
     const params = new URLSearchParams();
     if (data.search) params.set("search", data.search);
@@ -482,26 +456,24 @@ export const getCollectionDatasets = createServerFn({ method: "GET" })
       // Add a timeout to prevent hanging requests
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 second timeout
-      
+
       const response = await fetch(url, {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
-      
+
       if (!response.ok) {
-        const errorText = await response
-          .text()
-          .catch(() => response.statusText);
-        throw new Error(
-          `Failed to fetch collection datasets: ${response.status} ${errorText}`
-        );
+        const errorText = await response.text().catch(() => response.statusText);
+        throw new Error(`Failed to fetch collection datasets: ${response.status} ${errorText}`);
       }
       const result = await response.json();
       return result as PaginatedResponse<DatasetWithUrls>;
     } catch (error) {
       // Log the error for debugging
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('Request timeout: The server took too long to respond. This may be due to slow URL computation. Please try again or contact support.');
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(
+          "Request timeout: The server took too long to respond. This may be due to slow URL computation. Please try again or contact support.",
+        );
       }
       console.error(`Error fetching collection datasets:`, {
         url,
@@ -520,12 +492,12 @@ export const getCollectionDatasetsBySlug = createServerFn({ method: "GET" })
   .inputValidator(
     (data: {
       collectionSlug: string;
-      search?: string;
-      includeUrls?: boolean;
-      limit?: number;
-      offset?: number;
-      tagFilters?: Record<string, string | string[]>;
-    }) => data
+      search?: string | undefined;
+      includeUrls?: boolean | undefined;
+      limit?: number | undefined;
+      offset?: number | undefined;
+      tagFilters?: DatasetTags | undefined;
+    }) => data,
   )
   .handler(async ({ data }) => {
     // First get the collection by slug to get its ID
@@ -537,11 +509,11 @@ export const getCollectionDatasetsBySlug = createServerFn({ method: "GET" })
     return getCollectionDatasets({
       data: {
         collectionId: collection.id,
-        search: data.search,
-        includeUrls: data.includeUrls,
-        limit: data.limit,
-        offset: data.offset,
-        tagFilters: data.tagFilters,
+        ...(data.search !== undefined ? { search: data.search } : {}),
+        ...(data.includeUrls !== undefined ? { includeUrls: data.includeUrls } : {}),
+        ...(data.limit !== undefined ? { limit: data.limit } : {}),
+        ...(data.offset !== undefined ? { offset: data.offset } : {}),
+        ...(data.tagFilters !== undefined ? { tagFilters: data.tagFilters } : {}),
       },
     });
   });
@@ -551,7 +523,7 @@ export const getCollectionDatasetsBySlug = createServerFn({ method: "GET" })
  * Server function - can be called from loaders or components
  */
 export const getCollectionTagValues = createServerFn({ method: "GET" })
-  .inputValidator((data: { collectionId: number; tagKey?: string }) => data)
+  .inputValidator((data: { collectionId: number; tagKey?: string | undefined }) => data)
   .handler(async ({ data }) => {
     const params = new URLSearchParams();
     if (data.tagKey) params.set("tag_key", data.tagKey);
@@ -561,12 +533,8 @@ export const getCollectionTagValues = createServerFn({ method: "GET" })
     try {
       const response = await fetch(url);
       if (!response.ok) {
-        const errorText = await response
-          .text()
-          .catch(() => response.statusText);
-        throw new Error(
-          `Failed to fetch collection tag values: ${response.status} ${errorText}`
-        );
+        const errorText = await response.text().catch(() => response.statusText);
+        throw new Error(`Failed to fetch collection tag values: ${response.status} ${errorText}`);
       }
       return response.json();
     } catch (error) {
@@ -584,7 +552,7 @@ export const getCollectionTagValues = createServerFn({ method: "GET" })
  * Server function - can be called from loaders or components
  */
 export const getCollectionTagValuesBySlug = createServerFn({ method: "GET" })
-  .inputValidator((data: { collectionSlug: string; tagKey?: string }) => data)
+  .inputValidator((data: { collectionSlug: string; tagKey?: string | undefined }) => data)
   .handler(async ({ data }) => {
     const collection = await getCollectionBySlug({ data: { slug: data.collectionSlug } });
     if (!collection) {
@@ -593,7 +561,7 @@ export const getCollectionTagValuesBySlug = createServerFn({ method: "GET" })
     return getCollectionTagValues({
       data: {
         collectionId: collection.id,
-        tagKey: data.tagKey,
+        ...(data.tagKey !== undefined ? { tagKey: data.tagKey } : {}),
       },
     });
   });
@@ -603,9 +571,7 @@ export const getCollectionTagValuesBySlug = createServerFn({ method: "GET" })
  */
 export function getGeoparquetUrl(dataset: DatasetWithUrls): string | null {
   if (!dataset.formats) return null;
-  const geoparquetFormat = dataset.formats.find(
-    (f) => f.format.format_type === "geoparquet"
-  );
+  const geoparquetFormat = dataset.formats.find((f) => f.format.format_type === "geoparquet");
   return geoparquetFormat?.sources[0]?.url || null;
 }
 
@@ -614,8 +580,6 @@ export function getGeoparquetUrl(dataset: DatasetWithUrls): string | null {
  */
 export function getPmtilesUrl(dataset: DatasetWithUrls): string | null {
   if (!dataset.formats) return null;
-  const pmtilesFormat = dataset.formats.find(
-    (f) => f.format.format_type === "pmtiles"
-  );
+  const pmtilesFormat = dataset.formats.find((f) => f.format.format_type === "pmtiles");
   return pmtilesFormat?.sources[0]?.url || null;
 }

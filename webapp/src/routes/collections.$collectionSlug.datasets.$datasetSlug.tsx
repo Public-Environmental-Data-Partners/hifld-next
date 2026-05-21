@@ -1,17 +1,13 @@
-import { createFileRoute, notFound, Outlet, useRouterState } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound, Outlet, useRouterState } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
-import { Link } from "@tanstack/react-router";
-
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
-import { getDatasetBySlug, getCollectionBySlug } from "@/lib/api-client";
 import { DatasetFileTree } from "@/components/dataset/DatasetFileTree";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { PageLoader } from "@/components/ui/page-loader";
+import { Separator } from "@/components/ui/separator";
+import { getCollectionBySlug, getDatasetBySlug } from "@/lib/api-client";
 
-export const Route = createFileRoute(
-  "/collections/$collectionSlug/datasets/$datasetSlug"
-)({
+export const Route = createFileRoute("/collections/$collectionSlug/datasets/$datasetSlug")({
   loader: async ({ params }) => {
     try {
       const collection = await getCollectionBySlug({
@@ -51,9 +47,9 @@ function DatasetDetailPage() {
   const { collection, dataset } = Route.useLoaderData();
   const { collectionSlug, datasetSlug } = Route.useParams();
   const router = useRouterState();
-  
+
   // Check if we're on a child route (file detail page)
-  const isFileRoute = router.location.pathname.includes('/files/');
+  const isFileRoute = router.location.pathname.includes("/files/");
 
   const cleanDescription = dataset.description
     ?.replace(/<[^>]*>/g, "")
@@ -119,13 +115,11 @@ function DatasetDetailPage() {
 
                 return (
                   <div key={key}>
-                    <p className="text-sm text-muted-foreground mb-1">
-                      {label}
-                    </p>
+                    <p className="text-sm text-muted-foreground mb-1">{label}</p>
                     {Array.isArray(value) ? (
                       <div className="flex flex-wrap gap-1">
-                        {value.map((v: string, idx: number) => (
-                          <Badge key={idx} variant="outline">
+                        {value.map((v: string) => (
+                          <Badge key={`${key}-${v}`} variant="outline">
                             {v}
                           </Badge>
                         ))}
@@ -145,11 +139,7 @@ function DatasetDetailPage() {
               <div>
                 <h4 className="font-medium mb-4">Files</h4>
                 <div className="border rounded-lg p-4 bg-muted/20">
-                  <DatasetFileTree
-                    dataset={dataset}
-                    collectionSlug={collectionSlug}
-                    datasetSlug={datasetSlug}
-                  />
+                  <DatasetFileTree dataset={dataset} collectionSlug={collectionSlug} datasetSlug={datasetSlug} />
                 </div>
               </div>
             </>
@@ -166,4 +156,3 @@ function DatasetDetailPage() {
     </div>
   );
 }
-

@@ -48,9 +48,7 @@ function MemberLogo({
           onError={() => setImgError(true)}
         />
       )}
-      <span className="text-center text-xs text-muted-foreground">
-        {member.name}
-      </span>
+      <span className="text-center text-xs text-muted-foreground">{member.name}</span>
     </a>
   );
 }

@@ -1,7 +1,7 @@
-import { Badge } from "@/components/ui/badge";
 import { X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { MultiSelect } from "@/components/ui/multi-select";
+import { cn } from "@/lib/utils";
 
 export interface TagFilter {
   key: string;
@@ -9,12 +9,20 @@ export interface TagFilter {
   label?: string;
 }
 
+export interface AvailableTagValues {
+  [tagKey: string]: string[] | undefined;
+}
+
+export interface TagKeyLabelMap {
+  [tagKey: string]: string | undefined;
+}
+
 export interface TagFiltersProps {
-  availableTags: Record<string, string[]>;
+  availableTags: AvailableTagValues;
   selectedFilters: TagFilter[];
   onFilterChange: (key: string, values: string[]) => void;
   className?: string;
-  tagKeyLabels?: Record<string, string>; // Optional custom labels for tag keys
+  tagKeyLabels?: TagKeyLabelMap; // Optional custom labels for tag keys
 }
 
 export function TagFilters({
@@ -37,16 +45,10 @@ export function TagFilters({
   };
 
   // Group selected filters by key
-  const selectedByKey = selectedFilters.reduce(
-    (acc, filter) => {
-      if (!acc[filter.key]) {
-        acc[filter.key] = [];
-      }
-      acc[filter.key].push(filter.value);
-      return acc;
-    },
-    {} as Record<string, string[]>
-  );
+  const selectedByKey: AvailableTagValues = {};
+  for (const filter of selectedFilters) {
+    selectedByKey[filter.key] = [...(selectedByKey[filter.key] ?? []), filter.value];
+  }
 
   if (Object.keys(availableTags).length === 0) {
     return null;
@@ -72,13 +74,13 @@ export function TagFilters({
                 className="cursor-pointer hover:bg-primary/80 gap-1 pr-1 break-words max-w-full"
                 onClick={() => {
                   const currentValues = selectedByKey[filter.key] || [];
-                  const newValues = currentValues.filter(
-                    (v) => v !== filter.value
-                  );
+                  const newValues = currentValues.filter((v) => v !== filter.value);
                   onFilterChange(filter.key, newValues);
                 }}
               >
-                <span className="break-words">{label}: {filter.value}</span>
+                <span className="break-words">
+                  {label}: {filter.value}
+                </span>
                 <X className="h-3 w-3 shrink-0" />
               </Badge>
             );
@@ -90,6 +92,7 @@ export function TagFilters({
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 min-w-0">
         {tagKeys.map((key) => {
           const values = availableTags[key];
+          if (!values) return null;
           if (values.length === 0) return null;
 
           const label = getTagKeyLabel(key);
@@ -101,9 +104,9 @@ export function TagFilters({
 
           return (
             <div key={key} className="space-y-2 min-w-0">
-              <label className="font-mono text-xs font-medium tracking-wide uppercase text-foreground break-words">
+              <span className="font-mono text-xs font-medium tracking-wide uppercase text-foreground break-words">
                 {label}
-              </label>
+              </span>
               <MultiSelect
                 options={options}
                 selected={selectedValues}

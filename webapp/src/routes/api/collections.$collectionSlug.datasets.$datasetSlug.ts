@@ -1,20 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  getCollectionBySlug,
-  getDatasetBySlug,
-  type DatasetFile,
-} from "@/lib/api-client";
-import {
-  collectionSelf,
-  datasetSelf,
-  fileSelf,
-  requestOrigin,
-} from "@/lib/api-links";
+import { type DatasetFile, getCollectionBySlug, getDatasetBySlug } from "@/lib/api-client";
+import { collectionSelf, datasetSelf, fileSelf, requestOrigin } from "@/lib/api-links";
 import { jsonProblem } from "@/lib/api-problem";
 
-export const Route = createFileRoute(
-  "/api/collections/$collectionSlug/datasets/$datasetSlug"
-)({
+export const Route = createFileRoute("/api/collections/$collectionSlug/datasets/$datasetSlug")({
   server: {
     handlers: {
       GET: async ({ params, request }) => {
@@ -62,4 +51,3 @@ export const Route = createFileRoute(
     },
   },
 });
-

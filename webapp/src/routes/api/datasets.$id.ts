@@ -1,13 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { json } from "@tanstack/react-start";
 import { getCollectionById } from "@/lib/api-client";
-import { getDatasetById } from "@/lib/datasets";
-import {
-  collectionSelf,
-  globalDatasetByIdSelf,
-  requestOrigin,
-} from "@/lib/api-links";
+import { collectionSelf, globalDatasetByIdSelf, requestOrigin } from "@/lib/api-links";
 import { jsonProblem } from "@/lib/api-problem";
+import { getDatasetById } from "@/lib/datasets";
+
+interface DatasetLinks {
+  self: string;
+  collection?: string;
+}
 
 export const Route = createFileRoute("/api/datasets/$id")({
   server: {
@@ -24,7 +25,7 @@ export const Route = createFileRoute("/api/datasets/$id")({
             return jsonProblem(404, "Dataset not found");
           }
           const origin = requestOrigin(request);
-          const links: Record<string, string> = {
+          const links: DatasetLinks = {
             self: globalDatasetByIdSelf(origin, id),
           };
           if (dataset.collection_id != null) {
@@ -43,17 +44,11 @@ export const Route = createFileRoute("/api/datasets/$id")({
       },
 
       PUT: async () => {
-        return json(
-          { error: "Dataset updates are handled by dataset-api import script" },
-          { status: 405 }
-        );
+        return json({ error: "Dataset updates are handled by dataset-api import script" }, { status: 405 });
       },
 
       DELETE: async () => {
-        return json(
-          { error: "Dataset deletion is handled by dataset-api import script" },
-          { status: 405 }
-        );
+        return json({ error: "Dataset deletion is handled by dataset-api import script" }, { status: 405 });
       },
     },
   },

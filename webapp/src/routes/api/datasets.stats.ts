@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { json } from "@tanstack/react-start";
-import { getDatasetStats } from "@/lib/datasets";
 import { globalDatasetStatsSelf, requestOrigin } from "@/lib/api-links";
 import { jsonProblem } from "@/lib/api-problem";
+import { getDatasetStats } from "@/lib/datasets";
 
 export const Route = createFileRoute("/api/datasets/stats")({
   server: {

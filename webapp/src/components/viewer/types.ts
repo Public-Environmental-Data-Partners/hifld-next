@@ -1,5 +1,11 @@
 import type maplibregl from "maplibre-gl";
 
+export type LayerStylesById = {
+  [layerId: string]: LayerStyle | undefined;
+};
+
+export type PopupPropertyEntry = [key: string, value: string];
+
 export type VectorLayerInfo = {
   id: string;
   fields: string[];
@@ -32,4 +38,3 @@ export type ColorScheme = {
   label: string;
   interpolator: (t: number) => string;
 };
-

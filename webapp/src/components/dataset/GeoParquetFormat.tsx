@@ -1,4 +1,4 @@
-import { FileJson, Download } from "lucide-react";
+import { Download, FileJson } from "lucide-react";
 import type { DatasetWithUrls } from "@/lib/api-client";
 import { CopyButton } from "./CopyButton";
 import { DownloadButton } from "./DownloadButton";
@@ -8,8 +8,8 @@ interface GeoParquetFormatProps {
   formatEntry: NonNullable<DatasetWithUrls["formats"]>[0];
   geoparquetUrl: string;
   storageUri?: string;
-  selectedSource: { storageLocationId: number; version: number } | null;
-  onSourceChange: (storageLocationId: number, version: number) => void;
+  selectedSource: { storageLocationId: number; version: string | number } | null;
+  onSourceChange: (storageLocationId: number, version: string | number) => void;
 }
 
 export function GeoParquetFormat({
@@ -30,7 +30,7 @@ export function GeoParquetFormat({
           selectedSource={selectedSource}
           onSourceChange={onSourceChange}
         />
-        
+
         {/* Download */}
         {geoparquetUrl && (
           <div className="mt-3 pl-3 border-l-2 space-y-3">
@@ -40,9 +40,7 @@ export function GeoParquetFormat({
                   <Download className="h-3 w-3" />
                   <p className="text-xs font-medium">Download</p>
                 </div>
-                <p className="text-xs text-muted-foreground break-all pl-5">
-                  {geoparquetUrl}
-                </p>
+                <p className="text-xs text-muted-foreground break-all pl-5">{geoparquetUrl}</p>
               </div>
               <div className="flex shrink-0 gap-1">
                 <DownloadButton
@@ -68,9 +66,7 @@ export function GeoParquetFormat({
                   <FileJson className="h-3 w-3" />
                   <p className="text-xs font-medium">Glob Pattern URI</p>
                 </div>
-                <code className="text-xs bg-muted px-2 py-1 rounded block break-all pl-5">
-                  {storageUri}
-                </code>
+                <code className="text-xs bg-muted px-2 py-1 rounded block break-all pl-5">{storageUri}</code>
                 <p className="text-xs text-muted-foreground pl-5 mt-1">
                   Use this URI in DuckDB or other tools that support glob patterns
                 </p>

@@ -7,7 +7,7 @@ function apiNotFound(request: Request) {
   const path = new URL(request.url).pathname;
 
   let detail =
-    'No handler for this path. This API is not OGC API-Features or STAC: there are no /items, /features, /download, or /map endpoints under dataset URLs.';
+    "No handler for this path. This API is not OGC API-Features or STAC: there are no /items, /features, /download, or /map endpoints under dataset URLs.";
   if (path.includes("/items") || path.includes("/features")) {
     detail +=
       " Use GET /api/collections/{collectionSlug} with query params search, tag_filters, limit, offset, omit (not q= on invented paths). Then GET /api/collections/{collectionSlug}/datasets/{datasetSlug}, then .../files/{fileSlug} for file metadata and download URLs.";

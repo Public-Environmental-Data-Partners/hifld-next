@@ -4,14 +4,16 @@ import logging
 import re
 from typing import Protocol
 
-from schemas.types import APIDict, JSONDict, json_value, model_json_dict
+from schemas.types import APIDict, JSONDict, api_dict, json_value, model_json_dict
 from storage.storage_client import create_storage_client_from_location
 
 from .dataset import (
     ApiLocation,
+    BucketStorageLocationConfig,
     FileLocation,
     FileSource,
     GeoServerLocation,
+    GeoServerStorageLocationConfig,
     StorageLocation,
 )
 
@@ -139,6 +141,46 @@ def file_source_path(file_source: FileSource) -> str | None:
     return None
 
 
+def file_source_json_dict(file_source: FileSource) -> APIDict:
+    """Serialize a file source without Pydantic JSON-column warnings.
+
+    SQLModel can hydrate JSON columns as dictionaries even when the Python type
+    annotation is a nested Pydantic model. Exclude those fields from the generic
+    dump, then normalize them explicitly for API responses.
+    """
+    source_dict = api_dict(file_source.model_dump(mode="json", exclude={"location", "source_metadata"}))
+    source_dict["location"] = location_dict(file_source.source_type, file_source.location)
+    metadata = source_metadata_dict(file_source)
+    source_dict["source_metadata"] = metadata if metadata else None
+    return source_dict
+
+
+def location_dict(
+    source_type: str,
+    location: FileLocation | ApiLocation | GeoServerLocation | JSONDict,
+) -> APIDict:
+    """Return a JSON-compatible location dictionary."""
+    normalized = normalize_location(source_type, location)
+    if normalized is not None:
+        return model_json_dict(normalized)
+    if isinstance(location, dict):
+        return api_dict(location)
+    return {}
+
+
+def storage_location_json_dict(storage_location: StorageLocation) -> APIDict:
+    """Serialize a storage location without Pydantic JSON-column warnings."""
+    storage_dict = api_dict(storage_location.model_dump(mode="json", exclude={"config"}))
+    config = storage_location.config
+    if isinstance(config, (BucketStorageLocationConfig, GeoServerStorageLocationConfig)):
+        storage_dict["config"] = model_json_dict(config)
+    elif isinstance(config, dict):
+        storage_dict["config"] = api_dict(config)
+    else:
+        storage_dict["config"] = None
+    return storage_dict
+
+
 def construct_glob_pattern_from_sources(
     file_sources: list[FileSource],
     storage_location: StorageLocation,
@@ -237,7 +279,7 @@ async def expand_glob_pattern_in_source(
     file_path, location_version = source_location
     if "*" not in file_path:
         # Not a glob pattern, return as-is
-        return [model_json_dict(file_source)]
+        return [file_source_json_dict(file_source)]
 
     file_path = normalize_glob_path(file_path)
 
@@ -247,7 +289,7 @@ async def expand_glob_pattern_in_source(
         logger.warning(
             "Cannot create storage client for location %s, cannot expand glob pattern", storage_location.name
         )
-        return [model_json_dict(file_source)]
+        return [file_source_json_dict(file_source)]
 
     # Use storage client's expand_glob_pattern method
     matching_files = await storage_client.expand_glob_pattern(file_path)
@@ -260,7 +302,7 @@ async def expand_glob_pattern_in_source(
 
     if not matching_files:
         logger.warning("No files found matching glob pattern: %s", file_path)
-        return [model_json_dict(file_source)]
+        return [file_source_json_dict(file_source)]
 
     return [
         await expanded_source_dict(file_source, matching_file, location_version, storage_client)

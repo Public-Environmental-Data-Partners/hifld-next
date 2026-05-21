@@ -3,8 +3,8 @@
  * Initializes PostHog on the client side only
  */
 
-import { useEffect } from 'react';
-import { initPostHog } from '@/lib/analytics';
+import { useEffect } from "react";
+import { initPostHog } from "@/lib/analytics";
 
 export function PostHogProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
@@ -14,4 +14,3 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
 
   return <>{children}</>;
 }
-

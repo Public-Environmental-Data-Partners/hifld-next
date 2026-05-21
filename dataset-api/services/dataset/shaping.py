@@ -18,8 +18,10 @@ from models.dataset import (
 from models.helpers import (
     construct_glob_pattern_from_sources,
     expand_glob_pattern_in_source,
+    file_source_json_dict,
     get_file_source_storage_uri,
     get_file_source_url,
+    storage_location_json_dict,
 )
 from schemas.types import APIDict, APIList, APIValue, api_dict, json_dict, model_json_dict
 
@@ -321,7 +323,7 @@ def _group_source_parts(
     storage_locations_by_id: dict[int, StorageLocation],
 ) -> tuple[APIDict, FileSource, StorageLocation | None]:
     if not isinstance(source_item, dict):
-        source_dict: APIDict = model_json_dict(source_item)
+        source_dict = file_source_json_dict(source_item)
         source_dict.setdefault("storage_location_id", source_item.storage_location_id)
         return source_dict, source_item, fallback_storage
 
@@ -347,7 +349,7 @@ def _safe_source_response(
 ) -> APIDict:
     try:
         source_storage = storage_locations_by_id.get(source.storage_location_id)
-        source_dict = model_json_dict(source)
+        source_dict = file_source_json_dict(source)
         _add_source_urls(source_dict, source, source_storage)
     except Exception:
         logger.exception("Error processing source %s", source.id)
@@ -365,7 +367,7 @@ def _add_source_urls(
         logger.warning("Storage location not found for source %s", source_dict.get("id"))
     source_dict["url"] = get_file_source_url(source, source_storage)
     source_dict["storage_uri"] = get_file_source_storage_uri(source, source_storage)
-    source_dict["storage_location"] = source_storage.model_dump() if source_storage else None
+    source_dict["storage_location"] = storage_location_json_dict(source_storage) if source_storage else None
 
 
 def _add_glob_pattern(source_dict: APIDict, glob_pattern: str | None) -> None:
@@ -377,10 +379,10 @@ def _fallback_source_response(
     source_item: FileSource | APIDict,
     source_storage: StorageLocation | None,
 ) -> APIDict:
-    source_dict = dict(source_item) if isinstance(source_item, dict) else model_json_dict(source_item)
+    source_dict = dict(source_item) if isinstance(source_item, dict) else file_source_json_dict(source_item)
     source_dict["url"] = None
     source_dict["storage_uri"] = None
-    source_dict["storage_location"] = source_storage.model_dump() if source_storage else None
+    source_dict["storage_location"] = storage_location_json_dict(source_storage) if source_storage else None
     return source_dict
 
 

@@ -89,7 +89,7 @@ registry.registerPath({
                 name: z.string(),
                 links: z.object({ self: z.string() }).optional(),
               })
-              .passthrough()
+              .passthrough(),
           ),
         },
       },

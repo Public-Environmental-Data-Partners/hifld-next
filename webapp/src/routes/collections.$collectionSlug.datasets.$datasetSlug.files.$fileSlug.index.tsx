@@ -1,31 +1,113 @@
-import { createFileRoute, notFound } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ArrowLeft, Table } from "lucide-react";
-import { Link } from "@tanstack/react-router";
-
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
-import {
-  getDatasetFileById,
-  getDatasetFileBySlug,
-  getCollectionBySlug,
-  getDatasetBySlug,
-} from "@/lib/api-client";
-import type { DatasetFile } from "@/lib/api-client";
+import { useEffect, useState } from "react";
 import { FileFormatTree } from "@/components/dataset/FileFormatTree";
 import { ParquetViewerPanel } from "@/components/dataset/ParquetViewerPanel";
 import { buildSourceFileUrl } from "@/components/dataset/sourceUrls";
-import { PageLoader } from "@/components/ui/page-loader";
 import { compareVersionValues } from "@/components/dataset/versionLabel";
+import { Button } from "@/components/ui/button";
+import { PageLoader } from "@/components/ui/page-loader";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { Separator } from "@/components/ui/separator";
+import type { DatasetFile } from "@/lib/api-client";
+import { getCollectionBySlug, getDatasetBySlug, getDatasetFileById, getDatasetFileBySlug } from "@/lib/api-client";
 
-export const Route = createFileRoute(
-  "/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/",
-)({
+type FileFormat = NonNullable<DatasetFile["formats"]>[number];
+type FileSource = FileFormat["sources"][number];
+
+interface SelectedSource {
+  storageLocationId: number;
+  version: string | number;
+}
+
+interface SelectedSourcesByFormat {
+  [formatType: string]: SelectedSource;
+}
+
+interface ParquetFilePreview {
+  url: string;
+  fileName: string;
+}
+
+function latestSourcesByLocation(sources: FileSource[]): Map<number, { source: FileSource; version: string | number }> {
+  const sourcesByLocation = new Map<number, { source: FileSource; version: string | number }>();
+  for (const source of sources) {
+    const locId = source.storage_location?.id;
+    const version = source.version || "1";
+    if (!locId) {
+      continue;
+    }
+
+    const existing = sourcesByLocation.get(locId);
+    if (!existing || compareVersionValues(version, existing.version) < 0) {
+      sourcesByLocation.set(locId, { source, version });
+    }
+  }
+  return sourcesByLocation;
+}
+
+function initialSelectedSources(file: DatasetFile): SelectedSourcesByFormat {
+  const initial: SelectedSourcesByFormat = {};
+  for (const formatEntry of file.formats ?? []) {
+    const firstEntry = Array.from(latestSourcesByLocation(formatEntry.sources).values())[0];
+    const storageLocationId = firstEntry?.source.storage_location?.id;
+    if (firstEntry && storageLocationId !== undefined && storageLocationId !== 0) {
+      initial[formatEntry.format.format_type] = {
+        storageLocationId,
+        version: firstEntry.version,
+      };
+    }
+  }
+  return initial;
+}
+
+function sourcePath(source: FileSource): string | undefined {
+  return "path" in source.location ? source.location.path : undefined;
+}
+
+function parquetPreviewFromSource(source: FileSource | null): ParquetFilePreview | null {
+  if (!source) {
+    return null;
+  }
+
+  const url = buildSourceFileUrl(source);
+  const path = sourcePath(source);
+  if (!url || !path || path.includes("*")) {
+    return null;
+  }
+
+  return {
+    url,
+    fileName: path.split("/").pop() || "data.parquet",
+  };
+}
+
+function firstParquetFilePreview(file: DatasetFile, selectedSource: FileSource | null): ParquetFilePreview | null {
+  const selectedPreview = parquetPreviewFromSource(selectedSource);
+  if (selectedPreview) {
+    return selectedPreview;
+  }
+
+  const geoparquetFormat = file.formats?.find((f) => f.format.format_type === "geoparquet");
+  for (const source of geoparquetFormat?.sources ?? []) {
+    const preview = parquetPreviewFromSource(source);
+    if (preview) {
+      return preview;
+    }
+  }
+
+  return null;
+}
+
+function FileDetailPending() {
+  return (
+    <div className="flex min-h-[50vh] flex-1 flex-col items-center justify-center">
+      <PageLoader size="lg" />
+    </div>
+  );
+}
+
+export const Route = createFileRoute("/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/")({
   loader: async ({ params }) => {
     try {
       const collection = await getCollectionBySlug({
@@ -84,20 +166,14 @@ export const Route = createFileRoute(
     }
   },
   component: FileDetailPage,
-  pendingComponent: () => (
-    <div className="flex min-h-[50vh] flex-1 flex-col items-center justify-center">
-      <PageLoader size="lg" />
-    </div>
-  ),
+  pendingComponent: FileDetailPending,
   pendingMs: 200,
 });
 
 function FileDetailPage() {
   const { collection, dataset, file } = Route.useLoaderData();
   const { collectionSlug, datasetSlug, fileSlug } = Route.useParams();
-  const [selectedSources, setSelectedSources] = useState<
-    Record<string, { storageLocationId: number; version: string | number }>
-  >({});
+  const [selectedSources, setSelectedSources] = useState<SelectedSourcesByFormat>({});
   const [parquetViewer, setParquetViewer] = useState<{
     url: string;
     fileName: string;
@@ -105,55 +181,16 @@ function FileDetailPage() {
 
   // Initialize selected sources with the latest version for each format
   useEffect(() => {
-    const initial: Record<
-      string,
-      { storageLocationId: number; version: string | number }
-    > = {};
-    file.formats?.forEach((formatEntry) => {
-      const formatType = formatEntry.format.format_type;
-      if (formatEntry.sources && formatEntry.sources.length > 0) {
-        // Find the latest version for each storage location, then pick the first one
-        type SourceType = NonNullable<DatasetFile["formats"]>[0]["sources"][0];
-        type SourceEntry = { source: SourceType; version: string | number };
-        const sourcesByLocation: Record<number, SourceEntry> = {};
-        formatEntry.sources.forEach((source: SourceType) => {
-          const locId = source.storage_location?.id;
-          const version = source.version || "1";
-          if (locId) {
-            const existing = sourcesByLocation[locId];
-            if (!existing) {
-              sourcesByLocation[locId] = { source, version };
-            } else if (compareVersionValues(version, existing.version) < 0) {
-              sourcesByLocation[locId] = { source, version };
-            }
-          }
-        });
-        // Use the first storage location's latest version
-        const firstEntry = Object.values(sourcesByLocation)[0] as
-          | SourceEntry
-          | undefined;
-        if (firstEntry && firstEntry.source.storage_location?.id) {
-          initial[formatType] = {
-            storageLocationId: firstEntry.source.storage_location.id,
-            version: firstEntry.version,
-          };
-        }
-      }
-    });
-    setSelectedSources(initial);
+    setSelectedSources(initialSelectedSources(file));
   }, [file]);
 
   // Helper to get selected source for a format
-  const getSelectedSource = (
-    formatType: string,
-  ): NonNullable<DatasetFile["formats"]>[0]["sources"][0] | null => {
+  const getSelectedSource = (formatType: string): FileSource | null => {
     const selection = selectedSources[formatType];
     if (!selection) return null;
 
-    const formatEntry = file.formats?.find(
-      (f) => f.format.format_type === formatType,
-    );
-    if (!formatEntry || !formatEntry.sources) return null;
+    const formatEntry = file.formats?.find((f) => f.format.format_type === formatType);
+    if (!formatEntry?.sources) return null;
 
     return (
       formatEntry.sources.find(
@@ -165,9 +202,7 @@ function FileDetailPage() {
   };
 
   // Helper to get URL from a source
-  const getUrlFromSource = (
-    source: NonNullable<DatasetFile["formats"]>[0]["sources"][0] | null,
-  ): string | null => {
+  const getUrlFromSource = (source: FileSource | null): string | null => {
     return source ? buildSourceFileUrl(source) : null;
   };
 
@@ -181,46 +216,7 @@ function FileDetailPage() {
   // Extract metadata from selected source
   const featureCount = geoparquetSource?.source_metadata?.feature_count;
 
-  // Helper to get first parquet file for data table preview
-  const getFirstParquetFile = (): { url: string; fileName: string } | null => {
-    const geoparquetFormat = file.formats?.find(
-      (f) => f.format.format_type === "geoparquet",
-    );
-
-    if (!geoparquetFormat?.sources || geoparquetFormat.sources.length === 0) {
-      return null;
-    }
-
-    // Use selected source if available, otherwise find first individual file
-    const selectedSource = geoparquetSource;
-
-    if (selectedSource) {
-      const url = buildSourceFileUrl(selectedSource);
-      // Extract filename from location path
-      const location = selectedSource.location as { path?: string };
-      const path = location?.path;
-      if (url && path && !path.includes("*")) {
-        const fileName = path.split("/").pop() || "data.parquet";
-        return { url, fileName };
-      }
-    }
-
-    // Fallback: find first individual file (not a glob pattern)
-    for (const source of geoparquetFormat.sources) {
-      const url = buildSourceFileUrl(source);
-      if (!url) continue;
-      const location = source.location as { path?: string };
-      const path = location?.path;
-      if (path && !path.includes("*")) {
-        const fileName = path.split("/").pop() || "data.parquet";
-        return { url, fileName };
-      }
-    }
-
-    return null;
-  };
-
-  const firstParquetFile = getFirstParquetFile();
+  const firstParquetFile = firstParquetFilePreview(file, geoparquetSource);
 
   const cleanDescription = file.description
     ?.replace(/<[^>]*>/g, "")
@@ -277,11 +273,7 @@ function FileDetailPage() {
               </Link>
             </Button>
             {firstParquetFile && (
-              <Button
-                variant="outline"
-                onClick={() => setParquetViewer(firstParquetFile)}
-                className="w-full"
-              >
+              <Button variant="outline" onClick={() => setParquetViewer(firstParquetFile)} className="w-full">
                 <Table className="h-4 w-4 mr-2 shrink-0" />
                 Data Table
               </Button>
@@ -295,9 +287,7 @@ function FileDetailPage() {
           <>
             <div>
               <h4 className="font-medium mb-2">Description</h4>
-              <p className="text-sm text-muted-foreground break-words">
-                {cleanDescription}
-              </p>
+              <p className="text-sm text-muted-foreground break-words">{cleanDescription}</p>
             </div>
             <Separator />
           </>
@@ -312,18 +302,14 @@ function FileDetailPage() {
           )}
           {file.file_metadata?.geometry_type && (
             <div>
-              <p className="text-sm text-muted-foreground mb-1">
-                Geometry Type
-              </p>
+              <p className="text-sm text-muted-foreground mb-1">Geometry Type</p>
               <p className="font-medium">{file.file_metadata.geometry_type}</p>
             </div>
           )}
           {file.file_metadata?.bounds && (
             <div>
               <p className="text-sm text-muted-foreground mb-1">Bounds</p>
-              <p className="font-mono text-xs">
-                [{file.file_metadata.bounds.join(", ")}]
-              </p>
+              <p className="font-mono text-xs">[{file.file_metadata.bounds.join(", ")}]</p>
             </div>
           )}
         </div>
@@ -363,15 +349,8 @@ function FileDetailPage() {
   return (
     <div>
       {parquetViewer ? (
-        <ResizablePanelGroup
-          orientation="vertical"
-          className="min-h-[calc(100vh-4rem)]"
-        >
-          <ResizablePanel
-            defaultSize="70%"
-            minSize="40%"
-            className="min-h-0 overflow-y-auto"
-          >
+        <ResizablePanelGroup orientation="vertical" className="min-h-[calc(100vh-4rem)]">
+          <ResizablePanel defaultSize="70%" minSize="40%" className="min-h-0 overflow-y-auto">
             {content}
           </ResizablePanel>
           <ResizableHandle withHandle />

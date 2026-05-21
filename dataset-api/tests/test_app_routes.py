@@ -1,6 +1,7 @@
 """Route and startup tests for the Dataset API."""
 
 import sys
+import warnings
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -14,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main
 from database.db import get_db
 from main import app
-from models.dataset import Collection, Dataset, File
+from models.dataset import Collection, Dataset, File, FileSource, StorageLocation
+from models.helpers import file_source_json_dict, storage_location_json_dict
 from services.dataset import DatasetService
 
 
@@ -104,3 +106,53 @@ def test_dynamic_dataset_routes_do_not_infer_recursive_response_models() -> None
     assert list_response.json()["items"][0]["slug"] == "nfhl"
     assert detail_response.status_code == HTTP_OK
     assert detail_response.json()["files"][0]["slug"] == "alluvial-fans"
+
+
+def test_file_source_json_dict_normalizes_json_columns_without_serializer_warnings() -> None:
+    """Verify ORM-style JSON dict fields serialize without Pydantic warnings."""
+    source = FileSource(
+        id=1,
+        file_format_id=2,
+        storage_location_id=3,
+        source_type="file",
+        location={"type": "file", "version": "v1", "path": "dataset/file.parquet"},
+        source_metadata={"version": "v1", "feature_count": 12},
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        payload = file_source_json_dict(source)
+
+    assert caught == []
+    assert payload["location"] == {"type": "file", "version": "v1", "path": "dataset/file.parquet"}
+    assert payload["source_metadata"] == {"version": "v1", "feature_count": 12}
+
+
+def test_storage_location_json_dict_normalizes_config_without_serializer_warnings() -> None:
+    """Verify ORM-style storage config dict fields serialize without Pydantic warnings."""
+    storage_location = StorageLocation(
+        id=1,
+        slug="seaweedfs-local",
+        name="SeaweedFS Local",
+        backend_type="s3",
+        config={
+            "type": "seaweedfs",
+            "version": "v1",
+            "base_url": "http://localhost:8888",
+            "bucket": "hifld",
+            "endpoint_url": "http://localhost:8333",
+        },
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        payload = storage_location_json_dict(storage_location)
+
+    assert caught == []
+    assert payload["config"] == {
+        "type": "seaweedfs",
+        "version": "v1",
+        "base_url": "http://localhost:8888",
+        "bucket": "hifld",
+        "endpoint_url": "http://localhost:8333",
+    }

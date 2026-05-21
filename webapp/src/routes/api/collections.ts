@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { getCollections, type Collection } from "@/lib/api-client";
+import { type Collection, getCollections } from "@/lib/api-client";
 import { collectionSelf, requestOrigin } from "@/lib/api-links";
 
 export const Route = createFileRoute("/api/collections")({
