@@ -270,7 +270,7 @@ export function trackDataTable(
  * Track URL copied
  */
 export function trackUrlCopied(
-  urlType: 'geoserver' | 'storage_uri' | 'api_endpoint' | 'duckdb_config',
+  urlType: 'storage_uri' | 'api_endpoint' | 'duckdb_config',
   properties?: {
     format?: string;
     datasetSlug?: string;

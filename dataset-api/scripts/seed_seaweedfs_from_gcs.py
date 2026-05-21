@@ -22,7 +22,6 @@ logger = logging.getLogger("seed-seaweedfs-from-gcs")
 KNOWN_FORMATS = {
     "geoparquet",
     "pmtiles",
-    "geoserver",
     "geopackage",
     "shapefile",
     "geojson",

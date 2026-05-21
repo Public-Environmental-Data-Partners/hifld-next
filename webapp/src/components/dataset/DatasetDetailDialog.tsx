@@ -9,7 +9,6 @@ import {
 import type { DatasetWithUrls } from "@/lib/api-client";
 import { PMTilesFormat } from "./PMTilesFormat";
 import { GeoParquetFormat } from "./GeoParquetFormat";
-import { GeoServerFormat } from "./GeoServerFormat";
 
 interface DatasetDetailDialogProps {
   dataset: DatasetWithUrls;
@@ -24,9 +23,6 @@ interface DatasetDetailDialogProps {
   ) => void;
   pmtilesUrl: string | null;
   geoparquetUrl: string | null;
-  ogcFeaturesUrl: string | null;
-  fullLayerName: string | null;
-  geopackageUrl: string | null;
   featureCount: number | undefined;
 }
 
@@ -36,9 +32,6 @@ export function DatasetDetailDialog({
   onSourceChange,
   pmtilesUrl,
   geoparquetUrl,
-  ogcFeaturesUrl,
-  fullLayerName,
-  geopackageUrl,
   featureCount,
 }: DatasetDetailDialogProps) {
   const cleanDescription = dataset.description
@@ -51,9 +44,6 @@ export function DatasetDetailDialog({
   );
   const geoparquetFormat = dataset.formats?.find(
     (f) => f.format.format_type === "geoparquet"
-  );
-  const geoserverFormat = dataset.formats?.find(
-    (f) => f.format.format_type === "geoserver"
   );
 
   return (
@@ -117,15 +107,9 @@ export function DatasetDetailDialog({
                 <p className="font-medium">{featureCount.toLocaleString()}</p>
               </div>
             )}
-            {fullLayerName && (
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">Layer</p>
-                <p className="font-mono text-sm break-all">{fullLayerName}</p>
-              </div>
-            )}
           </div>
 
-          {(pmtilesUrl || geoparquetUrl || geoserverFormat) && (
+          {(pmtilesUrl || geoparquetUrl) && (
             <>
               <Separator />
               <div>
@@ -152,18 +136,6 @@ export function DatasetDetailDialog({
                           storageLocationId,
                           version
                         );
-                      }}
-                    />
-                  )}
-                  {geoserverFormat && ogcFeaturesUrl && (
-                    <GeoServerFormat
-                      formatEntry={geoserverFormat}
-                      ogcFeaturesUrl={ogcFeaturesUrl}
-                      fullLayerName={fullLayerName}
-                      geopackageUrl={geopackageUrl}
-                      selectedSource={selectedSources["geoserver"] || null}
-                      onSourceChange={(storageLocationId, version) => {
-                        onSourceChange("geoserver", storageLocationId, version);
                       }}
                     />
                   )}

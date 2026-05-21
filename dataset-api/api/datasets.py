@@ -9,7 +9,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlmodel import Session, select
 from sqlalchemy.orm import selectinload
@@ -688,6 +688,12 @@ async def download_shapefile_zip(
         source_path = location.get("path", "")
         if not source_path:
             raise HTTPException(status_code=400, detail="Source path is empty")
+
+        if source_path.lower().endswith(".zip"):
+            return RedirectResponse(
+                url=storage_client.get_public_url(source_path),
+                status_code=302,
+            )
 
         # Extract folder path (remove filename, keep directory)
         # e.g., "dataset/shapefile/file.shp" -> "dataset/shapefile/"

@@ -3,12 +3,15 @@ HIFLD Next Dataset API
 
 FastAPI service for reading geospatial datasets:
 - Read-only dataset and collection endpoints
-- GeoServer integration
 - Dataset ingestion via scripts/import_datasets.py
 """
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+from alembic import command as alembic_command
+from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -17,7 +20,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from database.db import init_db
 from api import collections as collections_router
 from api import datasets as datasets_router
-from api import geoserver as geoserver_router
 
 # Processing router removed - use scripts/import_datasets.py for dataset ingestion
 
@@ -26,6 +28,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("dataset-api")
+
+ALEMBIC_INI_PATH = Path(__file__).parent / "alembic.ini"
 
 # SQLAlchemy logging is controlled in database/db.py via ENABLE_DB_DEBUG
 
@@ -78,9 +82,6 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
     # Startup
-    from alembic import command
-    from alembic.config import Config
-    from pathlib import Path
     from config import config
 
     # Log database URL (mask password for security)
@@ -96,23 +97,39 @@ async def lifespan(app: FastAPI):
     else:
         logger.info(f"Connecting to database: {db_url}")
 
-    # Run Alembic migrations
-    alembic_cfg = Config(str(Path(__file__).parent / "alembic.ini"))
-    try:
-        command.upgrade(alembic_cfg, "head")
-        logger.info("Database migrations completed")
-    except Exception as e:
-        logger.error(f"Failed to run migrations: {e}")
-        raise
-
-    # Initialize database (creates tables if they don't exist)
-    init_db()
-    logger.info("Database initialized")
+    run_startup_database_setup()
     
     yield
     
     # Shutdown (if needed)
     logger.info("Shutting down")
+
+
+def run_startup_database_setup() -> None:
+    """Run the supported startup database initialization flow.
+
+    The API intentionally follows the service-startup migration pattern used by
+    tools like Dagster: report the current revision, apply Alembic migrations,
+    report the resulting revision, then create any missing SQLModel tables.
+    """
+    alembic_cfg = AlembicConfig(str(ALEMBIC_INI_PATH))
+    try:
+        logger.info("Current database revision before startup migrations:")
+        alembic_command.current(alembic_cfg)
+        alembic_command.upgrade(alembic_cfg, "head")
+        logger.info("Current database revision after startup migrations:")
+        alembic_command.current(alembic_cfg)
+        logger.info("Database migrations completed")
+    except Exception as e:
+        logger.error(f"Failed to run migrations: {e}")
+        raise
+
+    try:
+        init_db()
+        logger.info("Database initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize database tables: {e}")
+        raise
 
 
 app = FastAPI(
@@ -139,7 +156,6 @@ app.add_middleware(
 # Include routers (read-only endpoints)
 app.include_router(collections_router.router)  # GET only
 app.include_router(datasets_router.router)  # GET only, nested under collections
-app.include_router(geoserver_router.router)  # GeoServer proxy endpoints
 # Processing router removed - use scripts/import_datasets.py for dataset ingestion
 
 

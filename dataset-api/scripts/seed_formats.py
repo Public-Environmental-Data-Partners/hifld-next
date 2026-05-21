@@ -64,12 +64,6 @@ DEFAULT_FORMATS = [
         "mime_type": "application/x-protobuf",
     },
     {
-        "format_type": "geoserver",
-        "name": "GeoServer",
-        "description": "GeoServer service providing multiple OGC-compliant interfaces (WFS, WMS, OGC API Features, GeoPackage export)",
-        "mime_type": None,  # Multiple formats available depending on request
-    },
-    {
         "format_type": "geopackage",
         "name": "GeoPackage",
         "description": "GeoPackage file format for portable spatial datasets",

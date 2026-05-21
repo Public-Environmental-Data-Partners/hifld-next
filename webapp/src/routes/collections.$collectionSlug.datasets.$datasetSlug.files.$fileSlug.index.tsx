@@ -22,15 +22,6 @@ import { ParquetViewerPanel } from "@/components/dataset/ParquetViewerPanel";
 import { buildSourceFileUrl } from "@/components/dataset/sourceUrls";
 import { PageLoader } from "@/components/ui/page-loader";
 import { compareVersionValues } from "@/components/dataset/versionLabel";
-import {
-  getOgcFeaturesUrl,
-  getFullLayerName,
-  getGeoPackageUrl,
-  getGeoJsonUrl,
-  getShapefileUrl,
-} from "@/lib/api-client";
-
-const GEOSERVER_EXPORT_SIZE_LIMIT_MB = 250;
 
 export const Route = createFileRoute(
   "/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/",
@@ -183,37 +174,9 @@ function FileDetailPage() {
   // Get selected sources for each format
   const geoparquetSource = getSelectedSource("geoparquet");
   const pmtilesSource = getSelectedSource("pmtiles");
-  const geoserverSource = getSelectedSource("geoserver");
-  const geoserverStorageLocation = geoserverSource?.storage_location;
-  const geoserverTotalSizeBytes = geoserverSource?.source_metadata?.size_bytes;
-  const geoserverExportsEnabled =
-    typeof geoserverTotalSizeBytes !== "number"
-      ? true
-      : geoserverTotalSizeBytes <= GEOSERVER_EXPORT_SIZE_LIMIT_MB * 1024 * 1024;
 
   // Extract URLs from selected sources
   const pmtilesUrl = getUrlFromSource(pmtilesSource);
-
-  // URLs for the selected GeoServer source
-  const ogcFeaturesUrl =
-    geoserverSource && geoserverStorageLocation
-      ? getOgcFeaturesUrl(geoserverSource, geoserverStorageLocation)
-      : null;
-  const fullLayerName = geoserverSource
-    ? getFullLayerName(geoserverSource)
-    : null;
-  const geopackageUrl =
-    geoserverExportsEnabled && geoserverSource && geoserverStorageLocation
-      ? getGeoPackageUrl(geoserverSource, geoserverStorageLocation)
-      : null;
-  const geojsonUrl =
-    geoserverExportsEnabled && geoserverSource && geoserverStorageLocation
-      ? getGeoJsonUrl(geoserverSource, geoserverStorageLocation)
-      : null;
-  const shapefileUrl =
-    geoserverExportsEnabled && geoserverSource && geoserverStorageLocation
-      ? getShapefileUrl(geoserverSource, geoserverStorageLocation)
-      : null;
 
   // Extract metadata from selected source
   const featureCount = geoparquetSource?.source_metadata?.feature_count;
@@ -380,12 +343,6 @@ function FileDetailPage() {
           onViewParquet={(url, fileName) => {
             setParquetViewer({ url, fileName });
           }}
-          ogcFeaturesUrl={ogcFeaturesUrl}
-          fullLayerName={fullLayerName}
-          geopackageUrl={geopackageUrl}
-          geojsonUrl={geojsonUrl}
-          shapefileUrl={shapefileUrl}
-          geoserverExportsEnabled={geoserverExportsEnabled}
           pmtilesUrl={pmtilesUrl}
           collectionId={collection.id}
           collectionSlug={collectionSlug}
