@@ -1,11 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { json } from "@tanstack/react-start";
-import {
-  getCollectionById,
-  type Collection,
-  type DatasetWithUrls,
-} from "@/lib/api-client";
-import { getDatasets } from "@/lib/datasets";
+import { type Collection, type DatasetWithUrls, getCollectionById } from "@/lib/api-client";
 import {
   collectionSelf,
   datasetSelf,
@@ -14,6 +9,12 @@ import {
   requestOrigin,
 } from "@/lib/api-links";
 import { jsonProblem } from "@/lib/api-problem";
+import { getDatasets } from "@/lib/datasets";
+
+interface DatasetLinks {
+  self: string;
+  collection?: string;
+}
 
 export const Route = createFileRoute("/api/datasets")({
   server: {
@@ -21,7 +22,8 @@ export const Route = createFileRoute("/api/datasets")({
       GET: async ({ request }) => {
         try {
           const url = new URL(request.url);
-          const search = url.searchParams.get("search") || undefined;
+          const rawSearch = url.searchParams.get("search")?.trim();
+          const search = rawSearch && rawSearch.length > 0 ? rawSearch : undefined;
           const datasets = await getDatasets(search);
           const origin = requestOrigin(request);
           const colCache = new Map<number, Collection | null>();
@@ -34,11 +36,10 @@ export const Route = createFileRoute("/api/datasets")({
             return c;
           };
 
-          const body: Array<DatasetWithUrls & { links: Record<string, string> }> =
-            [];
+          const body: Array<DatasetWithUrls & { links: DatasetLinks }> = [];
           for (const d of datasets) {
             const col = await resolveCol(d.collection_id);
-            const links: Record<string, string> = {
+            const links: DatasetLinks = {
               self: col
                 ? datasetSelf(origin, col.slug, d.slug, {
                     include_urls: true,
@@ -51,7 +52,7 @@ export const Route = createFileRoute("/api/datasets")({
             body.push({ ...d, links });
           }
 
-          const listSelf = globalDatasetsListSelf(origin, { search });
+          const listSelf = globalDatasetsListSelf(origin, search === undefined ? undefined : { search });
           return new Response(JSON.stringify(body), {
             status: 200,
             headers: {
@@ -66,10 +67,7 @@ export const Route = createFileRoute("/api/datasets")({
       },
 
       POST: async () => {
-        return json(
-          { error: "Dataset creation is handled by dataset-api import script" },
-          { status: 405 }
-        );
+        return json({ error: "Dataset creation is handled by dataset-api import script" }, { status: 405 });
       },
     },
   },

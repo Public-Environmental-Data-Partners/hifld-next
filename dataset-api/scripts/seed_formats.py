@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Seed script to initialize format definitions in the database.
+"""Seed script to initialize format definitions in the database.
 
 This creates default format types (e.g., geoparquet, pmtiles, ogc_feature) that
 can be used across all datasets.
@@ -15,14 +14,17 @@ import argparse
 import sys
 from pathlib import Path
 
+
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from typing import TypedDict, Optional, get_args
+from typing import TypedDict, get_args
+
+from sqlmodel import Session, select
+
 from database.db import get_db_session
 from models.dataset import Format, FormatType
 from scripts.config_loader import load_json_config
-from sqlmodel import Session, select
 
 
 class FormatConfig(TypedDict):
@@ -31,22 +33,34 @@ class FormatConfig(TypedDict):
     format_type: FormatType
     name: str
     description: str
-    mime_type: Optional[str]
+    mime_type: str | None
 
 
 ALLOWED_FORMAT_TYPES = set(get_args(FormatType))
+
+
+class FormatConfigError(ValueError):
+    """Invalid format configuration."""
+
+    @classmethod
+    def invalid_type(cls, format_type: object) -> "FormatConfigError":
+        """Create an error for an unsupported format type."""
+        return cls(f"format_type must be one of {sorted(ALLOWED_FORMAT_TYPES)}, got: {format_type}")
+
+    @classmethod
+    def missing_field(cls, field_name: str, format_type: object) -> "FormatConfigError":
+        """Create an error for a missing required field."""
+        return cls(f"{field_name} is required for format {format_type}")
 
 
 def validate_format_config(format_data: FormatConfig) -> None:
     """Validate a format config before writing it to the database."""
     format_type = format_data.get("format_type")
     if format_type not in ALLOWED_FORMAT_TYPES:
-        raise ValueError(
-            f"format_type must be one of {sorted(ALLOWED_FORMAT_TYPES)}, got: {format_type}"
-        )
+        raise FormatConfigError.invalid_type(format_type)
     for field_name in ("name", "description"):
         if field_name not in format_data:
-            raise ValueError(f"{field_name} is required for format {format_type}")
+            raise FormatConfigError.missing_field(field_name, format_type)
 
 
 # Default format definitions (fallback if no config provided)
@@ -90,9 +104,7 @@ DEFAULT_FORMATS = [
 ]
 
 
-def seed_formats(
-    db: Session, formats: list[FormatConfig], dry_run: bool = False
-) -> dict[str, int]:
+def seed_formats(db: Session, formats: list[FormatConfig], dry_run: bool = False) -> dict[str, int]:
     """Seed format definitions into the database."""
     results = {"created": 0, "updated": 0, "unchanged": 0}
 
@@ -100,9 +112,7 @@ def seed_formats(
         validate_format_config(format_data)
 
         # Check if format already exists
-        statement = select(Format).where(
-            Format.format_type == format_data["format_type"]
-        )
+        statement = select(Format).where(Format.format_type == format_data["format_type"])
         existing = db.exec(statement).first()
 
         if existing:
@@ -126,9 +136,7 @@ def seed_formats(
                 )
                 results["updated"] += 1
             else:
-                print(
-                    f"  ✓ Format '{format_data['format_type']}' already exists and is up to date (ID: {existing.id})"
-                )
+                print(f"  ✓ Format '{format_data['format_type']}' already exists and is up to date (ID: {existing.id})")
                 results["unchanged"] += 1
             continue
 
@@ -149,7 +157,7 @@ def seed_formats(
     return results
 
 
-def main():
+def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Seed format definitions")
     parser.add_argument(
@@ -169,9 +177,7 @@ def main():
         if default_config.exists():
             config_path = str(default_config)
         else:
-            print(
-                "No config file provided and formats.local.json not found. Using defaults."
-            )
+            print("No config file provided and formats.local.json not found. Using defaults.")
             formats = DEFAULT_FORMATS
             config_path = None
 

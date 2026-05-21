@@ -8,7 +8,9 @@ Loads environment variables from .env files with precedence:
 
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 
 # Get the directory containing this file
 BASE_DIR = Path(__file__).resolve().parent

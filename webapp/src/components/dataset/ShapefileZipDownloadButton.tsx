@@ -1,29 +1,28 @@
-import { useState } from "react";
 import { Download, Loader2 } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import type {
-  DownloadAnalyticsContext,
-} from "@/lib/analytics";
-import {
-  trackDownloadClicked,
-  trackDownloadFailed,
-  trackDownloadSucceeded,
-} from "@/lib/analytics";
-import { createZipFromUrls, extractShapefileUrls, FileUrl } from "@/lib/zip-utils";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import type { DownloadAnalyticsContext } from "@/lib/analytics";
+import { trackDownloadClicked, trackDownloadFailed, trackDownloadSucceeded } from "@/lib/analytics";
+import type { DatasetSource } from "@/lib/api-client";
+import { createZipFromUrls, extractShapefileUrls } from "@/lib/zip-utils";
+
+interface ShapefileZipSource {
+  id?: number | undefined;
+  url?: string | undefined;
+  location?: DatasetSource["location"] | { path?: string | undefined; type?: string | undefined } | undefined;
+  glob_pattern?: string | undefined;
+}
+
+interface ZipSourceInput {
+  id?: number;
+  url?: string;
+  location?: { path?: string; type?: string };
+  glob_pattern?: string;
+}
 
 interface ShapefileZipDownloadButtonProps {
-  sources: Array<{
-    id?: number;
-    url?: string;
-    location?: { path?: string; type?: string };
-    glob_pattern?: string;
-  }>;
+  sources: ShapefileZipSource[];
   filename: string;
   label?: string;
   analyticsContext?: Omit<Partial<DownloadAnalyticsContext>, "download_method">;
@@ -42,6 +41,17 @@ function elapsedMs(startTime: number): number {
   return Math.round(performance.now() - startTime);
 }
 
+function toZipSourceInput(source: ShapefileZipSource): ZipSourceInput {
+  const input: ZipSourceInput = {};
+  if (source.id !== undefined) input.id = source.id;
+  if (source.url) input.url = source.url;
+  if (source.glob_pattern) input.glob_pattern = source.glob_pattern;
+  if (source.location && "path" in source.location && source.location.path) {
+    input.location = { path: source.location.path };
+  }
+  return input;
+}
+
 export async function executeShapefileZipDownload({
   sources,
   filename,
@@ -54,7 +64,7 @@ export async function executeShapefileZipDownload({
   onProgress?: (progress: number) => void;
 }) {
   const startTime = performance.now();
-  const fileUrls = extractShapefileUrls(sources);
+  const fileUrls = extractShapefileUrls(sources.map(toZipSourceInput));
   const sourceCount = fileUrls.length;
   const baseAnalyticsContext: DownloadAnalyticsContext = {
     ...analyticsContext,
@@ -111,14 +121,17 @@ export function ShapefileZipDownloadButton({
     setProgress(0);
 
     try {
-      await executeShapefileZipDownload({
+      const downloadOptions: Parameters<typeof executeShapefileZipDownload>[0] = {
         sources,
         filename,
-        analyticsContext,
         onProgress: (progressValue) => {
           setProgress(progressValue);
         },
-      });
+      };
+      if (analyticsContext) {
+        downloadOptions.analyticsContext = analyticsContext;
+      }
+      await executeShapefileZipDownload(downloadOptions);
     } finally {
       setIsDownloading(false);
       setProgress(0);
@@ -129,12 +142,7 @@ export function ShapefileZipDownloadButton({
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleDownload}
-            disabled={isDownloading}
-          >
+          <Button variant="ghost" size="sm" onClick={handleDownload} disabled={isDownloading}>
             {isDownloading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -145,11 +153,7 @@ export function ShapefileZipDownloadButton({
             )}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>
-          {isDownloading
-            ? `Creating zip... ${progress}%`
-            : label}
-        </TooltipContent>
+        <TooltipContent>{isDownloading ? `Creating zip... ${progress}%` : label}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );

@@ -1,3 +1,5 @@
+"""Storage client tests for GCS and SeaweedFS adapters."""
+
 import asyncio
 import os
 import sys
@@ -5,16 +7,18 @@ import types
 import uuid
 from pathlib import Path
 
-import httpx
 import gcsfs
+import httpx
 import pytest
+
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from storage.storage_client import GCSStorageClient, SeaweedFSFilerClient
 
 
-def test_seaweedfs_list_files_uses_filer_http_recursively(monkeypatch):
+def test_seaweedfs_list_files_uses_filer_http_recursively(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the expected behavior."""
     payloads = {
         "/buckets/hifld/root/?limit=10000": {
             "Entries": [
@@ -49,16 +53,22 @@ def test_seaweedfs_list_files_uses_filer_http_recursively(monkeypatch):
     requested_paths: list[str] = []
 
     class FakeAsyncClient:
-        def __init__(self, *args, **kwargs):
+        """Test helper FakeAsyncClient."""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            """Test helper for __init__."""
             pass
 
-        async def __aenter__(self):
+        async def __aenter__(self) -> "FakeAsyncClient":
+            """Test helper for __aenter__."""
             return self
 
-        async def __aexit__(self, *args):
+        async def __aexit__(self, *args: object) -> None:
+            """Test helper for __aexit__."""
             return None
 
-        async def get(self, url, headers=None):
+        async def get(self, url: str, headers: dict[str, str] | None = None) -> httpx.Response:
+            """Test helper for get."""
             request = httpx.Request("GET", url)
             requested_paths.append(request.url.raw_path.decode())
             return httpx.Response(
@@ -85,25 +95,35 @@ def test_seaweedfs_list_files_uses_filer_http_recursively(monkeypatch):
     ]
 
 
-def test_gcs_expand_glob_pattern_includes_nested_recursive_parquet(monkeypatch):
+def test_gcs_expand_glob_pattern_includes_nested_recursive_parquet(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the expected behavior."""
+
     class FakeBucket:
+        """Test helper FakeBucket."""
+
         pass
 
     class FakeStorageClient:
-        def bucket(self, bucket_name):
+        """Test helper FakeStorageClient."""
+
+        def bucket(self, bucket_name: str) -> FakeBucket:
+            """Test helper for bucket."""
             return FakeBucket()
 
     class FakeGoogleStorage:
+        """Test helper FakeGoogleStorage."""
+
         @staticmethod
-        def Client(project=None):
+        def Client(project: str | None = None) -> FakeStorageClient:
+            """Test helper for Client."""
             return FakeStorageClient()
 
     class FakeGCSFileSystem:
-        def find(self, prefix, detail=False):
-            assert (
-                prefix
-                == "gs://hifld-next-datasets-prod/wbd/10-digit-hu-watershed/v1.0.0/geoparquet/"
-            )
+        """Test helper FakeGCSFileSystem."""
+
+        def find(self, prefix: str, detail: bool = False) -> list[str]:
+            """Test helper for find."""
+            assert prefix == "gs://hifld-next-datasets-prod/wbd/10-digit-hu-watershed/v1.0.0/geoparquet/"
             assert detail is False
             return [
                 "gs://hifld-next-datasets-prod/wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=01/part-000.parquet",
@@ -118,11 +138,7 @@ def test_gcs_expand_glob_pattern_includes_nested_recursive_parquet(monkeypatch):
     monkeypatch.setattr(gcsfs, "GCSFileSystem", FakeGCSFileSystem)
 
     client = GCSStorageClient(bucket="hifld-next-datasets-prod")
-    files = asyncio.run(
-        client.expand_glob_pattern(
-            "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/**/*.parquet"
-        )
-    )
+    files = asyncio.run(client.expand_glob_pattern("wbd/10-digit-hu-watershed/v1.0.0/geoparquet/**/*.parquet"))
 
     assert files == [
         "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=01/part-000.parquet",
@@ -130,8 +146,11 @@ def test_gcs_expand_glob_pattern_includes_nested_recursive_parquet(monkeypatch):
     ]
 
 
-def test_seaweedfs_expand_glob_pattern_uses_filer_listing(monkeypatch):
-    async def fake_list_files(self, prefix):
+def test_seaweedfs_expand_glob_pattern_uses_filer_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the expected behavior."""
+
+    async def fake_list_files(self: object, prefix: str) -> list[str]:
+        """Test helper for fake_list_files."""
         assert prefix == "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/"
         return [
             "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=01/part-000.parquet",
@@ -146,11 +165,7 @@ def test_seaweedfs_expand_glob_pattern_uses_filer_listing(monkeypatch):
         s3_url="http://localhost:8333",
         bucket="drp-hifld-copy-formatted",
     )
-    files = asyncio.run(
-        client.expand_glob_pattern(
-            "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/**/*.parquet"
-        )
-    )
+    files = asyncio.run(client.expand_glob_pattern("wbd/10-digit-hu-watershed/v1.0.0/geoparquet/**/*.parquet"))
 
     assert files == [
         "wbd/10-digit-hu-watershed/v1.0.0/geoparquet/huc2=01/part-000.parquet",
@@ -162,7 +177,8 @@ def test_seaweedfs_expand_glob_pattern_uses_filer_listing(monkeypatch):
     os.getenv("HIFLD_RUN_SEAWEEDFS_INTEGRATION") != "1",
     reason="Set HIFLD_RUN_SEAWEEDFS_INTEGRATION=1 to test local SeaweedFS",
 )
-def test_seaweedfs_integration_round_trips_file_and_expands_glob(tmp_path):
+def test_seaweedfs_integration_round_trips_file_and_expands_glob(tmp_path: Path) -> None:
+    """Verify the expected behavior."""
     bucket = os.getenv("SEAWEEDFS_BUCKET", "hifld")
     client = SeaweedFSFilerClient(
         filer_url=os.getenv("SEAWEEDFS_FILER_URL", "http://localhost:8888"),
@@ -175,7 +191,8 @@ def test_seaweedfs_integration_round_trips_file_and_expands_glob(tmp_path):
     downloaded_file = tmp_path / "downloaded.json"
     local_file.write_text('{"status":"ok"}', encoding="utf-8")
 
-    async def scenario():
+    async def scenario() -> None:
+        """Test helper for scenario."""
         try:
             public_url = await client.upload_file(
                 local_file,
@@ -190,9 +207,7 @@ def test_seaweedfs_integration_round_trips_file_and_expands_glob(tmp_path):
             assert client.parse_url_to_path(public_url) == remote_path
             assert await client.file_exists(remote_path)
             assert await client.list_files(prefix) == [remote_path]
-            assert await client.expand_glob_pattern(f"{prefix}/**/*.json") == [
-                remote_path
-            ]
+            assert await client.expand_glob_pattern(f"{prefix}/**/*.json") == [remote_path]
             assert await client.get_file_size(remote_path) == len('{"status":"ok"}')
 
             await client.download_file(remote_path, downloaded_file)

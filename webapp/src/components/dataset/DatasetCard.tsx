@@ -1,7 +1,7 @@
-import { Map, FileJson } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { FileJson, Map as MapIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Link } from "@tanstack/react-router";
 import type { DatasetWithUrls } from "@/lib/api-client";
 
 interface DatasetCardProps {
@@ -13,13 +13,9 @@ export function DatasetCard({ dataset, collectionSlug }: DatasetCardProps) {
   // Check which formats are available
   // Note: formats may not be present if includeUrls=false (to avoid N+1 query performance issues)
   // Format badges will be shown on the detail page instead
-  const hasPmtiles = dataset.formats?.some(
-    (f) => f.format.format_type === "pmtiles"
-  );
-  const hasGeoparquet = dataset.formats?.some(
-    (f) => f.format.format_type === "geoparquet"
-  );
-  
+  const hasPmtiles = dataset.formats?.some((f) => f.format.format_type === "pmtiles");
+  const hasGeoparquet = dataset.formats?.some((f) => f.format.format_type === "geoparquet");
+
   // If formats aren't loaded, don't show format badges (they'll be on detail page)
   const showFormatBadges = dataset.formats && dataset.formats.length > 0;
 
@@ -27,7 +23,7 @@ export function DatasetCard({ dataset, collectionSlug }: DatasetCardProps) {
     ?.replace(/<[^>]*>/g, "")
     .replace(/&nbsp;/g, " ")
     .trim();
-  
+
   const tagBadges = dataset.tags
     ? Object.entries(dataset.tags).flatMap(([key, value]) => {
         const values = Array.isArray(value) ? value : [value];
@@ -68,14 +64,12 @@ export function DatasetCard({ dataset, collectionSlug }: DatasetCardProps) {
           <CardTitle className="text-base font-mono break-words break-all hyphens-auto leading-snug mb-2">
             {dataset.name}
           </CardTitle>
-          <p className="font-mono text-xs text-muted-foreground mb-2">
-            {dataset.slug}
-          </p>
+          <p className="font-mono text-xs text-muted-foreground mb-2">{dataset.slug}</p>
           {tagBadges.length > 0 && (
             <div className="flex items-start gap-2 flex-wrap min-w-0 overflow-visible">
-              {tagBadges.map((tag, idx) => (
+              {tagBadges.map((tag) => (
                 <Badge
-                  key={`${tag.key}-${idx}`}
+                  key={`${tag.key}-${tag.value}`}
                   variant="outline"
                   className="font-mono whitespace-normal break-words break-all hyphens-auto min-w-0 max-w-full overflow-visible leading-tight rounded-md"
                 >
@@ -93,7 +87,7 @@ export function DatasetCard({ dataset, collectionSlug }: DatasetCardProps) {
             <div className="flex flex-wrap gap-1">
               {hasPmtiles && (
                 <Badge variant="secondary" className="font-mono text-xs">
-                  <Map className="h-3 w-3 mr-1" />
+                  <MapIcon className="h-3 w-3 mr-1" />
                   PMTiles
                 </Badge>
               )}

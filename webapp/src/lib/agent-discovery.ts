@@ -31,8 +31,7 @@ ${urls}
 }
 
 /** Content Signals (https://contentsignals.org/, draft-romm-aipref-contentsignals). */
-export const ROBOTS_CONTENT_SIGNAL =
-  "Content-Signal: ai-train=no, search=yes, ai-input=no";
+export const ROBOTS_CONTENT_SIGNAL = "Content-Signal: ai-train=no, search=yes, ai-input=no";
 
 export function buildRobotsTxt(origin: string): string {
   return [

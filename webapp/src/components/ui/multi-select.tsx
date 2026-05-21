@@ -1,21 +1,10 @@
-import * as React from "react";
 import { Check, ChevronsUpDown, X } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
+import * as React from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 
 export interface MultiSelectOption {
   label: string;
@@ -64,11 +53,7 @@ export function MultiSelect({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className={cn(
-            "w-full justify-between min-h-9 h-auto min-w-0",
-            selected.length > 0 && "h-auto",
-            className
-          )}
+          className={cn("w-full justify-between min-h-9 h-auto min-w-0", selected.length > 0 && "h-auto", className)}
         >
           <div className="flex gap-1 flex-wrap items-center min-w-0 flex-1 pr-2 overflow-hidden">
             {selectedOptions.slice(0, maxDisplay).map((option) => (
@@ -84,6 +69,8 @@ export function MultiSelect({
               >
                 <span className="truncate block max-w-full sm:max-w-[140px]">{option.label}</span>
                 <button
+                  type="button"
+                  aria-label={`Remove ${option.label}`}
                   className="ml-1 ring-offset-background rounded-full outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 shrink-0 flex-shrink-0"
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -109,9 +96,7 @@ export function MultiSelect({
                 +{hiddenCount} more
               </Badge>
             )}
-            {selected.length === 0 && (
-              <span className="text-muted-foreground truncate">{placeholder}</span>
-            )}
+            {selected.length === 0 && <span className="text-muted-foreground truncate">{placeholder}</span>}
           </div>
           <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50 ml-2" />
         </Button>
@@ -125,16 +110,8 @@ export function MultiSelect({
               {options.map((option) => {
                 const isSelected = selected.includes(option.value);
                 return (
-                  <CommandItem
-                    key={option.value}
-                    onSelect={() => handleSelect(option.value)}
-                  >
-                    <Check
-                      className={cn(
-                        "mr-2 h-4 w-4",
-                        isSelected ? "opacity-100" : "opacity-0"
-                      )}
-                    />
+                  <CommandItem key={option.value} onSelect={() => handleSelect(option.value)}>
+                    <Check className={cn("mr-2 h-4 w-4", isSelected ? "opacity-100" : "opacity-0")} />
                     {option.label}
                   </CommandItem>
                 );
@@ -146,4 +123,3 @@ export function MultiSelect({
     </Popover>
   );
 }
-

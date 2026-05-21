@@ -2,27 +2,41 @@
 
 import logging
 import re
-from typing import Optional, Union
+from typing import Protocol
 
-from .dataset import (
-    FileSource,
-    StorageLocation,
-    FileLocation,
-    ApiLocation,
-    GeoServerLocation,
-)
+from schemas.types import APIDict, JSONDict, api_dict, json_value, model_json_dict
 from storage.storage_client import create_storage_client_from_location
 
+from .dataset import (
+    ApiLocation,
+    BucketStorageLocationConfig,
+    FileLocation,
+    FileSource,
+    GeoServerLocation,
+    GeoServerStorageLocationConfig,
+    StorageLocation,
+)
+
+
 logger = logging.getLogger(__name__)
+STORAGE_URI_PATTERN = re.compile(r"^(gs://|s3://)([^/]+)/(.+)$")
+GCS_PUBLIC_URL_PATTERN = re.compile(r"^https?://storage\.googleapis\.com/[^/]+/(.*)$")
+
+
+class SupportsFileSize(Protocol):
+    """Protocol for storage clients that can return file sizes."""
+
+    async def get_file_size(self, remote_path: str) -> int:
+        """Return the remote object's size in bytes."""
+        ...
 
 
 def get_file_url(
     source_type: str,
-    location: Union[FileLocation, ApiLocation, GeoServerLocation, dict],
-    storage_location: Optional[StorageLocation],
-) -> Optional[str]:
-    """
-    Construct the full URL from source type, location, and storage location.
+    location: FileLocation | ApiLocation | GeoServerLocation | JSONDict,
+    storage_location: StorageLocation | None,
+) -> str | None:
+    """Construct the full URL from source type, location, and storage location.
 
     Args:
         source_type: Type of source - "file", "database", "api", or "service"
@@ -32,65 +46,46 @@ def get_file_url(
     Returns:
         Full URL to resource, or None if location or storage location is missing
     """
-    if not location or not storage_location:
+    if not location:
         return None
 
-    # Convert dict to Pydantic model if needed
-    if isinstance(location, dict):
-        if source_type == "file":
-            location = FileLocation(**location)
-        elif source_type == "api":
-            location = ApiLocation(**location)
-        elif source_type == "service":
-            location = GeoServerLocation(**location)
-
-    # For API locations, return the URL directly
-    if source_type == "api":
-        if isinstance(location, ApiLocation):
-            return location.url
+    normalized = normalize_location(source_type, location)
+    if source_type == "api" and isinstance(normalized, ApiLocation):
+        return normalized.url
+    if source_type != "file" or not isinstance(normalized, FileLocation):
         return None
+    return file_location_public_url(normalized, storage_location)
 
-    # For database locations, return None (no URL for databases)
-    if source_type == "database":
-        return None
 
-    # For service locations (GeoServer), return None
-    # GeoServer URLs are constructed differently in the frontend
-    if source_type == "service":
-        return None
-
-    # For file locations, use storage client to construct URL
+def normalize_location(
+    source_type: str,
+    location: FileLocation | ApiLocation | GeoServerLocation | JSONDict,
+) -> FileLocation | ApiLocation | GeoServerLocation | None:
+    """Convert a raw location dict into its typed location model."""
+    if not isinstance(location, dict):
+        return location
     if source_type == "file":
-        if not isinstance(location, FileLocation):
-            return None
-        file_path = location.path
-        if not file_path:
-            return None
-
-        # Don't generate URLs for glob patterns - they need to be expanded first
-        # Expanded sources will have individual file paths without wildcards
-        if "*" in file_path:
-            return None
-
-        if not storage_location:
-            return None
-
-        # Use storage client to get public URL (handles bucket stripping, URL format, etc.)
-        storage_client = create_storage_client_from_location(storage_location)
-        if not storage_client:
-            return None
-
-        return storage_client.get_public_url(file_path)
-
+        return FileLocation.model_validate(location)
+    if source_type == "api":
+        return ApiLocation.model_validate(location)
+    if source_type == "service":
+        return GeoServerLocation.model_validate(location)
     return None
+
+
+def file_location_public_url(location: FileLocation, storage_location: StorageLocation | None) -> str | None:
+    """Return a public URL for a concrete file location."""
+    if not location.path or "*" in location.path or not storage_location:
+        return None
+    storage_client = create_storage_client_from_location(storage_location)
+    return storage_client.get_public_url(location.path) if storage_client else None
 
 
 def get_file_source_url(
     file_source: FileSource,
-    storage_location: Optional[StorageLocation],
-) -> Optional[str]:
-    """
-    Construct the full URL for a FileSource.
+    storage_location: StorageLocation | None,
+) -> str | None:
+    """Construct the full URL for a FileSource.
 
     Args:
         file_source: FileSource with source_type and location dict
@@ -106,10 +101,9 @@ def get_file_source_url(
 
 def get_file_source_storage_uri(
     file_source: FileSource,
-    storage_location: Optional[StorageLocation],
-) -> Optional[str]:
-    """
-    Construct the storage URI (gs:// or s3://) for a FileSource.
+    storage_location: StorageLocation | None,
+) -> str | None:
+    """Construct the storage URI (gs:// or s3://) for a FileSource.
 
     Args:
         file_source: FileSource with source_type and location dict
@@ -118,22 +112,8 @@ def get_file_source_storage_uri(
     Returns:
         Storage URI (e.g., gs://bucket/path or s3://bucket/path), or None if not applicable
     """
-    if not storage_location or not file_source.location:
-        return None
-
-    # Only file sources with bucket storage have storage URIs
-    if file_source.source_type != "file":
-        return None
-
-    # Handle both dict and FileLocation objects
-    if isinstance(file_source.location, dict):
-        file_path = file_source.location.get("path", "")
-    elif isinstance(file_source.location, FileLocation):
-        file_path = file_source.location.path
-    else:
-        return None
-
-    if not file_path:
+    file_path = file_source_path(file_source)
+    if not storage_location or not file_path:
         return None
 
     # Only bucket-based storage locations have storage URIs
@@ -141,8 +121,6 @@ def get_file_source_storage_uri(
         return None
 
     # Create storage client and use it to construct the URI
-    from storage.storage_client import create_storage_client_from_location
-
     storage_client = create_storage_client_from_location(storage_location)
     if not storage_client:
         return None
@@ -152,12 +130,62 @@ def get_file_source_storage_uri(
     return uri
 
 
+def file_source_path(file_source: FileSource) -> str | None:
+    """Return the path from a file source if it is a concrete file source."""
+    if file_source.source_type != "file" or not file_source.location:
+        return None
+    if isinstance(file_source.location, dict):
+        return str(file_source.location.get("path", ""))
+    if isinstance(file_source.location, FileLocation):
+        return file_source.location.path
+    return None
+
+
+def file_source_json_dict(file_source: FileSource) -> APIDict:
+    """Serialize a file source without Pydantic JSON-column warnings.
+
+    SQLModel can hydrate JSON columns as dictionaries even when the Python type
+    annotation is a nested Pydantic model. Exclude those fields from the generic
+    dump, then normalize them explicitly for API responses.
+    """
+    source_dict = api_dict(file_source.model_dump(mode="json", exclude={"location", "source_metadata"}))
+    source_dict["location"] = location_dict(file_source.source_type, file_source.location)
+    metadata = source_metadata_dict(file_source)
+    source_dict["source_metadata"] = metadata if metadata else None
+    return source_dict
+
+
+def location_dict(
+    source_type: str,
+    location: FileLocation | ApiLocation | GeoServerLocation | JSONDict,
+) -> APIDict:
+    """Return a JSON-compatible location dictionary."""
+    normalized = normalize_location(source_type, location)
+    if normalized is not None:
+        return model_json_dict(normalized)
+    if isinstance(location, dict):
+        return api_dict(location)
+    return {}
+
+
+def storage_location_json_dict(storage_location: StorageLocation) -> APIDict:
+    """Serialize a storage location without Pydantic JSON-column warnings."""
+    storage_dict = api_dict(storage_location.model_dump(mode="json", exclude={"config"}))
+    config = storage_location.config
+    if isinstance(config, (BucketStorageLocationConfig, GeoServerStorageLocationConfig)):
+        storage_dict["config"] = model_json_dict(config)
+    elif isinstance(config, dict):
+        storage_dict["config"] = api_dict(config)
+    else:
+        storage_dict["config"] = None
+    return storage_dict
+
+
 def construct_glob_pattern_from_sources(
     file_sources: list[FileSource],
     storage_location: StorageLocation,
-) -> Optional[str]:
-    """
-    Construct a glob pattern from multiple file sources in the same storage location.
+) -> str | None:
+    """Construct a glob pattern from multiple file sources in the same storage location.
 
     Args:
         file_sources: List of FileSource objects with source_type="file"
@@ -166,96 +194,77 @@ def construct_glob_pattern_from_sources(
     Returns:
         Glob pattern (e.g., gs://bucket/path/*.parquet) or None if not applicable
     """
-    if not file_sources or not storage_location:
+    storage_uris = storage_uris_for_sources(file_sources, storage_location)
+    if not storage_uris:
         return None
 
-    # Filter to only file sources
-    file_sources = [s for s in file_sources if s.source_type == "file"]
-    if not file_sources:
+    first_uri = storage_uris[0]
+    match = STORAGE_URI_PATTERN.match(first_uri.split("?")[0])
+    if not match:
         return None
 
-    # Get storage URIs for all sources
+    paths = storage_uri_directories(storage_uris)
+    if not paths:
+        return None
+
+    common_path = longest_common_path(paths)
+    glob_pattern = (
+        f"{match.group(1)}{match.group(2)}/{common_path}/*.parquet"
+        if common_path
+        else f"{match.group(1)}{match.group(2)}/*.parquet"
+    )
+    endpoint_param = endpoint_url_param(first_uri)
+    return f"{glob_pattern}?endpoint_url={endpoint_param}" if endpoint_param else glob_pattern
+
+
+def storage_uris_for_sources(file_sources: list[FileSource], storage_location: StorageLocation) -> list[str]:
+    """Return valid native storage URIs for file sources."""
     storage_uris = []
     for source in file_sources:
         uri = get_file_source_storage_uri(source, storage_location)
         if uri and (uri.startswith("gs://") or uri.startswith("s3://")):
             storage_uris.append(uri)
+    return storage_uris
 
-    if not storage_uris:
-        return None
 
-    # Parse first URI to get scheme and bucket
-    first_uri = storage_uris[0]
-    # Handle URIs with query parameters (e.g., s3://bucket/path?endpoint_url=...)
-    uri_without_params = first_uri.split("?")[0]
-    match = re.match(r"^(gs://|s3://)([^/]+)/(.+)$", uri_without_params)
-    if not match:
-        return None
-
-    scheme = match.group(1)  # gs:// or s3://
-    bucket = match.group(2)  # bucket name
-
-    # Extract endpoint URL from first URI if present (for SeaweedFS)
-    endpoint_param = None
-    if "?endpoint_url=" in first_uri:
-        endpoint_param = first_uri.split("?endpoint_url=")[1]
-
-    # Extract directory paths from all URIs
+def storage_uri_directories(storage_uris: list[str]) -> list[str]:
+    """Extract directory paths from storage URIs."""
     paths = []
     for uri in storage_uris:
-        # Handle URIs with query parameters
-        uri_without_params = uri.split("?")[0]
-        match = re.match(r"^(gs://|s3://)([^/]+)/(.+)$", uri_without_params)
-        if match:
-            full_path = match.group(3)
-            # Remove filename, keep directory
-            path_parts = full_path.split("/")
-            if len(path_parts) > 1:
-                directory = "/".join(path_parts[:-1])
-                paths.append(directory)
-            else:
-                paths.append("")
+        match = STORAGE_URI_PATTERN.match(uri.split("?")[0])
+        if not match:
+            continue
+        path_parts = match.group(3).split("/")
+        paths.append("/".join(path_parts[:-1]) if len(path_parts) > 1 else "")
+    return paths
 
-    if not paths:
+
+def longest_common_path(paths: list[str]) -> str:
+    """Return the longest slash-delimited common path."""
+    common_parts = paths[0].split("/")
+    for path in paths[1:]:
+        parts = path.split("/")
+        common_length = 0
+        for common_part, part in zip(common_parts, parts, strict=False):
+            if common_part != part:
+                break
+            common_length += 1
+        common_parts = common_parts[:common_length]
+    return "/".join(common_parts)
+
+
+def endpoint_url_param(uri: str) -> str | None:
+    """Extract an endpoint_url query parameter from a storage URI."""
+    if "?endpoint_url=" not in uri:
         return None
-
-    # Find common directory prefix
-    if len(paths) == 1:
-        common_path = paths[0]
-    else:
-        # Find longest common prefix
-        common_parts = paths[0].split("/")
-        for path in paths[1:]:
-            parts = path.split("/")
-            # Find common prefix length
-            common_length = 0
-            for i in range(min(len(common_parts), len(parts))):
-                if common_parts[i] == parts[i]:
-                    common_length += 1
-                else:
-                    break
-            common_parts = common_parts[:common_length]
-        common_path = "/".join(common_parts)
-
-        # Construct glob pattern
-        if common_path:
-            glob_pattern = f"{scheme}{bucket}/{common_path}/*.parquet"
-        else:
-            glob_pattern = f"{scheme}{bucket}/*.parquet"
-
-        # Add endpoint parameter if present (for SeaweedFS)
-        if endpoint_param:
-            glob_pattern = f"{glob_pattern}?endpoint_url={endpoint_param}"
-
-        return glob_pattern
+    return uri.split("?endpoint_url=", maxsplit=1)[1]
 
 
 async def expand_glob_pattern_in_source(
     file_source: FileSource,
     storage_location: StorageLocation,
-) -> list[dict]:
-    """
-    Expand a file source with a glob pattern in its path to individual file sources.
+) -> list[APIDict]:
+    """Expand a file source with a glob pattern in its path to individual file sources.
 
     Args:
         file_source: FileSource with a path containing wildcards (e.g., "path/*.parquet")
@@ -264,43 +273,23 @@ async def expand_glob_pattern_in_source(
     Returns:
         List of dicts (not actual FileSource objects) with individual file paths
     """
-    # Handle both dict and FileLocation objects
-    if not file_source.location:
+    source_location = glob_source_location(file_source)
+    if not source_location:
         return []
-
-    if isinstance(file_source.location, dict):
-        file_path = file_source.location.get("path", "")
-        location_version = file_source.location.get("version", "1")
-    elif isinstance(file_source.location, FileLocation):
-        file_path = file_source.location.path
-        location_version = file_source.location.version
-    else:
-        return []
-
-    if not file_path or "*" not in file_path:
+    file_path, location_version = source_location
+    if "*" not in file_path:
         # Not a glob pattern, return as-is
-        if isinstance(file_source, dict):
-            return [file_source]
-        else:
-            return [file_source.model_dump()]
+        return [file_source_json_dict(file_source)]
 
-    # Normalize paths that include a scheme or full URL
-    # The endpoint URL comes from storage location config, not from the path
-    match = re.match(r"^(gs://|s3://)([^/]+)/(.*)$", file_path)
-    if match:
-        file_path = match.group(3)
-    match = re.match(r"^https?://storage\.googleapis\.com/[^/]+/(.*)$", file_path)
-    if match:
-        file_path = match.group(1)
-    file_path = file_path.lstrip("/")
+    file_path = normalize_glob_path(file_path)
 
     # Create storage client and use it to expand the glob pattern
     storage_client = create_storage_client_from_location(storage_location)
     if not storage_client:
         logger.warning(
-            f"Cannot create storage client for location {storage_location.name}, cannot expand glob pattern"
+            "Cannot create storage client for location %s, cannot expand glob pattern", storage_location.name
         )
-        return [file_source.model_dump()]
+        return [file_source_json_dict(file_source)]
 
     # Use storage client's expand_glob_pattern method
     matching_files = await storage_client.expand_glob_pattern(file_path)
@@ -312,52 +301,78 @@ async def expand_glob_pattern_in_source(
     )
 
     if not matching_files:
-        logger.warning(f"No files found matching glob pattern: {file_path}")
-        return [file_source.model_dump()]
+        logger.warning("No files found matching glob pattern: %s", file_path)
+        return [file_source_json_dict(file_source)]
 
-    # Create individual file source dicts with individual file sizes
-    expanded_sources = []
-    for matching_file in matching_files:
-        # Calculate size for this individual file
-        try:
-            file_size = await storage_client.get_file_size(matching_file)
-        except Exception as e:
-            logger.warning(
-                f"Failed to get file size for {matching_file}: {e}"
-            )
-            file_size = None
+    return [
+        await expanded_source_dict(file_source, matching_file, location_version, storage_client)
+        for matching_file in matching_files
+    ]
 
-        # Create a new FileLocation with the actual file path
-        new_location = FileLocation(
-            version=location_version,
-            path=matching_file,
-        )
 
-        # Get base metadata from parent source, supporting both dict and model shapes.
-        source_metadata = file_source.source_metadata
-        if isinstance(source_metadata, dict):
-            base_metadata = source_metadata.copy()
-        elif source_metadata and hasattr(source_metadata, "model_dump"):
-            base_metadata = source_metadata.model_dump()
-        else:
-            base_metadata = {}
-        # Update size_bytes with the individual file size
-        if file_size is not None:
-            base_metadata["size_bytes"] = file_size
-        # Ensure version is set
-        if "version" not in base_metadata:
-            base_metadata["version"] = "v1"
+def glob_source_location(file_source: FileSource) -> tuple[str, str] | None:
+    """Return source path and location version for a glob-capable source."""
+    if not file_source.location:
+        return None
+    if isinstance(file_source.location, dict):
+        file_path = str(file_source.location.get("path", ""))
+        location_version = str(file_source.location.get("version", "1"))
+    elif isinstance(file_source.location, FileLocation):
+        file_path = file_source.location.path
+        location_version = file_source.location.version
+    else:
+        return None
+    return (file_path, location_version) if file_path else None
 
-        # Create a dict representation (not a FileSource object)
-        source_dict = {
-            "id": file_source.id,  # Keep original ID for reference
-            "file_format_id": file_source.file_format_id,
-            "storage_location_id": file_source.storage_location_id,
-            "version": file_source.version,
-            "source_type": file_source.source_type,
-            "location": new_location.model_dump(),
-            "source_metadata": base_metadata if base_metadata else None,
-        }
-        expanded_sources.append(source_dict)
 
-    return expanded_sources
+def normalize_glob_path(file_path: str) -> str:
+    """Normalize storage URIs and GCS public URLs into object paths."""
+    match = STORAGE_URI_PATTERN.match(file_path)
+    if match:
+        return match.group(3).lstrip("/")
+    match = GCS_PUBLIC_URL_PATTERN.match(file_path)
+    if match:
+        return match.group(1).lstrip("/")
+    return file_path.lstrip("/")
+
+
+async def expanded_source_dict(
+    file_source: FileSource,
+    matching_file: str,
+    location_version: str,
+    storage_client: SupportsFileSize,
+) -> APIDict:
+    """Build a source dictionary for one expanded glob match."""
+    file_size = await file_size_or_none(storage_client, matching_file)
+    base_metadata = source_metadata_dict(file_source)
+    if file_size is not None:
+        base_metadata["size_bytes"] = file_size
+    base_metadata.setdefault("version", "v1")
+    return {
+        "id": file_source.id,
+        "file_format_id": file_source.file_format_id,
+        "storage_location_id": file_source.storage_location_id,
+        "version": file_source.version,
+        "source_type": file_source.source_type,
+        "location": model_json_dict(FileLocation(version=location_version, path=matching_file)),
+        "source_metadata": base_metadata if base_metadata else None,
+    }
+
+
+async def file_size_or_none(storage_client: SupportsFileSize, matching_file: str) -> int | None:
+    """Return file size for an expanded source, logging and ignoring lookup errors."""
+    try:
+        return await storage_client.get_file_size(matching_file)
+    except Exception as exc:
+        logger.warning("Failed to get file size for %s: %s", matching_file, exc)
+        return None
+
+
+def source_metadata_dict(file_source: FileSource) -> APIDict:
+    """Return a mutable source metadata dictionary."""
+    source_metadata = file_source.source_metadata
+    if isinstance(source_metadata, dict):
+        return {str(key): json_value(value) for key, value in source_metadata.items()}
+    if source_metadata:
+        return model_json_dict(source_metadata)
+    return {}

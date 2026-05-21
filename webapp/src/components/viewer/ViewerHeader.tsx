@@ -1,5 +1,5 @@
-import { ArrowLeft, PanelLeft } from "lucide-react";
 import { Link } from "@tanstack/react-router";
+import { ArrowLeft, PanelLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type { DatasetFile } from "@/lib/api-client";
@@ -38,13 +38,9 @@ export function ViewerHeader({
       </Button>
       <Separator orientation="vertical" className="h-6" />
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        <span className="text-sm font-medium text-muted-foreground truncate">
-          {datasetName}
-        </span>
+        <span className="text-sm font-medium text-muted-foreground truncate">{datasetName}</span>
         <span className="text-sm text-muted-foreground">/</span>
-        <span className="text-sm font-medium truncate">
-          {file.name || file.slug}
-        </span>
+        <span className="text-sm font-medium truncate">{file.name || file.slug}</span>
       </div>
       {onToggleEditor && (
         <Button
@@ -60,4 +56,3 @@ export function ViewerHeader({
     </div>
   );
 }
-

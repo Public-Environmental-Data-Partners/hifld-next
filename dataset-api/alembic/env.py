@@ -1,30 +1,37 @@
-from logging.config import fileConfig
+"""Alembic migration environment for the dataset API."""
+
 import sys
+from logging.config import fileConfig
 from pathlib import Path
 
 from sqlalchemy import engine_from_config, pool, text
+
 from alembic import context
+
 
 # Add the parent directory to the path so we can import our models
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Import database configuration
+from sqlmodel import SQLModel
+
 from config import config
 from database.db import engine
-from sqlmodel import SQLModel
+
 
 DATABASE_URL = config.DATABASE_URL
 
 # Import all models so Alembic can detect them
-from models.dataset import (  # noqa: F401
+from models.dataset import (  # noqa: E402,F401
     Collection,
     Dataset,
     File,
     FileFormat,
     FileSource,
-    StorageLocation,
     Format,
+    StorageLocation,
 )
+
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

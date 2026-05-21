@@ -1,13 +1,6 @@
-import type { DatasetSource, SpatialDatasetFileMetadata, ColumnSchema } from "@/lib/api-client";
 import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import type { ColumnSchema, DatasetSource, SpatialDatasetFileMetadata } from "@/lib/api-client";
 
 type MetadataKey =
   | "feature_count"
@@ -28,14 +21,19 @@ const METADATA_KEYS: MetadataKey[] = [
   "columns_hash",
 ];
 
-function normalizeValue(value: unknown): string {
+type MetadataValue = SpatialDatasetFileMetadata[MetadataKey];
+
+function normalizeValue(value: MetadataValue): string {
   if (value == null) return "—";
   if (Array.isArray(value)) return value.join(", ");
   if (typeof value === "boolean") return value ? "Yes" : "No";
   return String(value);
 }
 
-function isDifferent(a: unknown, b: unknown): boolean {
+function isDifferent(
+  a: MetadataValue | ColumnSchema | undefined,
+  b: MetadataValue | ColumnSchema | undefined,
+): boolean {
   return JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
 }
 
@@ -43,13 +41,7 @@ function getColumns(metadata?: SpatialDatasetFileMetadata): ColumnSchema[] {
   return metadata?.columns ?? [];
 }
 
-export function VersionCompare({
-  sourceA,
-  sourceB,
-}: {
-  sourceA: DatasetSource;
-  sourceB: DatasetSource;
-}) {
+export function VersionCompare({ sourceA, sourceB }: { sourceA: DatasetSource; sourceB: DatasetSource }) {
   const metadataA = sourceA.source_metadata;
   const metadataB = sourceB.source_metadata;
   const columnsA = getColumns(metadataA);
@@ -58,7 +50,7 @@ export function VersionCompare({
   const versionB = String(sourceB.version ?? "B");
 
   const columnNames = Array.from(
-    new Set([...columnsA.map((column) => column.name), ...columnsB.map((column) => column.name)])
+    new Set([...columnsA.map((column) => column.name), ...columnsB.map((column) => column.name)]),
   ).sort();
 
   const schemaRows = columnNames.map((name) => {
@@ -84,9 +76,7 @@ export function VersionCompare({
       <section className="space-y-3">
         <div>
           <h2 className="text-lg font-semibold">Metadata Changes</h2>
-          <p className="text-sm text-muted-foreground">
-            Compare file-level metadata between two discovered versions.
-          </p>
+          <p className="text-sm text-muted-foreground">Compare file-level metadata between two discovered versions.</p>
         </div>
         <Table>
           <TableHeader>
@@ -126,9 +116,7 @@ export function VersionCompare({
           </p>
         </div>
         {changedSchemaRows.length === 0 ? (
-          <div className="rounded-md border p-4 text-sm text-muted-foreground">
-            No schema changes
-          </div>
+          <div className="rounded-md border p-4 text-sm text-muted-foreground">No schema changes</div>
         ) : (
           <Table>
             <TableHeader>
@@ -157,11 +145,7 @@ export function VersionCompare({
                     </Badge>
                   </TableCell>
                   <TableCell className="align-top">
-                    {row.left ? (
-                      <ColumnDetails column={row.left} />
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
+                    {row.left ? <ColumnDetails column={row.left} /> : <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell className="align-top">
                     {row.right ? (

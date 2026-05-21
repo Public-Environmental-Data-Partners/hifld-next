@@ -1,8 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  API_CATALOG_CONTENT_TYPE,
-  buildApiCatalogLinkset,
-} from "@/lib/api-catalog-linkset";
+import { API_CATALOG_CONTENT_TYPE, buildApiCatalogLinkset } from "@/lib/api-catalog-linkset";
 
 export const Route = createFileRoute("/.well-known/api-catalog")({
   server: {

@@ -1,41 +1,19 @@
-import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import {
-  Folder,
-  File,
-  ChevronRight,
-  ChevronDown,
-  Package,
-  FileJson,
-  Map as MapIcon,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import type { DatasetFile, DatasetFormat, DatasetSource } from "@/lib/api-client";
-import type { DownloadAnalyticsContext } from "@/lib/analytics";
+import { ChevronDown, ChevronRight, File, FileJson, Folder, Map as MapIcon, Package } from "lucide-react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { DownloadAnalyticsContext } from "@/lib/analytics";
+import type { DatasetFile, DatasetFormat, DatasetSource, FileLocation } from "@/lib/api-client";
+import { cn } from "@/lib/utils";
 import { CopyButton } from "./CopyButton";
+import { buildCompareSearchForLocation, getLocationOptions, getVersionSourcesForLocation } from "./compareSources";
 import { DownloadButton } from "./DownloadButton";
+import { buildGeoparquetSourceTree, formatGeoparquetGlobLabel, type GeoparquetTreeNode } from "./geoparquetTree";
 import { ShapefileZipDownloadButton } from "./ShapefileZipDownloadButton";
 import { buildSourceFileUrl, buildSourceStorageUri } from "./sourceUrls";
-import {
-  buildGeoparquetSourceTree,
-  formatGeoparquetGlobLabel,
-  type GeoparquetTreeNode,
-} from "./geoparquetTree";
 import { formatVersionLabel, parseVersionValue } from "./versionLabel";
-import {
-  buildCompareSearchForLocation,
-  getLocationOptions,
-  getVersionSourcesForLocation,
-} from "./compareSources";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 function formatFileSize(bytes: number | null | undefined): string {
   if (bytes == null || bytes === 0) return "Unknown size";
@@ -49,6 +27,104 @@ function formatFileSize(bytes: number | null | undefined): string {
   return `${size.toFixed(unitIndex > 0 ? 1 : 0)} ${units[unitIndex]}`;
 }
 
+interface SelectedFormatSource {
+  storageLocationId: number;
+  version: string | number;
+}
+
+interface SelectedFormatSources {
+  [formatType: string]: SelectedFormatSource | undefined;
+}
+
+function isFileLocation(location: DatasetSource["location"]): location is FileLocation {
+  return "path" in location;
+}
+
+function sourcePath(source: DatasetSource): string {
+  return isFileLocation(source.location) ? source.location.path : "";
+}
+
+function selectedFormatSource(
+  formatEntry: DatasetFormat,
+  selectedSources: SelectedFormatSources,
+  formatType: string,
+): DatasetSource | undefined {
+  const selectedLocationId = selectedSources[formatType]?.storageLocationId;
+  const selectedVersion = selectedSources[formatType]?.version;
+  return formatEntry.sources?.find(
+    (source) =>
+      source.storage_location?.id === selectedLocationId &&
+      String(source.version || "1") === String(selectedVersion || "1"),
+  );
+}
+
+function selectedFormatSources(
+  formatEntry: DatasetFormat,
+  selectedSources: SelectedFormatSources,
+  formatType: string,
+): DatasetSource[] {
+  const selectedLocationId = selectedSources[formatType]?.storageLocationId;
+  const selectedVersion = selectedSources[formatType]?.version;
+  return (
+    formatEntry.sources?.filter(
+      (source) =>
+        source.storage_location?.id === selectedLocationId &&
+        String(source.version || "1") === String(selectedVersion || "1"),
+    ) || []
+  );
+}
+
+function formatEndpointConfig(storageUri: string): {
+  hasEndpointUrl: boolean;
+  s3Uri: string;
+  host: string;
+  port: string;
+} {
+  if (!storageUri.includes("?endpoint_url=")) {
+    return { hasEndpointUrl: false, s3Uri: storageUri, host: "", port: "" };
+  }
+
+  const [uriPart, queryPart = ""] = storageUri.split("?");
+  const params = new URLSearchParams(queryPart);
+  const endpointUrl = params.get("endpoint_url") || "";
+
+  try {
+    const url = new URL(endpointUrl);
+    return {
+      hasEndpointUrl: true,
+      s3Uri: uriPart || storageUri,
+      host: url.hostname,
+      port: url.port || (url.protocol === "https:" ? "443" : "80"),
+    };
+  } catch {
+    const match = endpointUrl.match(/\/\/([^:]+)(?::(\d+))?/);
+    return {
+      hasEndpointUrl: true,
+      s3Uri: uriPart || storageUri,
+      host: match?.[1] ?? "",
+      port: match?.[2] ?? "8333",
+    };
+  }
+}
+
+function countDisplaySources(formatType: string, sources: DatasetSource[]): number {
+  if (formatType !== "geoparquet") {
+    return sources.length;
+  }
+
+  const uniqueLocations = new Set<number>();
+  for (const source of sources) {
+    if (sourcePath(source).includes("*")) {
+      continue;
+    }
+    const locId = source.storage_location?.id;
+    if (locId) {
+      uniqueLocations.add(locId);
+    }
+  }
+  return uniqueLocations.size;
+}
+
 function downloadAnalyticsContext({
   collectionSlug,
   datasetSlug,
@@ -58,30 +134,33 @@ function downloadAnalyticsContext({
   sizeBytes,
   filename,
 }: {
-  collectionSlug?: string;
-  datasetSlug?: string;
-  fileSlug?: string;
+  collectionSlug?: string | undefined;
+  datasetSlug?: string | undefined;
+  fileSlug?: string | undefined;
   format: string;
-  source?: DatasetSource;
-  sizeBytes?: number;
-  filename?: string;
+  source?: DatasetSource | undefined;
+  sizeBytes?: number | undefined;
+  filename?: string | undefined;
 }): Omit<Partial<DownloadAnalyticsContext>, "download_method"> {
-  return {
-    collection_slug: collectionSlug,
-    dataset_slug: datasetSlug,
-    file_slug: fileSlug,
+  const context: Omit<Partial<DownloadAnalyticsContext>, "download_method"> = {
     format,
-    source_id: source?.id,
-    storage_location_id: source?.storage_location?.id,
-    version: source?.version,
-    expected_size_bytes: sizeBytes,
-    filename,
   };
+  if (collectionSlug) context.collection_slug = collectionSlug;
+  if (datasetSlug) context.dataset_slug = datasetSlug;
+  if (fileSlug) context.file_slug = fileSlug;
+  if (source) {
+    context.source_id = source.id;
+    if (source.storage_location?.id !== undefined) context.storage_location_id = source.storage_location.id;
+    if (source.version !== undefined) context.version = source.version;
+  }
+  if (sizeBytes !== undefined) context.expected_size_bytes = sizeBytes;
+  if (filename) context.filename = filename;
+  return context;
 }
 
 interface FileFormatTreeProps {
   file: DatasetFile;
-  selectedSources: Record<string, { storageLocationId: number; version: string | number }>;
+  selectedSources: SelectedFormatSources;
   onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
   onViewParquet?: (url: string, fileName: string) => void;
   pmtilesUrl: string | null;
@@ -91,13 +170,80 @@ interface FileFormatTreeProps {
   fileSlug?: string;
 }
 
+interface ShapefileFormatNodeProps {
+  shapefileFormat: DatasetFormat;
+  selectedSources: SelectedFormatSources;
+  onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
+  isExpanded: boolean;
+  onToggle: () => void;
+  collectionSlug?: string | undefined;
+  datasetSlug?: string | undefined;
+  fileSlug?: string | undefined;
+}
+
+interface GeoparquetTreeNodesProps {
+  nodes: GeoparquetTreeNode[];
+  formatEntry: DatasetFormat;
+  selectedSources: SelectedFormatSources;
+  onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
+  expandedFormats: Set<string>;
+  toggleFormat: (formatType: string) => void;
+  collectionSlug?: string | undefined;
+  datasetSlug?: string | undefined;
+  fileSlug?: string | undefined;
+  onViewParquet?: ((url: string, fileName: string) => void) | undefined;
+}
+
+type GeoparquetTreeNodeSharedProps = Omit<GeoparquetTreeNodesProps, "nodes">;
+
+interface ShapefileDownloadModel {
+  matchingSources: DatasetSource[];
+  sourcesWithUrls: DatasetSource[];
+  hasGlobPattern: boolean;
+  hasExpandedSources: boolean;
+  originalSource?: DatasetSource | undefined;
+  sizeBytes?: number | undefined;
+  zipFilename: string;
+}
+
+function buildShapefileDownloadModel({
+  shapefileFormat,
+  selectedSources,
+  datasetSlug,
+  fileSlug,
+}: {
+  shapefileFormat: DatasetFormat;
+  selectedSources: SelectedFormatSources;
+  datasetSlug?: string | undefined;
+  fileSlug?: string | undefined;
+}): ShapefileDownloadModel {
+  const matchingSources = selectedFormatSources(shapefileFormat, selectedSources, "shapefile");
+  const hasGlobPattern = matchingSources.some((source) =>
+    Boolean(source.glob_pattern || sourcePath(source).includes("*")),
+  );
+  const originalSource = matchingSources.find((source) => source.glob_pattern || sourcePath(source).includes("*"));
+  const sourcesWithUrls = matchingSources.filter((source) => {
+    const sourceUrl = buildSourceFileUrl(source);
+    return Boolean(sourceUrl && !sourceUrl.includes("*"));
+  });
+
+  return {
+    matchingSources,
+    sourcesWithUrls,
+    hasGlobPattern,
+    hasExpandedSources: hasGlobPattern && sourcesWithUrls.length > 0,
+    originalSource,
+    sizeBytes: originalSource?.source_metadata?.size_bytes,
+    zipFilename: datasetSlug && fileSlug ? `${datasetSlug}_${fileSlug}_shapefile.zip` : "shapefile.zip",
+  };
+}
+
 export function FileFormatTree({
   file,
   selectedSources,
   onSourceChange,
   onViewParquet,
   pmtilesUrl,
-  collectionId,
   collectionSlug,
   datasetSlug,
   fileSlug,
@@ -122,15 +268,6 @@ export function FileFormatTree({
   const shapefileFormat = file.formats?.find((f) => f.format.format_type === "shapefile");
   const geojsonFormat = file.formats?.find((f) => f.format.format_type === "geojson");
   const fileGeodatabaseFormat = file.formats?.find((f) => f.format.format_type === "file_geodatabase");
-  const selectedSourceFor = (formatType: string, formatEntry?: DatasetFormat): DatasetSource | undefined => {
-    const selectedLocationId = selectedSources[formatType]?.storageLocationId;
-    const selectedVersion = selectedSources[formatType]?.version;
-    return formatEntry?.sources?.find((source) => (
-      source.storage_location?.id === selectedLocationId &&
-      String(source.version || "1") === String(selectedVersion || "1")
-    ));
-  };
-
   return (
     <div className="space-y-1 border rounded-md p-4">
       <h4 className="font-medium mb-3">Available Formats</h4>
@@ -154,16 +291,7 @@ export function FileFormatTree({
             <div className="pl-6 space-y-1 mt-1">
               {/* Glob pattern */}
               {(() => {
-                const selectedLocationId = selectedSources["geoparquet"]?.storageLocationId;
-                const selectedVersion = selectedSources["geoparquet"]?.version;
-                
-                // Get all sources for the selected location and version
-                const allSources = geoparquetFormat.sources?.filter((source) => {
-                  return (
-                    source.storage_location?.id === selectedLocationId &&
-                    String(source.version || "1") === String(selectedVersion || "1")
-                  );
-                }) || [];
+                const allSources = selectedFormatSources(geoparquetFormat, selectedSources, "geoparquet");
 
                 // Get glob pattern from API (it's added to each source in the group)
                 const sourceWithGlob = allSources.find((s) => s.glob_pattern);
@@ -177,7 +305,7 @@ export function FileFormatTree({
                 if (!globPattern) {
                   return null;
                 }
-                
+
                 // Calculate total size from all sources (for glob pattern, use the first source's total size)
                 const totalSizeBytes = allSources.reduce((sum, source) => {
                   const size = source.source_metadata?.size_bytes;
@@ -185,8 +313,8 @@ export function FileFormatTree({
                 }, 0);
                 // If we have individual files, sum their sizes; otherwise use the glob pattern source's size
                 const globSourceSize = allSources.find((s) => {
-                  const path = (s.location as any)?.path;
-                  return path && path.includes("*");
+                  const path = sourcePath(s);
+                  return path.includes("*");
                 })?.source_metadata?.size_bytes;
                 const displaySize = globSourceSize || totalSizeBytes;
 
@@ -205,35 +333,8 @@ export function FileFormatTree({
                   >
                     <div className="space-y-2">
                       {(() => {
-                        // Check if this is SeaweedFS (has endpoint_url parameter)
-                        const hasEndpointUrl = globPattern.includes("?endpoint_url=");
-                        let s3Uri = globPattern;
-                        let endpointUrl = "";
-                        let host = "";
-                        let port = "";
-                        
-                        if (hasEndpointUrl) {
-                          // Extract endpoint URL and clean S3 URI
-                          const [uriPart, queryPart] = globPattern.split("?");
-                          s3Uri = uriPart;
-                          const params = new URLSearchParams(queryPart);
-                          endpointUrl = params.get("endpoint_url") || "";
-                          
-                          // Parse endpoint URL to extract host and port
-                          try {
-                            const url = new URL(endpointUrl);
-                            host = url.hostname;
-                            port = url.port || (url.protocol === "https:" ? "443" : "80");
-                          } catch {
-                            // If parsing fails, try to extract from endpoint_url string
-                            const match = endpointUrl.match(/\/\/([^:]+)(?::(\d+))?/);
-                            if (match) {
-                              host = match[1];
-                              port = match[2] || "8333";
-                            }
-                          }
-                        }
-                        
+                        const { hasEndpointUrl, s3Uri, host, port } = formatEndpointConfig(globPattern);
+
                         return (
                           <>
                             {hasEndpointUrl ? (
@@ -252,16 +353,12 @@ export function FileFormatTree({
                                     SET s3_url_style='path';
                                   </code>
                                 </div>
-                                <p className="text-xs text-muted-foreground mb-2">
-                                  Then use this URI in your query:
-                                </p>
-                                <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
-                                  {s3Uri}
-                                </code>
+                                <p className="text-xs text-muted-foreground mb-2">Then use this URI in your query:</p>
+                                <code className="text-xs bg-muted px-2 py-1 rounded block break-all">{s3Uri}</code>
                                 <div className="flex items-center gap-2 mt-2">
-                                  <CopyButton 
-                                    value={`SET s3_endpoint='${host}:${port}';\nSET s3_use_ssl=false;\nSET s3_url_style='path';\n\nSELECT * FROM '${s3Uri}';`} 
-                                    label="Copy DuckDB Config" 
+                                  <CopyButton
+                                    value={`SET s3_endpoint='${host}:${port}';\nSET s3_use_ssl=false;\nSET s3_url_style='path';\n\nSELECT * FROM '${s3Uri}';`}
+                                    label="Copy DuckDB Config"
                                   />
                                   <CopyButton value={s3Uri} label="Copy URI" />
                                 </div>
@@ -280,9 +377,7 @@ export function FileFormatTree({
                               </>
                             )}
                             {displaySize > 0 && (
-                              <p className="text-xs text-muted-foreground">
-                                Total size: {formatFileSize(displaySize)}
-                              </p>
+                              <p className="text-xs text-muted-foreground">Total size: {formatFileSize(displaySize)}</p>
                             )}
                           </>
                         );
@@ -294,188 +389,21 @@ export function FileFormatTree({
 
               {/* Individual parquet files */}
               {(() => {
-                const selectedLocationId = selectedSources["geoparquet"]?.storageLocationId;
-                const selectedVersion = selectedSources["geoparquet"]?.version;
-                
-                // Get all sources for the selected location and version
-                const allSources = geoparquetFormat.sources?.filter((source) => {
-                  return (
-                    source.storage_location?.id === selectedLocationId &&
-                    String(source.version || "1") === String(selectedVersion || "1")
-                  );
-                }) || [];
-
-                const renderTreeNodes = (nodes: GeoparquetTreeNode[]): React.ReactNode =>
-                  nodes.map((node) => {
-                    if (node.type === "folder") {
-                      const expansionKey = `geoparquet-folder-${node.path}`;
-                      return (
-                        <FormatFileNode
-                          key={node.path}
-                          icon={<Folder className="h-4 w-4 text-yellow-600" />}
-                          name={node.name}
-                          badge={`${node.children.length} item${node.children.length === 1 ? "" : "s"}`}
-                          formatType="geoparquet"
-                          formatEntry={geoparquetFormat}
-                          selectedSources={selectedSources}
-                          onSourceChange={onSourceChange}
-                          isExpanded={expandedFormats.has(expansionKey)}
-                          onToggle={() => toggleFormat(expansionKey)}
-                          showSourceSelector={false}
-                        >
-                          <div className="space-y-1">
-                            {renderTreeNodes(node.children)}
-                          </div>
-                        </FormatFileNode>
-                      );
-                    }
-
-                    const source = node.source;
-                    if (!source) {
-                      return null;
-                    }
-                    const fileName = node.name;
-                    const fileUrl = buildSourceFileUrl(source);
-                    const fileStorageUri = buildSourceStorageUri(source);
-                    const fileSizeBytes = source.source_metadata?.size_bytes;
-
-                    return (
-                      <FormatFileNode
-                        key={node.path}
-                        icon={<File className="h-4 w-4 text-green-600" />}
-                        name={fileName}
-                        badge={fileSizeBytes != null ? formatFileSize(fileSizeBytes) : undefined}
-                        formatType="geoparquet"
-                        formatEntry={geoparquetFormat}
-                        selectedSources={selectedSources}
-                        onSourceChange={onSourceChange}
-                        isExpanded={expandedFormats.has(`geoparquet-file-${node.path}`)}
-                        onToggle={() => toggleFormat(`geoparquet-file-${node.path}`)}
-                        showSourceSelector={false}
-                      >
-                        <div className="space-y-2">
-                          {fileSizeBytes != null && (
-                            <p className="text-xs text-muted-foreground">
-                              Size: {formatFileSize(fileSizeBytes)}
-                            </p>
-                          )}
-                          {fileStorageUri && (() => {
-                            // Check if this is SeaweedFS (has endpoint_url parameter)
-                            const hasEndpointUrl = fileStorageUri.includes("?endpoint_url=");
-                            let s3Uri = fileStorageUri;
-                            let endpointUrl = "";
-                            let host = "";
-                            let port = "";
-                            
-                            if (hasEndpointUrl) {
-                              // Extract endpoint URL and clean S3 URI
-                              const [uriPart, queryPart] = fileStorageUri.split("?");
-                              s3Uri = uriPart;
-                              const params = new URLSearchParams(queryPart);
-                              endpointUrl = params.get("endpoint_url") || "";
-                              
-                              // Parse endpoint URL to extract host and port
-                              try {
-                                const url = new URL(endpointUrl);
-                                host = url.hostname;
-                                port = url.port || (url.protocol === "https:" ? "443" : "80");
-                              } catch {
-                                // If parsing fails, try to extract from endpoint_url string
-                                const match = endpointUrl.match(/\/\/([^:]+)(?::(\d+))?/);
-                                if (match) {
-                                  host = match[1];
-                                  port = match[2] || "8333";
-                                }
-                              }
-                            }
-                            
-                            return (
-                              <div>
-                                <p className="text-xs text-muted-foreground mb-1">Storage URI:</p>
-                                {hasEndpointUrl ? (
-                                  <>
-                                    <p className="text-xs text-muted-foreground mb-2">
-                                      For DuckDB, configure the S3 endpoint first:
-                                    </p>
-                                    <div className="space-y-1 mb-2">
-                                      <code className="text-xs bg-muted px-2 py-1 rounded block">
-                                        SET s3_endpoint='{host}:{port}';
-                                      </code>
-                                      <code className="text-xs bg-muted px-2 py-1 rounded block">
-                                        SET s3_use_ssl=false;
-                                      </code>
-                                      <code className="text-xs bg-muted px-2 py-1 rounded block">
-                                        SET s3_url_style='path';
-                                      </code>
-                                    </div>
-                                    <p className="text-xs text-muted-foreground mb-1">
-                                      Then use this URI in your query:
-                                    </p>
-                                    <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
-                                      {s3Uri}
-                                    </code>
-                                    <div className="flex items-center gap-2 mt-1">
-                                      <CopyButton 
-                                        value={`SET s3_endpoint='${host}:${port}';\nSET s3_use_ssl=false;\nSET s3_url_style='path';\n\nSELECT * FROM '${s3Uri}';`} 
-                                        label="Copy DuckDB Config" 
-                                      />
-                                      <CopyButton value={s3Uri} label="Copy URI" />
-                                    </div>
-                                  </>
-                                ) : (
-                                  <>
-                                    <code className="text-xs bg-muted px-2 py-1 rounded block break-all">
-                                      {fileStorageUri}
-                                    </code>
-                                    <div className="flex items-center gap-2 mt-1">
-                                      <CopyButton value={fileStorageUri} label="Copy URI" />
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            );
-                          })()}
-                          {fileUrl && (
-                            <div>
-                              <p className="text-xs text-muted-foreground mb-1">Download URL:</p>
-                              <p className="text-xs text-muted-foreground break-all mb-1">
-                                {fileUrl}
-                              </p>
-                              <div className="flex items-center gap-2">
-                                <DownloadButton
-                                  url={fileUrl}
-                                  label="Download"
-                                  analyticsContext={downloadAnalyticsContext({
-                                    collectionSlug,
-                                    datasetSlug,
-                                    fileSlug,
-                                    format: "geoparquet",
-                                    source,
-                                    sizeBytes: fileSizeBytes,
-                                    filename: fileName,
-                                  })}
-                                />
-                                {onViewParquet && (
-                                  <Button
-                                    size="sm"
-                                    variant="secondary"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      onViewParquet(fileUrl, fileName);
-                                    }}
-                                  >
-                                    View Data
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </FormatFileNode>
-                    );
-                  });
-
-                return renderTreeNodes(buildGeoparquetSourceTree(allSources));
+                const allSources = selectedFormatSources(geoparquetFormat, selectedSources, "geoparquet");
+                return (
+                  <GeoparquetTreeNodes
+                    nodes={buildGeoparquetSourceTree(allSources)}
+                    formatEntry={geoparquetFormat}
+                    selectedSources={selectedSources}
+                    onSourceChange={onSourceChange}
+                    expandedFormats={expandedFormats}
+                    toggleFormat={toggleFormat}
+                    collectionSlug={collectionSlug}
+                    datasetSlug={datasetSlug}
+                    fileSlug={fileSlug}
+                    onViewParquet={onViewParquet}
+                  />
+                );
               })()}
             </div>
           </FormatFolderNode>
@@ -483,427 +411,575 @@ export function FileFormatTree({
       )}
 
       {/* PMTiles */}
-      {pmtilesFormat && (() => {
-        const selectedLocationId = selectedSources["pmtiles"]?.storageLocationId;
-        const selectedVersion = selectedSources["pmtiles"]?.version;
-        
-        const selectedPmtilesSource = pmtilesFormat.sources?.find((source) => {
+      {pmtilesFormat &&
+        (() => {
+          const selectedPmtilesSource = selectedFormatSource(pmtilesFormat, selectedSources, "pmtiles");
+          const pmtilesSizeBytes = selectedPmtilesSource?.source_metadata?.size_bytes;
+
           return (
-            source.storage_location?.id === selectedLocationId &&
-            String(source.version || "1") === String(selectedVersion || "1")
-          );
-        });
-        
-        const pmtilesSizeBytes = selectedPmtilesSource?.source_metadata?.size_bytes;
-        
-        return (
-          <FormatFileNode
-            icon={<MapIcon className="h-4 w-4 text-pink-500" />}
-            name="tiles"
-            badge={pmtilesSizeBytes != null ? formatFileSize(pmtilesSizeBytes) : undefined}
-            formatType="pmtiles"
-            formatEntry={pmtilesFormat}
-            selectedSources={selectedSources}
-            onSourceChange={onSourceChange}
-            isExpanded={expandedFormats.has("pmtiles")}
-            onToggle={() => toggleFormat("pmtiles")}
-            collectionSlug={collectionSlug}
-            datasetSlug={datasetSlug}
-            fileSlug={fileSlug}
-          >
-            {pmtilesUrl && (
-              <div className="space-y-2">
-                {pmtilesSizeBytes != null && (
-                  <p className="text-xs text-muted-foreground">
-                    Size: {formatFileSize(pmtilesSizeBytes)}
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground break-all">
-                  {pmtilesUrl}
-                </p>
-                <div className="flex items-center gap-2">
-                  <CopyButton value={pmtilesUrl} label="Copy URL" />
-                  <DownloadButton
-                    url={pmtilesUrl}
-                    label="Download"
-                    analyticsContext={downloadAnalyticsContext({
-                      collectionSlug,
-                      datasetSlug,
-                      fileSlug,
-                      format: "pmtiles",
-                      source: selectedPmtilesSource,
-                      sizeBytes: pmtilesSizeBytes,
-                    })}
-                  />
+            <FormatFileNode
+              icon={<MapIcon className="h-4 w-4 text-pink-500" />}
+              name="tiles"
+              badge={pmtilesSizeBytes != null ? formatFileSize(pmtilesSizeBytes) : undefined}
+              formatType="pmtiles"
+              formatEntry={pmtilesFormat}
+              selectedSources={selectedSources}
+              onSourceChange={onSourceChange}
+              isExpanded={expandedFormats.has("pmtiles")}
+              onToggle={() => toggleFormat("pmtiles")}
+              collectionSlug={collectionSlug}
+              datasetSlug={datasetSlug}
+              fileSlug={fileSlug}
+            >
+              {pmtilesUrl && (
+                <div className="space-y-2">
+                  {pmtilesSizeBytes != null && (
+                    <p className="text-xs text-muted-foreground">Size: {formatFileSize(pmtilesSizeBytes)}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground break-all">{pmtilesUrl}</p>
+                  <div className="flex items-center gap-2">
+                    <CopyButton value={pmtilesUrl} label="Copy URL" />
+                    <DownloadButton
+                      url={pmtilesUrl}
+                      label="Download"
+                      analyticsContext={downloadAnalyticsContext({
+                        collectionSlug,
+                        datasetSlug,
+                        fileSlug,
+                        format: "pmtiles",
+                        source: selectedPmtilesSource,
+                        sizeBytes: pmtilesSizeBytes,
+                      })}
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
-          </FormatFileNode>
-        );
-      })()}
+              )}
+            </FormatFileNode>
+          );
+        })()}
 
       {/* GeoPackage */}
-      {geopackageFormat && (() => {
-        const selectedLocationId = selectedSources["geopackage"]?.storageLocationId;
-        const selectedVersion = selectedSources["geopackage"]?.version;
-        
-        const selectedGeopackageSource = geopackageFormat.sources?.find((source) => {
+      {geopackageFormat &&
+        (() => {
+          const selectedGeopackageSource = selectedFormatSource(geopackageFormat, selectedSources, "geopackage");
+          const geopackageSizeBytes = selectedGeopackageSource?.source_metadata?.size_bytes;
+          const geopackageUrl = selectedGeopackageSource ? buildSourceFileUrl(selectedGeopackageSource) : null;
+
           return (
-            source.storage_location?.id === selectedLocationId &&
-            String(source.version || "1") === String(selectedVersion || "1")
-          );
-        });
-        
-        const geopackageSizeBytes = selectedGeopackageSource?.source_metadata?.size_bytes;
-        const geopackageUrl = selectedGeopackageSource ? buildSourceFileUrl(selectedGeopackageSource) : null;
-        
-        return (
-          <FormatFileNode
-            icon={<Package className="h-4 w-4 text-purple-500" />}
-            name="geopackage"
-            badge={geopackageSizeBytes != null ? formatFileSize(geopackageSizeBytes) : undefined}
-            formatType="geopackage"
-            formatEntry={geopackageFormat}
-            selectedSources={selectedSources}
-            onSourceChange={onSourceChange}
-            isExpanded={expandedFormats.has("geopackage")}
-            onToggle={() => toggleFormat("geopackage")}
-            collectionSlug={collectionSlug}
-            datasetSlug={datasetSlug}
-            fileSlug={fileSlug}
-          >
-            {geopackageUrl && (
-              <div className="space-y-2">
-                {geopackageSizeBytes != null && (
-                  <p className="text-xs text-muted-foreground">
-                    Size: {formatFileSize(geopackageSizeBytes)}
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground break-all">
-                  {geopackageUrl}
-                </p>
-                <div className="flex items-center gap-2">
-                  <CopyButton value={geopackageUrl} label="Copy URL" />
-                  <DownloadButton
-                    url={geopackageUrl}
-                    label="Download"
-                    sizeBytes={geopackageSizeBytes ?? undefined}
-                    analyticsContext={downloadAnalyticsContext({
-                      collectionSlug,
-                      datasetSlug,
-                      fileSlug,
-                      format: "geopackage",
-                      source: selectedGeopackageSource,
-                      sizeBytes: geopackageSizeBytes,
-                    })}
-                  />
+            <FormatFileNode
+              icon={<Package className="h-4 w-4 text-purple-500" />}
+              name="geopackage"
+              badge={geopackageSizeBytes != null ? formatFileSize(geopackageSizeBytes) : undefined}
+              formatType="geopackage"
+              formatEntry={geopackageFormat}
+              selectedSources={selectedSources}
+              onSourceChange={onSourceChange}
+              isExpanded={expandedFormats.has("geopackage")}
+              onToggle={() => toggleFormat("geopackage")}
+              collectionSlug={collectionSlug}
+              datasetSlug={datasetSlug}
+              fileSlug={fileSlug}
+            >
+              {geopackageUrl && (
+                <div className="space-y-2">
+                  {geopackageSizeBytes != null && (
+                    <p className="text-xs text-muted-foreground">Size: {formatFileSize(geopackageSizeBytes)}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground break-all">{geopackageUrl}</p>
+                  <div className="flex items-center gap-2">
+                    <CopyButton value={geopackageUrl} label="Copy URL" />
+                    <DownloadButton
+                      url={geopackageUrl}
+                      label="Download"
+                      sizeBytes={geopackageSizeBytes ?? undefined}
+                      analyticsContext={downloadAnalyticsContext({
+                        collectionSlug,
+                        datasetSlug,
+                        fileSlug,
+                        format: "geopackage",
+                        source: selectedGeopackageSource,
+                        sizeBytes: geopackageSizeBytes,
+                      })}
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
-          </FormatFileNode>
-        );
-      })()}
+              )}
+            </FormatFileNode>
+          );
+        })()}
 
       {/* Shapefile */}
-      {shapefileFormat && (() => {
-        const selectedLocationId = selectedSources["shapefile"]?.storageLocationId;
-        const selectedVersion = selectedSources["shapefile"]?.version;
-        
-        // Find all sources matching the selected location and version
-        // This includes both the original glob pattern source and expanded individual file sources
-        const matchingSources = shapefileFormat.sources?.filter((source) => {
-          return (
-            source.storage_location?.id === selectedLocationId &&
-            String(source.version || "1") === String(selectedVersion || "1")
-          );
-        }) || [];
-        
-        // Check if any source has a glob pattern (either in glob_pattern field or in path)
-        const hasGlobPattern = matchingSources.some((source) => {
-          return (
-            source.glob_pattern ||
-            (source.location && 
-             typeof source.location === 'object' && 
-             'path' in source.location &&
-             typeof source.location.path === 'string' &&
-             source.location.path.includes('*'))
-          );
-        });
-        
-        // Find the original source (with glob_pattern or glob in path) for metadata
-        const originalSource = matchingSources.find((source) => 
-          source.glob_pattern || 
-          (source.location && 
-           typeof source.location === 'object' && 
-           'path' in source.location &&
-           typeof source.location.path === 'string' &&
-           source.location.path.includes('*'))
-        );
-        const shapefileSizeBytes = originalSource?.source_metadata?.size_bytes;
-        
-        // Get sources with URLs (expanded sources from glob pattern)
-        // Filter out sources that have glob patterns in their URL/path (those are the original glob sources)
-        const sourcesWithUrls = matchingSources.filter((source) => {
-          const sourceUrl = buildSourceFileUrl(source);
-          if (!sourceUrl) return false;
-          // Exclude sources where the URL itself contains a glob pattern
-          return !sourceUrl.includes('*');
-        });
-        
-        // Check if we have expanded sources (multiple URLs from glob pattern)
-        // If we have a glob pattern source, we should use client-side zip creation
-        // Otherwise, fall back to single URL download
-        const hasExpandedSources = hasGlobPattern && sourcesWithUrls.length > 0;
-        
-        const zipFilename = datasetSlug && fileSlug 
-          ? `${datasetSlug}_${fileSlug}_shapefile.zip`
-          : "shapefile.zip";
-        
-        return (
-          <FormatFileNode
-            icon={<File className="h-4 w-4 text-amber-600" />}
-            name="shapefile"
-            badge={shapefileSizeBytes != null ? formatFileSize(shapefileSizeBytes) : undefined}
-            formatType="shapefile"
-            formatEntry={shapefileFormat}
-            selectedSources={selectedSources}
-            onSourceChange={onSourceChange}
-            isExpanded={expandedFormats.has("shapefile")}
-            onToggle={() => toggleFormat("shapefile")}
-            collectionSlug={collectionSlug}
-            datasetSlug={datasetSlug}
-            fileSlug={fileSlug}
-          >
-            {hasExpandedSources ? (
-              // We have expanded sources - use client-side zip creation
-              <div className="space-y-2">
-                {shapefileSizeBytes != null && (
-                  <p className="text-xs text-muted-foreground">
-                    Size: {formatFileSize(shapefileSizeBytes)} (zip contains all shapefile components)
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  Download all shapefile components (.shp, .shx, .dbf, .prj, etc.) as a zip file
-                  {sourcesWithUrls.length > 0 && ` (${sourcesWithUrls.length} files)`}
-                </p>
-                <div className="flex items-center gap-2">
-                  <ShapefileZipDownloadButton
-                    sources={sourcesWithUrls.map((source) => ({
-                      ...source,
-                      url: buildSourceFileUrl(source) ?? undefined,
-                    }))}
-                    filename={zipFilename}
-                    label="Download Zip"
-                    analyticsContext={downloadAnalyticsContext({
-                      collectionSlug,
-                      datasetSlug,
-                      fileSlug,
-                      format: "shapefile",
-                      source: originalSource,
-                      sizeBytes: shapefileSizeBytes,
-                      filename: zipFilename,
-                    })}
-                  />
-                </div>
-              </div>
-            ) : hasGlobPattern && originalSource?.id && collectionSlug && datasetSlug && fileSlug ? (
-              // We have a glob pattern but no expanded sources yet - fall back to server-side zip
-              <div className="space-y-2">
-                {shapefileSizeBytes != null && (
-                  <p className="text-xs text-muted-foreground">
-                    Size: {formatFileSize(shapefileSizeBytes)} (zip contains all shapefile components)
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  Download all shapefile components (.shp, .shx, .dbf, .prj, etc.) as a zip file
-                </p>
-                <div className="flex items-center gap-2">
-                  <DownloadButton 
-                    url={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}/sources/${originalSource.id}/download-zip`}
-                    label="Download Zip"
-                    filename={zipFilename}
-                    analyticsContext={downloadAnalyticsContext({
-                      collectionSlug,
-                      datasetSlug,
-                      fileSlug,
-                      format: "shapefile",
-                      source: originalSource,
-                      sizeBytes: shapefileSizeBytes,
-                      filename: zipFilename,
-                    })}
-                  />
-                </div>
-              </div>
-            ) : sourcesWithUrls.length === 1 && buildSourceFileUrl(sourcesWithUrls[0]) ? (
-              // Fallback: single URL (no glob pattern)
-              (() => {
-                const sourceUrl = buildSourceFileUrl(sourcesWithUrls[0]);
-                if (!sourceUrl) return null;
-
-                return (
-                  <div className="space-y-2">
-                    {shapefileSizeBytes != null && (
-                      <p className="text-xs text-muted-foreground">
-                        Size: {formatFileSize(shapefileSizeBytes)}
-                      </p>
-                    )}
-                    <p className="text-xs text-muted-foreground break-all">
-                      {sourceUrl}
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <CopyButton value={sourceUrl} label="Copy URL" />
-                      <DownloadButton
-                        url={sourceUrl}
-                        label="Download"
-                        analyticsContext={downloadAnalyticsContext({
-                          collectionSlug,
-                          datasetSlug,
-                          fileSlug,
-                          format: "shapefile",
-                          source: sourcesWithUrls[0],
-                          sizeBytes: shapefileSizeBytes,
-                        })}
-                      />
-                    </div>
-                  </div>
-                );
-              })()
-            ) : null}
-          </FormatFileNode>
-        );
-      })()}
+      {shapefileFormat && (
+        <ShapefileFormatNode
+          shapefileFormat={shapefileFormat}
+          selectedSources={selectedSources}
+          onSourceChange={onSourceChange}
+          isExpanded={expandedFormats.has("shapefile")}
+          onToggle={() => toggleFormat("shapefile")}
+          collectionSlug={collectionSlug}
+          datasetSlug={datasetSlug}
+          fileSlug={fileSlug}
+        />
+      )}
 
       {/* GeoJSON */}
-      {geojsonFormat && (() => {
-        const selectedLocationId = selectedSources["geojson"]?.storageLocationId;
-        const selectedVersion = selectedSources["geojson"]?.version;
-        
-        const selectedGeojsonSource = geojsonFormat.sources?.find((source) => {
+      {geojsonFormat &&
+        (() => {
+          const selectedGeojsonSource = selectedFormatSource(geojsonFormat, selectedSources, "geojson");
+          const geojsonSizeBytes = selectedGeojsonSource?.source_metadata?.size_bytes;
+          const geojsonUrl = selectedGeojsonSource ? buildSourceFileUrl(selectedGeojsonSource) : null;
+
           return (
-            source.storage_location?.id === selectedLocationId &&
-            String(source.version || "1") === String(selectedVersion || "1")
-          );
-        });
-        
-        const geojsonSizeBytes = selectedGeojsonSource?.source_metadata?.size_bytes;
-        const geojsonUrl = selectedGeojsonSource
-          ? buildSourceFileUrl(selectedGeojsonSource)
-          : null;
-        
-        return (
-          <FormatFileNode
-            icon={<FileJson className="h-4 w-4 text-orange-500" />}
-            name="geojson"
-            badge={geojsonSizeBytes != null ? formatFileSize(geojsonSizeBytes) : undefined}
-            formatType="geojson"
-            formatEntry={geojsonFormat}
-            selectedSources={selectedSources}
-            onSourceChange={onSourceChange}
-            isExpanded={expandedFormats.has("geojson")}
-            onToggle={() => toggleFormat("geojson")}
-            collectionSlug={collectionSlug}
-            datasetSlug={datasetSlug}
-            fileSlug={fileSlug}
-          >
-            {geojsonUrl && (
-              <div className="space-y-2">
-                {geojsonSizeBytes != null && (
-                  <p className="text-xs text-muted-foreground">
-                    Size: {formatFileSize(geojsonSizeBytes)}
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground break-all">
-                  {geojsonUrl}
-                </p>
-                <div className="flex items-center gap-2">
-                  <CopyButton value={geojsonUrl} label="Copy URL" />
-                  <DownloadButton
-                    url={geojsonUrl}
-                    label="Download"
-                    analyticsContext={downloadAnalyticsContext({
-                      collectionSlug,
-                      datasetSlug,
-                      fileSlug,
-                      format: "geojson",
-                      source: selectedGeojsonSource,
-                      sizeBytes: geojsonSizeBytes,
-                    })}
-                  />
+            <FormatFileNode
+              icon={<FileJson className="h-4 w-4 text-orange-500" />}
+              name="geojson"
+              badge={geojsonSizeBytes != null ? formatFileSize(geojsonSizeBytes) : undefined}
+              formatType="geojson"
+              formatEntry={geojsonFormat}
+              selectedSources={selectedSources}
+              onSourceChange={onSourceChange}
+              isExpanded={expandedFormats.has("geojson")}
+              onToggle={() => toggleFormat("geojson")}
+              collectionSlug={collectionSlug}
+              datasetSlug={datasetSlug}
+              fileSlug={fileSlug}
+            >
+              {geojsonUrl && (
+                <div className="space-y-2">
+                  {geojsonSizeBytes != null && (
+                    <p className="text-xs text-muted-foreground">Size: {formatFileSize(geojsonSizeBytes)}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground break-all">{geojsonUrl}</p>
+                  <div className="flex items-center gap-2">
+                    <CopyButton value={geojsonUrl} label="Copy URL" />
+                    <DownloadButton
+                      url={geojsonUrl}
+                      label="Download"
+                      analyticsContext={downloadAnalyticsContext({
+                        collectionSlug,
+                        datasetSlug,
+                        fileSlug,
+                        format: "geojson",
+                        source: selectedGeojsonSource,
+                        sizeBytes: geojsonSizeBytes,
+                      })}
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
-          </FormatFileNode>
-        );
-      })()}
+              )}
+            </FormatFileNode>
+          );
+        })()}
 
       {/* File Geodatabase */}
-      {fileGeodatabaseFormat && (() => {
-        const selectedLocationId = selectedSources["file_geodatabase"]?.storageLocationId;
-        const selectedVersion = selectedSources["file_geodatabase"]?.version;
-        
-        const selectedFileGeodatabaseSource = fileGeodatabaseFormat.sources?.find((source) => {
-          return (
-            source.storage_location?.id === selectedLocationId &&
-            String(source.version || "1") === String(selectedVersion || "1")
+      {fileGeodatabaseFormat &&
+        (() => {
+          const selectedFileGeodatabaseSource = selectedFormatSource(
+            fileGeodatabaseFormat,
+            selectedSources,
+            "file_geodatabase",
           );
-        });
-        
-        const fileGeodatabaseSizeBytes = selectedFileGeodatabaseSource?.source_metadata?.size_bytes;
-        const fileGeodatabaseUrl = selectedFileGeodatabaseSource
-          ? buildSourceFileUrl(selectedFileGeodatabaseSource)
-          : null;
-        
-        return (
-          <FormatFileNode
-            icon={<Folder className="h-4 w-4 text-indigo-500" />}
-            name="file geodatabase"
-            badge={fileGeodatabaseSizeBytes != null ? formatFileSize(fileGeodatabaseSizeBytes) : undefined}
-            formatType="file_geodatabase"
-            formatEntry={fileGeodatabaseFormat}
+          const fileGeodatabaseSizeBytes = selectedFileGeodatabaseSource?.source_metadata?.size_bytes;
+          const fileGeodatabaseUrl = selectedFileGeodatabaseSource
+            ? buildSourceFileUrl(selectedFileGeodatabaseSource)
+            : null;
+
+          return (
+            <FormatFileNode
+              icon={<Folder className="h-4 w-4 text-indigo-500" />}
+              name="file geodatabase"
+              badge={fileGeodatabaseSizeBytes != null ? formatFileSize(fileGeodatabaseSizeBytes) : undefined}
+              formatType="file_geodatabase"
+              formatEntry={fileGeodatabaseFormat}
+              selectedSources={selectedSources}
+              onSourceChange={onSourceChange}
+              isExpanded={expandedFormats.has("file_geodatabase")}
+              onToggle={() => toggleFormat("file_geodatabase")}
+              collectionSlug={collectionSlug}
+              datasetSlug={datasetSlug}
+              fileSlug={fileSlug}
+            >
+              {fileGeodatabaseUrl && (
+                <div className="space-y-2">
+                  {fileGeodatabaseSizeBytes != null && (
+                    <p className="text-xs text-muted-foreground">Size: {formatFileSize(fileGeodatabaseSizeBytes)}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground break-all">{fileGeodatabaseUrl}</p>
+                  <div className="flex items-center gap-2">
+                    <CopyButton value={fileGeodatabaseUrl} label="Copy URL" />
+                    <DownloadButton
+                      url={fileGeodatabaseUrl}
+                      label="Download"
+                      analyticsContext={downloadAnalyticsContext({
+                        collectionSlug,
+                        datasetSlug,
+                        fileSlug,
+                        format: "file_geodatabase",
+                        source: selectedFileGeodatabaseSource,
+                        sizeBytes: fileGeodatabaseSizeBytes,
+                      })}
+                    />
+                  </div>
+                </div>
+              )}
+            </FormatFileNode>
+          );
+        })()}
+
+      {(!file.formats || file.formats.length === 0) && (
+        <p className="text-sm text-muted-foreground">No formats available for this file.</p>
+      )}
+    </div>
+  );
+}
+
+function GeoparquetTreeNodes({
+  nodes,
+  formatEntry,
+  selectedSources,
+  onSourceChange,
+  expandedFormats,
+  toggleFormat,
+  collectionSlug,
+  datasetSlug,
+  fileSlug,
+  onViewParquet,
+}: GeoparquetTreeNodesProps) {
+  return (
+    <>
+      {nodes.map((node) =>
+        node.type === "folder" ? (
+          <GeoparquetFolderNode
+            key={node.path}
+            node={node}
+            formatEntry={formatEntry}
             selectedSources={selectedSources}
             onSourceChange={onSourceChange}
-            isExpanded={expandedFormats.has("file_geodatabase")}
-            onToggle={() => toggleFormat("file_geodatabase")}
+            expandedFormats={expandedFormats}
+            toggleFormat={toggleFormat}
             collectionSlug={collectionSlug}
             datasetSlug={datasetSlug}
             fileSlug={fileSlug}
-          >
-            {fileGeodatabaseUrl && (
-              <div className="space-y-2">
-                {fileGeodatabaseSizeBytes != null && (
-                  <p className="text-xs text-muted-foreground">
-                    Size: {formatFileSize(fileGeodatabaseSizeBytes)}
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground break-all">
-                  {fileGeodatabaseUrl}
-                </p>
-                <div className="flex items-center gap-2">
-                  <CopyButton value={fileGeodatabaseUrl} label="Copy URL" />
-                  <DownloadButton
-                    url={fileGeodatabaseUrl}
-                    label="Download"
-                    analyticsContext={downloadAnalyticsContext({
-                      collectionSlug,
-                      datasetSlug,
-                      fileSlug,
-                      format: "file_geodatabase",
-                      source: selectedFileGeodatabaseSource,
-                      sizeBytes: fileGeodatabaseSizeBytes,
-                    })}
-                  />
-                </div>
-              </div>
-            )}
-          </FormatFileNode>
-        );
-      })()}
-
-      {(!file.formats || file.formats.length === 0) && (
-        <p className="text-sm text-muted-foreground">
-          No formats available for this file.
-        </p>
+            onViewParquet={onViewParquet}
+          />
+        ) : (
+          <GeoparquetLeafNode
+            key={node.path}
+            node={node}
+            formatEntry={formatEntry}
+            selectedSources={selectedSources}
+            onSourceChange={onSourceChange}
+            expandedFormats={expandedFormats}
+            toggleFormat={toggleFormat}
+            collectionSlug={collectionSlug}
+            datasetSlug={datasetSlug}
+            fileSlug={fileSlug}
+            onViewParquet={onViewParquet}
+          />
+        ),
       )}
+    </>
+  );
+}
+
+function GeoparquetFolderNode({ node, ...props }: { node: GeoparquetTreeNode } & GeoparquetTreeNodeSharedProps) {
+  const expansionKey = `geoparquet-folder-${node.path}`;
+  return (
+    <FormatFileNode
+      icon={<Folder className="h-4 w-4 text-yellow-600" />}
+      name={node.name}
+      badge={`${node.children.length} item${node.children.length === 1 ? "" : "s"}`}
+      formatType="geoparquet"
+      formatEntry={props.formatEntry}
+      selectedSources={props.selectedSources}
+      onSourceChange={props.onSourceChange}
+      isExpanded={props.expandedFormats.has(expansionKey)}
+      onToggle={() => props.toggleFormat(expansionKey)}
+      showSourceSelector={false}
+    >
+      <div className="space-y-1">
+        <GeoparquetTreeNodes nodes={node.children} {...props} />
+      </div>
+    </FormatFileNode>
+  );
+}
+
+function GeoparquetLeafNode({ node, ...props }: { node: GeoparquetTreeNode } & GeoparquetTreeNodeSharedProps) {
+  const source = node.source;
+  if (!source) {
+    return null;
+  }
+
+  const fileSizeBytes = source.source_metadata?.size_bytes;
+  return (
+    <FormatFileNode
+      icon={<File className="h-4 w-4 text-green-600" />}
+      name={node.name}
+      badge={fileSizeBytes != null ? formatFileSize(fileSizeBytes) : undefined}
+      formatType="geoparquet"
+      formatEntry={props.formatEntry}
+      selectedSources={props.selectedSources}
+      onSourceChange={props.onSourceChange}
+      isExpanded={props.expandedFormats.has(`geoparquet-file-${node.path}`)}
+      onToggle={() => props.toggleFormat(`geoparquet-file-${node.path}`)}
+      showSourceSelector={false}
+    >
+      <GeoparquetFileDetails
+        source={source}
+        fileName={node.name}
+        collectionSlug={props.collectionSlug}
+        datasetSlug={props.datasetSlug}
+        fileSlug={props.fileSlug}
+        onViewParquet={props.onViewParquet}
+      />
+    </FormatFileNode>
+  );
+}
+
+function GeoparquetFileDetails({
+  source,
+  fileName,
+  collectionSlug,
+  datasetSlug,
+  fileSlug,
+  onViewParquet,
+}: {
+  source: DatasetSource;
+  fileName: string;
+  collectionSlug?: string | undefined;
+  datasetSlug?: string | undefined;
+  fileSlug?: string | undefined;
+  onViewParquet?: ((url: string, fileName: string) => void) | undefined;
+}) {
+  const fileUrl = buildSourceFileUrl(source);
+  const fileStorageUri = buildSourceStorageUri(source);
+  const fileSizeBytes = source.source_metadata?.size_bytes;
+
+  return (
+    <div className="space-y-2">
+      {fileSizeBytes != null && <p className="text-xs text-muted-foreground">Size: {formatFileSize(fileSizeBytes)}</p>}
+      {fileStorageUri && <StorageUriDetails storageUri={fileStorageUri} />}
+      {fileUrl && (
+        <div>
+          <p className="text-xs text-muted-foreground mb-1">Download URL:</p>
+          <p className="text-xs text-muted-foreground break-all mb-1">{fileUrl}</p>
+          <div className="flex items-center gap-2">
+            <DownloadButton
+              url={fileUrl}
+              label="Download"
+              analyticsContext={downloadAnalyticsContext({
+                collectionSlug,
+                datasetSlug,
+                fileSlug,
+                format: "geoparquet",
+                source,
+                sizeBytes: fileSizeBytes,
+                filename: fileName,
+              })}
+            />
+            {onViewParquet && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onViewParquet(fileUrl, fileName);
+                }}
+              >
+                View Data
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StorageUriDetails({ storageUri }: { storageUri: string }) {
+  const { hasEndpointUrl, s3Uri, host, port } = formatEndpointConfig(storageUri);
+
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground mb-1">Storage URI:</p>
+      {hasEndpointUrl ? (
+        <>
+          <p className="text-xs text-muted-foreground mb-2">For DuckDB, configure the S3 endpoint first:</p>
+          <div className="space-y-1 mb-2">
+            <code className="text-xs bg-muted px-2 py-1 rounded block">
+              SET s3_endpoint='{host}:{port}';
+            </code>
+            <code className="text-xs bg-muted px-2 py-1 rounded block">SET s3_use_ssl=false;</code>
+            <code className="text-xs bg-muted px-2 py-1 rounded block">SET s3_url_style='path';</code>
+          </div>
+          <p className="text-xs text-muted-foreground mb-1">Then use this URI in your query:</p>
+          <code className="text-xs bg-muted px-2 py-1 rounded block break-all">{s3Uri}</code>
+          <div className="flex items-center gap-2 mt-1">
+            <CopyButton
+              value={`SET s3_endpoint='${host}:${port}';\nSET s3_use_ssl=false;\nSET s3_url_style='path';\n\nSELECT * FROM '${s3Uri}';`}
+              label="Copy DuckDB Config"
+            />
+            <CopyButton value={s3Uri} label="Copy URI" />
+          </div>
+        </>
+      ) : (
+        <>
+          <code className="text-xs bg-muted px-2 py-1 rounded block break-all">{storageUri}</code>
+          <div className="flex items-center gap-2 mt-1">
+            <CopyButton value={storageUri} label="Copy URI" />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ShapefileFormatNode({
+  shapefileFormat,
+  selectedSources,
+  onSourceChange,
+  isExpanded,
+  onToggle,
+  collectionSlug,
+  datasetSlug,
+  fileSlug,
+}: ShapefileFormatNodeProps) {
+  const model = buildShapefileDownloadModel({ shapefileFormat, selectedSources, datasetSlug, fileSlug });
+
+  return (
+    <FormatFileNode
+      icon={<File className="h-4 w-4 text-amber-600" />}
+      name="shapefile"
+      badge={model.sizeBytes != null ? formatFileSize(model.sizeBytes) : undefined}
+      formatType="shapefile"
+      formatEntry={shapefileFormat}
+      selectedSources={selectedSources}
+      onSourceChange={onSourceChange}
+      isExpanded={isExpanded}
+      onToggle={onToggle}
+      collectionSlug={collectionSlug}
+      datasetSlug={datasetSlug}
+      fileSlug={fileSlug}
+    >
+      <ShapefileDownloadActions
+        model={model}
+        collectionSlug={collectionSlug}
+        datasetSlug={datasetSlug}
+        fileSlug={fileSlug}
+      />
+    </FormatFileNode>
+  );
+}
+
+function ShapefileSizeLine({ sizeBytes }: { sizeBytes?: number | undefined }) {
+  if (sizeBytes == null) {
+    return null;
+  }
+  return (
+    <p className="text-xs text-muted-foreground">
+      Size: {formatFileSize(sizeBytes)} (zip contains all shapefile components)
+    </p>
+  );
+}
+
+function ShapefileDownloadActions({
+  model,
+  collectionSlug,
+  datasetSlug,
+  fileSlug,
+}: {
+  model: ShapefileDownloadModel;
+  collectionSlug?: string | undefined;
+  datasetSlug?: string | undefined;
+  fileSlug?: string | undefined;
+}) {
+  if (model.hasExpandedSources) {
+    const sources = model.sourcesWithUrls.map((source) => {
+      const sourceUrl = buildSourceFileUrl(source);
+      return sourceUrl ? { ...source, url: sourceUrl } : source;
+    });
+
+    return (
+      <div className="space-y-2">
+        <ShapefileSizeLine sizeBytes={model.sizeBytes} />
+        <p className="text-xs text-muted-foreground">
+          Download all shapefile components (.shp, .shx, .dbf, .prj, etc.) as a zip file
+          {` (${model.sourcesWithUrls.length} files)`}
+        </p>
+        <div className="flex items-center gap-2">
+          <ShapefileZipDownloadButton
+            sources={sources}
+            filename={model.zipFilename}
+            label="Download Zip"
+            analyticsContext={downloadAnalyticsContext({
+              collectionSlug,
+              datasetSlug,
+              fileSlug,
+              format: "shapefile",
+              source: model.originalSource,
+              sizeBytes: model.sizeBytes,
+              filename: model.zipFilename,
+            })}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (model.hasGlobPattern && model.originalSource?.id && collectionSlug && datasetSlug && fileSlug) {
+    return (
+      <div className="space-y-2">
+        <ShapefileSizeLine sizeBytes={model.sizeBytes} />
+        <p className="text-xs text-muted-foreground">
+          Download all shapefile components (.shp, .shx, .dbf, .prj, etc.) as a zip file
+        </p>
+        <div className="flex items-center gap-2">
+          <DownloadButton
+            url={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}/sources/${model.originalSource.id}/download-zip`}
+            label="Download Zip"
+            filename={model.zipFilename}
+            analyticsContext={downloadAnalyticsContext({
+              collectionSlug,
+              datasetSlug,
+              fileSlug,
+              format: "shapefile",
+              source: model.originalSource,
+              sizeBytes: model.sizeBytes,
+              filename: model.zipFilename,
+            })}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  const singleSource = model.sourcesWithUrls.length === 1 ? model.sourcesWithUrls[0] : undefined;
+  const sourceUrl = singleSource ? buildSourceFileUrl(singleSource) : null;
+  if (!singleSource || !sourceUrl) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-2">
+      {model.sizeBytes != null && (
+        <p className="text-xs text-muted-foreground">Size: {formatFileSize(model.sizeBytes)}</p>
+      )}
+      <p className="text-xs text-muted-foreground break-all">{sourceUrl}</p>
+      <div className="flex items-center gap-2">
+        <CopyButton value={sourceUrl} label="Copy URL" />
+        <DownloadButton
+          url={sourceUrl}
+          label="Download"
+          analyticsContext={downloadAnalyticsContext({
+            collectionSlug,
+            datasetSlug,
+            fileSlug,
+            format: "shapefile",
+            source: singleSource,
+            sizeBytes: model.sizeBytes,
+          })}
+        />
+      </div>
     </div>
   );
 }
@@ -911,18 +987,18 @@ export function FileFormatTree({
 interface FormatFileNodeProps {
   icon: React.ReactNode;
   name: string;
-  badge?: string;
+  badge?: string | undefined;
   formatType: string;
   formatEntry: NonNullable<DatasetFile["formats"]>[0];
-  selectedSources: Record<string, { storageLocationId: number; version: string | number }>;
+  selectedSources: SelectedFormatSources;
   onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
   isExpanded: boolean;
   onToggle: () => void;
   children?: React.ReactNode;
   showSourceSelector?: boolean; // Whether to show location/version selector
-  collectionSlug?: string;
-  datasetSlug?: string;
-  fileSlug?: string;
+  collectionSlug?: string | undefined;
+  datasetSlug?: string | undefined;
+  fileSlug?: string | undefined;
 }
 
 function FormatFileNode({
@@ -946,10 +1022,11 @@ function FormatFileNode({
 
   return (
     <div>
-      <div
+      <button
+        type="button"
         className={cn(
-          "select-none flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors",
-          isExpanded && hasChildren && "bg-muted/30"
+          "select-none flex w-full items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors text-left",
+          isExpanded && hasChildren && "bg-muted/30",
         )}
         onClick={onToggle}
       >
@@ -969,7 +1046,7 @@ function FormatFileNode({
             {badge}
           </Badge>
         )}
-      </div>
+      </button>
 
       {isExpanded && hasChildren && (
         <div className="ml-5 pl-4 mt-2 mb-2 border-l-2 border-muted select-text">
@@ -999,14 +1076,14 @@ interface FormatFolderNodeProps {
   name: string;
   formatType: string;
   formatEntry: NonNullable<DatasetFile["formats"]>[0];
-  selectedSources: Record<string, { storageLocationId: number; version: string | number }>;
+  selectedSources: SelectedFormatSources;
   onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
   isExpanded: boolean;
   onToggle: () => void;
   children?: React.ReactNode;
-  collectionSlug?: string;
-  datasetSlug?: string;
-  fileSlug?: string;
+  collectionSlug?: string | undefined;
+  datasetSlug?: string | undefined;
+  fileSlug?: string | undefined;
 }
 
 function FormatFolderNode({
@@ -1024,32 +1101,15 @@ function FormatFolderNode({
   fileSlug,
 }: FormatFolderNodeProps) {
   const sources = formatEntry.sources || [];
-  
-  // For geoparquet, count only unique storage locations (excluding glob pattern sources)
-  // The glob pattern is just a representation of individual files, not a separate source
-  let sourceCount = sources.length;
-  if (formatType === "geoparquet") {
-    // Count unique storage locations, excluding glob pattern sources
-    const uniqueLocations = new Set<number>();
-    sources.forEach((source) => {
-      const path = (source.location as any)?.path || "";
-      // Only count sources that are NOT glob patterns
-      if (!path.includes("*")) {
-        const locId = source.storage_location?.id;
-        if (locId) {
-          uniqueLocations.add(locId);
-        }
-      }
-    });
-    sourceCount = uniqueLocations.size;
-  }
+  const sourceCount = countDisplaySources(formatType, sources);
 
   return (
     <div>
-      <div
+      <button
+        type="button"
         className={cn(
-          "select-none flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors",
-          isExpanded && "bg-muted/30"
+          "select-none flex w-full items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors text-left",
+          isExpanded && "bg-muted/30",
         )}
         onClick={onToggle}
       >
@@ -1065,7 +1125,7 @@ function FormatFolderNode({
             {sourceCount} source{sourceCount !== 1 ? "s" : ""}
           </Badge>
         )}
-      </div>
+      </button>
 
       {isExpanded && (
         <div className="ml-5 mt-2 mb-2 select-text">
@@ -1093,11 +1153,11 @@ function FormatFolderNode({
 interface SourceSelectorProps {
   formatType: string;
   formatEntry: NonNullable<DatasetFile["formats"]>[0];
-  selectedSources: Record<string, { storageLocationId: number; version: string | number }>;
+  selectedSources: SelectedFormatSources;
   onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
-  collectionSlug?: string;
-  datasetSlug?: string;
-  fileSlug?: string;
+  collectionSlug?: string | undefined;
+  datasetSlug?: string | undefined;
+  fileSlug?: string | undefined;
 }
 
 function SourceSelector({
@@ -1116,13 +1176,19 @@ function SourceSelector({
     return null;
   }
 
-  const currentLocationId = selectedSource?.storageLocationId || locationArray[0]?.id;
+  const firstLocation = locationArray[0];
+  if (!firstLocation) {
+    return null;
+  }
+
+  const currentLocationId = selectedSource?.storageLocationId || firstLocation.id;
   const versionSources = getVersionSourcesForLocation(formatEntry, currentLocationId);
   const versionArray = versionSources.map((source) => source.version || "1");
+  const firstVersion = versionArray[0] ?? "1";
   const currentVersion =
     selectedSource?.version && versionArray.some((version) => String(version) === String(selectedSource.version))
       ? selectedSource.version
-      : versionArray[0];
+      : firstVersion;
   const compareSearch = buildCompareSearchForLocation(formatEntry, currentLocationId);
 
   return (
@@ -1130,13 +1196,13 @@ function SourceSelector({
       {/* Location selector */}
       {locationArray.length > 1 ? (
         <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Location:</label>
+          <span className="text-xs text-muted-foreground">Location:</span>
           <Select
             value={String(currentLocationId)}
             onValueChange={(value) => {
               const locId = Number(value);
-            const nextVersion = getVersionSourcesForLocation(formatEntry, locId)[0]?.version ?? "1";
-            onSourceChange(formatType, locId, nextVersion);
+              const nextVersion = getVersionSourcesForLocation(formatEntry, locId)[0]?.version ?? "1";
+              onSourceChange(formatType, locId, nextVersion);
             }}
           >
             <SelectTrigger className="h-7 text-xs">
@@ -1152,15 +1218,13 @@ function SourceSelector({
           </Select>
         </div>
       ) : locationArray.length === 1 ? (
-        <div className="text-xs text-muted-foreground">
-          Location: {locationArray[0].name}
-        </div>
+        <div className="text-xs text-muted-foreground">Location: {firstLocation.name}</div>
       ) : null}
 
       {/* Version selector */}
       {versionArray.length > 1 ? (
         <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Version:</label>
+          <span className="text-xs text-muted-foreground">Version:</span>
           <Select
             value={String(currentVersion)}
             onValueChange={(value) => {
@@ -1181,9 +1245,7 @@ function SourceSelector({
           </Select>
         </div>
       ) : versionArray.length === 1 ? (
-        <div className="text-xs text-muted-foreground">
-          Version: {formatVersionLabel(versionArray[0])}
-        </div>
+        <div className="text-xs text-muted-foreground">Version: {formatVersionLabel(firstVersion)}</div>
       ) : null}
 
       {compareSearch && collectionSlug && datasetSlug && fileSlug ? (

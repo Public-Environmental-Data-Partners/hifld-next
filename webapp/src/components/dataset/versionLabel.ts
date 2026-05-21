@@ -20,10 +20,7 @@ export function parseVersionValue(value: string): string | number {
   return Number.isNaN(numeric) ? value : numeric;
 }
 
-export function compareVersionValues(
-  left: string | number,
-  right: string | number
-): number {
+export function compareVersionValues(left: string | number, right: string | number): number {
   const leftValue = String(left);
   const rightValue = String(right);
   const leftSemver = parseSemverVersion(leftValue);
@@ -31,7 +28,9 @@ export function compareVersionValues(
 
   if (leftSemver && rightSemver) {
     for (let index = 0; index < leftSemver.length; index += 1) {
-      const diff = rightSemver[index] - leftSemver[index];
+      const leftPart = leftSemver[index] ?? 0;
+      const rightPart = rightSemver[index] ?? 0;
+      const diff = rightPart - leftPart;
       if (diff !== 0) {
         return diff;
       }
@@ -52,5 +51,6 @@ function parseSemverVersion(value: string): [number, number, number] | null {
     return null;
   }
 
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
+  const [, major = "0", minor = "0", patch = "0"] = match;
+  return [Number(major), Number(minor), Number(patch)];
 }

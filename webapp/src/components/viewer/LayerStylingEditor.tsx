@@ -1,4 +1,5 @@
 import { ChevronDown } from "lucide-react";
+import type maplibregl from "maplibre-gl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -6,14 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
-import type { VectorLayerInfo, LayerStyle } from "./types";
-import type maplibregl from "maplibre-gl";
-import {
-  computeQuantileBreaks,
-  getSampledValues,
-  DEFAULT_BREAK_COUNT,
-  colorSchemes,
-} from "./utils";
+import type { LayerStyle, VectorLayerInfo } from "./types";
+import { colorSchemes, computeQuantileBreaks, DEFAULT_BREAK_COUNT, getSampledValues } from "./utils";
+
+function isScale(value: string): value is LayerStyle["radiusScale"] {
+  return value === "linear" || value === "sqrt" || value === "log";
+}
 
 interface LayerStylingEditorProps {
   activeLayer: VectorLayerInfo | null;
@@ -47,9 +46,7 @@ export function LayerStylingEditor({
           <CardTitle className="text-base">Layer Styling</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-sm text-muted-foreground">
-            No vector layers detected yet.
-          </div>
+          <div className="text-sm text-muted-foreground">No vector layers detected yet.</div>
         </CardContent>
       </Card>
     );
@@ -65,17 +62,11 @@ export function LayerStylingEditor({
         <Collapsible open={colorSectionOpen} onOpenChange={setColorSectionOpen}>
           <CollapsibleTrigger className="text-sm font-medium">
             <span>Color & Opacity</span>
-            <ChevronDown
-              className={`h-4 w-4 transition-transform ${
-                colorSectionOpen ? "rotate-180" : ""
-              }`}
-            />
+            <ChevronDown className={`h-4 w-4 transition-transform ${colorSectionOpen ? "rotate-180" : ""}`} />
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-4 border border-t-0 rounded-md px-3 py-3">
             <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">
-                Color by Property
-              </label>
+              <div className="text-xs text-muted-foreground">Color by Property</div>
               <Select
                 value={activeStyle.colorProperty || "none"}
                 onValueChange={(value) => {
@@ -87,9 +78,7 @@ export function LayerStylingEditor({
                     });
                     return;
                   }
-                  const values = mapRef.current
-                    ? getSampledValues(mapRef.current, activeLayer.id, value)
-                    : [];
+                  const values = mapRef.current ? getSampledValues(mapRef.current, activeLayer.id, value) : [];
                   const breaks = computeQuantileBreaks(values, DEFAULT_BREAK_COUNT);
                   onStyleChange({
                     ...activeStyle,
@@ -113,12 +102,10 @@ export function LayerStylingEditor({
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">Color Scheme</label>
+              <div className="text-xs text-muted-foreground">Color Scheme</div>
               <Select
                 value={activeStyle.colorScheme}
-                onValueChange={(value) =>
-                  onStyleChange({ ...activeStyle, colorScheme: value })
-                }
+                onValueChange={(value) => onStyleChange({ ...activeStyle, colorScheme: value })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select scheme" />
@@ -134,7 +121,7 @@ export function LayerStylingEditor({
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">Breakpoints</label>
+              <div className="text-xs text-muted-foreground">Breakpoints</div>
               {activeStyle.colorProperty ? (
                 <div className="space-y-2">
                   {activeBreaks.length === 0 ? (
@@ -143,10 +130,7 @@ export function LayerStylingEditor({
                     </div>
                   ) : (
                     activeBreaks.map((value, index) => (
-                      <div
-                        key={`${activeLayer.id}-break-${index}`}
-                        className="flex items-center gap-2"
-                      >
+                      <div key={`${activeLayer.id}-break-${value}`} className="flex items-center gap-2">
                         <span
                           className="h-3 w-3 rounded-sm border"
                           style={{ backgroundColor: activeColors[index + 1] }}
@@ -157,9 +141,7 @@ export function LayerStylingEditor({
                           onChange={(event) => {
                             const next = [...activeBreaks];
                             next[index] = Number(event.target.value);
-                            const normalized = next
-                              .filter((item) => !Number.isNaN(item))
-                              .sort((a, b) => a - b);
+                            const normalized = next.filter((item) => !Number.isNaN(item)).sort((a, b) => a - b);
                             onStyleChange({
                               ...activeStyle,
                               breaksText: normalized.join(", "),
@@ -172,9 +154,7 @@ export function LayerStylingEditor({
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            const next = activeBreaks.filter(
-                              (_, idx) => idx !== index
-                            );
+                            const next = activeBreaks.filter((_, idx) => idx !== index);
                             onStyleChange({
                               ...activeStyle,
                               breaksText: next.join(", "),
@@ -194,10 +174,7 @@ export function LayerStylingEditor({
                       const current = [...activeBreaks];
                       const last = current[current.length - 1];
                       const prev = current[current.length - 2];
-                      const step =
-                        last !== undefined && prev !== undefined
-                          ? Math.max(1, last - prev)
-                          : 1;
+                      const step = last !== undefined && prev !== undefined ? Math.max(1, last - prev) : 1;
                       const nextValue = (last ?? 0) + step;
                       const nextList = [...current, nextValue]
                         .filter((item) => !Number.isNaN(item))
@@ -212,14 +189,12 @@ export function LayerStylingEditor({
                   </Button>
                 </div>
               ) : (
-                <div className="text-xs text-muted-foreground">
-                  Pick a property to enable breakpoints.
-                </div>
+                <div className="text-xs text-muted-foreground">Pick a property to enable breakpoints.</div>
               )}
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">Opacity</label>
+              <div className="text-xs text-muted-foreground">Opacity</div>
               <Slider
                 value={[activeStyle.opacity]}
                 min={0}
@@ -239,17 +214,11 @@ export function LayerStylingEditor({
         <Collapsible open={sizeSectionOpen} onOpenChange={setSizeSectionOpen}>
           <CollapsibleTrigger className="text-sm font-medium">
             <span>Size</span>
-            <ChevronDown
-              className={`h-4 w-4 transition-transform ${
-                sizeSectionOpen ? "rotate-180" : ""
-              }`}
-            />
+            <ChevronDown className={`h-4 w-4 transition-transform ${sizeSectionOpen ? "rotate-180" : ""}`} />
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-4 border border-t-0 rounded-md px-3 py-3">
             <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">
-                Point Radius by Field
-              </label>
+              <div className="text-xs text-muted-foreground">Point Radius by Field</div>
               <Select
                 value={activeStyle.radiusProperty || "none"}
                 onValueChange={(value) =>
@@ -271,13 +240,11 @@ export function LayerStylingEditor({
                   ))}
                 </SelectContent>
               </Select>
-              <div className="text-xs text-muted-foreground">
-                Scales between half and double the radius slider.
-              </div>
+              <div className="text-xs text-muted-foreground">Scales between half and double the radius slider.</div>
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">Point Radius</label>
+              <div className="text-xs text-muted-foreground">Point Radius</div>
               <Slider
                 value={[activeStyle.radius]}
                 min={1}
@@ -293,14 +260,11 @@ export function LayerStylingEditor({
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">Point Scale</label>
+              <div className="text-xs text-muted-foreground">Point Scale</div>
               <Select
                 value={activeStyle.radiusScale}
                 onValueChange={(value) =>
-                  onStyleChange({
-                    ...activeStyle,
-                    radiusScale: value as LayerStyle["radiusScale"],
-                  })
+                  isScale(value) ? onStyleChange({ ...activeStyle, radiusScale: value }) : undefined
                 }
               >
                 <SelectTrigger>
@@ -317,9 +281,7 @@ export function LayerStylingEditor({
             <Separator />
 
             <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">
-                Line Thickness by Field
-              </label>
+              <div className="text-xs text-muted-foreground">Line Thickness by Field</div>
               <Select
                 value={activeStyle.lineWidthProperty || "none"}
                 onValueChange={(value) =>
@@ -341,13 +303,11 @@ export function LayerStylingEditor({
                   ))}
                 </SelectContent>
               </Select>
-              <div className="text-xs text-muted-foreground">
-                Scales between half and double the thickness slider.
-              </div>
+              <div className="text-xs text-muted-foreground">Scales between half and double the thickness slider.</div>
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">Line Thickness</label>
+              <div className="text-xs text-muted-foreground">Line Thickness</div>
               <Slider
                 value={[activeStyle.lineWidth]}
                 min={1}
@@ -363,14 +323,11 @@ export function LayerStylingEditor({
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">Line Scale</label>
+              <div className="text-xs text-muted-foreground">Line Scale</div>
               <Select
                 value={activeStyle.lineWidthScale}
                 onValueChange={(value) =>
-                  onStyleChange({
-                    ...activeStyle,
-                    lineWidthScale: value as LayerStyle["lineWidthScale"],
-                  })
+                  isScale(value) ? onStyleChange({ ...activeStyle, lineWidthScale: value }) : undefined
                 }
               >
                 <SelectTrigger>
@@ -389,4 +346,3 @@ export function LayerStylingEditor({
     </Card>
   );
 }
-

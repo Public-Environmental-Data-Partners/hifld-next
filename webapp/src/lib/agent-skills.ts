@@ -26,24 +26,19 @@ Unknown paths under \`/api\` return \`404\` with \`application/problem+json\` an
 `;
 
 export function skillArtifactDigest(markdown: string): string {
-  return (
-    "sha256:" +
-    createHash("sha256").update(markdown, "utf8").digest("hex")
-  );
+  return `sha256:${createHash("sha256").update(markdown, "utf8").digest("hex")}`;
 }
 
 /** Agent Skills Discovery index (RFC v0.2.0 style). */
 export function buildAgentSkillsIndex(origin: string) {
   const skillUrl = `${origin}/.well-known/agent-skills/hifld-catalog/SKILL.md`;
   return {
-    $schema:
-      "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+    $schema: "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
     skills: [
       {
         name: "hifld-catalog",
         type: "skill-md",
-        description:
-          "Browse HIFLD Next collections and datasets using the JSON API, OpenAPI, and discovery documents.",
+        description: "Browse HIFLD Next collections and datasets using the JSON API, OpenAPI, and discovery documents.",
         url: skillUrl,
         digest: skillArtifactDigest(HIFLD_CATALOG_SKILL_MD),
       },

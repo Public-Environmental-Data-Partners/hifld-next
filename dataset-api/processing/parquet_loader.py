@@ -3,13 +3,14 @@
 import logging
 
 import geopandas as gpd
+from pyarrow import fs
+
 
 logger = logging.getLogger(__name__)
 
 
 def load_parquet(url: str) -> gpd.GeoDataFrame:
-    """
-    Load a parquet file directly using geopandas.
+    """Load a parquet file directly using geopandas.
 
     GeoPandas/PyArrow can read directly from:
     - gs:// URLs (Google Cloud Storage) - uses anonymous access for public buckets
@@ -20,9 +21,6 @@ def load_parquet(url: str) -> gpd.GeoDataFrame:
     logger.info(f"Loading parquet from: {url}")
 
     if url.startswith("gs://"):
-        # Use pyarrow filesystem for GCS
-        from pyarrow import fs
-
         # Parse gs://bucket/path
         parts = url[5:].split("/", 1)
         bucket = parts[0]

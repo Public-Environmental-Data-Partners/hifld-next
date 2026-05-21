@@ -1,27 +1,16 @@
-import { useState } from "react";
 import { Download, Loader2 } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import type {
-  DownloadAnalyticsContext,
-} from "@/lib/analytics";
-import {
-  trackDownloadClicked,
-  trackDownloadFailed,
-  trackDownloadSucceeded,
-} from "@/lib/analytics";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import type { DownloadAnalyticsContext } from "@/lib/analytics";
+import { trackDownloadClicked, trackDownloadFailed, trackDownloadSucceeded } from "@/lib/analytics";
 import { usesNativeBrowserDownload } from "./sourceUrls";
 
 interface DownloadButtonProps {
   url: string;
   label: string;
   filename?: string; // Optional explicit filename to use instead of extracting from URL
-  sizeBytes?: number; // Optional file size to determine if we should use streaming
+  sizeBytes?: number | undefined; // Optional file size to determine if we should use streaming
   analyticsContext?: Omit<Partial<DownloadAnalyticsContext>, "download_method">;
 }
 
@@ -38,17 +27,157 @@ function elapsedMs(startTime: number): number {
   return Math.round(performance.now() - startTime);
 }
 
-export async function executeDownload({
-  url,
-  filename,
-  analyticsContext,
-  useDirectDownload,
-}: {
+type DownloadAnalyticsInput = Omit<Partial<DownloadAnalyticsContext>, "download_method">;
+
+interface ExecuteDownloadOptions {
   url: string;
   filename: string;
-  analyticsContext?: Omit<Partial<DownloadAnalyticsContext>, "download_method">;
+  analyticsContext?: DownloadAnalyticsInput;
   useDirectDownload: boolean;
-}) {
+}
+
+interface DownloadState {
+  receivedBytes: number;
+  contentLengthBytes?: number;
+}
+
+interface FilePickerAccept {
+  [mimeType: string]: string[];
+}
+
+interface FilePickerType {
+  description: string;
+  accept: FilePickerAccept;
+}
+
+interface FilePickerOptions {
+  suggestedName: string;
+  types: FilePickerType[];
+}
+
+interface FilePickerWindow {
+  showSaveFilePicker(options: FilePickerOptions): Promise<FileSystemFileHandle>;
+}
+
+function hasFilePicker(value: Window): value is Window & FilePickerWindow {
+  return "showSaveFilePicker" in value;
+}
+
+function triggerAnchorDownload(url: string, filename: string, openInNewTab: boolean) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  if (openInNewTab) {
+    link.target = "_blank";
+    link.rel = "noopener";
+  }
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function errorMessage(error: Error | DOMException): string {
+  return error.message || String(error);
+}
+
+function extensionForLabel(label: string): string {
+  if (label === "PMTiles") return "pmtiles";
+  if (label === "GeoParquet") return "parquet";
+  if (label === "GeoPackage") return "gpkg";
+  return label.toLowerCase().includes("zip") ? "zip" : "bin";
+}
+
+function fallbackFilename(label: string): string {
+  return `${label.toLowerCase().replace(/\s+/g, "-")}.${extensionForLabel(label)}`;
+}
+
+function filenameFromUrl(url: string, label: string): string {
+  try {
+    const urlPath = new URL(url, window.location.origin).pathname;
+    const extractedFilename = urlPath.split("/").pop();
+    return extractedFilename?.includes(".") ? extractedFilename : fallbackFilename(label);
+  } catch {
+    return fallbackFilename(label);
+  }
+}
+
+async function streamToFile(response: Response, filename: string): Promise<number | null> {
+  if (!hasFilePicker(window)) {
+    return null;
+  }
+
+  try {
+    const fileHandle = await window.showSaveFilePicker({
+      suggestedName: filename,
+      types: [
+        {
+          description: "Download file",
+          accept: {
+            "application/octet-stream": [filename.split(".").pop() || ""],
+          },
+        },
+      ],
+    });
+
+    const writable = await fileHandle.createWritable();
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error("Response body is not readable");
+    }
+
+    let receivedBytes = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      receivedBytes += value.length;
+      await writable.write(value);
+    }
+
+    await writable.close();
+    return receivedBytes;
+  } catch (fileSystemError) {
+    if (fileSystemError instanceof DOMException && fileSystemError.name === "AbortError") {
+      throw fileSystemError;
+    }
+    console.log("File System Access API not available, using blob method:", fileSystemError);
+    return null;
+  }
+}
+
+async function streamToBlobUrl(response: Response): Promise<{ blobUrl: string; receivedBytes: number }> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("Response body is not readable");
+  }
+
+  const chunks: ArrayBuffer[] = [];
+  let receivedBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+    receivedBytes += value.length;
+  }
+
+  const blob = new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
+  return { blobUrl: URL.createObjectURL(blob), receivedBytes };
+}
+
+function trackCompleted(
+  baseAnalyticsContext: DownloadAnalyticsContext,
+  state: DownloadState,
+  startTime: number,
+  completionStatus: "completed" | "handoff",
+) {
+  trackDownloadSucceeded(baseAnalyticsContext, {
+    completion_status: completionStatus,
+    received_bytes: state.receivedBytes || undefined,
+    content_length_bytes: state.contentLengthBytes,
+    duration_ms: elapsedMs(startTime),
+  });
+}
+
+export async function executeDownload({ url, filename, analyticsContext, useDirectDownload }: ExecuteDownloadOptions) {
   const startTime = performance.now();
   const download_method = useDirectDownload ? "native_link" : "fetch_stream";
   const baseAnalyticsContext: DownloadAnalyticsContext = {
@@ -61,14 +190,7 @@ export async function executeDownload({
   trackDownloadClicked(baseAnalyticsContext);
 
   if (useDirectDownload) {
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    link.target = "_blank";
-    link.rel = "noopener";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    triggerAnchorDownload(url, filename, true);
     trackDownloadSucceeded(baseAnalyticsContext, {
       completion_status: "handoff",
       duration_ms: elapsedMs(startTime),
@@ -76,13 +198,14 @@ export async function executeDownload({
     return;
   }
 
-  let receivedBytes = 0;
-  let contentLengthBytes: number | undefined;
+  const state: DownloadState = { receivedBytes: 0 };
 
   try {
     const response = await fetch(url);
-    const contentLength = response.headers.get('content-length');
-    contentLengthBytes = contentLength ? parseInt(contentLength, 10) : undefined;
+    const contentLength = response.headers.get("content-length");
+    if (contentLength) {
+      state.contentLengthBytes = parseInt(contentLength, 10);
+    }
 
     if (!response.ok) {
       throw new Error(`Download failed: ${response.statusText}`);
@@ -90,86 +213,31 @@ export async function executeDownload({
 
     const responseClone = response.clone();
 
-    // @ts-ignore - File System Access API is not in all TypeScript definitions
-    if ('showSaveFilePicker' in window) {
-      try {
-        // @ts-ignore
-        const fileHandle = await window.showSaveFilePicker({
-          suggestedName: filename,
-          types: [{
-            description: 'Download file',
-            accept: {
-              'application/octet-stream': [filename.split('.').pop() || ''],
-            },
-          }],
-        });
-
-        const writable = await fileHandle.createWritable();
-        const reader = response.body?.getReader();
-
-        if (!reader) {
-          throw new Error('Response body is not readable');
-        }
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          receivedBytes += value.length;
-          await writable.write(value);
-        }
-
-        await writable.close();
-        trackDownloadSucceeded(baseAnalyticsContext, {
-          completion_status: "completed",
-          received_bytes: receivedBytes,
-          content_length_bytes: contentLengthBytes,
+    try {
+      const savedBytes = await streamToFile(response, filename);
+      if (savedBytes !== null) {
+        state.receivedBytes = savedBytes;
+        trackCompleted(baseAnalyticsContext, state, startTime, "completed");
+        return;
+      }
+    } catch (fileSystemError) {
+      if (fileSystemError instanceof DOMException && fileSystemError.name === "AbortError") {
+        trackDownloadFailed(baseAnalyticsContext, {
+          error_message: "Download canceled",
+          received_bytes: state.receivedBytes,
+          content_length_bytes: state.contentLengthBytes,
           duration_ms: elapsedMs(startTime),
         });
         return;
-      } catch (fileSystemError: any) {
-        if (fileSystemError.name === 'AbortError') {
-          trackDownloadFailed(baseAnalyticsContext, {
-            error_message: "Download canceled",
-            received_bytes: receivedBytes,
-            content_length_bytes: contentLengthBytes,
-            duration_ms: elapsedMs(startTime),
-          });
-          return;
-        }
-        console.log('File System Access API not available, using blob method:', fileSystemError);
       }
+      throw fileSystemError;
     }
 
     const responseToUse = responseClone.body ? responseClone : response;
-    const reader = responseToUse.body?.getReader();
-    if (!reader) {
-      throw new Error('Response body is not readable');
-    }
-
-    const chunks: Uint8Array[] = [];
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      chunks.push(value);
-      receivedBytes += value.length;
-    }
-
-    const blob = new Blob(chunks, { type: response.headers.get('content-type') || 'application/octet-stream' });
-    const blobUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = blobUrl;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    trackDownloadSucceeded(baseAnalyticsContext, {
-      completion_status: "completed",
-      received_bytes: receivedBytes,
-      content_length_bytes: contentLengthBytes,
-      duration_ms: elapsedMs(startTime),
-    });
+    const { blobUrl, receivedBytes } = await streamToBlobUrl(responseToUse);
+    state.receivedBytes = receivedBytes;
+    triggerAnchorDownload(blobUrl, filename, false);
+    trackCompleted(baseAnalyticsContext, state, startTime, "completed");
 
     setTimeout(() => {
       URL.revokeObjectURL(blobUrl);
@@ -177,84 +245,34 @@ export async function executeDownload({
   } catch (error) {
     console.error("Download error:", error);
     trackDownloadFailed(baseAnalyticsContext, {
-      error_message: error instanceof Error ? error.message : String(error),
-      received_bytes: receivedBytes || undefined,
-      content_length_bytes: contentLengthBytes,
+      error_message: error instanceof Error ? errorMessage(error) : String(error),
+      received_bytes: state.receivedBytes || undefined,
+      content_length_bytes: state.contentLengthBytes,
       duration_ms: elapsedMs(startTime),
     });
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    link.target = "_blank";
-    link.rel = "noopener";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    triggerAnchorDownload(url, filename, true);
   }
 }
 
-export function DownloadButton({
-  url,
-  label,
-  filename: explicitFilename,
-  analyticsContext,
-}: DownloadButtonProps) {
+export function DownloadButton({ url, label, filename: explicitFilename, analyticsContext }: DownloadButtonProps) {
   const [isDownloading, setIsDownloading] = useState(false);
   const useDirectDownload = usesNativeBrowserDownload(url);
 
-  // Use explicit filename if provided, otherwise extract from URL or generate from label
-  let filename: string;
-  
-  if (explicitFilename) {
-    filename = explicitFilename;
-  } else {
-    try {
-      const urlPath = new URL(url, window.location.origin).pathname;
-      const extractedFilename = urlPath.split("/").pop();
-
-      if (extractedFilename && extractedFilename.includes(".")) {
-        // Only use extracted filename if it has an extension
-        filename = extractedFilename;
-      } else {
-        // Generate filename based on label and common extensions
-        const extension =
-          label === "PMTiles"
-            ? "pmtiles"
-            : label === "GeoParquet"
-              ? "parquet"
-              : label === "GeoPackage"
-                ? "gpkg"
-                : label.toLowerCase().includes("zip")
-                  ? "zip"
-                  : "bin";
-        filename = `${label.toLowerCase().replace(/\s+/g, "-")}.${extension}`;
-      }
-    } catch {
-      // Fallback if URL parsing fails
-      const extension =
-        label === "PMTiles"
-          ? "pmtiles"
-          : label === "GeoParquet"
-            ? "parquet"
-            : label === "GeoPackage"
-              ? "gpkg"
-              : label.toLowerCase().includes("zip")
-                ? "zip"
-                : "bin";
-      filename = `${label.toLowerCase().replace(/\s+/g, "-")}.${extension}`;
-    }
-  }
+  const filename = explicitFilename ?? filenameFromUrl(url, label);
 
   const handleDownload = async () => {
     setIsDownloading(true);
 
     try {
-      await executeDownload({
+      const downloadOptions: ExecuteDownloadOptions = {
         url,
         filename,
-        analyticsContext,
         useDirectDownload,
-      });
+      };
+      if (analyticsContext) {
+        downloadOptions.analyticsContext = analyticsContext;
+      }
+      await executeDownload(downloadOptions);
 
       if (useDirectDownload) {
         setTimeout(() => {
@@ -272,22 +290,11 @@ export function DownloadButton({
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleDownload}
-            disabled={isDownloading}
-          >
-            {isDownloading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4" />
-            )}
+          <Button variant="ghost" size="sm" onClick={handleDownload} disabled={isDownloading}>
+            {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>
-          {isDownloading ? "Downloading..." : label}
-        </TooltipContent>
+        <TooltipContent>{isDownloading ? "Downloading..." : label}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );

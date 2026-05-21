@@ -1,32 +1,34 @@
-"""
-HIFLD Next Dataset API
+"""HIFLD Next Dataset API.
 
 FastAPI service for reading geospatial datasets:
 - Read-only dataset and collection endpoints
 - Dataset ingestion via scripts/import_datasets.py
 """
 
+import asyncio
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response
+from starlette.types import ASGIApp
 
-from database.db import init_db
+from alembic import command as alembic_command
 from api import collections as collections_router
 from api import datasets as datasets_router
+from config import config
+from database.db import init_db
+
 
 # Processing router removed - use scripts/import_datasets.py for dataset ingestion
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("dataset-api")
 
 ALEMBIC_INI_PATH = Path(__file__).parent / "alembic.ini"
@@ -36,19 +38,20 @@ ALEMBIC_INI_PATH = Path(__file__).parent / "alembic.ini"
 
 class TimeoutMiddleware(BaseHTTPMiddleware):
     """Middleware to add request timeout protection.
-    
+
     Applies different timeouts based on the request path:
     - Download endpoints (download-zip, export) get 280 seconds (just under Cloud Run's 300s limit)
     - All other endpoints get 60 seconds
     """
-    
-    def __init__(self, app, timeout: float = 60.0, long_timeout: float = 280.0):
+
+    def __init__(self, app: ASGIApp, timeout: float = 60.0, long_timeout: float = 280.0) -> None:
+        """Initialize timeout middleware."""
         super().__init__(app)
         self.timeout = timeout
         self.long_timeout = long_timeout
         # Paths that need longer timeouts
         self.long_timeout_paths = ["/download-zip", "/export/"]
-    
+
     def _get_timeout(self, request: Request) -> float:
         """Determine the appropriate timeout for this request."""
         path = str(request.url.path)
@@ -58,49 +61,37 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
                 logger.debug(f"Using long timeout ({self.long_timeout}s) for {path}")
                 return self.long_timeout
         return self.timeout
-    
-    async def dispatch(self, request: Request, call_next):
-        import asyncio
-        
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        """Apply a timeout to request handling."""
         timeout = self._get_timeout(request)
         try:
             # Create a timeout task
-            response = await asyncio.wait_for(
-                call_next(request),
-                timeout=timeout
-            )
+            response = await asyncio.wait_for(call_next(request), timeout=timeout)
+        except TimeoutError:
+            logger.exception(f"Request timeout after {timeout}s: {request.url}")
+            return JSONResponse(status_code=504, content={"detail": f"Request timeout after {timeout} seconds"})
+        else:
             return response
-        except asyncio.TimeoutError:
-            logger.error(f"Request timeout after {timeout}s: {request.url}")
-            return JSONResponse(
-                status_code=504,
-                content={"detail": f"Request timeout after {timeout} seconds"}
-            )
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Lifespan context manager for startup and shutdown events."""
     # Startup
-    from config import config
-
     # Log database URL (mask password for security)
     db_url = config.DATABASE_URL
     if "@" in db_url:
         # Mask password in URL for logging
-        masked_url = (
-            db_url.split("@")[0].split(":")[0]
-            + ":***@"
-            + "@".join(db_url.split("@")[1:])
-        )
+        masked_url = db_url.split("@")[0].split(":")[0] + ":***@" + "@".join(db_url.split("@")[1:])
         logger.info(f"Connecting to database: {masked_url}")
     else:
         logger.info(f"Connecting to database: {db_url}")
 
     run_startup_database_setup()
-    
+
     yield
-    
+
     # Shutdown (if needed)
     logger.info("Shutting down")
 
@@ -120,15 +111,15 @@ def run_startup_database_setup() -> None:
         logger.info("Current database revision after startup migrations:")
         alembic_command.current(alembic_cfg)
         logger.info("Database migrations completed")
-    except Exception as e:
-        logger.error(f"Failed to run migrations: {e}")
+    except Exception:
+        logger.exception("Failed to run migrations")
         raise
 
     try:
         init_db()
         logger.info("Database initialized")
-    except Exception as e:
-        logger.error(f"Failed to initialize database tables: {e}")
+    except Exception:
+        logger.exception("Failed to initialize database tables")
         raise
 
 
@@ -160,7 +151,7 @@ app.include_router(datasets_router.router)  # GET only, nested under collections
 
 
 @app.get("/health")
-async def health_check():
+async def health_check() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "ok"}
 

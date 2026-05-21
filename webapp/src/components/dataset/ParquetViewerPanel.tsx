@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
 import HighTable, { type DataFrame } from "hightable";
+import { useEffect, useState } from "react";
 import "hightable/src/HighTable.css";
 import { byteLengthFromUrl, parquetMetadataAsync } from "hyparquet";
 import { asyncBufferFrom, parquetDataFrame } from "hyperparam";
@@ -27,22 +27,40 @@ function limitColumns(df: DataFrame, maxColumns = 30): DataFrame {
   return {
     ...df,
     // Geometry payloads are often very large and expensive to stringify in table cells.
-    columnDescriptors:
-      (filteredDescriptors.length > 0 ? filteredDescriptors : df.columnDescriptors).slice(
-        0,
-        maxColumns
-      ),
+    columnDescriptors: (filteredDescriptors.length > 0 ? filteredDescriptors : df.columnDescriptors).slice(
+      0,
+      maxColumns,
+    ),
   };
 }
 
-export function ParquetViewerPanel({
-  url,
-  fileName,
-  onClose,
-}: ParquetViewerPanelProps) {
-  const [tableInstanceId] = useState(
-    () => `${Date.now()}-${Math.random().toString(36).slice(2)}`
-  );
+async function loadParquetDataFrame(url: string): Promise<{ dataFrame: DataFrame; totalRows: number }> {
+  const byteLength = await byteLengthFromUrl(url);
+  const asyncBuffer = await asyncBufferFrom({ url, byteLength });
+  const metadata = await parquetMetadataAsync(asyncBuffer);
+  const baseDf = parquetDataFrame({ url, byteLength }, metadata, {
+    utf8: false,
+  });
+
+  return {
+    dataFrame: limitColumns(baseDf, 30),
+    totalRows: baseDf.numRows,
+  };
+}
+
+function renderErrorMessage(error: Error): string {
+  return error.message || error.toString() || "Failed to render parquet table.";
+}
+
+function renderTableErrorMessage(error: Error | null | undefined): string {
+  if (error) {
+    return renderErrorMessage(error);
+  }
+  return "Failed to render parquet table.";
+}
+
+export function ParquetViewerPanel({ url, fileName, onClose }: ParquetViewerPanelProps) {
+  const [tableInstanceId] = useState(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const [dataFrame, setDataFrame] = useState<DataFrame | null>(null);
   const [totalRows, setTotalRows] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -55,29 +73,20 @@ export function ParquetViewerPanel({
     setDataFrame(null);
     setTotalRows(null);
 
-    (async () => {
-      try {
-        const byteLength = await byteLengthFromUrl(url);
-        const asyncBuffer = await asyncBufferFrom({ url, byteLength });
-        const metadata = await parquetMetadataAsync(asyncBuffer);
-        const baseDf = parquetDataFrame({ url, byteLength }, metadata, {
-          utf8: false,
-        });
-        const limitedDf = limitColumns(baseDf, 30);
-        if (isActive) {
-          setDataFrame(limitedDf);
-          setTotalRows(baseDf.numRows);
-        }
-      } catch (err) {
-        if (isActive) {
-          setError(err instanceof Error ? err.message : "Failed to load parquet file.");
-        }
-      } finally {
-        if (isActive) {
-          setIsLoading(false);
-        }
-      }
-    })();
+    loadParquetDataFrame(url)
+      .then((result) => {
+        if (!isActive) return;
+        setDataFrame(result.dataFrame);
+        setTotalRows(result.totalRows);
+      })
+      .catch((err) => {
+        if (!isActive) return;
+        setError(err instanceof Error ? err.message : "Failed to load parquet file.");
+      })
+      .finally(() => {
+        if (!isActive) return;
+        setIsLoading(false);
+      });
 
     return () => {
       isActive = false;
@@ -93,9 +102,7 @@ export function ParquetViewerPanel({
         </div>
         <div className="flex items-center gap-2">
           {totalRows !== null && (
-            <span className="text-xs text-muted-foreground">
-              {totalRows.toLocaleString()} rows (lazy-loaded)
-            </span>
+            <span className="text-xs text-muted-foreground">{totalRows.toLocaleString()} rows (lazy-loaded)</span>
           )}
           <Button size="sm" variant="ghost" onClick={onClose}>
             Close
@@ -110,9 +117,7 @@ export function ParquetViewerPanel({
           </div>
         )}
         {!isLoading && error && (
-          <div className="flex h-full items-center justify-center text-sm text-destructive p-4">
-            {error}
-          </div>
+          <div className="flex h-full items-center justify-center text-sm text-destructive p-4">{error}</div>
         )}
         {!isLoading && !error && dataFrame && (
           <HighTable
@@ -120,10 +125,8 @@ export function ParquetViewerPanel({
             cacheKey={`${url}:${tableInstanceId}`}
             data={dataFrame}
             className="h-full hightable"
-            onError={(err: any) => {
-              setError(
-                err?.message || err?.toString() || "Failed to render parquet table."
-              );
+            onError={(err) => {
+              setError(renderTableErrorMessage(err instanceof Error ? err : null));
             }}
           />
         )}

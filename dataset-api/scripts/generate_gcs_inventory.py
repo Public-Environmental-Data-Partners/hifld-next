@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Generate inventory CSV that maps HIFLD Open Inventory entries to GCS zip file locations.
+"""Generate inventory CSV that maps HIFLD Open Inventory entries to GCS zip file locations.
 
 This script:
 1. Reads HIFLD_Open_Inventory_12112025.csv
@@ -13,11 +12,12 @@ Priority for format selection:
 3. Shapefile (.shp)
 4. File Geodatabase (.gdb)
 """
+
 import csv
+import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Dict, List
-import subprocess
+
 
 # Format priority order
 FORMAT_PRIORITY = [
@@ -42,11 +42,8 @@ def normalize_filename(filename: str) -> str:
     return filename.strip().lstrip(".").rstrip("/")
 
 
-def find_gcs_zip_file(
-    bucket: str, filename: str, available_formats: Dict[str, bool]
-) -> Optional[str]:
-    """
-    Find the best matching zip file in GCS for a given filename.
+def find_gcs_zip_file(bucket: str, filename: str, available_formats: dict[str, bool]) -> str | None:
+    """Find the best matching zip file in GCS for a given filename.
 
     Args:
         bucket: GCS bucket name
@@ -60,7 +57,7 @@ def find_gcs_zip_file(
     normalized_name = normalize_filename(filename)
 
     # Try formats in priority order
-    for format_name, format_ext in FORMAT_PRIORITY:
+    for format_name, _format_ext in FORMAT_PRIORITY:
         # Check if this format is available (CSV has a value in that column)
         if format_name not in available_formats:
             continue
@@ -69,7 +66,7 @@ def find_gcs_zip_file(
         # CSV contains file sizes in KB, so any non-empty value means format exists
         format_value = available_formats.get(format_name, "")
         format_str = str(format_value).strip()
-        if not format_str or format_str == "" or format_str == "0":
+        if not format_str or format_str in {"", "0"}:
             continue
 
         # Construct potential GCS path
@@ -83,7 +80,7 @@ def find_gcs_zip_file(
         # Check if file exists (direct path)
         for gcs_path in potential_paths:
             try:
-                result = subprocess.run(
+                result = subprocess.run(  # noqa: PLW1510
                     ["gsutil", "ls", gcs_path],
                     capture_output=True,
                     text=True,
@@ -99,11 +96,8 @@ def find_gcs_zip_file(
     return find_gcs_zip_file_recursive(bucket, normalized_name, available_formats)
 
 
-def find_gcs_zip_file_recursive(
-    bucket: str, filename: str, available_formats: Dict[str, bool]
-) -> Optional[str]:
-    """
-    Recursively search for zip files when direct path doesn't work.
+def find_gcs_zip_file_recursive(bucket: str, filename: str, available_formats: dict[str, bool]) -> str | None:  # noqa: C901, PLR0912
+    """Recursively search for zip files when direct path doesn't work.
 
     Some datasets are nested under parent folders (e.g., nfhl/nfhl/filename/).
     Uses targeted searches of known parent folders and flexible pattern matching.
@@ -120,36 +114,30 @@ def find_gcs_zip_file_recursive(
     if special_patterns:
         for pattern in special_patterns:
             try:
-                result = subprocess.run(
+                result = subprocess.run(  # noqa: PLW1510
                     ["gsutil", "ls", pattern],
                     capture_output=True,
                     text=True,
                     timeout=15,
                 )
                 if result.returncode == 0:
-                    lines = [
-                        line.strip()
-                        for line in result.stdout.split("\n")
-                        if line.strip()
-                    ]
+                    lines = [line.strip() for line in result.stdout.split("\n") if line.strip()]
                     # Return the first match
                     for line in lines:
-                        if line.endswith(".zip") and is_valid_format_match(
-                            line, filename, available_formats
-                        ):
+                        if line.endswith(".zip") and is_valid_format_match(line, filename, available_formats):
                             return line
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 continue
 
     # Try formats in priority order
-    for format_name, format_ext in FORMAT_PRIORITY:
+    for format_name, _format_ext in FORMAT_PRIORITY:
         # Check if this format is available
         if format_name not in available_formats:
             continue
 
         format_value = available_formats.get(format_name, "")
         format_str = str(format_value).strip()
-        if not format_str or format_str == "" or format_str == "0":
+        if not format_str or format_str in {"", "0"}:
             continue
 
         format_suffix = FORMAT_MAPPINGS.get(format_name, format_name)
@@ -165,7 +153,7 @@ def find_gcs_zip_file_recursive(
 
             for gcs_path in potential_paths:
                 try:
-                    result = subprocess.run(
+                    result = subprocess.run(  # noqa: PLW1510
                         ["gsutil", "ls", gcs_path],
                         capture_output=True,
                         text=True,
@@ -189,7 +177,7 @@ def find_gcs_zip_file_recursive(
             ]
 
             for pattern in search_patterns:
-                result = subprocess.run(
+                result = subprocess.run(  # noqa: PLW1510
                     ["gsutil", "ls", pattern],
                     capture_output=True,
                     text=True,
@@ -197,16 +185,10 @@ def find_gcs_zip_file_recursive(
                 )
 
                 if result.returncode == 0:
-                    lines = [
-                        line.strip()
-                        for line in result.stdout.split("\n")
-                        if line.strip()
-                    ]
+                    lines = [line.strip() for line in result.stdout.split("\n") if line.strip()]
                     # Try to find the best match
                     for line in lines:
-                        if line.endswith(".zip") and is_valid_format_match(
-                            line, filename, available_formats
-                        ):
+                        if line.endswith(".zip") and is_valid_format_match(line, filename, available_formats):
                             return line
         except (subprocess.TimeoutExpired, FileNotFoundError):
             continue
@@ -214,12 +196,8 @@ def find_gcs_zip_file_recursive(
     return None
 
 
-def get_special_naming_patterns(
-    filename: str, available_formats: Dict[str, bool]
-) -> List[str]:
-    """
-    Get special search patterns for datasets with non-standard naming conventions.
-    """
+def get_special_naming_patterns(filename: str, available_formats: dict[str, bool]) -> list[str]:  # noqa: C901, PLR0912
+    """Get special search patterns for datasets with non-standard naming conventions."""
     bucket = "drp-hifld-copy-49775666365"
     patterns = []
 
@@ -230,7 +208,7 @@ def get_special_naming_patterns(
         "metropolitan-statistical-areas",
         "micropolitan-statistical-areas-3",
     ]:
-        for format_name, format_ext in FORMAT_PRIORITY:
+        for format_name, _format_ext in FORMAT_PRIORITY:
             if format_name not in available_formats:
                 continue
             format_value = available_formats.get(format_name, "")
@@ -238,16 +216,14 @@ def get_special_naming_patterns(
                 continue
             format_suffix = FORMAT_MAPPINGS.get(format_name, format_name)
             # These datasets use tl_2024_* prefix in filenames
-            patterns.append(
-                f"gs://{bucket}/{filename}/{filename}/**/*{format_suffix}.zip"
-            )
+            patterns.append(f"gs://{bucket}/{filename}/{filename}/**/*{format_suffix}.zip")
 
     # Handle NFHL area datasets with format in middle of name
     if filename in [
         "national-flood-hazard-layer-area-nfhl-1-east",
         "national-flood-hazard-layer-area-nfhl-1-west",
     ]:
-        for format_name, format_ext in FORMAT_PRIORITY:
+        for format_name, _format_ext in FORMAT_PRIORITY:
             if format_name not in available_formats:
                 continue
             format_value = available_formats.get(format_name, "")
@@ -256,13 +232,11 @@ def get_special_naming_patterns(
             format_suffix = FORMAT_MAPPINGS.get(format_name, format_name)
             # Pattern: national-flood-hazard-layer-nfhl-{format}-area-1-{east/west}.zip
             area = "east" if "east" in filename else "west"
-            patterns.append(
-                f"gs://{bucket}/nfhl/nfhl/{filename}/**/*{format_suffix}*area-1-{area}*.zip"
-            )
+            patterns.append(f"gs://{bucket}/nfhl/nfhl/{filename}/**/*{format_suffix}*area-1-{area}*.zip")
 
     # Handle hydrolocation-reach-code-external-connection (missing "external-connection" in filename)
     if filename == "hydrolocation-reach-code-external-connection":
-        for format_name, format_ext in FORMAT_PRIORITY:
+        for format_name, _format_ext in FORMAT_PRIORITY:
             if format_name not in available_formats:
                 continue
             format_value = available_formats.get(format_name, "")
@@ -270,13 +244,11 @@ def get_special_naming_patterns(
                 continue
             format_suffix = FORMAT_MAPPINGS.get(format_name, format_name)
             # Files are named hydrolocation-reach-code-{format}.zip
-            patterns.append(
-                f"gs://{bucket}/nhd/nhd/{filename}/**/hydrolocation-reach-code-{format_suffix}.zip"
-            )
+            patterns.append(f"gs://{bucket}/nhd/nhd/{filename}/**/hydrolocation-reach-code-{format_suffix}.zip")
 
     # Handle flowline and waterbody (have variations like flowline-large-scale-2)
     if filename in ["flowline", "waterbody"]:
-        for format_name, format_ext in FORMAT_PRIORITY:
+        for format_name, _format_ext in FORMAT_PRIORITY:
             if format_name not in available_formats:
                 continue
             format_value = available_formats.get(format_name, "")
@@ -284,13 +256,11 @@ def get_special_naming_patterns(
                 continue
             format_suffix = FORMAT_MAPPINGS.get(format_name, format_name)
             # Search for any file containing the base name and format
-            patterns.append(
-                f"gs://{bucket}/nhd/nhd/**/*{filename}*{format_suffix}*.zip"
-            )
+            patterns.append(f"gs://{bucket}/nhd/nhd/**/*{filename}*{format_suffix}*.zip")
 
     # Handle water-lines-1 (has .gpkg.zip extension)
     if filename == "water-lines-1":
-        for format_name, format_ext in FORMAT_PRIORITY:
+        for format_name, _format_ext in FORMAT_PRIORITY:
             if format_name not in available_formats:
                 continue
             format_value = available_formats.get(format_name, "")
@@ -298,19 +268,13 @@ def get_special_naming_patterns(
                 continue
             format_suffix = FORMAT_MAPPINGS.get(format_name, format_name)
             # Try both .zip and .gpkg.zip
-            patterns.append(
-                f"gs://{bucket}/nfhl/nfhl/{filename}/**/*{format_suffix}*.zip"
-            )
+            patterns.append(f"gs://{bucket}/nfhl/nfhl/{filename}/**/*{format_suffix}*.zip")
 
     return patterns
 
 
-def is_valid_format_match(
-    file_path: str, filename: str, available_formats: Dict[str, bool]
-) -> bool:
-    """
-    Check if a file path is a valid match for the given filename and available formats.
-    """
+def is_valid_format_match(file_path: str, filename: str, available_formats: dict[str, bool]) -> bool:
+    """Check if a file path is a valid match for the given filename and available formats."""
     file_lower = file_path.lower()
     filename_lower = filename.lower()
 
@@ -324,7 +288,7 @@ def is_valid_format_match(
             return False
 
     # Check if any available format appears in the filename
-    for format_name, format_ext in FORMAT_PRIORITY:
+    for format_name, _format_ext in FORMAT_PRIORITY:
         if format_name not in available_formats:
             continue
         format_value = available_formats.get(format_name, "")
@@ -338,17 +302,13 @@ def is_valid_format_match(
     return False
 
 
-def list_gcs_files_for_verification(
-    bucket: str, filename: str, limit: int = 10
-) -> List[str]:
+def list_gcs_files_for_verification(bucket: str, filename: str, limit: int = 10) -> list[str]:
     """List all files in GCS for a given filename (for debugging)."""
     normalized_name = normalize_filename(filename)
     prefix = f"gs://{bucket}/{normalized_name}/"
 
     try:
-        result = subprocess.run(
-            ["gsutil", "ls", "-r", prefix], capture_output=True, text=True, timeout=30
-        )
+        result = subprocess.run(["gsutil", "ls", "-r", prefix], capture_output=True, text=True, timeout=30)  # noqa: PLW1510
         if result.returncode == 0:
             files = [line.strip() for line in result.stdout.split("\n") if line.strip()]
             return files[:limit]
@@ -358,15 +318,14 @@ def list_gcs_files_for_verification(
     return []
 
 
-def generate_inventory(
+def generate_inventory(  # noqa: C901, D417, PLR0912, PLR0915
     input_csv: Path,
     output_csv: Path,
     gcs_bucket: str,
     verify_first_n: int = 10,
     skip_verify: bool = False,
 ) -> None:
-    """
-    Generate joined inventory CSV.
+    """Generate joined inventory CSV.
 
     Args:
         input_csv: Path to HIFLD_Open_Inventory_12112025.csv
@@ -377,7 +336,7 @@ def generate_inventory(
     print(f"Reading inventory from: {input_csv}")
     print(f"GCS Bucket: {gcs_bucket}")
 
-    with open(input_csv, "r", encoding="utf-8") as f:
+    with open(input_csv, encoding="utf-8") as f:  # noqa: PTH123
         reader = csv.DictReader(f)
         rows = list(reader)
 
@@ -411,9 +370,7 @@ def generate_inventory(
             else:
                 print("   ✗ Not found")
                 # List available files for debugging
-                available_files = list_gcs_files_for_verification(
-                    gcs_bucket, filename, limit=5
-                )
+                available_files = list_gcs_files_for_verification(gcs_bucket, filename, limit=5)
                 if available_files:
                     print("   Available files:")
                     for file in available_files:
@@ -482,7 +439,7 @@ def generate_inventory(
     if output_rows:
         fieldnames = list(output_rows[0].keys())
 
-        with open(output_csv, "w", encoding="utf-8", newline="") as f:
+        with open(output_csv, "w", encoding="utf-8", newline="") as f:  # noqa: PTH123
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(output_rows)
@@ -495,12 +452,10 @@ def generate_inventory(
         print("✗ No rows to write")
 
 
-def main():
-    import argparse
+def main() -> None:  # noqa: D103
+    import argparse  # noqa: PLC0415
 
-    parser = argparse.ArgumentParser(
-        description="Generate inventory CSV with GCS zip file paths"
-    )
+    parser = argparse.ArgumentParser(description="Generate inventory CSV with GCS zip file paths")
     parser.add_argument(
         "--input",
         type=Path,
@@ -537,9 +492,7 @@ def main():
         print(f"Error: Input file not found: {args.input}")
         sys.exit(1)
 
-    generate_inventory(
-        args.input, args.output, args.bucket, args.verify, skip_verify=args.skip_verify
-    )
+    generate_inventory(args.input, args.output, args.bucket, args.verify, skip_verify=args.skip_verify)
 
 
 if __name__ == "__main__":

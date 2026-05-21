@@ -1,6 +1,5 @@
 """Pydantic schemas for dataset processing."""
 
-from typing import Optional
 from pydantic import BaseModel
 
 
@@ -16,15 +15,9 @@ class ProcessResponse(BaseModel):
 
     success: bool
     name: str
-    pmtiles_url: Optional[str] = None
-    geoparquet_url: Optional[str] = None
-    feature_count: Optional[int] = None
-    bounds: Optional[str] = None  # WKT or GeoJSON bbox
-    geometry_type: Optional[str] = None
-    error: Optional[str] = None
-
-
-
-
-
-
+    pmtiles_url: str | None = None
+    geoparquet_url: str | None = None
+    feature_count: int | None = None
+    bounds: str | None = None  # WKT or GeoJSON bbox
+    geometry_type: str | None = None
+    error: str | None = None

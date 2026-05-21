@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Process datasets from storage (GCS or SeaweedFS) with chunked reading/writing.
+"""Process datasets from storage (GCS or SeaweedFS) with chunked reading/writing.
 
 This script:
 1. Reads inventory_gcs.csv to find datasets (or discovers nested datasets)
@@ -22,7 +21,8 @@ import tempfile
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
 
 try:
     import psutil
@@ -36,7 +36,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import fiona
 import geopandas as gpd
-from storage.storage_client import StorageClient, create_storage_client
+
+from storage.storage_client import StorageClient, StorageClientOptions, create_storage_client
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,7 +68,7 @@ DEFAULT_FGB_CHUNK_SIZE_MB = 100
 DEFAULT_MEMORY_ESTIMATE_MULTIPLIER = 5.0
 
 
-def parse_storage_url(url: str) -> Tuple[str, str, str]:
+def parse_storage_url(url: str) -> tuple[str, str, str]:
     """Parse a storage URL and return (storage_type, bucket, path)."""
     if url.startswith("gs://"):
         parts = url[5:].split("/", 1)
@@ -81,13 +83,13 @@ def parse_storage_url(url: str) -> Tuple[str, str, str]:
     return ("gcs", url, "")
 
 
-def load_inventory(inventory_path: Path) -> List[Dict[str, str]]:
+def load_inventory(inventory_path: Path) -> list[dict[str, str]]:
     """Load inventory CSV."""
-    datasets: List[Dict[str, str]] = []
-    with open(inventory_path, "r", encoding="utf-8") as f:
+    datasets: list[dict[str, str]] = []
+    with open(inventory_path, encoding="utf-8") as f:  # noqa: PTH123
         reader = csv.DictReader(f)
         for row in reader:
-            datasets.append(row)
+            datasets.append(row)  # noqa: PERF402
     return datasets
 
 
@@ -118,25 +120,21 @@ def _strip_format_suffix(name: str) -> str:
 def _normalize_duplicate_leading_folder(path: str) -> str:
     # Handle paths like folder/folder/file.zip that appear in some inventories.
     parts = [p for p in path.split("/") if p]
-    while len(parts) >= 3 and parts[0] == parts[1]:
+    while len(parts) >= 3 and parts[0] == parts[1]:  # noqa: PLR2004
         parts = parts[1:]
     return "/".join(parts)
 
 
-async def list_zip_files_in_folder(
-    storage: StorageClient, folder_path: str
-) -> List[str]:
+async def list_zip_files_in_folder(storage: StorageClient, folder_path: str) -> list[str]:
     """List zip files under folder_path using the storage client abstraction."""
     prefix = folder_path.strip("/")
     files = await storage.list_files(prefix)
     return sorted([f for f in files if f.lower().endswith(".zip")])
 
 
-async def discover_nested_datasets(
-    source_storage: StorageClient, source_path: str
-) -> List[Dict[str, str]]:
+async def discover_nested_datasets(source_storage: StorageClient, source_path: str) -> list[dict[str, str]]:
     """Discover datasets by scanning zip files and grouping by dataset base name."""
-    datasets_by_name: Dict[str, Dict[str, Any]] = {}
+    datasets_by_name: dict[str, dict[str, Any]] = {}
     zip_files = await list_zip_files_in_folder(source_storage, source_path)
 
     for zip_path in zip_files:
@@ -162,10 +160,7 @@ async def discover_nested_datasets(
 
         # Prefer chunk-readable formats for the canonical source path.
         current_fmt = _detect_format_from_path(current.get("gcs_zip_path", ""))
-        if (
-            format_name in CHUNKED_READABLE_FORMATS
-            and current_fmt not in CHUNKED_READABLE_FORMATS
-        ):
+        if format_name in CHUNKED_READABLE_FORMATS and current_fmt not in CHUNKED_READABLE_FORMATS:
             current["gcs_zip_path"] = storage_url
 
     # Convert to list and remove internal tracking dict
@@ -176,7 +171,7 @@ async def discover_nested_datasets(
     return result
 
 
-def get_memory_usage_mb() -> float:
+def get_memory_usage_mb() -> float:  # noqa: D103
     if not PSUTIL_AVAILABLE:
         return 0.0
     try:
@@ -186,7 +181,7 @@ def get_memory_usage_mb() -> float:
         return 0.0
 
 
-def get_system_memory_info() -> Dict[str, float]:
+def get_system_memory_info() -> dict[str, float]:  # noqa: D103
     if not PSUTIL_AVAILABLE:
         return {"available": 0.0, "total": 0.0, "percent": 0.0}
     try:
@@ -200,23 +195,20 @@ def get_system_memory_info() -> Dict[str, float]:
         return {"available": 0.0, "total": 0.0, "percent": 0.0}
 
 
-def log_memory_usage(context: str = "") -> None:
+def log_memory_usage(context: str = "") -> None:  # noqa: D103
     if not PSUTIL_AVAILABLE:
         return
     process_mb = get_memory_usage_mb()
     system_mem = get_system_memory_info()
     msg = f"  Memory: {process_mb:.1f} MB (process)"
     if system_mem["total"] > 0:
-        msg += (
-            f", {system_mem['available']:.1f} MB available "
-            f"({system_mem['percent']:.1f}% used)"
-        )
+        msg += f", {system_mem['available']:.1f} MB available ({system_mem['percent']:.1f}% used)"
     if context:
         msg = f"{context} - {msg}"
     logger.info(msg)
 
 
-def _get_fiona_driver(format_type: str) -> Optional[str]:
+def _get_fiona_driver(format_type: str) -> str | None:
     driver_map = {
         "shapefile": "ESRI Shapefile",
         "geojson": "GeoJSON",
@@ -242,23 +234,17 @@ def _safe_layer_suffix(layer_name: str) -> str:
     return layer_name.replace("/", "-").replace("\\", "-")
 
 
-def list_layers_in_file(
-    file_path: Path, format_type: str
-) -> List[Tuple[str, Optional[str]]]:
-    import pyogrio
+def list_layers_in_file(file_path: Path, format_type: str) -> list[tuple[str, str | None]]:  # noqa: D103
+    import pyogrio  # noqa: PLC0415
 
     if format_type in {"geopackage", "file_geodatabase"}:
         layers = pyogrio.list_layers(file_path)
-        filtered = [
-            (name, geom_type) for name, geom_type in layers if geom_type is not None
-        ]
+        filtered = [(name, geom_type) for name, geom_type in layers if geom_type is not None]
         return filtered or [("default", None)]
     return [("default", None)]
 
 
-def _extract_geospatial_from_zip(
-    zip_file: Path, extract_dir: Path
-) -> Optional[Tuple[str, Path]]:
+def _extract_geospatial_from_zip(zip_file: Path, extract_dir: Path) -> tuple[str, Path] | None:
     with zipfile.ZipFile(zip_file, "r") as zf:
         zf.extractall(extract_dir)
 
@@ -278,13 +264,10 @@ def _extract_geospatial_from_zip(
     return None
 
 
-async def unzip_from_storage(
-    storage: StorageClient, remote_path: str, extract_dir: Path
-) -> Optional[Tuple[str, Path]]:
-    """
-    Download a remote file and extract/resolve a geospatial input.
+async def unzip_from_storage(storage: StorageClient, remote_path: str, extract_dir: Path) -> tuple[str, Path] | None:
+    """Download a remote file and extract/resolve a geospatial input.
     Supports zip archives and direct geospatial files.
-    """
+    """  # noqa: D205
     remote_name = Path(remote_path).name
     local_file = extract_dir / (remote_name or "source_file")
     await storage.download_file(remote_path, local_file)
@@ -329,11 +312,11 @@ def _build_layer_filename(base_filename: str, layer_name: str) -> str:
 
 async def _upload_geoparquet_files(
     dest_storage: StorageClient,
-    geoparquet_files: List[Path],
+    geoparquet_files: list[Path],
     dest_folder: str,
     layer_filename: str,
-) -> List[str]:
-    urls: List[str] = []
+) -> list[str]:
+    urls: list[str] = []
     for i, gp_file in enumerate(geoparquet_files):
         remote_path = f"{dest_folder}parquet/{layer_filename}-{i}.zstd.parquet"
         await dest_storage.upload_file(gp_file, remote_path)
@@ -342,9 +325,7 @@ async def _upload_geoparquet_files(
     return urls
 
 
-def _build_tippecanoe_cmd(
-    pmtiles_path: Path, layer_filename: str, fgb_files: List[Path]
-) -> List[str]:
+def _build_tippecanoe_cmd(pmtiles_path: Path, layer_filename: str, fgb_files: list[Path]) -> list[str]:
     base = [
         "tippecanoe",
         "-zg",
@@ -362,17 +343,17 @@ def _build_tippecanoe_cmd(
 
 async def _create_and_upload_pmtiles(
     dest_storage: StorageClient,
-    fgb_files: List[Path],
+    fgb_files: list[Path],
     pmtiles_path: Path,
     dest_folder: str,
     layer_filename: str,
-) -> Optional[str]:
+) -> str | None:
     if not fgb_files:
         return None
 
     try:
         cmd = _build_tippecanoe_cmd(pmtiles_path, layer_filename, fgb_files)
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)  # noqa: PLW1510
         if result.returncode != 0:
             logger.warning(f"    tippecanoe failed: {result.stderr}")
             return None
@@ -408,26 +389,22 @@ def _repair_geometries_for_fgb(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", "GeoSeries.notna", UserWarning)
-        repaired = repaired[
-            repaired.geometry.notna()
-            & ~repaired.geometry.is_empty
-            & repaired.geometry.is_valid
-        ].copy()
+        repaired = repaired[repaired.geometry.notna() & ~repaired.geometry.is_empty & repaired.geometry.is_valid].copy()
     return repaired
 
 
 def _to_wgs84(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     if gdf.crs is None:
         return gdf.set_crs("EPSG:4326")
-    if gdf.crs.to_epsg() != 4326:
+    if gdf.crs.to_epsg() != 4326:  # noqa: PLR2004
         return gdf.to_crs("EPSG:4326")
     return gdf
 
 
-async def process_layer_chunked(
+async def process_layer_chunked(  # noqa: C901, PLR0912, PLR0913, PLR0915
     file_path: Path,
     format_type: str,
-    layer_name: Optional[str],
+    layer_name: str | None,
     layer_filename: str,
     dest_folder: str,
     dest_storage: StorageClient,
@@ -438,12 +415,10 @@ async def process_layer_chunked(
     data_page_size_bytes: int = DEFAULT_DATA_PAGE_SIZE_BYTES,
     skip_parquet: bool = False,
     skip_pmtiles: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Streaming reader/writer path with separate parquet and PMTiles passes."""
     if skip_parquet and skip_pmtiles:
-        logger.info(
-            "    Skipping layer generation for parquet/pmtiles because both outputs already exist."
-        )
+        logger.info("    Skipping layer generation for parquet/pmtiles because both outputs already exist.")
         return {"geoparquet_urls": [], "pmtiles_url": None, "feature_count": 0}
 
     mem_before = get_memory_usage_mb()
@@ -456,8 +431,8 @@ async def process_layer_chunked(
     geoparquet_dir.mkdir(exist_ok=True)
     pmtiles_dir.mkdir(exist_ok=True)
 
-    geoparquet_files: List[Path] = []
-    fgb_files: List[Path] = []
+    geoparquet_files: list[Path] = []
+    fgb_files: list[Path] = []
 
     feature_count = 0
     null_geometry_count = 0
@@ -466,9 +441,9 @@ async def process_layer_chunked(
     dropped_for_pmtiles_count = 0
     pmtiles_write_failed = False
 
-    bytes_per_feature: Optional[float] = None
-    current_chunk_size: Optional[int] = None
-    chunk_features: List[Dict[str, Any]] = []
+    bytes_per_feature: float | None = None
+    current_chunk_size: int | None = None
+    chunk_features: list[dict[str, Any]] = []
     current_memory_multiplier = DEFAULT_MEMORY_ESTIMATE_MULTIPLIER
     compressed_target_bytes = geoparquet_chunk_size_mb * 1024 * 1024
     chunk_target_bytes = int(compressed_target_bytes * current_memory_multiplier)
@@ -476,25 +451,19 @@ async def process_layer_chunked(
     chunk_num = 0
     features_processed = 0
     estimate_sample_size = 10
-    open_kwargs: Dict[str, Any] = {"driver": driver}
+    open_kwargs: dict[str, Any] = {"driver": driver}
     if layer_name and format_type in {"geopackage", "file_geodatabase"}:
         open_kwargs["layer"] = layer_name
 
-    def flush_parquet_chunk(
-        crs: Any, features: List[Dict[str, Any]], idx: int, start_id: int
-    ) -> int:
+    def flush_parquet_chunk(crs: object, features: list[dict[str, Any]], idx: int, start_id: int) -> int:
         nonlocal bytes_per_feature
         nonlocal current_chunk_size
         nonlocal current_memory_multiplier
         nonlocal chunk_target_bytes
 
         if skip_parquet:
-            actual_uncompressed_bytes = sum(
-                _estimate_feature_size_bytes(f) for f in features
-            )
-            file_size_bytes = max(
-                1, int(actual_uncompressed_bytes / max(1.0, current_memory_multiplier))
-            )
+            actual_uncompressed_bytes = sum(_estimate_feature_size_bytes(f) for f in features)
+            file_size_bytes = max(1, int(actual_uncompressed_bytes / max(1.0, current_memory_multiplier)))
             chunk_bytes_per_feature = file_size_bytes / max(1, len(features))
             processed_len = len(features)
         else:
@@ -514,34 +483,26 @@ async def process_layer_chunked(
             file_size_bytes = parquet_path.stat().st_size
             chunk_bytes_per_feature = file_size_bytes / max(1, len(gdf_chunk))
             # Calculate the actual uncompressed size of this chunk for multiplier tuning
-            actual_uncompressed_bytes = sum(
-                _estimate_feature_size_bytes(f) for f in features
-            )
+            actual_uncompressed_bytes = sum(_estimate_feature_size_bytes(f) for f in features)
             processed_len = len(gdf_chunk)
         # Ratio of compressed parquet size to our uncompressed estimate
         # This helps us understand how "heavy" the in-memory features are relative to their parquet size
         observed_multiplier = actual_uncompressed_bytes / max(1, file_size_bytes)
 
         # Smoothly update the multiplier (70% old, 30% new)
-        current_memory_multiplier = (current_memory_multiplier * 0.7) + (
-            observed_multiplier * 0.3
-        )
+        current_memory_multiplier = (current_memory_multiplier * 0.7) + (observed_multiplier * 0.3)
         # Clamp multiplier to sane range
         current_memory_multiplier = max(2.0, min(20.0, current_memory_multiplier))
 
         if bytes_per_feature is None:
             bytes_per_feature = chunk_bytes_per_feature
         else:
-            bytes_per_feature = (bytes_per_feature * 0.7) + (
-                chunk_bytes_per_feature * 0.3
-            )
+            bytes_per_feature = (bytes_per_feature * 0.7) + (chunk_bytes_per_feature * 0.3)
 
         # Target rows is now driven by the uncompressed budget divided by the
         # (compressed bytes per feature * current memory multiplier)
         # Keep row targeting based on compressed parquet size target.
-        proposed_chunk_size = max(
-            1, int(compressed_target_bytes / max(bytes_per_feature, 1))
-        )
+        proposed_chunk_size = max(1, int(compressed_target_bytes / max(bytes_per_feature, 1)))
         # Keep a separate in-memory budget based on learned multiplier.
         chunk_target_bytes = int(compressed_target_bytes * current_memory_multiplier)
 
@@ -561,7 +522,7 @@ async def process_layer_chunked(
         )
         return processed_len
 
-    def flush_fgb_chunk(crs: Any, features: List[Dict[str, Any]], idx: int) -> None:
+    def flush_fgb_chunk(crs: object, features: list[dict[str, Any]], idx: int) -> None:
         nonlocal null_geometry_count
         nonlocal invalid_geometry_count
         nonlocal invalid_geometry_count_after_repair
@@ -596,8 +557,7 @@ async def process_layer_chunked(
                 dropped_for_pmtiles_count += len(gdf_valid)
                 pmtiles_write_failed = True
                 logger.warning(
-                    "    Could not repair geometries for chunk %s. "
-                    "Skipping PMTiles for this layer.",
+                    "    Could not repair geometries for chunk %s. Skipping PMTiles for this layer.",
                     idx,
                 )
             else:
@@ -636,7 +596,7 @@ async def process_layer_chunked(
                 crs = src.crs if src.crs else "EPSG:4326"
                 src_iter = iter(src)
 
-                sample_features: List[Dict[str, Any]] = []
+                sample_features: list[dict[str, Any]] = []
                 for _ in range(estimate_sample_size):
                     try:
                         sample_features.append(next(src_iter))
@@ -650,9 +610,7 @@ async def process_layer_chunked(
                         "feature_count": 0,
                     }
 
-                sample = _ensure_id_column(
-                    gpd.GeoDataFrame.from_features(sample_features, crs=crs), start_id=1
-                )
+                sample = _ensure_id_column(gpd.GeoDataFrame.from_features(sample_features, crs=crs), start_id=1)
                 sample_path = geoparquet_dir / "_estimate.parquet"
                 sample.to_parquet(
                     sample_path,
@@ -667,9 +625,7 @@ async def process_layer_chunked(
                     1,
                     int(compressed_target_bytes / max(bytes_per_feature, 1)),
                 )
-                chunk_target_bytes = int(
-                    compressed_target_bytes * current_memory_multiplier
-                )
+                chunk_target_bytes = int(compressed_target_bytes * current_memory_multiplier)
 
                 logger.info(
                     "    Initial chunk sizing: target_rows=%s, target_compressed=%.2fMB, uncompressed_budget=%.2fMB (bytes_per_feature=%.1f, sample_rows=%s, multiplier=%.1f)",
@@ -682,20 +638,13 @@ async def process_layer_chunked(
                 )
 
                 chunk_features.extend(sample_features)
-                chunk_uncompressed_bytes = sum(
-                    _estimate_feature_size_bytes(feat) for feat in sample_features
-                )
+                chunk_uncompressed_bytes = sum(_estimate_feature_size_bytes(feat) for feat in sample_features)
                 feature_count = len(sample_features)
 
                 for feat in src_iter:
                     feat_size = _estimate_feature_size_bytes(feat)
-                    if (
-                        chunk_features
-                        and (chunk_uncompressed_bytes + feat_size) > chunk_target_bytes
-                    ):
-                        estimated_mb = (len(chunk_features) * bytes_per_feature) / (
-                            1024 * 1024
-                        )
+                    if chunk_features and (chunk_uncompressed_bytes + feat_size) > chunk_target_bytes:
+                        estimated_mb = (len(chunk_features) * bytes_per_feature) / (1024 * 1024)
                         uncompressed_mb = chunk_uncompressed_bytes / (1024 * 1024)
                         logger.info(
                             "    Pre-flush parquet chunk %s at rows_in_buffer=%s (next_feature=%.2fKB, estimated=%.2fMB, uncompressed=%.2fMB)",
@@ -719,9 +668,7 @@ async def process_layer_chunked(
                     chunk_features.append(feat)
                     chunk_uncompressed_bytes += feat_size
                     feature_count += 1
-                    estimated_mb = (len(chunk_features) * bytes_per_feature) / (
-                        1024 * 1024
-                    )
+                    estimated_mb = (len(chunk_features) * bytes_per_feature) / (1024 * 1024)
                     uncompressed_mb = chunk_uncompressed_bytes / (1024 * 1024)
                     if (
                         len(chunk_features) >= current_chunk_size
@@ -760,7 +707,7 @@ async def process_layer_chunked(
             # Still estimate bytes per feature so PMTiles pass has sane row targeting.
             with fiona.open(str(file_path), **open_kwargs) as src:
                 src_iter = iter(src)
-                sample_features: List[Dict[str, Any]] = []
+                sample_features: list[dict[str, Any]] = []
                 for _ in range(estimate_sample_size):
                     try:
                         sample_features.append(next(src_iter))
@@ -772,18 +719,10 @@ async def process_layer_chunked(
                         "pmtiles_url": None,
                         "feature_count": 0,
                     }
-                sample_bytes = sum(
-                    _estimate_feature_size_bytes(f) for f in sample_features
-                )
-                bytes_per_feature = max(
-                    1.0, sample_bytes / max(1, len(sample_features))
-                )
-                current_chunk_size = max(
-                    1, int(compressed_target_bytes / max(bytes_per_feature, 1))
-                )
-                chunk_target_bytes = int(
-                    compressed_target_bytes * current_memory_multiplier
-                )
+                sample_bytes = sum(_estimate_feature_size_bytes(f) for f in sample_features)
+                bytes_per_feature = max(1.0, sample_bytes / max(1, len(sample_features)))
+                current_chunk_size = max(1, int(compressed_target_bytes / max(bytes_per_feature, 1)))
+                chunk_target_bytes = int(compressed_target_bytes * current_memory_multiplier)
 
         # Pass 2: stream source again -> FGB/PMTiles only
         if (feature_count > 0 or skip_parquet) and not skip_pmtiles:
@@ -794,9 +733,7 @@ async def process_layer_chunked(
                 1,
                 int(fgb_compressed_target_bytes / max(fgb_bytes_per_feature, 1)),
             )
-            fgb_target_bytes = int(
-                fgb_compressed_target_bytes * current_memory_multiplier
-            )
+            fgb_target_bytes = int(fgb_compressed_target_bytes * current_memory_multiplier)
 
             logger.info(
                 "    Starting PMTiles pass: target_compressed=%sMB, uncompressed_budget=%.2fMB, multiplier=%.1f (~%s rows/chunk)",
@@ -818,13 +755,8 @@ async def process_layer_chunked(
                     feat_size = _estimate_feature_size_bytes(feat)
 
                     # Flush if next feature exceeds budget
-                    if (
-                        chunk_features
-                        and (chunk_uncompressed_bytes + feat_size) > fgb_target_bytes
-                    ):
-                        flush_fgb_chunk(
-                            crs=crs, features=chunk_features, idx=fgb_chunk_num
-                        )
+                    if chunk_features and (chunk_uncompressed_bytes + feat_size) > fgb_target_bytes:
+                        flush_fgb_chunk(crs=crs, features=chunk_features, idx=fgb_chunk_num)
                         chunk_features = []
                         chunk_uncompressed_bytes = 0
                         fgb_chunk_num += 1
@@ -833,9 +765,7 @@ async def process_layer_chunked(
                     chunk_uncompressed_bytes += feat_size
 
                     uncompressed_mb = chunk_uncompressed_bytes / (1024 * 1024)
-                    estimated_mb = (len(chunk_features) * fgb_bytes_per_feature) / (
-                        1024 * 1024
-                    )
+                    estimated_mb = (len(chunk_features) * fgb_bytes_per_feature) / (1024 * 1024)
 
                     if (
                         len(chunk_features) >= fgb_target_rows
@@ -850,9 +780,7 @@ async def process_layer_chunked(
                             estimated_mb,
                             uncompressed_mb,
                         )
-                        flush_fgb_chunk(
-                            crs=crs, features=chunk_features, idx=fgb_chunk_num
-                        )
+                        flush_fgb_chunk(crs=crs, features=chunk_features, idx=fgb_chunk_num)
                         chunk_features = []
                         chunk_uncompressed_bytes = 0
                         fgb_chunk_num += 1
@@ -888,9 +816,7 @@ async def process_layer_chunked(
                 layer_filename=layer_filename,
             )
         else:
-            logger.info(
-                "    Skipping parquet upload (parquet folder already exists)..."
-            )
+            logger.info("    Skipping parquet upload (parquet folder already exists)...")
 
         pmtiles_url = None
         if not skip_pmtiles and not pmtiles_write_failed:
@@ -902,29 +828,27 @@ async def process_layer_chunked(
                 layer_filename=layer_filename,
             )
         elif skip_pmtiles:
-            logger.info(
-                "    Skipping PMTiles creation (pmtiles folder already exists)..."
-            )
+            logger.info("    Skipping PMTiles creation (pmtiles folder already exists)...")
         elif pmtiles_write_failed:
             logger.warning(
                 "    Skipping PMTiles creation for layer '%s' because one or more FGB chunks failed.",
                 layer_filename,
             )
 
-        return {
+        return {  # noqa: TRY300
             "geoparquet_urls": geoparquet_urls,
             "pmtiles_url": pmtiles_url,
             "feature_count": feature_count,
         }
     except Exception as e:
-        logger.error(f"    Error in chunked processing: {e}")
+        logger.exception(f"    Error in chunked processing: {e}")  # noqa: TRY401
         return {"error": str(e)}
 
 
 def read_chunked(
     file_path: Path,
     format_type: str,
-    layer_name: Optional[str] = None,
+    layer_name: str | None = None,
 ) -> gpd.GeoDataFrame:
     """Fallback read path that loads the full layer into memory."""
     mem_before = get_memory_usage_mb()
@@ -934,13 +858,10 @@ def read_chunked(
     elif format_type in {"shapefile", "geojson"}:
         gdf = gpd.read_file(file_path, engine="pyogrio")
     else:
-        raise ValueError(f"Unsupported format: {format_type}")
+        raise ValueError(f"Unsupported format: {format_type}")  # noqa: TRY003
 
     mem_after = get_memory_usage_mb()
-    logger.info(
-        f"    Memory used for read: {mem_after - mem_before:.1f} MB "
-        f"(total: {mem_after:.1f} MB)"
-    )
+    logger.info(f"    Memory used for read: {mem_after - mem_before:.1f} MB (total: {mem_after:.1f} MB)")
     return gdf
 
 
@@ -950,12 +871,12 @@ def write_geoparquet_chunked(
     chunk_size_mb: int = 250,
     row_group_size: int = DEFAULT_ROW_GROUP_SIZE,
     data_page_size_bytes: int = DEFAULT_DATA_PAGE_SIZE_BYTES,
-) -> List[Path]:
+) -> list[Path]:
     """Write GeoParquet chunk files (always with -0, -1, ... suffixes)."""
     estimated_mb = len(gdf) * 0.001
     num_chunks = max(1, int(estimated_mb / chunk_size_mb) + 1)
 
-    paths: List[Path] = []
+    paths: list[Path] = []
     for i in range(num_chunks):
         start_idx = i * len(gdf) // num_chunks
         end_idx = (i + 1) * len(gdf) // num_chunks if i < num_chunks - 1 else len(gdf)
@@ -977,7 +898,7 @@ def write_pmtiles_chunked(
     output_path: Path,
     layer_filename: str,
     max_zoom: int = 14,
-) -> Optional[Path]:
+) -> Path | None:
     """Create PMTiles from one or more FlatGeobuf intermediates."""
     gdf_valid = _filter_valid_geometries(gdf)
     if len(gdf_valid) == 0:
@@ -989,7 +910,7 @@ def write_pmtiles_chunked(
     chunk_size = 100000
     num_chunks = max(1, (len(gdf_valid) + chunk_size - 1) // chunk_size)
 
-    fgb_files: List[Path] = []
+    fgb_files: list[Path] = []
     for i in range(num_chunks):
         start_idx = i * chunk_size
         end_idx = min((i + 1) * chunk_size, len(gdf_valid))
@@ -1000,11 +921,11 @@ def write_pmtiles_chunked(
 
     try:
         cmd = _build_tippecanoe_cmd(output_path, layer_filename, fgb_files)
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)  # noqa: PLW1510
         if result.returncode != 0:
             logger.warning(f"tippecanoe failed: {result.stderr}")
             return None
-        return output_path
+        return output_path  # noqa: TRY300
     except FileNotFoundError:
         logger.warning("tippecanoe not found, skipping PMTiles creation")
         return None
@@ -1017,7 +938,7 @@ async def check_dataset_exists(
     dest_storage: StorageClient,
     dest_folder: str,
     base_filename: str,
-    layers: List[Tuple[str, str]],
+    layers: list[tuple[str, str]],
 ) -> bool:
     """Return True if at least one expected output artifact already exists."""
     for layer_name, _ in layers:
@@ -1051,23 +972,16 @@ async def resolve_existing_output_formats(
     dest_storage: StorageClient,
     dest_folder: str,
     skip_format_existing: bool,
-) -> Dict[str, bool]:
-    """
-    Resolve which output format folders already exist in destination storage.
+) -> dict[str, bool]:
+    """Resolve which output format folders already exist in destination storage.
     Returns flags for parquet/pmtiles/geopackage existence.
-    """
+    """  # noqa: D205
     if not skip_format_existing:
         return {"parquet": False, "pmtiles": False, "geopackage": False}
 
-    parquet_exists = await check_format_folder_exists(
-        dest_storage, dest_folder, "parquet"
-    )
-    pmtiles_exists = await check_format_folder_exists(
-        dest_storage, dest_folder, "pmtiles"
-    )
-    geopackage_exists = await check_format_folder_exists(
-        dest_storage, dest_folder, "geopackage"
-    )
+    parquet_exists = await check_format_folder_exists(dest_storage, dest_folder, "parquet")
+    pmtiles_exists = await check_format_folder_exists(dest_storage, dest_folder, "pmtiles")
+    geopackage_exists = await check_format_folder_exists(dest_storage, dest_folder, "geopackage")
     return {
         "parquet": parquet_exists,
         "pmtiles": pmtiles_exists,
@@ -1076,23 +990,23 @@ async def resolve_existing_output_formats(
 
 
 def _select_best_format_for_geopackage(
-    processed_formats: Dict[str, Dict[str, Any]],
-) -> Tuple[Optional[Dict[str, Any]], Optional[Path]]:
+    processed_formats: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any] | None, Path | None]:
     """Pick the best available source format for geopackage creation."""
     for fmt_name in CHUNKED_READABLE_FORMATS:
         if fmt_name in processed_formats:
             fmt_info = processed_formats[fmt_name]
             return fmt_info, fmt_info["data_file"]
 
-    for _fmt_name, fmt_info in processed_formats.items():
+    for fmt_info in processed_formats.values():
         return fmt_info, fmt_info["data_file"]
 
     return None, None
 
 
 def _select_preferred_processing_format(
-    processed_formats: Dict[str, Dict[str, Any]],
-) -> Tuple[Optional[Dict[str, Any]], Optional[Path], Optional[str]]:
+    processed_formats: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any] | None, Path | None, str | None]:
     """Pick preferred format for parquet/pmtiles generation based on priority."""
     for fmt_name, _suffix in FORMAT_PRIORITY:
         if fmt_name in processed_formats:
@@ -1101,7 +1015,7 @@ def _select_preferred_processing_format(
     return None, None, None
 
 
-async def _upload_extracted_format_files(
+async def _upload_extracted_format_files(  # noqa: PLR0913
     data_file: Path,
     format_type: str,
     format_name: str,
@@ -1110,7 +1024,7 @@ async def _upload_extracted_format_files(
     dest_storage: StorageClient,
 ) -> None:
     """Copy extracted source files into a temp folder and upload to destination."""
-    import shutil
+    import shutil  # noqa: PLC0415
 
     format_files_dir = work_dir / f"format_{format_name}"
     format_files_dir.mkdir(exist_ok=True)
@@ -1138,7 +1052,7 @@ async def _upload_extracted_format_files(
             logger.info(f"    Uploaded {format_name} file: {remote_path}")
 
 
-async def _process_single_format_variant(
+async def _process_single_format_variant(  # noqa: PLR0913
     format_name: str,
     format_path: str,
     source_storage: StorageClient,
@@ -1147,23 +1061,19 @@ async def _process_single_format_variant(
     work_dir: Path,
     dest_folder: str,
     skip_format_existing: bool,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Extract, inspect, and optionally upload one source format variant."""
     format_dest_folder = f"{dest_folder}{format_name}/"
     skip_upload = False
 
-    if skip_format_existing and await check_format_folder_exists(
-        dest_storage, dest_folder, format_name
-    ):
+    if skip_format_existing and await check_format_folder_exists(dest_storage, dest_folder, format_name):
         logger.info(
             f"  Format folder '{format_name}' already exists, skipping upload (but will extract for conversion if needed)..."
         )
         skip_upload = True
 
     logger.info(f"  Processing format: {format_name}")
-    unzip_result = await unzip_from_storage(
-        source_storage, format_path, extract_dir / format_name
-    )
+    unzip_result = await unzip_from_storage(source_storage, format_path, extract_dir / format_name)
     if unzip_result is None:
         logger.warning(f"    Could not extract {format_name} format")
         return None
@@ -1176,12 +1086,8 @@ async def _process_single_format_variant(
         format_name = format_type
         format_dest_folder = f"{dest_folder}{format_name}/"
         logger.info(f"    Detected actual format from file content: {format_name}")
-        if skip_format_existing and await check_format_folder_exists(
-            dest_storage, dest_folder, format_name
-        ):
-            logger.info(
-                f"  Format folder '{format_name}' already exists, skipping upload..."
-            )
+        if skip_format_existing and await check_format_folder_exists(dest_storage, dest_folder, format_name):
+            logger.info(f"  Format folder '{format_name}' already exists, skipping upload...")
             skip_upload = True
 
     try:
@@ -1211,28 +1117,26 @@ async def _process_single_format_variant(
     }
 
 
-async def write_geopackage_chunked(
+async def write_geopackage_chunked(  # noqa: C901, PLR0912, PLR0913, PLR0915
     file_path: Path,
     format_type: str,
-    layer_name: Optional[str],
+    layer_name: str | None,
     output_gpkg: Path,
     geoparquet_chunk_size_mb: int = 250,
     row_group_size: int = DEFAULT_ROW_GROUP_SIZE,
     data_page_size_bytes: int = DEFAULT_DATA_PAGE_SIZE_BYTES,
 ) -> None:
-    """
-    Write a geopackage file in chunks using fiona's streaming writerecords to avoid memory issues.
-    """
+    """Write a geopackage file in chunks using fiona's streaming writerecords to avoid memory issues."""
     driver = _get_fiona_driver(format_type)
     if not driver:
-        raise ValueError(f"Unsupported format for geopackage conversion: {format_type}")
+        raise ValueError(f"Unsupported format for geopackage conversion: {format_type}")  # noqa: TRY003
 
-    open_kwargs: Dict[str, Any] = {"driver": driver}
+    open_kwargs: dict[str, Any] = {"driver": driver}
     if layer_name and format_type in {"geopackage", "file_geodatabase"}:
         open_kwargs["layer"] = layer_name
 
     chunk_target_bytes = geoparquet_chunk_size_mb * 1024 * 1024
-    chunk_features: List[Dict[str, Any]] = []
+    chunk_features: list[dict[str, Any]] = []
     chunk_uncompressed_bytes = 0
     output_schema = None
     output_crs = None
@@ -1287,20 +1191,12 @@ async def write_geopackage_chunked(
 
         if detected_geom_types:
             # Use the most general type found
-            detected_geom_type = max(
-                detected_geom_types, key=lambda x: geom_type_priority.get(x, 0)
-            )
+            detected_geom_type = max(detected_geom_types, key=lambda x: geom_type_priority.get(x, 0))
             # If we have both LineString and MultiLineString, use MultiLineString
-            if (
-                "LineString" in detected_geom_types
-                and "MultiLineString" in detected_geom_types
-            ):
+            if "LineString" in detected_geom_types and "MultiLineString" in detected_geom_types:
                 detected_geom_type = "MultiLineString"
             # If we have both Polygon and MultiPolygon, use MultiPolygon
-            elif (
-                "Polygon" in detected_geom_types
-                and "MultiPolygon" in detected_geom_types
-            ):
+            elif "Polygon" in detected_geom_types and "MultiPolygon" in detected_geom_types:
                 detected_geom_type = "MultiPolygon"
             # If we have both Point and MultiPoint, use MultiPoint
             elif "Point" in detected_geom_types and "MultiPoint" in detected_geom_types:
@@ -1315,7 +1211,7 @@ async def write_geopackage_chunked(
 
         # Estimate bytes per feature from sample by writing a small test file
         # Use geopandas to handle mixed geometry types automatically
-        import geopandas as gpd
+        import geopandas as gpd  # noqa: PLC0415
 
         # Convert sample features to GeoDataFrame
         sample_gdf = gpd.GeoDataFrame.from_features(sample_features, crs=output_crs)
@@ -1325,9 +1221,7 @@ async def write_geopackage_chunked(
 
         # Write sample to temporary file to estimate size
         sample_path = output_gpkg.parent / f"{output_gpkg.stem}_sample.gpkg"
-        sample_gdf.to_file(
-            str(sample_path), driver="GPKG", layer=layer_name if layer_name else None
-        )
+        sample_gdf.to_file(str(sample_path), driver="GPKG", layer=layer_name if layer_name else None)
 
         bytes_per_feature = sample_path.stat().st_size / max(1, len(sample_features))
         sample_path.unlink(missing_ok=True)
@@ -1341,9 +1235,7 @@ async def write_geopackage_chunked(
 
         # Initialize output geopackage with first chunk
         chunk_features.extend(sample_features)
-        chunk_uncompressed_bytes = sum(
-            _estimate_feature_size_bytes(feat) for feat in sample_features
-        )
+        chunk_uncompressed_bytes = sum(_estimate_feature_size_bytes(feat) for feat in sample_features)
 
         # Open output file and write chunks using geopandas (handles mixed geometry types)
         # Write first chunk
@@ -1360,27 +1252,18 @@ async def write_geopackage_chunked(
 
             chunk_features = []
             chunk_uncompressed_bytes = 0
-            feature_id_counter = (
-                len(chunk_features) + 1
-            )  # Continue from where sample left off
+            feature_id_counter = len(chunk_features) + 1  # Continue from where sample left off
 
             # Continue streaming and writing chunks
             for feat in src_iter:
                 feat_size = _estimate_feature_size_bytes(feat)
 
                 # If adding this feature would exceed budget, write current batch
-                if (
-                    chunk_features
-                    and (chunk_uncompressed_bytes + feat_size) > chunk_target_bytes
-                ):
+                if chunk_features and (chunk_uncompressed_bytes + feat_size) > chunk_target_bytes:
                     # Write accumulated features using geopandas
                     if chunk_features:
-                        chunk_gdf = gpd.GeoDataFrame.from_features(
-                            chunk_features, crs=output_crs
-                        )
-                        chunk_gdf = _ensure_id_column(
-                            chunk_gdf, start_id=feature_id_counter
-                        )
+                        chunk_gdf = gpd.GeoDataFrame.from_features(chunk_features, crs=output_crs)
+                        chunk_gdf = _ensure_id_column(chunk_gdf, start_id=feature_id_counter)
                         feature_id_counter += len(chunk_gdf)
                         # Append to existing file
                         chunk_gdf.to_file(
@@ -1400,12 +1283,8 @@ async def write_geopackage_chunked(
                 if len(chunk_features) >= current_chunk_size:
                     # Write chunk using geopandas
                     if chunk_features:
-                        chunk_gdf = gpd.GeoDataFrame.from_features(
-                            chunk_features, crs=output_crs
-                        )
-                        chunk_gdf = _ensure_id_column(
-                            chunk_gdf, start_id=feature_id_counter
-                        )
+                        chunk_gdf = gpd.GeoDataFrame.from_features(chunk_features, crs=output_crs)
+                        chunk_gdf = _ensure_id_column(chunk_gdf, start_id=feature_id_counter)
                         feature_id_counter += len(chunk_gdf)
                         # Append to existing file
                         chunk_gdf.to_file(
@@ -1420,9 +1299,7 @@ async def write_geopackage_chunked(
 
             # Write remaining features
             if chunk_features:
-                chunk_gdf = gpd.GeoDataFrame.from_features(
-                    chunk_features, crs=output_crs
-                )
+                chunk_gdf = gpd.GeoDataFrame.from_features(chunk_features, crs=output_crs)
                 chunk_gdf = _ensure_id_column(chunk_gdf, start_id=feature_id_counter)
                 # Append to existing file
                 chunk_gdf.to_file(
@@ -1438,20 +1315,19 @@ async def copy_geopackage_if_source(
     format_type: str,
     output_gpkg: Path,
 ) -> bool:
-    """
-    If source is already a geopackage, copy it directly.
+    """If source is already a geopackage, copy it directly.
     Returns True if copied, False if not a geopackage.
-    """
+    """  # noqa: D205
     if format_type != "geopackage":
         return False
 
-    import shutil
+    import shutil  # noqa: PLC0415
 
     shutil.copy2(source_file, output_gpkg)
     return True
 
 
-def _extract_source_path(row: Dict[str, str]) -> Optional[str]:
+def _extract_source_path(row: dict[str, str]) -> str | None:
     source_path = row.get("gcs_zip_path", "").strip()
     if not source_path:
         return None
@@ -1459,20 +1335,19 @@ def _extract_source_path(row: Dict[str, str]) -> Optional[str]:
     return _normalize_duplicate_leading_folder(rel_path)
 
 
-def _is_format_available_in_row(row: Dict[str, str], format_name: str) -> bool:
+def _is_format_available_in_row(row: dict[str, str], format_name: str) -> bool:
     value = str(row.get(format_name, "")).strip().lower()
     return value not in {"", "0", "no", "false", "none", "null"}
 
 
 async def _find_all_format_variants(
-    row: Dict[str, str],
+    row: dict[str, str],
     source_storage: StorageClient,
     base_filename: str,
-) -> Dict[str, str]:
-    """
-    Find all format variants for a dataset by scanning the source folder.
+) -> dict[str, str]:
+    """Find all format variants for a dataset by scanning the source folder.
     Returns a dict mapping format_name -> storage_path.
-    """
+    """  # noqa: D205
     # Try to find the parent folder from the row's gcs_zip_path
     source_path = row.get("gcs_zip_path", "")
     if not source_path:
@@ -1482,7 +1357,7 @@ async def _find_all_format_variants(
     parent_prefix = str(Path(rel_path).parent).strip(".")
     dataset_base = _strip_format_suffix(base_filename)
 
-    format_paths: Dict[str, str] = {}
+    format_paths: dict[str, str] = {}
 
     try:
         sibling_files = await source_storage.list_files(parent_prefix)
@@ -1502,14 +1377,13 @@ async def _find_all_format_variants(
 
 
 async def _select_preferred_source_path(
-    row: Dict[str, str],
+    row: dict[str, str],
     source_storage: StorageClient,
     fallback_path: str,
 ) -> str:
-    """
-    Prefer chunk-friendly formats in the same dataset folder.
+    """Prefer chunk-friendly formats in the same dataset folder.
     This ensures shapefile is selected over geojson when both are present.
-    """
+    """  # noqa: D205
     parent_prefix = str(Path(fallback_path).parent).strip(".")
     dataset_stem = Path(fallback_path).stem
     dataset_base = _strip_format_suffix(dataset_stem)
@@ -1520,7 +1394,7 @@ async def _select_preferred_source_path(
         logger.debug(f"Could not list sibling files for format selection: {e}")
         return fallback_path
 
-    candidates_by_format: Dict[str, str] = {}
+    candidates_by_format: dict[str, str] = {}
     for sibling in sibling_files:
         sibling_base = _strip_format_suffix(Path(sibling).stem)
         if sibling_base != dataset_base:
@@ -1543,12 +1417,10 @@ def _detect_format_for_dry_run(source_path: str) -> str:
     return _detect_format_from_path(source_path)
 
 
-def _estimate_feature_size_bytes(feature: Dict[str, Any]) -> int:
+def _estimate_feature_size_bytes(feature: dict[str, Any]) -> int:
     """Estimate feature size before compression to cap in-memory chunk growth."""
     try:
-        raw_size = len(
-            json.dumps(feature, default=str, ensure_ascii=False).encode("utf-8")
-        )
+        raw_size = len(json.dumps(feature, default=str, ensure_ascii=False).encode("utf-8"))
         # Serialized GeoJSON-like payload size is typically much lower than
         # in-memory Python/GEOS object footprint; inflate conservatively.
         return max(1024, int(raw_size * DEFAULT_MEMORY_ESTIMATE_MULTIPLIER))
@@ -1566,14 +1438,14 @@ def _is_prefix_selector(path: str) -> bool:
 
 
 def _build_dataset_selectors(
-    dataset_args: List[str],
-) -> Dict[str, Any]:
+    dataset_args: list[str],
+) -> dict[str, Any]:
     """Parse --datasets values into exact-name, exact-path, and prefix selectors."""
     selector_names = set()
     selector_exact_paths = set()
     selector_prefixes = set()
-    explicit_paths_by_name: Dict[str, str] = {}
-    explicit_paths_by_row_path: Dict[str, str] = {}
+    explicit_paths_by_name: dict[str, str] = {}
+    explicit_paths_by_row_path: dict[str, str] = {}
 
     for ds in dataset_args:
         if _is_storage_url(ds):
@@ -1586,9 +1458,7 @@ def _build_dataset_selectors(
 
             filename = Path(normalized_path).stem
             for fmt, _ in FORMAT_PRIORITY:
-                if filename.endswith(f"-{fmt}") or filename.endswith(
-                    f"-{fmt.replace('_', '-')}"
-                ):
+                if filename.endswith(f"-{fmt}") or filename.endswith(f"-{fmt.replace('_', '-')}"):
                     filename = filename[: -(len(fmt) + 1)]
                     break
 
@@ -1609,7 +1479,7 @@ def _build_dataset_selectors(
 
 
 def _row_matches_dataset_selectors(
-    row: Dict[str, str],
+    row: dict[str, str],
     selector_names: set,
     selector_exact_paths: set,
     selector_prefixes: set,
@@ -1624,16 +1494,15 @@ def _row_matches_dataset_selectors(
     if normalized_row_path in selector_exact_paths:
         return True
     return any(
-        normalized_row_path == prefix or normalized_row_path.startswith(f"{prefix}/")
-        for prefix in selector_prefixes
+        normalized_row_path == prefix or normalized_row_path.startswith(f"{prefix}/") for prefix in selector_prefixes
     )
 
 
 def _resolve_explicit_source_path_for_row(
-    row: Dict[str, str],
-    explicit_paths_by_name: Dict[str, str],
-    explicit_paths_by_row_path: Dict[str, str],
-) -> Optional[str]:
+    row: dict[str, str],
+    explicit_paths_by_name: dict[str, str],
+    explicit_paths_by_row_path: dict[str, str],
+) -> str | None:
     row_filename = row.get("filename", "").strip()
     storage_path = row.get("gcs_zip_path", "").strip()
     if storage_path:
@@ -1645,7 +1514,7 @@ def _resolve_explicit_source_path_for_row(
     return explicit_paths_by_name.get(row_filename)
 
 
-async def _process_single_layer(
+async def _process_single_layer(  # noqa: PLR0913
     layer_name: str,
     base_filename: str,
     preferred_data_file: Path,
@@ -1655,16 +1524,14 @@ async def _process_single_layer(
     work_dir: Path,
     skip_parquet_upload: bool,
     skip_pmtiles_upload: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Process one layer via streaming path and fallback path when needed."""
     layer_filename = _build_layer_filename(base_filename, layer_name)
     logger.info(f"  Processing layer: {layer_name}")
     log_memory_usage(f"Before processing {layer_name}")
 
     with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore", category=UserWarning, message=".*parsing datetimes.*"
-        )
+        warnings.filterwarnings("ignore", category=UserWarning, message=".*parsing datetimes.*")
         warnings.filterwarnings(
             "ignore",
             category=UserWarning,
@@ -1694,9 +1561,7 @@ async def _process_single_layer(
                 "feature_count": stream_result.get("feature_count", 0),
             }
 
-        logger.warning(
-            f"    Streaming failed ({stream_result['error']}), falling back to full read..."
-        )
+        logger.warning(f"    Streaming failed ({stream_result['error']}), falling back to full read...")
 
         if skip_parquet_upload and skip_pmtiles_upload:
             return {
@@ -1756,15 +1621,15 @@ async def _process_single_layer(
         }
 
 
-async def process_dataset(
-    row: Dict[str, str],
+async def process_dataset(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915
+    row: dict[str, str],
     source_storage: StorageClient,
     dest_storage: StorageClient,
     dry_run: bool = False,
     skip_existing: bool = False,
     skip_format_existing: bool = False,
-    explicit_source_path: Optional[str] = None,
-) -> Dict[str, Any]:
+    explicit_source_path: str | None = None,
+) -> dict[str, Any]:
     """Process a single dataset: download, decode, transform, upload."""
     filename = row.get("filename", "").strip()
     title = row.get("title", "").strip()
@@ -1821,12 +1686,10 @@ async def process_dataset(
         # Fallback to the explicit or selected source path
         format_variants[_detect_format_from_path(source_rel_path)] = source_rel_path
 
-    logger.info(
-        f"  Found {len(format_variants)} format variant(s): {', '.join(format_variants.keys())}"
-    )
+    logger.info(f"  Found {len(format_variants)} format variant(s): {', '.join(format_variants.keys())}")
 
     # Process each format variant
-    processed_formats: Dict[str, Dict[str, Any]] = {}
+    processed_formats: dict[str, dict[str, Any]] = {}
     geopackage_created = False
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -1847,7 +1710,7 @@ async def process_dataset(
                     skip_format_existing=skip_format_existing,
                 )
             except Exception as e:
-                logger.error(f"    Error processing format {format_name}: {e}")
+                logger.exception(f"    Error processing format {format_name}: {e}")  # noqa: TRY401
                 continue
 
             if not processed:
@@ -1873,9 +1736,7 @@ async def process_dataset(
             logger.info("  Creating geopackage from available format...")
 
             # Find the best source format for geopackage conversion.
-            best_format, best_format_path = _select_best_format_for_geopackage(
-                processed_formats
-            )
+            best_format, best_format_path = _select_best_format_for_geopackage(processed_formats)
 
             if best_format and best_format_path:
                 if not best_format_path.exists():
@@ -1887,33 +1748,21 @@ async def process_dataset(
                     geopackage_dir.mkdir(exist_ok=True)
 
                     for layer_name, _geom_type in layers:
-                        layer_filename = _build_layer_filename(
-                            base_filename, layer_name
-                        )
+                        layer_filename = _build_layer_filename(base_filename, layer_name)
                         output_gpkg = geopackage_dir / f"{layer_filename}.gpkg"
                         try:
-                            layer_display = (
-                                layer_name if layer_name != "default" else "default"
-                            )
-                            logger.info(
-                                f"    Creating geopackage for layer '{layer_display}' from {format_type}..."
-                            )
+                            layer_display = layer_name if layer_name != "default" else "default"
+                            logger.info(f"    Creating geopackage for layer '{layer_display}' from {format_type}...")
                             await write_geopackage_chunked(
                                 file_path=best_format_path,
                                 format_type=format_type,
-                                layer_name=(
-                                    layer_name if layer_name != "default" else None
-                                ),
+                                layer_name=(layer_name if layer_name != "default" else None),
                                 output_gpkg=output_gpkg,
                             )
                             if not output_gpkg.exists():
-                                logger.error(
-                                    f"    Geopackage file was not created: {output_gpkg}"
-                                )
+                                logger.error(f"    Geopackage file was not created: {output_gpkg}")
                                 continue
-                            remote_path = (
-                                f"{dest_folder}geopackage/{layer_filename}.gpkg"
-                            )
+                            remote_path = f"{dest_folder}geopackage/{layer_filename}.gpkg"
                             await dest_storage.upload_file(output_gpkg, remote_path)
                             logger.info(f"    Uploaded geopackage: {remote_path}")
                             geopackage_created = True
@@ -1922,24 +1771,17 @@ async def process_dataset(
                                 f"    Failed to create geopackage for layer {layer_name}: {e}",
                                 exc_info=True,
                             )
-            else:
-                if not best_format:
-                    logger.warning(
-                        "    Could not find suitable format for geopackage conversion"
-                    )
-                elif not best_format_path:
-                    logger.warning(
-                        "    Could not determine source file path for geopackage conversion"
-                    )
+            elif not best_format:
+                logger.warning("    Could not find suitable format for geopackage conversion")
+            elif not best_format_path:
+                logger.warning("    Could not determine source file path for geopackage conversion")
         elif existing_outputs["geopackage"] and not geopackage_created:
-            logger.info(
-                "  Geopackage folder already exists, skipping geopackage creation..."
-            )
+            logger.info("  Geopackage folder already exists, skipping geopackage creation...")
             geopackage_created = True
 
         # Process layers for parquet and pmtiles (using the preferred format)
-        preferred_format, preferred_data_file, preferred_format_type = (
-            _select_preferred_processing_format(processed_formats)
+        preferred_format, preferred_data_file, preferred_format_type = _select_preferred_processing_format(
+            processed_formats
         )
 
         if not preferred_format:
@@ -1956,9 +1798,7 @@ async def process_dataset(
         skip_parquet_upload = existing_outputs["parquet"]
         skip_pmtiles_upload = existing_outputs["pmtiles"]
         if skip_parquet_upload and skip_pmtiles_upload:
-            logger.info(
-                "  Parquet and PMTiles folders already exist, skipping parquet/pmtiles processing..."
-            )
+            logger.info("  Parquet and PMTiles folders already exist, skipping parquet/pmtiles processing...")
             return {
                 "success": True,
                 "skipped": True,
@@ -1966,19 +1806,13 @@ async def process_dataset(
                 "reason": "Parquet and PMTiles folders already exist",
             }
         if skip_parquet_upload:
-            logger.info(
-                "  Parquet folder already exists, skipping parquet generation..."
-            )
+            logger.info("  Parquet folder already exists, skipping parquet generation...")
         if skip_pmtiles_upload:
-            logger.info(
-                "  PMTiles folder already exists, skipping PMTiles generation..."
-            )
+            logger.info("  PMTiles folder already exists, skipping PMTiles generation...")
 
         if skip_existing:
             try:
-                if await check_dataset_exists(
-                    dest_storage, dest_folder, base_filename, layers
-                ):
+                if await check_dataset_exists(dest_storage, dest_folder, base_filename, layers):
                     logger.info("  Dataset already exists, skipping parquet/pmtiles...")
                     return {
                         "success": True,
@@ -1987,11 +1821,9 @@ async def process_dataset(
                         "reason": "Output files already exist",
                     }
             except Exception as e:
-                logger.warning(
-                    f"  Error checking if dataset exists: {e}, continuing..."
-                )
+                logger.warning(f"  Error checking if dataset exists: {e}, continuing...")
 
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
 
         for layer_name, _geom_type in layers:
             try:
@@ -2008,7 +1840,7 @@ async def process_dataset(
                 )
                 results.append(layer_result)
             except Exception as e:
-                logger.error(f"    Error processing layer {layer_name}: {e}")
+                logger.exception(f"    Error processing layer {layer_name}: {e}")  # noqa: TRY401
                 results.append({"layer": layer_name, "error": str(e)})
 
         return {
@@ -2020,15 +1852,13 @@ async def process_dataset(
         }
 
 
-def _scope_datasets_to_source_prefix(
-    datasets: List[Dict[str, str]], source_path: str
-) -> List[Dict[str, str]]:
+def _scope_datasets_to_source_prefix(datasets: list[dict[str, str]], source_path: str) -> list[dict[str, str]]:
     """Filter datasets to those under the source path prefix."""
     if not source_path:
         return datasets
 
     source_prefix = source_path.strip("/")
-    filtered: List[Dict[str, str]] = []
+    filtered: list[dict[str, str]] = []
     for dataset in datasets:
         storage_path = dataset.get("gcs_zip_path", "").strip()
         if not storage_path:
@@ -2037,21 +1867,18 @@ def _scope_datasets_to_source_prefix(
         rel_path = rel_path.strip("/")
         if rel_path == source_prefix or rel_path.startswith(f"{source_prefix}/"):
             filtered.append(dataset)
-    logger.info(
-        f"Scoped to source prefix '{source_prefix}': {len(filtered)} dataset(s)"
-    )
+    logger.info(f"Scoped to source prefix '{source_prefix}': {len(filtered)} dataset(s)")
     return filtered
 
 
 def _apply_dataset_selectors(
-    datasets: List[Dict[str, str]], dataset_args: Optional[List[str]]
-) -> Tuple[List[Dict[str, str]], Dict[str, str], Dict[str, str]]:
-    """
-    Filter datasets using --datasets selectors.
+    datasets: list[dict[str, str]], dataset_args: list[str] | None
+) -> tuple[list[dict[str, str]], dict[str, str], dict[str, str]]:
+    """Filter datasets using --datasets selectors.
     Returns (filtered_datasets, explicit_paths_by_name, explicit_paths_by_row_path).
-    """
-    explicit_paths_by_name: Dict[str, str] = {}
-    explicit_paths_by_row_path: Dict[str, str] = {}
+    """  # noqa: D205
+    explicit_paths_by_name: dict[str, str] = {}
+    explicit_paths_by_row_path: dict[str, str] = {}
     if not dataset_args:
         return datasets, explicit_paths_by_name, explicit_paths_by_row_path
 
@@ -2073,11 +1900,9 @@ def _apply_dataset_selectors(
     return filtered, explicit_paths_by_name, explicit_paths_by_row_path
 
 
-async def main():
+async def main() -> None:  # noqa: C901, PLR0912, PLR0915
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Process datasets from storage with chunked reading/writing"
-    )
+    parser = argparse.ArgumentParser(description="Process datasets from storage with chunked reading/writing")
     parser.add_argument(
         "--inventory",
         type=Path,
@@ -2143,16 +1968,16 @@ async def main():
 
     # Parse source and destination storage
     source_type, source_bucket, source_path = parse_storage_url(args.source)
-    dest_type, dest_bucket, dest_path = parse_storage_url(args.dest)
+    dest_type, dest_bucket, _dest_path = parse_storage_url(args.dest)
 
     # Create storage clients
     source_storage = create_storage_client(
         storage_type=source_type,
-        bucket=source_bucket,
+        options=StorageClientOptions(bucket=source_bucket),
     )
     dest_storage = create_storage_client(
         storage_type=dest_type,
-        bucket=dest_bucket,
+        options=StorageClientOptions(bucket=dest_bucket),
     )
 
     # Load or discover datasets
@@ -2235,9 +2060,7 @@ async def main():
                     results["skipped"] += 1
                     dataset_result["status"] = "skipped"
                     dataset_result["error"] = result.get("reason", "Already exists")
-                    logger.info(
-                        f"  ⊘ Skipped: {result.get('reason', 'Already exists')}"
-                    )
+                    logger.info(f"  ⊘ Skipped: {result.get('reason', 'Already exists')}")
                 else:
                     results["success"] += 1
                     dataset_result["status"] = "success"
@@ -2329,9 +2152,7 @@ async def main():
                 missing.append("PMTiles")
 
             if missing:
-                datasets_with_missing_formats.append(
-                    {"dataset": ds, "missing": missing}
-                )
+                datasets_with_missing_formats.append({"dataset": ds, "missing": missing})
 
     if datasets_with_missing_formats:
         print("\n" + "-" * 80)
@@ -2355,9 +2176,7 @@ async def main():
                     if not layer["formats"]["pmtiles"]:
                         layer_missing.append("PMTiles")
                     if layer_missing:
-                        print(
-                            f"      Layer '{layer['name']}': Missing {', '.join(layer_missing)}"
-                        )
+                        print(f"      Layer '{layer['name']}': Missing {', '.join(layer_missing)}")
 
     # Print all errors if any
     if results["errors"]:

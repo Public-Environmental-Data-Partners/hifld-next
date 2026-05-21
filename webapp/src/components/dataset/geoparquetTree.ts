@@ -1,4 +1,4 @@
-import type { DatasetSource } from "@/lib/api-client";
+import type { DatasetSource, FileLocation } from "@/lib/api-client";
 
 export interface GeoparquetTreeNode {
   name: string;
@@ -8,8 +8,8 @@ export interface GeoparquetTreeNode {
   source?: DatasetSource;
 }
 
-function isFileLocation(location: DatasetSource["location"]): location is { path: string } {
-  return typeof location === "object" && location !== null && "path" in location;
+function isFileLocation(location: DatasetSource["location"]): location is FileLocation {
+  return "path" in location;
 }
 
 export function getSourcePath(source: DatasetSource): string | null {
@@ -35,14 +35,8 @@ function relativeGeoparquetPath(path: string): string {
   return formatIndex >= 0 ? parts.slice(formatIndex + 1).join("/") : parts.at(-1) || path;
 }
 
-function getOrCreateFolder(
-  siblings: GeoparquetTreeNode[],
-  name: string,
-  path: string,
-): GeoparquetTreeNode {
-  const existing = siblings.find(
-    (node) => node.type === "folder" && node.name === name,
-  );
+function getOrCreateFolder(siblings: GeoparquetTreeNode[], name: string, path: string): GeoparquetTreeNode {
+  const existing = siblings.find((node) => node.type === "folder" && node.name === name);
   if (existing) {
     return existing;
   }
@@ -58,9 +52,7 @@ function getOrCreateFolder(
   return folder;
 }
 
-export function buildGeoparquetSourceTree(
-  sources: DatasetSource[],
-): GeoparquetTreeNode[] {
+export function buildGeoparquetSourceTree(sources: DatasetSource[]): GeoparquetTreeNode[] {
   const root: GeoparquetTreeNode[] = [];
   const seenPaths = new Set<string>();
 

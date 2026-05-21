@@ -14,8 +14,8 @@ export default function Footer() {
               className="hover:text-foreground transition-colors"
             >
               Public Environmental Data Partners
-            </a>
-            {" "}website
+            </a>{" "}
+            website
           </p>
           <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground sm:flex-row sm:gap-4">
             <a
@@ -26,7 +26,9 @@ export default function Footer() {
             >
               Share feedback
             </a>
-            <span aria-hidden className="hidden sm:inline">|</span>
+            <span aria-hidden className="hidden sm:inline">
+              |
+            </span>
             <a
               href="https://donorbox.org/open-environmental-data-project-donations-2?default_interval=o"
               target="_blank"
@@ -35,7 +37,9 @@ export default function Footer() {
             >
               Donate
             </a>
-            <span aria-hidden className="hidden sm:inline">|</span>
+            <span aria-hidden className="hidden sm:inline">
+              |
+            </span>
             <a
               href="https://fultonring.com/"
               target="_blank"

@@ -17,17 +17,11 @@ const sizeClasses = {
 export function PageLoader({ className, size = "default" }: PageLoaderProps) {
   return (
     <div
-      className={cn(
-        "flex min-h-[200px] flex-col items-center justify-center gap-3 text-muted-foreground",
-        className
-      )}
+      className={cn("flex min-h-[200px] flex-col items-center justify-center gap-3 text-muted-foreground", className)}
       role="status"
       aria-label="Loading"
     >
-      <Loader2
-        className={cn("animate-spin", sizeClasses[size])}
-        aria-hidden
-      />
+      <Loader2 className={cn("animate-spin", sizeClasses[size])} aria-hidden />
       <span className="text-sm">Loading…</span>
     </div>
   );

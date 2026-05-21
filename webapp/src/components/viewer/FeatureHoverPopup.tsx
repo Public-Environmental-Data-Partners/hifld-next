@@ -1,14 +1,14 @@
+import { X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
-import { X } from "lucide-react";
-import type { HoverInfo } from "./types";
+import type { HoverInfo, PopupPropertyEntry } from "./types";
 
 interface FeatureHoverPopupProps {
   hoverInfo: HoverInfo;
   selectedIndex: number;
-  propertyEntries: Array<[string, any]>;
+  propertyEntries: PopupPropertyEntry[];
   onIndexChange: (index: number) => void;
   onClose?: () => void;
 }
@@ -46,16 +46,16 @@ export function FeatureHoverPopup({
         </div>
         {hoverInfo.features.length > 1 && (
           <div className="px-3 pb-2">
-            <Select
-              value={String(selectedIndex)}
-              onValueChange={(value) => onIndexChange(Number(value))}
-            >
+            <Select value={String(selectedIndex)} onValueChange={(value) => onIndexChange(Number(value))}>
               <SelectTrigger className="h-7 w-full">
                 <SelectValue placeholder="Select feature" />
               </SelectTrigger>
               <SelectContent>
                 {hoverInfo.features.map((feature, index) => (
-                  <SelectItem key={`${feature.layer?.id}-${index}`} value={String(index)}>
+                  <SelectItem
+                    key={`${feature.layer?.id ?? "feature"}-${String(feature.id ?? feature.sourceLayer)}`}
+                    value={String(index)}
+                  >
                     {feature.layer?.id || "Feature"} #{index + 1}
                   </SelectItem>
                 ))}
@@ -83,9 +83,7 @@ export function FeatureHoverPopup({
               propertyEntries.map(([key, value]) => (
                 <TableRow key={key}>
                   <TableCell className="font-medium">{key}</TableCell>
-                  <TableCell className="break-all text-xs">
-                    {String(value)}
-                  </TableCell>
+                  <TableCell className="break-all text-xs">{String(value)}</TableCell>
                 </TableRow>
               ))
             )}
@@ -95,4 +93,3 @@ export function FeatureHoverPopup({
     </div>
   );
 }
-

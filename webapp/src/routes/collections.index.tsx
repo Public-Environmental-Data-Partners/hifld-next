@@ -1,13 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Database, Folder } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCollections } from "@/lib/api-client";
 
 export const Route = createFileRoute("/collections/")({
@@ -27,9 +21,7 @@ function CollectionsListPage() {
         {/* Header */}
         <div className="text-center">
           <h1 className="text-4xl font-bold tracking-tighter sm:text-5xl md:text-6xl break-words">Collections</h1>
-          <p className="text-base sm:text-lg text-muted-foreground mt-2">
-            Browse datasets organized by collection
-          </p>
+          <p className="text-base sm:text-lg text-muted-foreground mt-2">Browse datasets organized by collection</p>
           <Button variant="outline" size="sm" asChild className="mt-4 font-mono">
             <a href="/api/collections" target="_blank" rel="noopener noreferrer">
               View Metadata
@@ -41,23 +33,15 @@ function CollectionsListPage() {
         {collections && collections.length > 0 ? (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {collections.map((collection) => (
-              <Link
-                key={collection.id}
-                to="/collections/$slug"
-                params={{ slug: collection.slug }}
-              >
+              <Link key={collection.id} to="/collections/$slug" params={{ slug: collection.slug }} search={{}}>
                 <Card className="cursor-pointer hover:bg-muted/60 transition-colors h-full">
                   <CardHeader>
                     <div className="flex items-center gap-2 mb-2 min-w-0">
                       <Folder className="h-5 w-5 text-muted-foreground shrink-0" />
-                      <CardTitle className="text-lg break-words min-w-0">
-                        {collection.name}
-                      </CardTitle>
+                      <CardTitle className="text-lg break-words min-w-0">{collection.name}</CardTitle>
                     </div>
                     {collection.description && (
-                      <CardDescription className="line-clamp-2 break-words">
-                        {collection.description}
-                      </CardDescription>
+                      <CardDescription className="line-clamp-2 break-words">{collection.description}</CardDescription>
                     )}
                   </CardHeader>
                 </Card>

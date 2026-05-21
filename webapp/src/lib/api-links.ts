@@ -2,7 +2,14 @@
  * Build absolute hypermedia URLs for public JSON API responses.
  */
 
-export type ApiLinkMap = Record<string, string>;
+export interface ApiLinkMap {
+  first?: string | undefined;
+  self?: string | undefined;
+  prev?: string | undefined;
+  next?: string | undefined;
+  last?: string | undefined;
+  [linkRelation: string]: string | undefined;
+}
 
 export function requestOrigin(request: Request): string {
   return new URL(request.url).origin;
@@ -16,14 +23,8 @@ export function collectionSelf(origin: string, collectionSlug: string): string {
   return `${origin}/api/collections/${enc(collectionSlug)}`;
 }
 
-export function collectionDatasetsTagsSelf(
-  origin: string,
-  collectionSlug: string,
-  tagKey?: string
-): string {
-  const u = new URL(
-    `${origin}/api/collections/${enc(collectionSlug)}/datasets/tags`
-  );
+export function collectionDatasetsTagsSelf(origin: string, collectionSlug: string, tagKey?: string): string {
+  const u = new URL(`${origin}/api/collections/${enc(collectionSlug)}/datasets/tags`);
   if (tagKey) u.searchParams.set("tag_key", tagKey);
   return u.href;
 }
@@ -32,18 +33,16 @@ export function collectionDatasetsListUrl(
   origin: string,
   collectionSlug: string,
   params: {
-    query?: string;
-    search?: string;
-    include_urls?: boolean;
-    limit?: number;
-    offset?: number;
-    tag_filters?: string;
-    omit?: string;
-  }
+    query?: string | undefined;
+    search?: string | undefined;
+    include_urls?: boolean | undefined;
+    limit?: number | undefined;
+    offset?: number | undefined;
+    tag_filters?: string | undefined;
+    omit?: string | undefined;
+  },
 ): string {
-  const u = new URL(
-    `${origin}/api/collections/${enc(collectionSlug)}`
-  );
+  const u = new URL(`${origin}/api/collections/${enc(collectionSlug)}`);
   const q = params.query ?? params.search;
   if (q) u.searchParams.set("query", q);
   if (params.include_urls) u.searchParams.set("include_urls", "true");
@@ -60,21 +59,14 @@ export function datasetSelf(
   origin: string,
   collectionSlug: string,
   datasetSlug: string,
-  opts?: { include_urls?: boolean }
+  opts?: { include_urls?: boolean },
 ): string {
-  const u = new URL(
-    `${origin}/api/collections/${enc(collectionSlug)}/datasets/${enc(datasetSlug)}`
-  );
+  const u = new URL(`${origin}/api/collections/${enc(collectionSlug)}/datasets/${enc(datasetSlug)}`);
   if (opts?.include_urls) u.searchParams.set("include_urls", "true");
   return u.href;
 }
 
-export function fileSelf(
-  origin: string,
-  collectionSlug: string,
-  datasetSlug: string,
-  fileSlug: string
-): string {
+export function fileSelf(origin: string, collectionSlug: string, datasetSlug: string, fileSlug: string): string {
   return `${origin}/api/collections/${enc(collectionSlug)}/datasets/${enc(datasetSlug)}/files/${enc(fileSlug)}`;
 }
 
@@ -83,15 +75,12 @@ export function sourceDownloadZip(
   collectionSlug: string,
   datasetSlug: string,
   fileSlug: string,
-  sourceId: number
+  sourceId: number,
 ): string {
   return `${origin}/api/collections/${enc(collectionSlug)}/datasets/${enc(datasetSlug)}/files/${enc(fileSlug)}/sources/${sourceId}/download-zip`;
 }
 
-export function globalDatasetsListSelf(
-  origin: string,
-  opts?: { search?: string }
-): string {
+export function globalDatasetsListSelf(origin: string, opts?: { search?: string }): string {
   const u = new URL(`${origin}/api/datasets`);
   if (opts?.search) u.searchParams.set("search", opts.search);
   return u.href;
@@ -115,10 +104,7 @@ export type PaginationNums = {
   offset: number;
 };
 
-export type CollectionDatasetsLinkBase = Omit<
-  Parameters<typeof collectionDatasetsListUrl>[2],
-  "limit" | "offset"
->;
+export type CollectionDatasetsLinkBase = Omit<Parameters<typeof collectionDatasetsListUrl>[2], "limit" | "offset">;
 
 /**
  * Build first / prev / next / last URLs for collection+datasets listing.
@@ -128,7 +114,7 @@ export function collectionDatasetsPaginationLinks(
   origin: string,
   collectionSlug: string,
   baseParams: CollectionDatasetsLinkBase,
-  page: PaginationNums
+  page: PaginationNums,
 ): ApiLinkMap {
   const { total, limit, offset } = page;
   const links: ApiLinkMap = {};
@@ -137,20 +123,20 @@ export function collectionDatasetsPaginationLinks(
     return links;
   }
 
-  links.first = collectionDatasetsListUrl(origin, collectionSlug, {
+  links["first"] = collectionDatasetsListUrl(origin, collectionSlug, {
     ...baseParams,
     limit,
     offset: 0,
   });
 
-  links.self = collectionDatasetsListUrl(origin, collectionSlug, {
+  links["self"] = collectionDatasetsListUrl(origin, collectionSlug, {
     ...baseParams,
     limit,
     offset,
   });
 
   if (offset > 0) {
-    links.prev = collectionDatasetsListUrl(origin, collectionSlug, {
+    links["prev"] = collectionDatasetsListUrl(origin, collectionSlug, {
       ...baseParams,
       limit,
       offset: Math.max(0, offset - limit),
@@ -158,7 +144,7 @@ export function collectionDatasetsPaginationLinks(
   }
 
   if (offset + limit < total) {
-    links.next = collectionDatasetsListUrl(origin, collectionSlug, {
+    links["next"] = collectionDatasetsListUrl(origin, collectionSlug, {
       ...baseParams,
       limit,
       offset: offset + limit,
@@ -167,7 +153,7 @@ export function collectionDatasetsPaginationLinks(
 
   const lastOffset = total > 0 ? Math.floor((total - 1) / limit) * limit : 0;
   if (lastOffset !== offset || total === 0) {
-    links.last = collectionDatasetsListUrl(origin, collectionSlug, {
+    links["last"] = collectionDatasetsListUrl(origin, collectionSlug, {
       ...baseParams,
       limit,
       offset: lastOffset,

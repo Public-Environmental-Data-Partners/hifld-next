@@ -1,39 +1,255 @@
-import { createFileRoute, notFound, useNavigate, useSearch } from "@tanstack/react-router";
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Search, ArrowLeft, Database, Loader2 } from "lucide-react";
-import { Link } from "@tanstack/react-router";
-
-import { Input } from "@/components/ui/input";
+import { createFileRoute, Link, notFound, useNavigate, useSearch } from "@tanstack/react-router";
+import { ArrowLeft, Database, Loader2, Search } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { z } from "zod";
+import { DatasetCard } from "@/components/dataset";
+import { type TagFilter, TagFilters } from "@/components/tag-filters";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { DatasetCard } from "@/components/dataset";
+import { Input } from "@/components/ui/input";
 import { Pagination } from "@/components/ui/pagination";
-import { TagFilters, type TagFilter } from "@/components/tag-filters";
-import {
-  getCollectionBySlug,
-  getCollectionDatasets,
-  getCollectionTagValues,
-} from "@/lib/api-client";
-import type { DatasetWithUrls } from "@/lib/api-client";
 import { trackSearchQuery, trackTagFilter } from "@/lib/analytics";
+import type { DatasetTags, DatasetWithUrls } from "@/lib/api-client";
+import { getCollectionBySlug, getCollectionDatasets, getCollectionTagValues } from "@/lib/api-client";
 
 const SEARCH_DEBOUNCE_MS = 500;
 
-export const Route = createFileRoute("/collections/$slug")({
-  validateSearch: (search: Record<string, unknown> | undefined) => {
-    if (!search) {
-      return {
-        query: "",
-        limit: 100, // Default limit to prevent timeouts
-        offset: 0,
-      };
+type CollectionSearch = {
+  query?: string;
+  limit?: number;
+  offset?: number;
+};
+
+interface TagValueLists {
+  [tagKey: string]: string[];
+}
+
+const collectionSearchSchema = z
+  .object({
+    query: z.string().optional(),
+    limit: z.coerce.number().int().positive().optional(),
+    offset: z.coerce.number().int().nonnegative().optional(),
+  })
+  .catch({});
+
+function parseCollectionSearch(search: z.input<typeof collectionSearchSchema>): CollectionSearch {
+  const parsed = collectionSearchSchema.parse(search);
+  const result: CollectionSearch = {};
+  if (parsed.query && parsed.query.length > 0) result.query = parsed.query;
+  if (parsed.limit !== undefined && parsed.limit !== 100) result.limit = parsed.limit;
+  if (parsed.offset !== undefined && parsed.offset > 0) result.offset = parsed.offset;
+  return result;
+}
+
+function getTagFiltersForAPI(filters: TagFilter[]): DatasetTags {
+  const filtersByKey = new Map<string, string[]>();
+
+  for (const filter of filters) {
+    const values = filtersByKey.get(filter.key) ?? [];
+    values.push(filter.value);
+    filtersByKey.set(filter.key, values);
+  }
+
+  const result: DatasetTags = {};
+  for (const [key, values] of filtersByKey) {
+    const singleValue = values[0];
+    result[key] = values.length === 1 && singleValue !== undefined ? singleValue : values;
+  }
+
+  return result;
+}
+
+function buildCollectionSearch(updates: CollectionSearch): CollectionSearch {
+  const result: CollectionSearch = {};
+  if (updates.query !== undefined && updates.query.length > 0) result.query = updates.query;
+  if (updates.limit !== undefined && updates.limit !== 100) result.limit = updates.limit;
+  if (updates.offset !== undefined && updates.offset > 0) result.offset = updates.offset;
+  return result;
+}
+
+function mergeCollectionSearch(current: CollectionSearch, updates: CollectionSearch): CollectionSearch {
+  const merged: CollectionSearch = {};
+  if (updates.query !== undefined) merged.query = updates.query;
+  else if (current.query !== undefined) merged.query = current.query;
+  if (updates.limit !== undefined) merged.limit = updates.limit;
+  else if (current.limit !== undefined) merged.limit = current.limit;
+  if (updates.offset !== undefined) merged.offset = updates.offset;
+  else if (current.offset !== undefined) merged.offset = current.offset;
+  return buildCollectionSearch(merged);
+}
+
+interface FilteredDatasetFetchArgs {
+  collectionId: number;
+  limit: number;
+  offset: number;
+  searchQuery?: string | undefined;
+  tagFilters: TagFilter[];
+  signal: AbortSignal;
+}
+
+interface FilteredDatasetFetchResult {
+  items: DatasetWithUrls[];
+  total: number;
+}
+
+function trimmedSearchParam(searchQuery: string | undefined): string | undefined {
+  const trimmedQuery = searchQuery?.trim();
+  return trimmedQuery && trimmedQuery.length > 0 ? trimmedQuery : undefined;
+}
+
+async function loadFilteredDatasets({
+  collectionId,
+  limit,
+  offset,
+  searchQuery,
+  tagFilters,
+  signal,
+}: FilteredDatasetFetchArgs): Promise<FilteredDatasetFetchResult | null> {
+  const tagFiltersForAPI = tagFilters.length > 0 ? getTagFiltersForAPI(tagFilters) : undefined;
+  const response = await getCollectionDatasets({
+    data: {
+      collectionId,
+      search: trimmedSearchParam(searchQuery),
+      includeUrls: false,
+      limit,
+      offset,
+      tagFilters: tagFiltersForAPI,
+    },
+  });
+
+  if (signal.aborted) {
+    return null;
+  }
+
+  return {
+    items: response.items || [],
+    total: response.total || 0,
+  };
+}
+
+function isAbortError(error: Error, signal: AbortSignal): boolean {
+  return signal.aborted || error.name === "AbortError";
+}
+
+function applyFilteredDatasetResult(
+  response: FilteredDatasetFetchResult | null,
+  tagFilters: TagFilter[],
+  setFilteredDatasets: (items: DatasetWithUrls[]) => void,
+  setFilteredTotal: (total: number) => void,
+): void {
+  if (!response || tagFilters.length === 0) {
+    return;
+  }
+
+  setFilteredDatasets(response.items);
+  setFilteredTotal(response.total);
+}
+
+function handleFilteredDatasetError(
+  error: Error,
+  signal: AbortSignal,
+  tagFilters: TagFilter[],
+  setFilteredDatasets: (items: DatasetWithUrls[]) => void,
+  setFilteredTotal: (total: number) => void,
+): void {
+  if (isAbortError(error, signal)) {
+    return;
+  }
+
+  console.error("Error fetching datasets:", error);
+  if (tagFilters.length > 0) {
+    setFilteredDatasets([]);
+    setFilteredTotal(0);
+  }
+}
+
+interface RunFilteredDatasetRequestArgs {
+  fetchArgs: FilteredDatasetFetchArgs;
+  tagFilters: TagFilter[];
+  setFilteredDatasets: (items: DatasetWithUrls[]) => void;
+  setFilteredTotal: (total: number) => void;
+  setIsLoading: (isLoading: boolean) => void;
+}
+
+async function runFilteredDatasetRequest({
+  fetchArgs,
+  tagFilters,
+  setFilteredDatasets,
+  setFilteredTotal,
+  setIsLoading,
+}: RunFilteredDatasetRequestArgs): Promise<void> {
+  setIsLoading(true);
+  try {
+    const response = await loadFilteredDatasets(fetchArgs);
+    applyFilteredDatasetResult(response, tagFilters, setFilteredDatasets, setFilteredTotal);
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    handleFilteredDatasetError(err, fetchArgs.signal, tagFilters, setFilteredDatasets, setFilteredTotal);
+  } finally {
+    if (!fetchArgs.signal.aborted) {
+      setIsLoading(false);
     }
-    return {
-      query: (search.query as string) || "",
-      limit: search.limit ? Number(search.limit) : 100, // Default to 100 if not specified
-      offset: search.offset ? Number(search.offset) : 0,
-    };
-  },
+  }
+}
+
+interface DatasetResultsProps {
+  collectionSlug: string;
+  datasets: DatasetWithUrls[];
+  isLoading: boolean;
+  limit: number;
+  offset: number;
+  onPageChange: (newOffset: number) => void;
+  searchQuery: string;
+  total: number;
+}
+
+function DatasetResults({
+  collectionSlug,
+  datasets,
+  isLoading,
+  limit,
+  offset,
+  onPageChange,
+  searchQuery,
+  total,
+}: DatasetResultsProps) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (datasets.length > 0) {
+    return (
+      <>
+        <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 min-w-0">
+          {datasets.map((dataset) => (
+            <DatasetCard key={dataset.id} dataset={dataset} collectionSlug={collectionSlug} />
+          ))}
+        </div>
+        {total > limit && (
+          <Pagination total={total} limit={limit} offset={offset} onPageChange={onPageChange} className="mt-8" />
+        )}
+      </>
+    );
+  }
+
+  return (
+    <Card>
+      <CardContent className="py-12 text-center">
+        <Database className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+        <p className="text-muted-foreground">
+          {searchQuery ? "No datasets found matching your search" : "No datasets in this collection"}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+export const Route = createFileRoute("/collections/$slug")({
+  validateSearch: parseCollectionSearch,
   loaderDeps: ({ search }) => ({
     query: search?.query ?? "",
     limit: search?.limit ?? 100,
@@ -53,7 +269,7 @@ export const Route = createFileRoute("/collections/$slug")({
       const pageSize = deps.limit ?? 100; // Default to 100 to prevent timeouts
       const offset = deps.offset ?? 0;
       const searchQuery = deps.query ?? "";
-      
+
       // Use getCollectionDatasets directly with the collection ID
       // Note: includeUrls=false to avoid N+1 query performance issues in backend
       const datasetsResponse = await getCollectionDatasets({
@@ -65,7 +281,7 @@ export const Route = createFileRoute("/collections/$slug")({
           search: searchQuery || undefined,
         },
       });
-      return { collection, datasetsResponse, pageSize };
+      return { collection, datasetsResponse };
     } catch (error) {
       console.error("Error in collection detail loader:", error);
       throw error;
@@ -76,23 +292,19 @@ export const Route = createFileRoute("/collections/$slug")({
 
 // Component runs on client by default
 function CollectionDetailPage() {
-  const {
-    collection,
-    datasetsResponse: initialResponse,
-    pageSize,
-  } = Route.useLoaderData();
+  const { collection, datasetsResponse: initialResponse } = Route.useLoaderData();
   const navigate = useNavigate({ from: Route.fullPath });
-  const search = useSearch({ from: Route.fullPath, strict: false });
-  
+  const search = useSearch({ from: Route.fullPath });
+
   // Use loader data as source of truth - it updates automatically when URL changes
   // Only maintain separate state when tag filters are active (loader doesn't support them)
-  const [searchQuery, setSearchQuery] = useState(search?.query || "");
+  const [searchQuery, setSearchQuery] = useState(search.query ?? "");
   const [selectedTagFilters, setSelectedTagFilters] = useState<TagFilter[]>([]);
   const [filteredDatasets, setFilteredDatasets] = useState<DatasetWithUrls[] | null>(null);
   const [filteredTotal, setFilteredTotal] = useState<number | null>(null);
-  
+
   const [isLoading, setIsLoading] = useState(false);
-  const [availableTags, setAvailableTags] = useState<Record<string, string[]>>({});
+  const [availableTags, setAvailableTags] = useState<TagValueLists>({});
   const [tagsLoading, setTagsLoading] = useState(true);
   const abortControllerRef = useRef<AbortController | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -102,32 +314,22 @@ function CollectionDetailPage() {
   // Use loader data directly - it updates automatically when URL changes and loader re-runs
   // Only use filtered state when tag filters are active (loader doesn't support them)
   const hasTagFilters = selectedTagFilters.length > 0;
-  const datasets = hasTagFilters ? (filteredDatasets || []) : (initialResponse?.items || []);
-  const total = hasTagFilters ? (filteredTotal ?? 0) : (initialResponse?.total || 0);
-  const offset = search?.offset || 0;
+  const datasets = hasTagFilters ? filteredDatasets || [] : initialResponse?.items || [];
+  const initialTotal = initialResponse?.total ?? 0;
+  const total = hasTagFilters ? (filteredTotal ?? 0) : initialTotal;
+  const offset = search.offset ?? 0;
+  const currentLimit = search.limit ?? 100;
 
   // Update URL when search, offset, or limit changes
   const updateUrlParams = useCallback(
-    (updates: { query?: string; offset?: number; limit?: number | undefined }) => {
-      const currentSearch = search || { query: "", limit: 100, offset: 0 };
-      const newSearch = {
-        ...currentSearch,
-        ...updates,
-      };
-      // Remove empty query from URL
-      if (newSearch.query === "") {
-        delete newSearch.query;
-      }
-      // Remove limit if it's the default (100) to keep URL clean
-      if (newSearch.limit === 100) {
-        delete newSearch.limit;
-      }
+    (updates: CollectionSearch) => {
+      const newSearch = mergeCollectionSearch(search, updates);
       navigate({
         search: newSearch,
         replace: true,
       });
     },
-    [navigate, search]
+    [navigate, search],
   );
 
   // Load available tag values
@@ -138,11 +340,7 @@ function CollectionDetailPage() {
         const tagValues = await getCollectionTagValues({
           data: { collectionId: collection.id },
         });
-        if (
-          tagValues &&
-          typeof tagValues === "object" &&
-          !Array.isArray(tagValues)
-        ) {
+        if (tagValues && typeof tagValues === "object" && !Array.isArray(tagValues)) {
           setAvailableTags(tagValues);
         } else {
           setAvailableTags({});
@@ -157,117 +355,48 @@ function CollectionDetailPage() {
     loadTagValues();
   }, [collection.id]);
 
-  // Convert selected filters to API format
-  const getTagFiltersForAPI = (
-    filters: TagFilter[]
-  ): Record<string, string | string[]> => {
-    const result: Record<string, string | string[]> = {};
-    const filtersByKey: Record<string, string[]> = {};
-
-    filters.forEach((filter) => {
-      if (!filtersByKey[filter.key]) {
-        filtersByKey[filter.key] = [];
-      }
-      filtersByKey[filter.key].push(filter.value);
-    });
-
-    Object.entries(filtersByKey).forEach(([key, values]) => {
-      result[key] = values.length === 1 ? values[0] : values;
-    });
-
-    return result;
-  };
-
   // Fetch datasets with tag filters (only needed when tag filters are present)
   const fetchDatasets = useCallback(
-    async (
-      searchQuery?: string,
-      newOffset: number = 0,
-      tagFilters: TagFilter[] = selectedTagFilters
-    ) => {
-      // Cancel previous request if it exists
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-
+    async (searchQuery?: string, newOffset: number = 0, tagFilters: TagFilter[] = selectedTagFilters) => {
+      abortControllerRef.current?.abort();
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
-
-      setIsLoading(true);
-      try {
-        const trimmedQuery = searchQuery?.trim();
-        const searchParam =
-          trimmedQuery && trimmedQuery.length > 0 ? trimmedQuery : undefined;
-
-        const tagFiltersForAPI =
-          tagFilters.length > 0 ? getTagFiltersForAPI(tagFilters) : undefined;
-
-        const currentLimit = search?.limit ?? 100;
-        
-        const response = await getCollectionDatasets({
-          data: {
-            collectionId: collection.id,
-            search: searchParam,
-            includeUrls: false,
-            limit: currentLimit,
-            offset: newOffset,
-            tagFilters: tagFiltersForAPI,
-          },
-        });
-
-        if (abortController.signal.aborted) {
-          return;
-        }
-
-        // Only update state when tag filters are active (loader handles the rest)
-        if (tagFilters.length > 0) {
-          setFilteredDatasets(response.items || []);
-          setFilteredTotal(response.total || 0);
-        }
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-          return;
-        }
-        if (abortController.signal.aborted) {
-          return;
-        }
-        console.error("Error fetching datasets:", error);
-        if (tagFilters.length > 0) {
-          setFilteredDatasets([]);
-          setFilteredTotal(0);
-        }
-      } finally {
-        if (!abortController.signal.aborted) {
-          setIsLoading(false);
-        }
-      }
+      await runFilteredDatasetRequest({
+        fetchArgs: {
+          collectionId: collection.id,
+          searchQuery,
+          limit: currentLimit,
+          offset: newOffset,
+          tagFilters,
+          signal: abortController.signal,
+        },
+        tagFilters,
+        setFilteredDatasets,
+        setFilteredTotal,
+        setIsLoading,
+      });
     },
-    [collection.id, search?.limit, selectedTagFilters]
+    [collection.id, currentLimit, selectedTagFilters],
   );
 
   // Sync search query from URL (only when URL changes, not when local state changes)
   useEffect(() => {
-    const urlQuery = search?.query || "";
+    const urlQuery = search.query ?? "";
     if (urlQuery !== searchQuery) {
       setSearchQuery(urlQuery);
     }
-    
+
     // Track search when URL query changes (only once per unique query)
     // Use ref to prevent duplicate tracking when loader data updates
     const trimmedQuery = urlQuery.trim();
     if (trimmedQuery && !hasTagFilters && trimmedQuery !== lastTrackedQueryRef.current) {
       lastTrackedQueryRef.current = trimmedQuery;
-      trackSearchQuery(
-        trimmedQuery,
-        collection.slug,
-        initialResponse?.total || 0,
-        {
-          hasTagFilters: false,
-          queryLength: trimmedQuery.length,
-        }
-      );
+      trackSearchQuery(trimmedQuery, collection.slug, initialTotal, {
+        hasTagFilters: false,
+        queryLength: trimmedQuery.length,
+      });
     }
-  }, [search?.query, collection.slug, hasTagFilters]); // Removed initialResponse?.total to prevent duplicate tracking
+  }, [search.query, searchQuery, collection.slug, hasTagFilters, initialTotal]);
 
   // Debounced search handler - wait before updating URL/fetching to avoid
   // firing searches while the user is still typing.
@@ -291,15 +420,10 @@ function CollectionDetailPage() {
 
         // Track search query after results are fetched
         if (searchQuery.trim()) {
-          trackSearchQuery(
-            searchQuery,
-            collection.slug,
-            filteredTotal ?? 0,
-            {
-              hasTagFilters: true,
-              queryLength: searchQuery.trim().length,
-            }
-          );
+          trackSearchQuery(searchQuery, collection.slug, filteredTotal ?? 0, {
+            hasTagFilters: true,
+            queryLength: searchQuery.trim().length,
+          });
         }
       }
     }, SEARCH_DEBOUNCE_MS);
@@ -309,7 +433,7 @@ function CollectionDetailPage() {
         clearTimeout(searchTimeoutRef.current);
       }
     };
-  }, [searchQuery, updateUrlParams, hasTagFilters, fetchDatasets, selectedTagFilters]);
+  }, [searchQuery, updateUrlParams, hasTagFilters, fetchDatasets, selectedTagFilters, collection.slug, filteredTotal]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -340,22 +464,14 @@ function CollectionDetailPage() {
   // Handle tag filter change
   const handleFilterChange = async (key: string, values: string[]) => {
     const otherFilters = selectedTagFilters.filter((f) => f.key !== key);
-    const newFilters: TagFilter[] = [
-      ...otherFilters,
-      ...values.map((value) => ({ key, value })),
-    ];
+    const newFilters: TagFilter[] = [...otherFilters, ...values.map((value) => ({ key, value }))];
 
     setSelectedTagFilters(newFilters);
     updateUrlParams({ offset: 0 });
-    
+
     // Track tag filter application
-    trackTagFilter(
-      collection.slug,
-      key,
-      values,
-      searchQuery || undefined
-    );
-    
+    trackTagFilter(collection.slug, key, values, searchQuery || undefined);
+
     await fetchDatasets(searchQuery, 0, newFilters);
   };
 
@@ -371,20 +487,12 @@ function CollectionDetailPage() {
             </Link>
           </Button>
           <div className="text-center">
-            <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight break-words">
-              {collection.name}
-            </h1>
+            <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight break-words">{collection.name}</h1>
             {collection.description && (
-              <p className="text-base sm:text-lg text-muted-foreground mt-2 break-words">
-                {collection.description}
-              </p>
+              <p className="text-base sm:text-lg text-muted-foreground mt-2 break-words">{collection.description}</p>
             )}
             <Button variant="outline" size="sm" asChild className="mt-4 font-mono">
-              <a
-                href={`/api/collections/${collection.slug}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
+              <a href={`/api/collections/${collection.slug}`} target="_blank" rel="noopener noreferrer">
                 View Metadata
               </a>
             </Button>
@@ -405,9 +513,7 @@ function CollectionDetailPage() {
 
         {/* Tag Filters */}
         {tagsLoading ? (
-          <div className="text-sm text-muted-foreground">
-            Loading filters...
-          </div>
+          <div className="text-sm text-muted-foreground">Loading filters...</div>
         ) : Object.keys(availableTags).length > 0 ? (
           <TagFilters
             availableTags={availableTags}
@@ -415,48 +521,19 @@ function CollectionDetailPage() {
             onFilterChange={handleFilterChange}
           />
         ) : (
-          <div className="text-sm text-muted-foreground">
-            No tag filters available
-          </div>
+          <div className="text-sm text-muted-foreground">No tag filters available</div>
         )}
 
-        {/* Datasets Grid */}
-        {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          </div>
-        ) : datasets && datasets.length > 0 ? (
-          <>
-            <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 min-w-0">
-              {datasets.map((dataset) => (
-                <DatasetCard key={dataset.id} dataset={dataset} collectionSlug={collection.slug} />
-              ))}
-            </div>
-            {(() => {
-              const currentLimit = search?.limit ?? 100;
-              return total > currentLimit && (
-                <Pagination
-                  total={total}
-                  limit={currentLimit}
-                  offset={offset}
-                  onPageChange={handlePageChange}
-                  className="mt-8"
-                />
-              );
-            })()}
-          </>
-        ) : (
-          <Card>
-            <CardContent className="py-12 text-center">
-              <Database className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground">
-                {searchQuery
-                  ? "No datasets found matching your search"
-                  : "No datasets in this collection"}
-              </p>
-            </CardContent>
-          </Card>
-        )}
+        <DatasetResults
+          collectionSlug={collection.slug}
+          datasets={datasets}
+          isLoading={isLoading}
+          limit={currentLimit}
+          offset={offset}
+          onPageChange={handlePageChange}
+          searchQuery={searchQuery}
+          total={total}
+        />
       </div>
     </div>
   );

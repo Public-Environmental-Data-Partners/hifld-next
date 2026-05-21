@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Convert HIFLD Open Inventory CSV to inventory JSONL format.
+"""Convert HIFLD Open Inventory CSV to inventory JSONL format.
 
 This script:
 1. Reads the HIFLD Open Inventory CSV
@@ -25,7 +24,8 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, Literal, Optional
+from typing import Literal
+
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -36,6 +36,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
+
 # Load environment variables
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -44,9 +45,7 @@ load_dotenv(BASE_DIR / ".env.local", override=True)
 # Get and validate OPENAI_API_KEY
 openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
-    raise ValueError(
-        "OPENAI_API_KEY not found. Please set it in your .env.local file or as an environment variable."
-    )
+    raise ValueError("OPENAI_API_KEY not found. Please set it in your .env.local file or as an environment variable.")  # noqa: TRY003
 
 model = OpenAIChatModel("gpt-4o-mini", provider=OpenAIProvider(api_key=openai_api_key))
 
@@ -86,9 +85,7 @@ class DatasetCategory(BaseModel):
         min_length=1,
         description="List of one or more categories this dataset belongs to",
     )
-    confidence: float = Field(
-        ge=0.0, le=1.0, description="Confidence score between 0 and 1"
-    )
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence score between 0 and 1")
     reasoning: str = Field(description="Brief explanation for the categorization")
 
 
@@ -122,7 +119,7 @@ def clean_description(description: str) -> str:
     description = re.sub(r"<[^>]+>", "", description)
 
     # Decode HTML entities
-    import html
+    import html  # noqa: PLC0415
 
     description = html.unescape(description)
 
@@ -132,12 +129,10 @@ def clean_description(description: str) -> str:
     return description.strip()
 
 
-async def categorize_dataset(
-    filename: str, title: str, description: str
-) -> DatasetCategory:
+async def categorize_dataset(filename: str, title: str, description: str) -> DatasetCategory:
     """Categorize a single dataset using the LLM (async)."""
     # Truncate long descriptions to avoid token limits
-    desc = description[:500] if len(description) > 500 else description
+    desc = description[:500] if len(description) > 500 else description  # noqa: PLR2004
 
     prompt = f"""Dataset Information:
 Filename: {filename}
@@ -152,9 +147,9 @@ Return a list of relevant categories."""
 
 
 def convert_row_to_jsonl(
-    row: Dict[str, str],
-    category_result: Optional[DatasetCategory] = None,
-) -> Dict:
+    row: dict[str, str],
+    category_result: DatasetCategory | None = None,
+) -> dict:
     """Convert a CSV row to inventory JSONL format (metadata only, no storage URLs)."""
     filename = row.get("filename", "").strip()
     title = row.get("title", "").strip() or filename
@@ -204,21 +199,19 @@ def convert_row_to_jsonl(
     dataset_config["files"] = [file_config]
 
     # Remove None values from tags
-    dataset_config["tags"] = {
-        k: v for k, v in dataset_config["tags"].items() if v is not None
-    }
+    dataset_config["tags"] = {k: v for k, v in dataset_config["tags"].items() if v is not None}
 
     return dataset_config
 
 
-async def convert_csv_to_jsonl(
+async def convert_csv_to_jsonl(  # noqa: C901, PLR0913, PLR0915
     input_path: Path,
     output_path: Path,
     offset: int = 0,
-    limit: Optional[int] = None,
+    limit: int | None = None,
     concurrency: int = 10,
     save_interval: int = 10,
-):
+) -> None:
     """Convert CSV inventory to inventory JSONL format with LLM categorization (async with concurrency).
 
     Args:
@@ -232,7 +225,7 @@ async def convert_csv_to_jsonl(
     rows = []
 
     # Read all rows first
-    with open(input_path, "r", encoding="utf-8") as f:
+    with open(input_path, encoding="utf-8") as f:  # noqa: PTH123
         reader = csv.DictReader(f)
         for row in reader:
             filename = row.get("filename", "").strip()
@@ -242,14 +235,12 @@ async def convert_csv_to_jsonl(
     # Apply offset and limit
     rows_to_process = rows[offset : offset + limit if limit else None]
 
-    print(
-        f"📊 Processing rows {offset + 1} to {offset + len(rows_to_process)} (total: {len(rows_to_process)} rows)"
-    )
+    print(f"📊 Processing rows {offset + 1} to {offset + len(rows_to_process)} (total: {len(rows_to_process)} rows)")
     print(f"💾 Saving progress every {save_interval} row(s)")
     print(f"⚡ Concurrency: {concurrency} concurrent requests\n")
 
     # Open output file for writing (we'll append as results complete)
-    output_file = open(output_path, "w", encoding="utf-8")
+    output_file = open(output_path, "w", encoding="utf-8")  # noqa: PTH123, SIM115
     processed_count = 0
     error_count = 0
     batch_results = []
@@ -257,7 +248,7 @@ async def convert_csv_to_jsonl(
     # Semaphore to control concurrency
     semaphore = asyncio.Semaphore(concurrency)
 
-    async def process_row(row: Dict[str, str], index: int) -> Optional[Dict]:
+    async def process_row(row: dict[str, str], index: int) -> dict | None:
         """Process a single row with semaphore control."""
         filename = row.get("filename", "").strip()
         title = row.get("title", "").strip() or filename
@@ -276,7 +267,7 @@ async def convert_csv_to_jsonl(
 
                 # Convert to JSONL format (metadata only, no storage URLs)
                 dataset_config = convert_row_to_jsonl(row, category_result)
-                return dataset_config
+                return dataset_config  # noqa: TRY300
 
             except Exception as e:
                 print(f"  ✗ ERROR [{index}/{len(rows_to_process)}] {filename}: {e}")
@@ -284,16 +275,11 @@ async def convert_csv_to_jsonl(
                 dataset_config = convert_row_to_jsonl(row, None)
                 dataset_config["tags"]["categories"] = ["Government"]  # Default
                 dataset_config["tags"]["category_confidence"] = "0.0"
-                dataset_config["tags"][
-                    "category_reasoning"
-                ] = f"Error during categorization: {str(e)}"
+                dataset_config["tags"]["category_reasoning"] = f"Error during categorization: {e!s}"
                 return dataset_config
 
     # Create tasks for all rows
-    tasks = {
-        asyncio.create_task(process_row(row, i + 1)): i
-        for i, row in enumerate(rows_to_process)
-    }
+    tasks = {asyncio.create_task(process_row(row, i + 1)): i for i, row in enumerate(rows_to_process)}
 
     # Process results as they complete and write in batches
     for task in asyncio.as_completed(tasks.keys()):
@@ -320,14 +306,12 @@ async def convert_csv_to_jsonl(
 
     output_file.close()
 
-    print(
-        f"\n✓ Converted {processed_count} datasets from {input_path} to {output_path}"
-    )
+    print(f"\n✓ Converted {processed_count} datasets from {input_path} to {output_path}")
     if error_count > 0:
         print(f"  ⚠ {error_count} datasets had categorization errors")
 
 
-async def main():
+async def main() -> None:  # noqa: D103
     parser = argparse.ArgumentParser(
         description="Convert HIFLD Open Inventory CSV to JSONL format with LLM categorization"
     )

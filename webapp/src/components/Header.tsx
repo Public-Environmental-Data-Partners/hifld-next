@@ -1,14 +1,8 @@
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
 import { Database, Home, Info, Menu, Users } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 const PEDP_LOGO =
   "https://images.squarespace-cdn.com/content/v1/6793060d1570ff20aceb1125/807a2f81-c6a3-4a9b-adbc-86a84a81fa7e/pedp_mark_pad.png?format=1500w";
@@ -103,14 +97,8 @@ export default function Header() {
           </Sheet>
 
           <Link to="/" className="flex items-center gap-2 min-w-0">
-            <img
-              src={PEDP_LOGO}
-              alt="Public Environmental Data Partners"
-              className="h-8 w-auto object-contain"
-            />
-            <span className="font-bold text-base sm:text-lg tracking-tight truncate">
-              HIFLD Next
-            </span>
+            <img src={PEDP_LOGO} alt="Public Environmental Data Partners" className="h-8 w-auto object-contain" />
+            <span className="font-bold text-base sm:text-lg tracking-tight truncate">HIFLD Next</span>
           </Link>
         </div>
 

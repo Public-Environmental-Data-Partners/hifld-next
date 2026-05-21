@@ -1,23 +1,44 @@
-"""
-Configurable storage client for SeaweedFS and S3-compatible storage.
+"""Configurable storage client for SeaweedFS and S3-compatible storage.
 
 This module provides an abstraction layer for object storage operations,
 allowing the upload processor to work with different storage backends.
 """
 
 import asyncio
+import importlib
 import logging
 import os
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import cast
 from urllib.parse import quote
 
-import httpx
 import gcsfs
+import httpx
+
+from models.dataset import BucketStorageLocationConfig, StorageLocation
+from schemas.types import JSONDict, json_dict
+
 
 logger = logging.getLogger("storage-client")
+HTTP_OK = 200
+HTTP_CREATED = 201
+HTTP_ACCEPTED = 202
+HTTP_NO_CONTENT = 204
+HTTP_NOT_FOUND = 404
+
+
+@dataclass(frozen=True)
+class StorageClientOptions:
+    """Optional storage client factory settings."""
+
+    bucket: str | None = None
+    filer_url: str | None = None
+    s3_url: str | None = None
+    base_url: str | None = None
+    project: str | None = None
 
 
 class StorageClient(ABC):
@@ -28,7 +49,7 @@ class StorageClient(ABC):
         self,
         local_path: Path,
         remote_path: str,
-        content_type: Optional[str] = None,
+        content_type: str | None = None,
     ) -> str:
         """Upload a file to storage and return the public URL."""
         pass
@@ -54,7 +75,7 @@ class StorageClient(ABC):
         pass
 
     @abstractmethod
-    async def list_files(self, prefix: str) -> List[str]:
+    async def list_files(self, prefix: str = "") -> list[str]:
         """List all files with the given prefix.
 
         Args:
@@ -65,9 +86,7 @@ class StorageClient(ABC):
         """
         pass
 
-    async def find_files_by_extensions(
-        self, prefix: str, extensions: List[str]
-    ) -> Dict[str, List[str]]:
+    async def find_files_by_extensions(self, prefix: str, extensions: list[str]) -> dict[str, list[str]]:
         """Find files by extension within a prefix.
 
         Args:
@@ -79,16 +98,14 @@ class StorageClient(ABC):
             Keys are normalized (e.g., 'parquet', 'pmtiles').
         """
         all_files = await self.list_files(prefix)
-        result: Dict[str, List[str]] = {}
+        result: dict[str, list[str]] = {}
 
         for file_path in all_files:
             # Check each extension
             for ext in extensions:
                 # Normalize extension (remove leading dot, handle .zstd.parquet)
                 normalized_ext = ext.lstrip(".")
-                if file_path.endswith(ext) or (
-                    ext == ".parquet" and file_path.endswith(".zstd.parquet")
-                ):
+                if file_path.endswith(ext) or (ext == ".parquet" and file_path.endswith(".zstd.parquet")):
                     # Use normalized extension as key
                     if normalized_ext not in result:
                         result[normalized_ext] = []
@@ -97,65 +114,25 @@ class StorageClient(ABC):
 
         return result
 
-    def parse_url_to_path(self, url: str) -> Optional[str]:
-        """Parse a storage URL to extract the relative path.
-
-        Args:
-            url: Full storage URL
-
-        Returns:
-            Relative path if URL belongs to this storage backend, None otherwise.
-        """
-        pass
+    def parse_url_to_path(self, url: str) -> str | None:
+        """Parse a storage URL to extract the relative path."""
+        return None
 
     def path_to_s3_uri(self, path: str) -> str:
-        """Convert a storage path to S3-compatible URI (e.g., s3://bucket/path).
-
-        Args:
-            path: Relative path within the storage location
-
-        Returns:
-            S3-compatible URI (e.g., s3://bucket/path/to/file.parquet)
-        """
-        pass
+        """Convert a storage path to S3-compatible URI."""
+        raise NotImplementedError
 
     def path_to_storage_uri(self, path: str) -> str:
-        """Convert a storage path to storage-specific URI (e.g., gs://bucket/path or s3://bucket/path).
-
-        This method returns the native protocol for each storage backend:
-        - GCS: gs://bucket/path
-        - SeaweedFS/S3: s3://bucket/path
-
-        Args:
-            path: Relative path within the storage location
-
-        Returns:
-            Storage URI with correct protocol (e.g., gs://bucket/path/to/file.parquet or s3://bucket/path/to/file.parquet)
-        """
-        pass
+        """Convert a storage path to the backend-native storage URI."""
+        raise NotImplementedError
 
     def path_to_public_url(self, path: str, for_docker: bool = False) -> str:
-        """Convert a storage path to public HTTP URL.
+        """Convert a storage path to public HTTP URL."""
+        return self.get_public_url(path)
 
-        Args:
-            path: Relative path within the storage location
-            for_docker: Legacy compatibility flag. Ignored by production clients.
-
-        Returns:
-            Public HTTP URL for accessing the file
-        """
-        pass
-
-    async def expand_glob_pattern(self, glob_path: str) -> List[str]:
-        """Expand a glob pattern to list of matching file paths.
-
-        Args:
-            glob_path: Glob pattern path (e.g., "dataset/*.parquet")
-
-        Returns:
-            List of relative paths (not full URLs) matching the glob pattern
-        """
-        pass
+    async def expand_glob_pattern(self, glob_path: str) -> list[str]:
+        """Expand a glob pattern to list of matching file paths."""
+        return []
 
     @abstractmethod
     async def get_file_size(self, remote_path: str) -> int:
@@ -187,16 +164,15 @@ class StorageClient(ABC):
             for file_path in matching_files:
                 size = await self.get_file_size(file_path)
                 total_size += size
-
-            return total_size
         except Exception as e:
             logger.warning(f"Error calculating total size for pattern {glob_path}: {e}")
             return 0
+        else:
+            return total_size
 
 
 class SeaweedFSFilerClient(StorageClient):
-    """
-    SeaweedFS storage client using the Filer HTTP API.
+    """SeaweedFS storage client using the Filer HTTP API.
 
     Uses the filer's HTTP API for file operations, which doesn't require
     authentication unlike the S3 API.
@@ -208,7 +184,8 @@ class SeaweedFSFilerClient(StorageClient):
         s3_url: str = "http://localhost:8333",
         bucket: str = "hifld",
         timeout: float = 300.0,
-    ):
+    ) -> None:
+        """Initialize a SeaweedFS filer-backed storage client."""
         self.filer_url = filer_url.rstrip("/")
         self.s3_url = s3_url.rstrip("/")
         self.bucket = bucket
@@ -231,7 +208,7 @@ class SeaweedFSFilerClient(StorageClient):
         }
         return content_type_map.get(ext, "application/octet-stream")
 
-    async def _ensure_bucket_exists(self):
+    async def _ensure_bucket_exists(self) -> None:
         """Ensure bucket directory exists in filer."""
         bucket_path = f"/buckets/{self.bucket}/"
         url = f"{self.filer_url}{bucket_path}"
@@ -239,17 +216,17 @@ class SeaweedFSFilerClient(StorageClient):
         async with httpx.AsyncClient(timeout=30) as client:
             # Check if bucket exists
             response = await client.head(url)
-            if response.status_code == 404:
+            if response.status_code == HTTP_NOT_FOUND:
                 # Create bucket directory
                 response = await client.post(url)
-                if response.status_code in (200, 201):
+                if response.status_code in (HTTP_OK, HTTP_CREATED):
                     logger.info(f"Created bucket: {self.bucket}")
 
     async def upload_file(
         self,
         local_path: Path,
         remote_path: str,
-        content_type: Optional[str] = None,
+        content_type: str | None = None,
     ) -> str:
         """Upload a file to SeaweedFS using the filer HTTP API."""
         await self._ensure_bucket_exists()
@@ -259,7 +236,7 @@ class SeaweedFSFilerClient(StorageClient):
         url = f"{self.filer_url}{filer_path}"
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            with open(local_path, "rb") as f:
+            with local_path.open("rb") as f:
                 # Use multipart/form-data for filer uploads
                 files = {"file": (local_path.name, f, content_type)}
                 response = await client.post(url, files=files)
@@ -279,7 +256,7 @@ class SeaweedFSFilerClient(StorageClient):
             response.raise_for_status()
 
             local_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(local_path, "wb") as f:
+            with local_path.open("wb") as f:
                 f.write(response.content)
 
         logger.info(f"Downloaded {remote_path} to {local_path}")
@@ -291,7 +268,7 @@ class SeaweedFSFilerClient(StorageClient):
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.delete(url)
-            return response.status_code in (200, 202, 204, 404)
+            return response.status_code in (HTTP_OK, HTTP_ACCEPTED, HTTP_NO_CONTENT, HTTP_NOT_FOUND)
 
     async def file_exists(self, remote_path: str) -> bool:
         """Check if a file exists in SeaweedFS."""
@@ -300,19 +277,19 @@ class SeaweedFSFilerClient(StorageClient):
 
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.head(url)
-            return response.status_code == 200
+            return response.status_code == HTTP_OK
 
     def get_public_url(self, remote_path: str) -> str:
         """Get the public URL for a file (via filer HTTP endpoint)."""
         key = remote_path.lstrip("/")
         return f"{self.filer_url}/buckets/{self.bucket}/{key}"
 
-    async def list_files(self, prefix: str) -> List[str]:
+    async def list_files(self, prefix: str = "") -> list[str]:
         """List all files in SeaweedFS with the given prefix recursively."""
         clean_prefix = prefix.strip("/")
         start_path = self._get_filer_path(clean_prefix).rstrip("/") + "/"
         bucket_prefix = f"/buckets/{self.bucket}/"
-        files: List[str] = []
+        files: list[str] = []
         pending = [start_path]
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -321,11 +298,18 @@ class SeaweedFSFilerClient(StorageClient):
                 encoded_path = quote(current_path, safe="/")
                 url = f"{self.filer_url}{encoded_path}?limit=10000"
                 response = await client.get(url, headers={"Accept": "application/json"})
-                if response.status_code == 404:
+                if response.status_code == HTTP_NOT_FOUND:
                     continue
                 response.raise_for_status()
 
-                for entry in response.json().get("Entries") or []:
+                payload = json_dict(response.json())
+                entries = payload.get("Entries")
+                if not isinstance(entries, list):
+                    continue
+                for raw_entry in entries:
+                    if not isinstance(raw_entry, dict):
+                        continue
+                    entry = json_dict(raw_entry)
                     full_path = str(entry.get("FullPath", "")).rstrip("/")
                     if not full_path:
                         continue
@@ -337,14 +321,12 @@ class SeaweedFSFilerClient(StorageClient):
 
         return sorted(files)
 
-    def _is_filer_directory(self, entry: dict) -> bool:
-        return (
-            not entry.get("Mime")
-            and not entry.get("Md5")
-            and int(entry.get("FileSize") or 0) == 0
-        )
+    def _is_filer_directory(self, entry: JSONDict) -> bool:
+        file_size = entry.get("FileSize")
+        size = int(file_size) if isinstance(file_size, (str, int)) else 0
+        return not entry.get("Mime") and not entry.get("Md5") and size == 0
 
-    def parse_url_to_path(self, url: str) -> Optional[str]:
+    def parse_url_to_path(self, url: str) -> str | None:
         """Parse a SeaweedFS URL to extract the relative path."""
         # SeaweedFS format: http://localhost:8888/buckets/{bucket}/{path}
         if f"/buckets/{self.bucket}/" in url:
@@ -384,7 +366,7 @@ class SeaweedFSFilerClient(StorageClient):
             url = url.replace("127.0.0.1", "host.docker.internal")
         return url
 
-    async def expand_glob_pattern(self, glob_path: str) -> List[str]:
+    async def expand_glob_pattern(self, glob_path: str) -> list[str]:
         """Expand a glob pattern to list of matching file paths using the filer API.
 
         Args:
@@ -410,9 +392,7 @@ class SeaweedFSFilerClient(StorageClient):
         candidate_files = await self.list_files(prefix)
         glob_regex = self._glob_pattern_to_regex(clean_glob)
         matching_files = [
-            path
-            for path in candidate_files
-            if path and not path.endswith("/") and glob_regex.fullmatch(path)
+            path for path in candidate_files if path and not path.endswith("/") and glob_regex.fullmatch(path)
         ]
 
         logger.info(
@@ -466,15 +446,15 @@ class SeaweedFSFilerClient(StorageClient):
                 content_length = response.headers.get("content-length")
                 if content_length:
                     return int(content_length)
-            return 0
         except Exception as e:
             logger.warning(f"Could not get size for {remote_path}: {e}")
+            return 0
+        else:
             return 0
 
 
 class GCSStorageClient(StorageClient):
-    """
-    Google Cloud Storage client that makes objects publicly readable.
+    """Google Cloud Storage client that makes objects publicly readable.
 
     Uploads objects with public-read ACL so they can be accessed without authentication.
     """
@@ -482,17 +462,16 @@ class GCSStorageClient(StorageClient):
     def __init__(
         self,
         bucket: str,
-        project: Optional[str] = None,
+        project: str | None = None,
         timeout: float = 300.0,
-        base_url: Optional[str] = None,
-    ):
+        base_url: str | None = None,
+    ) -> None:
+        """Initialize a Google Cloud Storage-backed storage client."""
         try:
-            from google.cloud import storage
-        except ImportError:
-            raise ImportError(
-                "google-cloud-storage is required for GCS storage. "
-                "Install with: pip install google-cloud-storage"
-            )
+            storage = importlib.import_module("google.cloud.storage")
+        except ImportError as exc:
+            msg = "google-cloud-storage is required for GCS storage. Install with: pip install google-cloud-storage"
+            raise ImportError(msg) from exc
 
         self.bucket_name = bucket
         # When set (e.g. https://domain/storage for load balancer), use for public URLs instead of storage.googleapis.com.
@@ -519,10 +498,9 @@ class GCSStorageClient(StorageClient):
         self,
         local_path: Path,
         remote_path: str,
-        content_type: Optional[str] = None,
+        content_type: str | None = None,
     ) -> str:
         """Upload a file to GCS and make it publicly readable."""
-
         content_type = content_type or self._get_content_type(local_path)
         # Clean the remote path - ensure no leading slash
         clean_path = remote_path.lstrip("/")
@@ -530,7 +508,7 @@ class GCSStorageClient(StorageClient):
         blob.content_type = content_type
 
         # Upload file
-        def _upload():
+        def _upload() -> None:
             blob.upload_from_filename(str(local_path))
             # Note: With uniform bucket-level access, objects inherit bucket IAM permissions
             # The bucket is already configured with public read access via IAM
@@ -547,10 +525,9 @@ class GCSStorageClient(StorageClient):
 
     async def download_file(self, remote_path: str, local_path: Path) -> None:
         """Download a file from GCS."""
-
         blob = self.bucket.blob(remote_path.lstrip("/"))
 
-        def _download():
+        def _download() -> None:
             local_path.parent.mkdir(parents=True, exist_ok=True)
             blob.download_to_filename(str(local_path))
 
@@ -561,27 +538,26 @@ class GCSStorageClient(StorageClient):
 
     async def delete_file(self, remote_path: str) -> bool:
         """Delete a file from GCS."""
-
         blob = self.bucket.blob(remote_path.lstrip("/"))
 
-        def _delete():
+        def _delete() -> bool:
             try:
                 blob.delete()
-                return True
             except Exception as e:
                 logger.warning(f"Failed to delete {remote_path}: {e}")
                 return False
+            else:
+                return True
 
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _delete)
 
     async def file_exists(self, remote_path: str) -> bool:
         """Check if a file exists in GCS."""
-
         blob = self.bucket.blob(remote_path.lstrip("/"))
 
-        def _exists():
-            return blob.exists()
+        def _exists() -> bool:
+            return bool(blob.exists())
 
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _exists)
@@ -594,17 +570,17 @@ class GCSStorageClient(StorageClient):
             return f"{self.base_url}/{clean_path}"
         return f"https://storage.googleapis.com/{self.bucket_name}/{clean_path}"
 
-    async def list_files(self, prefix: str) -> List[str]:
+    async def list_files(self, prefix: str = "") -> list[str]:
         """List all files in a GCS bucket with the given prefix."""
 
-        def _list():
+        def _list() -> list[str]:
             blobs = self.bucket.list_blobs(prefix=prefix)
             return [blob.name for blob in blobs if not blob.name.endswith("/")]
 
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _list)
 
-    def parse_url_to_path(self, url: str) -> Optional[str]:
+    def parse_url_to_path(self, url: str) -> str | None:
         """Parse a GCS URL to extract the relative path."""
         if "storage.googleapis.com" in url:
             parts = url.split(f"storage.googleapis.com/{self.bucket_name}/")
@@ -614,7 +590,7 @@ class GCSStorageClient(StorageClient):
             prefix = self.base_url.rstrip("/") + "/"
             if prefix in url:
                 idx = url.find(prefix)
-                rest = url[idx + len(prefix) :].split("?")[0]
+                rest = url[idx + len(prefix) :].split("?", maxsplit=1)[0]
                 if rest:
                     return rest
         return None
@@ -638,7 +614,7 @@ class GCSStorageClient(StorageClient):
         """
         return self.get_public_url(path)
 
-    async def expand_glob_pattern(self, glob_path: str) -> List[str]:
+    async def expand_glob_pattern(self, glob_path: str) -> list[str]:
         """Expand a glob pattern to list of matching file paths using fsspec.
 
         Args:
@@ -647,7 +623,6 @@ class GCSStorageClient(StorageClient):
         Returns:
             List of relative paths (not full URLs) matching the glob pattern
         """
-
         # Construct full GCS URI
         full_glob_path = f"gs://{self.bucket_name}/{glob_path.lstrip('/')}"
 
@@ -658,8 +633,8 @@ class GCSStorageClient(StorageClient):
         # For direct prefix patterns (even with ** for subdirectories), use find() which is much faster
         if glob_path.startswith("**/"):
             # Use glob for nested parent patterns (e.g., "**/dataset/**/*.parquet")
-            def _glob():
-                return fs.glob(full_glob_path)
+            def _glob() -> list[str]:
+                return [str(path) for path in cast(list[str], fs.glob(full_glob_path))]
 
             loop = asyncio.get_event_loop()
             matching_files = await loop.run_in_executor(None, _glob)
@@ -668,18 +643,18 @@ class GCSStorageClient(StorageClient):
             # Extract prefix from pattern (everything before the first wildcard)
             # e.g., "dataset/**/*.parquet" -> "dataset/"
             # e.g., "dataset/*.parquet" -> "dataset/"
-            prefix = glob_path.split("*")[0] if "*" in glob_path else glob_path
+            prefix = glob_path.split("*", maxsplit=1)[0] if "*" in glob_path else glob_path
             if not prefix.endswith("/"):
                 # If no trailing slash, find the directory
                 prefix = "/".join(prefix.split("/")[:-1]) + "/" if "/" in prefix else ""
 
             full_prefix = f"gs://{self.bucket_name}/{prefix.lstrip('/')}"
 
-            def _find():
-                all_files = fs.find(full_prefix, detail=False)
+            def _find() -> list[str]:
+                all_files = [str(path) for path in cast(list[str], fs.find(full_prefix, detail=False))]
                 # Filter by extension if pattern has one
                 if "*." in glob_path:
-                    ext = glob_path.split("*.")[-1].split("/")[0].split("*")[0]
+                    ext = glob_path.rsplit("*.", maxsplit=1)[-1].split("/", maxsplit=1)[0].split("*", maxsplit=1)[0]
                     return [f for f in all_files if f.endswith(f".{ext}")]
                 return all_files
 
@@ -689,15 +664,15 @@ class GCSStorageClient(StorageClient):
         # Remove the protocol and bucket prefix(es) to get relative paths
         # Handle cases where bucket name might appear multiple times in the path
         cleaned_files = []
-        for f in matching_files:
+        for matched_file in matching_files:
             # Remove gs:// protocol
-            if f.startswith("gs://"):
-                f = f[5:]  # Remove "gs://"
+            clean_file = matched_file
+            if clean_file.startswith("gs://"):
+                clean_file = clean_file[5:]
             # Remove all occurrences of bucket prefix
-            while f.startswith(f"{self.bucket_name}/"):
-                f = f[len(f"{self.bucket_name}/") :]
-            f = f.lstrip("/")
-            cleaned_files.append(f)
+            while clean_file.startswith(f"{self.bucket_name}/"):
+                clean_file = clean_file[len(f"{self.bucket_name}/") :]
+            cleaned_files.append(clean_file.lstrip("/"))
 
         # Filter out directories (they might end with /)
         matching_files = [f for f in cleaned_files if f and not f.endswith("/")]
@@ -724,9 +699,10 @@ class GCSStorageClient(StorageClient):
             info = fs.info(full_path)
             if info and "size" in info:
                 return info["size"]
-            return 0
         except Exception as e:
             logger.warning(f"Could not get size for {remote_path}: {e}")
+            return 0
+        else:
             return 0
 
 
@@ -734,16 +710,42 @@ class GCSStorageClient(StorageClient):
 SeaweedFSClient = SeaweedFSFilerClient
 
 
+def _storage_location_config_values(storage_location: StorageLocation) -> tuple[str | None, str | None, str | None]:
+    """Extract storage client fields from a storage location config."""
+    if isinstance(storage_location.config, dict):
+        return (
+            storage_location.config.get("type"),
+            storage_location.config.get("bucket"),
+            storage_location.config.get("base_url"),
+        )
+    if isinstance(storage_location.config, BucketStorageLocationConfig):
+        return (
+            storage_location.config.type,
+            storage_location.config.bucket,
+            storage_location.config.base_url,
+        )
+    return None, None, None
+
+
+def _seaweedfs_s3_url(base_url: str) -> str:
+    """Infer the SeaweedFS S3 endpoint from the filer URL."""
+    s3_url = (
+        base_url.replace(":8888", ":8333") if ":8888" in base_url else base_url.replace("localhost", "localhost:8333")
+    )
+    if not s3_url.startswith("http"):
+        return f"http://{s3_url}"
+    return s3_url
+
+
 def create_storage_client(
-    storage_type: Optional[str] = None,
-    **kwargs,
+    storage_type: str | None = None,
+    options: StorageClientOptions | None = None,
 ) -> StorageClient:
-    """
-    Factory function to create the appropriate storage client.
+    """Factory function to create the appropriate storage client.
 
     Args:
         storage_type: "seaweedfs" or "gcs" or auto-detect from environment
-        **kwargs: Additional arguments for the storage client
+        options: Typed optional client settings.
 
     Environment variables:
         STORAGE_TYPE: "seaweedfs" (default) or "gcs"
@@ -754,30 +756,30 @@ def create_storage_client(
         GCS_PROJECT: GCS project ID (optional, uses default credentials project)
     """
     storage_type = storage_type or os.getenv("STORAGE_TYPE", "seaweedfs")
+    options = options or StorageClientOptions()
 
     if storage_type == "seaweedfs":
         return SeaweedFSFilerClient(
-            filer_url=kwargs.get("filer_url")
+            filer_url=options.filer_url
+            or options.base_url
             or os.getenv("SEAWEEDFS_FILER_URL", "http://localhost:8888"),
-            s3_url=kwargs.get("s3_url")
-            or os.getenv("SEAWEEDFS_S3_URL", "http://localhost:8333"),
-            bucket=kwargs.get("bucket") or os.getenv("S3_BUCKET", "hifld"),
+            s3_url=options.s3_url or os.getenv("SEAWEEDFS_S3_URL", "http://localhost:8333"),
+            bucket=options.bucket or os.getenv("S3_BUCKET", "hifld"),
         )
     elif storage_type == "gcs":
-        bucket = kwargs.get("bucket") or os.getenv("GCS_BUCKET")
-        if not bucket:
-            raise ValueError(
-                "GCS_BUCKET environment variable or bucket kwarg is required for GCS storage"
-            )
-        project = kwargs.get("project") or os.getenv("GCS_PROJECT")
-        return GCSStorageClient(bucket=bucket, project=project)
+        bucket_name = options.bucket or os.getenv("GCS_BUCKET")
+        if not bucket_name:
+            msg = "GCS_BUCKET environment variable or bucket kwarg is required for GCS storage"
+            raise ValueError(msg)
+        project_id = options.project or os.getenv("GCS_PROJECT")
+        return GCSStorageClient(bucket=bucket_name, project=project_id)
     else:
-        raise ValueError(f"Unsupported storage type: {storage_type}")
+        msg = f"Unsupported storage type: {storage_type}"
+        raise ValueError(msg)
 
 
-def create_storage_client_from_location(storage_location) -> Optional[StorageClient]:
-    """
-    Create a storage client from a StorageLocation model.
+def create_storage_client_from_location(storage_location: StorageLocation | None) -> StorageClient | None:
+    """Create a storage client from a StorageLocation model.
 
     Args:
         storage_location: StorageLocation model with config
@@ -792,45 +794,16 @@ def create_storage_client_from_location(storage_location) -> Optional[StorageCli
     if storage_location.backend_type != "s3":
         return None
 
-    # Handle both dict and Pydantic model configs
-    # Import here to avoid circular dependencies
-    try:
-        from models.dataset import BucketStorageLocationConfig
-    except ImportError:
-        # If models not available, try to infer from dict
-        BucketStorageLocationConfig = None
-
-    if isinstance(storage_location.config, dict):
-        config_type = storage_location.config.get("type")
-        bucket = storage_location.config.get("bucket")
-        base_url = storage_location.config.get("base_url")
-    elif BucketStorageLocationConfig and isinstance(
-        storage_location.config, BucketStorageLocationConfig
-    ):
-        config_type = storage_location.config.type
-        bucket = storage_location.config.bucket
-        base_url = storage_location.config.base_url
-    else:
-        return None
-
+    config_type, bucket, base_url = _storage_location_config_values(storage_location)
     if not bucket or not config_type:
         return None
 
     if config_type == "gcs":
         return GCSStorageClient(bucket=bucket, base_url=base_url)
-    elif config_type == "seaweedfs":
-        # Extract S3 endpoint from base_url (filer URL) - SeaweedFS S3 is typically on port 8333
-        s3_url = (
-            base_url.replace(":8888", ":8333")
-            if ":8888" in base_url
-            else base_url.replace("localhost", "localhost:8333")
-        )
-        if not s3_url.startswith("http"):
-            s3_url = f"http://{s3_url}"
+    if config_type == "seaweedfs" and base_url:
         return SeaweedFSFilerClient(
             filer_url=base_url,
-            s3_url=s3_url,
+            s3_url=_seaweedfs_s3_url(base_url),
             bucket=bucket,
         )
-    else:
-        return None
+    return None

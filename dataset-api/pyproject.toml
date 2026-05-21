@@ -42,6 +42,37 @@ storage = [
 
 [dependency-groups]
 dev = [
+    "basedpyright>=1.39.5",
     "globus-sdk>=4.3.1",
     "pydantic-ai>=1.38.0",
+    "pyright>=1.1.409",
+    "ruff>=0.9.0",
 ]
+
+[tool.pyright]
+include = [
+    "api",
+    "database",
+    "jobs",
+    "models",
+    "processing",
+    "schemas",
+    "services",
+    "storage",
+    "utils",
+]
+exclude = [
+    "**/__pycache__",
+    ".venv",
+    "alembic",
+    "scripts",
+    "tests",
+]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false
+reportAssignmentType = false
+reportUnknownParameterType = "error"
+reportMissingTypeArgument = "error"
+reportUntypedFunctionDecorator = "error"
+reportUntypedBaseClass = "error"

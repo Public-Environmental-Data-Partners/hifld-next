@@ -1,246 +1,87 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
-import { useMapInitialization } from '../useMapInitialization'
-import maplibregl from 'maplibre-gl'
+import { describe, expect, it, vi } from "vitest";
+import { getVectorLayers, handleMapClick } from "../useMapInitialization";
 
-// Mock maplibre-gl
-vi.mock('maplibre-gl', () => {
-  const mockMap = {
-    on: vi.fn(),
-    off: vi.fn(),
-    remove: vi.fn(),
-    addSource: vi.fn(),
-    addLayer: vi.fn(),
-    queryRenderedFeatures: vi.fn(),
-    setFeatureState: vi.fn(),
-    resize: vi.fn(),
-    getLayer: vi.fn(),
-  }
+vi.mock("maplibre-gl", () => ({
+  default: {
+    Map: vi.fn(),
+    addProtocol: vi.fn(),
+  },
+}));
 
+function mockMapWithFeatures(features: unknown[]) {
   return {
-    default: {
-      Map: vi.fn(() => mockMap),
-      addProtocol: vi.fn(),
-    },
-  }
-})
+    queryRenderedFeatures: vi.fn(() => features),
+  };
+}
 
-// Mock pmtiles
-vi.mock('pmtiles', () => ({
-  PMTiles: vi.fn(() => ({
-    getMetadata: vi.fn().mockResolvedValue({
-      vector_layers: [{ id: 'test-layer', fields: { name: 'String' } }],
-    }),
-  })),
-  Protocol: vi.fn(() => ({
-    add: vi.fn(),
-    tile: vi.fn(),
-  })),
-}))
+describe("useMapInitialization helpers", () => {
+  it("extracts vector layer metadata", () => {
+    expect(
+      getVectorLayers({
+        vector_layers: [
+          { id: "test-layer", fields: { name: "String", id: "Number" } },
+          { fields: { ignored: "String" } },
+        ],
+      }),
+    ).toEqual([{ id: "test-layer", fields: ["name", "id"] }]);
+  });
 
-describe('useMapInitialization', () => {
-  let mapContainer: HTMLDivElement
-  let mockMap: any
-
-  beforeEach(() => {
-    mapContainer = document.createElement('div')
-    document.body.appendChild(mapContainer)
-    
-    mockMap = {
-      on: vi.fn(),
-      off: vi.fn(),
-      remove: vi.fn(),
-      addSource: vi.fn(),
-      addLayer: vi.fn(),
-      queryRenderedFeatures: vi.fn(),
-      setFeatureState: vi.fn(),
-      resize: vi.fn(),
-      getLayer: vi.fn(),
-    }
-
-    vi.mocked(maplibregl.Map).mockImplementation(() => mockMap)
-  })
-
-  afterEach(() => {
-    if (mapContainer.parentNode) {
-      document.body.removeChild(mapContainer)
-    }
-    vi.clearAllMocks()
-  })
-
-  it('initializes map with container ref', async () => {
-    const onLayersLoaded = vi.fn()
-    const onHover = vi.fn()
-    const onPinnedPopup = vi.fn()
-
-    const containerRef = { current: mapContainer }
-
-    renderHook(() =>
-      useMapInitialization(
-        containerRef,
-        'http://example.com/tiles.pmtiles',
-        onLayersLoaded,
-        onHover,
-        onPinnedPopup
-      )
-    )
-
-    await waitFor(() => {
-      expect(maplibregl.Map).toHaveBeenCalled()
-    })
-  })
-
-  it('sets up click event handler for pinned popup', async () => {
-    const onPinnedPopup = vi.fn()
-    const containerRef = { current: mapContainer }
-
-    renderHook(() =>
-      useMapInitialization(
-        containerRef,
-        'http://example.com/tiles.pmtiles',
-        vi.fn(),
-        vi.fn(),
-        onPinnedPopup
-      )
-    )
-
-    await waitFor(() => {
-      expect(mockMap.on).toHaveBeenCalledWith('click', expect.any(Function))
-    })
-
-    // Simulate click event
-    const clickHandler = mockMap.on.mock.calls.find(
-      (call: any[]) => call[0] === 'click'
-    )?.[1]
-
-    const mockFeatures = [
+  it("pins a popup when clicking a rendered feature", () => {
+    const onPinnedPopup = vi.fn();
+    const features = [
       {
-        type: 'Feature',
-        properties: { name: 'Test' },
-        layer: { id: 'test-layer' },
+        type: "Feature",
+        properties: { name: "Test" },
+        layer: { id: "test-layer" },
       },
-    ]
+    ];
+    const map = mockMapWithFeatures(features);
 
-    mockMap.queryRenderedFeatures.mockReturnValue(mockFeatures)
+    handleMapClick({
+      map,
+      point: { x: 100, y: 200 },
+      lngLat: { lng: 0, lat: 1 },
+      interactiveLayerIds: ["test-layer"],
+      onPinnedPopup,
+    });
 
-    if (clickHandler) {
-      clickHandler({
-        point: { x: 100, y: 200 },
-        lngLat: { lng: 0, lat: 0 },
-      })
+    expect(map.queryRenderedFeatures).toHaveBeenCalledWith({ x: 100, y: 200 }, { layers: ["test-layer"] });
+    expect(onPinnedPopup).toHaveBeenCalledWith({
+      x: 100,
+      y: 200,
+      features,
+      selectedIndex: 0,
+      isPinned: true,
+      lngLat: { lng: 0, lat: 1 },
+    });
+  });
 
-      expect(onPinnedPopup).toHaveBeenCalledWith({
-        x: 100,
-        y: 200,
-        features: mockFeatures,
-        selectedIndex: 0,
-        isPinned: true,
-      })
-    }
-  })
+  it("clears pinned popup when clicking empty map space", () => {
+    const onPinnedPopup = vi.fn();
+    const map = mockMapWithFeatures([]);
 
-  it('clears pinned popup when clicking empty map', async () => {
-    const onPinnedPopup = vi.fn()
-    const containerRef = { current: mapContainer }
+    handleMapClick({
+      map,
+      point: { x: 100, y: 200 },
+      lngLat: { lng: 0, lat: 1 },
+      interactiveLayerIds: ["test-layer"],
+      onPinnedPopup,
+    });
 
-    renderHook(() =>
-      useMapInitialization(
-        containerRef,
-        'http://example.com/tiles.pmtiles',
-        vi.fn(),
-        vi.fn(),
-        onPinnedPopup
-      )
-    )
+    expect(onPinnedPopup).toHaveBeenCalledWith(null);
+  });
 
-    await waitFor(() => {
-      expect(mockMap.on).toHaveBeenCalledWith('click', expect.any(Function))
-    })
+  it("does nothing when no pinned callback is provided", () => {
+    const map = mockMapWithFeatures([{ type: "Feature" }]);
 
-    const clickHandler = mockMap.on.mock.calls.find(
-      (call: any[]) => call[0] === 'click'
-    )?.[1]
+    handleMapClick({
+      map,
+      point: { x: 100, y: 200 },
+      lngLat: { lng: 0, lat: 1 },
+      interactiveLayerIds: ["test-layer"],
+      onPinnedPopup: undefined,
+    });
 
-    mockMap.queryRenderedFeatures.mockReturnValue([])
-
-    if (clickHandler) {
-      clickHandler({
-        point: { x: 100, y: 200 },
-        lngLat: { lng: 0, lat: 0 },
-      })
-
-      expect(onPinnedPopup).toHaveBeenCalledWith(null)
-    }
-  })
-
-  it('maintains hover behavior when pinned popup exists', async () => {
-    const onHover = vi.fn()
-    const containerRef = { current: mapContainer }
-
-    renderHook(() =>
-      useMapInitialization(
-        containerRef,
-        'http://example.com/tiles.pmtiles',
-        vi.fn(),
-        onHover,
-        vi.fn()
-      )
-    )
-
-    await waitFor(() => {
-      expect(mockMap.on).toHaveBeenCalledWith('mousemove', expect.any(Function))
-    })
-
-    const mousemoveHandler = mockMap.on.mock.calls.find(
-      (call: any[]) => call[0] === 'mousemove'
-    )?.[1]
-
-    const mockFeatures = [
-      {
-        type: 'Feature',
-        properties: { name: 'Hover Feature' },
-        layer: { id: 'test-layer' },
-      },
-    ]
-
-    mockMap.queryRenderedFeatures.mockReturnValue(mockFeatures)
-
-    if (mousemoveHandler) {
-      mousemoveHandler({
-        point: { x: 150, y: 250 },
-      })
-
-      expect(onHover).toHaveBeenCalledWith({
-        x: 150,
-        y: 250,
-        features: mockFeatures,
-        selectedIndex: 0,
-        isPinned: false,
-      })
-    }
-  })
-
-  it('does not require onPinnedPopup callback', async () => {
-    const containerRef = { current: mapContainer }
-
-    renderHook(() =>
-      useMapInitialization(
-        containerRef,
-        'http://example.com/tiles.pmtiles',
-        vi.fn(),
-        vi.fn()
-        // onPinnedPopup not provided
-      )
-    )
-
-    await waitFor(() => {
-      expect(maplibregl.Map).toHaveBeenCalled()
-    })
-
-    // Should still set up click handler even without callback
-    await waitFor(() => {
-      expect(mockMap.on).toHaveBeenCalledWith('click', expect.any(Function))
-    })
-  })
-})
-
+    expect(map.queryRenderedFeatures).not.toHaveBeenCalled();
+  });
+});

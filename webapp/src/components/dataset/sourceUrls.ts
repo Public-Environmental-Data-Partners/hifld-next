@@ -1,4 +1,11 @@
-import type { DatasetSource, FileLocation } from "@/lib/api-client";
+import type { BucketStorageLocationConfig, DatasetSource, FileLocation } from "@/lib/api-client";
+
+type StorageConfigType = "seaweedfs" | "gcs" | "s3" | string;
+
+interface UrlStorageLocationConfig extends BucketStorageLocationConfig {
+  type?: StorageConfigType;
+  endpoint_url?: string;
+}
 
 function isFileLocation(location: DatasetSource["location"]): location is FileLocation {
   return "path" in location;
@@ -8,12 +15,8 @@ function joinUrlPath(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
-function buildBucketFileUrl(
-  baseUrl: string,
-  path: string,
-  config: Record<string, unknown>
-): string {
-  const bucket = typeof config.bucket === "string" ? config.bucket : null;
+function buildBucketFileUrl(baseUrl: string, path: string, config: UrlStorageLocationConfig): string {
+  const bucket = config.bucket;
   if (config.type === "seaweedfs" && bucket) {
     return joinUrlPath(baseUrl, `buckets/${bucket}/${path}`);
   }
@@ -28,13 +31,15 @@ function pathToGlob(path: string, extension: string): string {
   }
   const lastSlash = cleanPath.lastIndexOf("/");
   const globName = `*.${extension.replace(/^\./, "")}`;
-  return lastSlash === -1
-    ? globName
-    : `${cleanPath.slice(0, lastSlash + 1)}${globName}`;
+  return lastSlash === -1 ? globName : `${cleanPath.slice(0, lastSlash + 1)}${globName}`;
 }
 
 function replaceStorageUriPath(storageUri: string, path: string): string {
   const [uriPart, queryPart] = storageUri.split("?");
+  if (!uriPart) {
+    return storageUri;
+  }
+
   const match = uriPart.match(/^([a-z][a-z0-9+.-]*:\/\/[^/]+)(?:\/.*)?$/i);
   if (!match) {
     return storageUri;
@@ -54,8 +59,8 @@ export function buildSourceFileUrl(source: DatasetSource): string | null {
   }
 
   const path = source.location.path;
-  const config = source.storage_location?.config as Record<string, unknown> | undefined;
-  const baseUrl = typeof config?.base_url === "string" ? config.base_url : null;
+  const config: UrlStorageLocationConfig | undefined = source.storage_location?.config;
+  const baseUrl = config?.base_url ?? null;
 
   if (!path || path.includes("*")) {
     return null;
@@ -68,10 +73,7 @@ export function buildSourceFileUrl(source: DatasetSource): string | null {
   return source.url ?? null;
 }
 
-export function buildSourceStorageUri(
-  source: DatasetSource,
-  options: { globExtension?: string } = {}
-): string | null {
+export function buildSourceStorageUri(source: DatasetSource, options: { globExtension?: string } = {}): string | null {
   if (source.source_type !== "file" || !isFileLocation(source.location)) {
     return source.storage_uri ?? null;
   }
@@ -89,21 +91,18 @@ export function buildSourceStorageUri(
     return replaceStorageUriPath(source.storage_uri, uriPath);
   }
 
-  const config = source.storage_location?.config as Record<string, unknown> | undefined;
-  const bucket = typeof config?.bucket === "string" ? config.bucket : null;
-  if (!bucket) {
+  const config: UrlStorageLocationConfig | undefined = source.storage_location?.config;
+  if (!config?.bucket) {
     return null;
   }
 
-  const storageType = typeof config?.type === "string" ? config.type : null;
+  const bucket = config.bucket;
+  const storageType = config.type ?? null;
   const scheme = storageType === "gcs" ? "gs" : "s3";
-  const endpointUrl =
-    typeof config?.endpoint_url === "string" ? config.endpoint_url : null;
+  const endpointUrl = config.endpoint_url ?? null;
   const uri = `${scheme}://${bucket}/${uriPath}`;
 
-  return endpointUrl && scheme === "s3"
-    ? `${uri}?endpoint_url=${endpointUrl}`
-    : uri;
+  return endpointUrl && scheme === "s3" ? `${uri}?endpoint_url=${endpointUrl}` : uri;
 }
 
 export function usesNativeBrowserDownload(urlString: string): boolean {
