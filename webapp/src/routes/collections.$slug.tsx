@@ -1,5 +1,5 @@
 import { createFileRoute, Link, notFound, useNavigate, useSearch } from "@tanstack/react-router";
-import { ArrowLeft, Database, Loader2, Search } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, Database, Loader2, Map as MapIcon, Search } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { DatasetCard } from "@/components/dataset";
@@ -517,11 +517,25 @@ function CollectionDetailPage() {
             {collection.description && (
               <p className="text-base sm:text-lg text-muted-foreground mt-2 break-words">{collection.description}</p>
             )}
-            <Button variant="outline" size="sm" asChild className="mt-4 font-mono">
-              <a href={`/api/collections/${collection.slug}`} target="_blank" rel="noopener noreferrer">
-                View Metadata
-              </a>
-            </Button>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Button variant="outline" size="sm" asChild className="font-mono">
+                <Link to="/collections/$collectionSlug/map" params={{ collectionSlug: collection.slug }}>
+                  <MapIcon className="mr-2 h-4 w-4" />
+                  Map Workspace
+                </Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild className="font-mono">
+                <Link to="/collections/$collectionSlug/compare" params={{ collectionSlug: collection.slug }}>
+                  <ArrowLeftRight className="mr-2 h-4 w-4" />
+                  Compare Sources
+                </Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild className="font-mono">
+                <a href={`/api/collections/${collection.slug}`} target="_blank" rel="noopener noreferrer">
+                  View Metadata
+                </a>
+              </Button>
+            </div>
           </div>
         </div>
 

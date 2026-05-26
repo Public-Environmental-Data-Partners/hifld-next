@@ -5,6 +5,7 @@ import { FileFormatTree } from "@/components/dataset/FileFormatTree";
 import { ParquetViewerPanel } from "@/components/dataset/ParquetViewerPanel";
 import { buildSourceFileUrl } from "@/components/dataset/sourceUrls";
 import { compareVersionValues } from "@/components/dataset/versionLabel";
+import { descriptorForSource, encodeSourceDescriptor } from "@/components/map/sourceDescriptors";
 import { Button } from "@/components/ui/button";
 import { PageLoader } from "@/components/ui/page-loader";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -212,6 +213,18 @@ function FileDetailPage() {
 
   // Extract URLs from selected sources
   const pmtilesUrl = getUrlFromSource(pmtilesSource);
+  const pmtilesDescriptor = pmtilesSource
+    ? descriptorForSource({
+        collectionSlug,
+        datasetSlug,
+        fileSlug,
+        formatType: "pmtiles",
+        source: pmtilesSource,
+      })
+    : null;
+  const mapSearch = {
+    ...(pmtilesDescriptor ? { source: encodeSourceDescriptor(pmtilesDescriptor) } : {}),
+  };
 
   // Extract metadata from selected source
   const featureCount = geoparquetSource?.source_metadata?.feature_count;
@@ -261,14 +274,7 @@ function FileDetailPage() {
               </a>
             </Button>
             <Button asChild className="w-full">
-              <Link
-                to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer"
-                params={{
-                  collectionSlug,
-                  datasetSlug,
-                  fileSlug,
-                }}
-              >
+              <Link to="/collections/$collectionSlug/map" params={{ collectionSlug }} search={mapSearch}>
                 Map Viewer
               </Link>
             </Button>

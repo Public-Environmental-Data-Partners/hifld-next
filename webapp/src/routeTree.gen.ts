@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
+import { Route as MapRouteImport } from './routes/map'
+import { Route as CompareRouteImport } from './routes/compare'
 import { Route as CommonsRouteImport } from './routes/commons'
 import { Route as CollectionsRouteImport } from './routes/collections'
 import { Route as AboutRouteImport } from './routes/about'
@@ -26,6 +28,8 @@ import { Route as ApiDatasetsRouteImport } from './routes/api/datasets'
 import { Route as ApiCollectionsRouteImport } from './routes/api/collections'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as DotwellKnownApiCatalogRouteRouteImport } from './routes/[.well-known]/api-catalog/route'
+import { Route as CollectionsCollectionSlugMapRouteImport } from './routes/collections.$collectionSlug.map'
+import { Route as CollectionsCollectionSlugCompareRouteImport } from './routes/collections.$collectionSlug.compare'
 import { Route as ApiDatasetsStatsRouteImport } from './routes/api/datasets.stats'
 import { Route as ApiDatasetsIdRouteImport } from './routes/api/datasets.$id'
 import { Route as ApiCollectionsSlugRouteImport } from './routes/api/collections.$slug'
@@ -49,6 +53,16 @@ const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
 const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
   id: '/robots.txt',
   path: '/robots.txt',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MapRoute = MapRouteImport.update({
+  id: '/map',
+  path: '/map',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CompareRoute = CompareRouteImport.update({
+  id: '/compare',
+  path: '/compare',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CommonsRoute = CommonsRouteImport.update({
@@ -126,6 +140,18 @@ const DotwellKnownApiCatalogRouteRoute =
     id: '/.well-known/api-catalog',
     path: '/.well-known/api-catalog',
     getParentRoute: () => rootRouteImport,
+  } as any)
+const CollectionsCollectionSlugMapRoute =
+  CollectionsCollectionSlugMapRouteImport.update({
+    id: '/$collectionSlug/map',
+    path: '/$collectionSlug/map',
+    getParentRoute: () => CollectionsRoute,
+  } as any)
+const CollectionsCollectionSlugCompareRoute =
+  CollectionsCollectionSlugCompareRouteImport.update({
+    id: '/$collectionSlug/compare',
+    path: '/$collectionSlug/compare',
+    getParentRoute: () => CollectionsRoute,
   } as any)
 const ApiDatasetsStatsRoute = ApiDatasetsStatsRouteImport.update({
   id: '/stats',
@@ -229,6 +255,8 @@ export interface FileRoutesByFullPath {
   '/about': typeof AboutRouteWithChildren
   '/collections': typeof CollectionsRouteWithChildren
   '/commons': typeof CommonsRouteWithChildren
+  '/compare': typeof CompareRoute
+  '/map': typeof MapRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/.well-known/api-catalog': typeof DotwellKnownApiCatalogRouteRoute
@@ -246,6 +274,8 @@ export interface FileRoutesByFullPath {
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
+  '/collections/$collectionSlug/compare': typeof CollectionsCollectionSlugCompareRoute
+  '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
@@ -259,6 +289,8 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/compare': typeof CompareRoute
+  '/map': typeof MapRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/.well-known/api-catalog': typeof DotwellKnownApiCatalogRouteRoute
@@ -276,6 +308,8 @@ export interface FileRoutesByTo {
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
+  '/collections/$collectionSlug/compare': typeof CollectionsCollectionSlugCompareRoute
+  '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
@@ -292,6 +326,8 @@ export interface FileRoutesById {
   '/about': typeof AboutRouteWithChildren
   '/collections': typeof CollectionsRouteWithChildren
   '/commons': typeof CommonsRouteWithChildren
+  '/compare': typeof CompareRoute
+  '/map': typeof MapRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/.well-known/api-catalog': typeof DotwellKnownApiCatalogRouteRoute
@@ -309,6 +345,8 @@ export interface FileRoutesById {
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
+  '/collections/$collectionSlug/compare': typeof CollectionsCollectionSlugCompareRoute
+  '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
@@ -327,6 +365,8 @@ export interface FileRouteTypes {
     | '/about'
     | '/collections'
     | '/commons'
+    | '/compare'
+    | '/map'
     | '/robots.txt'
     | '/sitemap.xml'
     | '/.well-known/api-catalog'
@@ -344,6 +384,8 @@ export interface FileRouteTypes {
     | '/api/collections/$slug'
     | '/api/datasets/$id'
     | '/api/datasets/stats'
+    | '/collections/$collectionSlug/compare'
+    | '/collections/$collectionSlug/map'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
@@ -357,6 +399,8 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/compare'
+    | '/map'
     | '/robots.txt'
     | '/sitemap.xml'
     | '/.well-known/api-catalog'
@@ -374,6 +418,8 @@ export interface FileRouteTypes {
     | '/api/collections/$slug'
     | '/api/datasets/$id'
     | '/api/datasets/stats'
+    | '/collections/$collectionSlug/compare'
+    | '/collections/$collectionSlug/map'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
@@ -389,6 +435,8 @@ export interface FileRouteTypes {
     | '/about'
     | '/collections'
     | '/commons'
+    | '/compare'
+    | '/map'
     | '/robots.txt'
     | '/sitemap.xml'
     | '/.well-known/api-catalog'
@@ -406,6 +454,8 @@ export interface FileRouteTypes {
     | '/api/collections/$slug'
     | '/api/datasets/$id'
     | '/api/datasets/stats'
+    | '/collections/$collectionSlug/compare'
+    | '/collections/$collectionSlug/map'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
@@ -423,6 +473,8 @@ export interface RootRouteChildren {
   AboutRoute: typeof AboutRouteWithChildren
   CollectionsRoute: typeof CollectionsRouteWithChildren
   CommonsRoute: typeof CommonsRouteWithChildren
+  CompareRoute: typeof CompareRoute
+  MapRoute: typeof MapRoute
   RobotsDottxtRoute: typeof RobotsDottxtRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   DotwellKnownApiCatalogRouteRoute: typeof DotwellKnownApiCatalogRouteRoute
@@ -450,6 +502,20 @@ declare module '@tanstack/react-router' {
       path: '/robots.txt'
       fullPath: '/robots.txt'
       preLoaderRoute: typeof RobotsDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/map': {
+      id: '/map'
+      path: '/map'
+      fullPath: '/map'
+      preLoaderRoute: typeof MapRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/compare': {
+      id: '/compare'
+      path: '/compare'
+      fullPath: '/compare'
+      preLoaderRoute: typeof CompareRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/commons': {
@@ -556,6 +622,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/.well-known/api-catalog'
       preLoaderRoute: typeof DotwellKnownApiCatalogRouteRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/collections/$collectionSlug/map': {
+      id: '/collections/$collectionSlug/map'
+      path: '/$collectionSlug/map'
+      fullPath: '/collections/$collectionSlug/map'
+      preLoaderRoute: typeof CollectionsCollectionSlugMapRouteImport
+      parentRoute: typeof CollectionsRoute
+    }
+    '/collections/$collectionSlug/compare': {
+      id: '/collections/$collectionSlug/compare'
+      path: '/$collectionSlug/compare'
+      fullPath: '/collections/$collectionSlug/compare'
+      preLoaderRoute: typeof CollectionsCollectionSlugCompareRouteImport
+      parentRoute: typeof CollectionsRoute
     }
     '/api/datasets/stats': {
       id: '/api/datasets/stats'
@@ -707,12 +787,16 @@ const CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren =
 interface CollectionsRouteChildren {
   CollectionsSlugRoute: typeof CollectionsSlugRoute
   CollectionsIndexRoute: typeof CollectionsIndexRoute
+  CollectionsCollectionSlugCompareRoute: typeof CollectionsCollectionSlugCompareRoute
+  CollectionsCollectionSlugMapRoute: typeof CollectionsCollectionSlugMapRoute
   CollectionsCollectionSlugDatasetsDatasetSlugRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
 }
 
 const CollectionsRouteChildren: CollectionsRouteChildren = {
   CollectionsSlugRoute: CollectionsSlugRoute,
   CollectionsIndexRoute: CollectionsIndexRoute,
+  CollectionsCollectionSlugCompareRoute: CollectionsCollectionSlugCompareRoute,
+  CollectionsCollectionSlugMapRoute: CollectionsCollectionSlugMapRoute,
   CollectionsCollectionSlugDatasetsDatasetSlugRoute:
     CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren,
 }
@@ -799,6 +883,8 @@ const rootRouteChildren: RootRouteChildren = {
   AboutRoute: AboutRouteWithChildren,
   CollectionsRoute: CollectionsRouteWithChildren,
   CommonsRoute: CommonsRouteWithChildren,
+  CompareRoute: CompareRoute,
+  MapRoute: MapRoute,
   RobotsDottxtRoute: RobotsDottxtRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   DotwellKnownApiCatalogRouteRoute: DotwellKnownApiCatalogRouteRoute,

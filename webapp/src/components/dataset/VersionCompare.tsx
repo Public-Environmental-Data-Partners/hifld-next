@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ColumnSchema, DatasetSource, SpatialDatasetFileMetadata } from "@/lib/api-client";
 
@@ -41,13 +42,41 @@ function getColumns(metadata?: SpatialDatasetFileMetadata): ColumnSchema[] {
   return metadata?.columns ?? [];
 }
 
-export function VersionCompare({ sourceA, sourceB }: { sourceA: DatasetSource; sourceB: DatasetSource }) {
-  const metadataA = sourceA.source_metadata;
-  const metadataB = sourceB.source_metadata;
+function formatBytes(value: number | undefined): string {
+  if (value === undefined || value === 0) return "Unknown";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+  return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function sourceLabel(source: DatasetSource, fallback: string): string {
+  const version = source.version === undefined ? fallback : `Version ${source.version}`;
+  const location = source.storage_location?.name;
+  return location ? `${version} (${location})` : version;
+}
+
+export function VersionCompare({
+  leftSource,
+  rightSource,
+  leftLabel,
+  rightLabel,
+}: {
+  leftSource: DatasetSource;
+  rightSource: DatasetSource;
+  leftLabel?: string | undefined;
+  rightLabel?: string | undefined;
+}) {
+  const metadataA = leftSource.source_metadata;
+  const metadataB = rightSource.source_metadata;
   const columnsA = getColumns(metadataA);
   const columnsB = getColumns(metadataB);
-  const versionA = String(sourceA.version ?? "A");
-  const versionB = String(sourceB.version ?? "B");
+  const versionA = leftLabel ?? sourceLabel(leftSource, "Left source");
+  const versionB = rightLabel ?? sourceLabel(rightSource, "Right source");
 
   const columnNames = Array.from(
     new Set([...columnsA.map((column) => column.name), ...columnsB.map((column) => column.name)]),
@@ -70,13 +99,51 @@ export function VersionCompare({ sourceA, sourceB }: { sourceA: DatasetSource; s
   });
 
   const changedSchemaRows = schemaRows.filter((row) => row.changeType !== "Unchanged");
+  const changedMetadataCount = METADATA_KEYS.filter((key) => isDifferent(metadataA?.[key], metadataB?.[key])).length;
+  const addedColumns = changedSchemaRows.filter((row) => row.changeType === "Added").length;
+  const removedColumns = changedSchemaRows.filter((row) => row.changeType === "Removed").length;
 
   return (
     <div className="space-y-6">
+      <div className="grid gap-3 md:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Rows</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {normalizeValue(metadataA?.feature_count)} → {normalizeValue(metadataB?.feature_count)}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Quality</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {normalizeValue(metadataB?.quality_check_passed)}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Size</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">{formatBytes(metadataB?.size_bytes)}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Changed Fields</CardTitle>
+          </CardHeader>
+          <CardContent className="text-2xl font-semibold">
+            {changedMetadataCount + changedSchemaRows.length}
+          </CardContent>
+        </Card>
+      </div>
+
       <section className="space-y-3">
         <div>
           <h2 className="text-lg font-semibold">Metadata Changes</h2>
-          <p className="text-sm text-muted-foreground">Compare file-level metadata between two discovered versions.</p>
+          <p className="text-sm text-muted-foreground">
+            Compare file-level metadata between the chosen left and right sources.
+          </p>
         </div>
         <Table>
           <TableHeader>
@@ -112,8 +179,14 @@ export function VersionCompare({ sourceA, sourceB }: { sourceA: DatasetSource; s
         <div>
           <h2 className="text-lg font-semibold">Schema Changes</h2>
           <p className="text-sm text-muted-foreground">
-            Column-level differences sourced from each version&apos;s data dictionary.
+            Added and removed are relative to the right source. Schema details come from source metadata and data
+            dictionaries when available.
           </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Badge variant="default">{addedColumns} added</Badge>
+            <Badge variant="destructive">{removedColumns} removed</Badge>
+            <Badge variant="outline">{changedSchemaRows.length - addedColumns - removedColumns} changed</Badge>
+          </div>
         </div>
         {changedSchemaRows.length === 0 ? (
           <div className="rounded-md border p-4 text-sm text-muted-foreground">No schema changes</div>

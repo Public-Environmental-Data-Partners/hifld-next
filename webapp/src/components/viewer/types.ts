@@ -8,6 +8,10 @@ export type PopupPropertyEntry = [key: string, value: string];
 
 export type VectorLayerInfo = {
   id: string;
+  sourceLayerId?: string | undefined;
+  loadedLayerId?: string | undefined;
+  mapSourceId?: string | undefined;
+  mapLayerBaseId?: string | undefined;
   fields: string[];
 };
 
@@ -28,6 +32,7 @@ export type HoverInfo = {
   x: number;
   y: number;
   features: maplibregl.MapGeoJSONFeature[];
+  layerLabel?: string | undefined;
   selectedIndex: number;
   isPinned?: boolean;
   lngLat?: { lng: number; lat: number }; // Geographic coordinates for pinned popups

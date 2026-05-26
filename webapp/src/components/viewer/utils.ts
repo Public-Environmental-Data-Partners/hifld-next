@@ -120,8 +120,14 @@ export function applyScale(value: number, scale: LayerStyle["radiusScale"]) {
   return value;
 }
 
-export function getSampledValues(map: maplibregl.Map, layerId: string, property: string, limit = 5000): number[] {
-  const features = map.querySourceFeatures("pmtiles", {
+export function getSampledValues(
+  map: maplibregl.Map,
+  layerId: string,
+  property: string,
+  limit = 5000,
+  sourceId = "pmtiles",
+): number[] {
+  const features = map.querySourceFeatures(sourceId, {
     sourceLayer: layerId,
   });
   const values: number[] = [];

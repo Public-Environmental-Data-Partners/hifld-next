@@ -6,7 +6,7 @@ import { VersionCompare } from "../VersionCompare";
 
 const sourceA: DatasetSource = {
   id: 1,
-  version: "v20260101" as unknown as number,
+  version: "v20260101",
   source_type: "file",
   location: {
     version: "v1",
@@ -31,7 +31,7 @@ const sourceA: DatasetSource = {
 
 const sourceB: DatasetSource = {
   id: 2,
-  version: "v20260214" as unknown as number,
+  version: "v20260214",
   source_type: "file",
   location: {
     version: "v1",
@@ -62,7 +62,7 @@ const sourceB: DatasetSource = {
 
 describe("VersionCompare", () => {
   it("renders metadata and schema differences side by side", () => {
-    render(<VersionCompare sourceA={sourceA} sourceB={sourceB} />);
+    render(<VersionCompare leftSource={sourceA} rightSource={sourceB} />);
 
     expect(screen.getByText("Metadata Changes")).toBeInTheDocument();
     expect(screen.getByText("Schema Changes")).toBeInTheDocument();
@@ -71,5 +71,13 @@ describe("VersionCompare", () => {
     expect(screen.getByText("population")).toBeInTheDocument();
     expect(screen.getByText("Population estimate")).toBeInTheDocument();
     expect(screen.getByText("Added")).toBeInTheDocument();
+  });
+
+  it("labels added and removed columns relative to the chosen right source", () => {
+    render(<VersionCompare leftSource={sourceB} rightSource={sourceA} leftLabel="Left source" rightLabel="Right source" />);
+
+    expect(screen.getAllByText("Right source").length).toBeGreaterThan(0);
+    expect(screen.getByText("population")).toBeInTheDocument();
+    expect(screen.getByText("Removed")).toBeInTheDocument();
   });
 });

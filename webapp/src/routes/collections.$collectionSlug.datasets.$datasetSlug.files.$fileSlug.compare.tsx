@@ -9,6 +9,7 @@ import {
 } from "@/components/dataset/compareSources";
 import { VersionCompare } from "@/components/dataset/VersionCompare";
 import { formatVersionLabel } from "@/components/dataset/versionLabel";
+import { descriptorForSource, encodeSourceDescriptor } from "@/components/map/sourceDescriptors";
 import { Button } from "@/components/ui/button";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -184,6 +185,20 @@ function FileComparePage() {
       search: completeCompareSearch(next, fallbackSearch),
       replace: true,
     });
+  const leftDescriptor = descriptorForSource({
+    collectionSlug: params.collectionSlug,
+    datasetSlug: params.datasetSlug,
+    fileSlug: params.fileSlug,
+    formatType: selectedFormat.format.format_type,
+    source: selectedSourceA,
+  });
+  const rightDescriptor = descriptorForSource({
+    collectionSlug: params.collectionSlug,
+    datasetSlug: params.datasetSlug,
+    fileSlug: params.fileSlug,
+    formatType: selectedFormat.format.format_type,
+    source: selectedSourceB,
+  });
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 p-4 sm:p-6 md:p-8">
@@ -200,6 +215,21 @@ function FileComparePage() {
             {dataset.name} / {file.name}
           </p>
         </div>
+        {leftDescriptor && rightDescriptor ? (
+          <Button variant="outline" asChild>
+            <Link
+              to="/collections/$collectionSlug/compare"
+              params={{ collectionSlug: params.collectionSlug }}
+              search={{
+                left: encodeSourceDescriptor(leftDescriptor),
+                right: encodeSourceDescriptor(rightDescriptor),
+                mode: "metadata",
+              }}
+            >
+              Open cross-layer compare
+            </Link>
+          </Button>
+        ) : null}
       </div>
 
       <div className="space-y-6">
@@ -304,7 +334,12 @@ function FileComparePage() {
         </div>
       </div>
 
-      <VersionCompare sourceA={selectedSourceA} sourceB={selectedSourceB} />
+      <VersionCompare
+        leftSource={selectedSourceA}
+        rightSource={selectedSourceB}
+        leftLabel={`Left source: ${formatVersionLabel(selectedSourceA.version)}`}
+        rightLabel={`Right source: ${formatVersionLabel(selectedSourceB.version)}`}
+      />
     </div>
   );
 }
