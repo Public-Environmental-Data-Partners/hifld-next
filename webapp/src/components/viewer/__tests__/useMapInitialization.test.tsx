@@ -3,6 +3,8 @@ import {
   getVectorLayers,
   handleMapClick,
   removeInactiveMapSources,
+  selectionBoxFeature,
+  syncBasemapVisibility,
   syncExistingRenderedLayers,
 } from "../useMapInitialization";
 
@@ -29,6 +31,37 @@ describe("useMapInitialization helpers", () => {
         ],
       }),
     ).toEqual([{ id: "test-layer", fields: ["name", "id"] }]);
+  });
+
+  it("builds a geographic selection box polygon", () => {
+    expect(selectionBoxFeature({ lng: -77, lat: 39 }, { lng: -76, lat: 38 })).toEqual({
+      type: "Feature",
+      properties: {},
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [-77, 39],
+            [-76, 39],
+            [-76, 38],
+            [-77, 38],
+            [-77, 39],
+          ],
+        ],
+      },
+    });
+  });
+
+  it("toggles street and satellite basemap visibility", () => {
+    const map = {
+      getLayer: vi.fn((layerId: string) => layerId === "osm-base" || layerId === "satellite-base"),
+      setLayoutProperty: vi.fn(),
+    };
+
+    syncBasemapVisibility(map, "satellite");
+
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("osm-base", "visibility", "none");
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("satellite-base", "visibility", "visible");
   });
 
   it("pins a popup when clicking a rendered feature", () => {
@@ -164,4 +197,5 @@ describe("useMapInitialization helpers", () => {
     expect(map.removeSource).not.toHaveBeenCalledWith("external-source");
     expect(managedSourceIds).toEqual(new Set(["source-active"]));
   });
+
 });

@@ -21,6 +21,27 @@ interface VectorLayersBySource {
   [sourceId: string]: VectorLayerInfo[] | undefined;
 }
 
+export type FeatureSelectionMode = "replace" | "append";
+export type BasemapMode = "street" | "satellite";
+
+interface SelectionLngLat {
+  lng: number;
+  lat: number;
+}
+
+type SelectionBoxFeature = GeoJSON.Feature<GeoJSON.Polygon>;
+type SelectionBoxFeatureCollection = GeoJSON.FeatureCollection<GeoJSON.Polygon>;
+
+const SELECTION_BOX_SOURCE_ID = "selection-box-source";
+const SELECTION_BOX_FILL_LAYER_ID = "selection-box-fill";
+const SELECTION_BOX_LINE_LAYER_ID = "selection-box-line";
+const STREET_BASE_LAYER_ID = "osm-base";
+const SATELLITE_BASE_LAYER_ID = "satellite-base";
+const EMPTY_SELECTION_BOX_FEATURES: SelectionBoxFeatureCollection = {
+  type: "FeatureCollection",
+  features: [],
+};
+
 export function getVectorLayers(metadata: PMTilesMetadata): VectorLayerInfo[] {
   const vectorLayers = metadata.vector_layers ?? [];
   const layers: VectorLayerInfo[] = [];
@@ -92,6 +113,125 @@ export function handleMapClick({
     isPinned: true,
     lngLat,
   });
+}
+
+function queryRenderedSelectionFeatures({
+  map,
+  point,
+  interactiveLayerIds,
+}: {
+  map: maplibregl.Map;
+  point: maplibregl.Point;
+  interactiveLayerIds: string[];
+}): maplibregl.MapGeoJSONFeature[] {
+  if (interactiveLayerIds.length === 0) {
+    return [];
+  }
+  return map.queryRenderedFeatures(point, {
+    layers: interactiveLayerIds,
+  });
+}
+
+function queryRenderedBoxFeatures({
+  map,
+  start,
+  end,
+  interactiveLayerIds,
+}: {
+  map: maplibregl.Map;
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+  interactiveLayerIds: string[];
+}): maplibregl.MapGeoJSONFeature[] {
+  if (interactiveLayerIds.length === 0) {
+    return [];
+  }
+  const minX = Math.min(start.x, end.x);
+  const minY = Math.min(start.y, end.y);
+  const maxX = Math.max(start.x, end.x);
+  const maxY = Math.max(start.y, end.y);
+  return map.queryRenderedFeatures(
+    [
+      [minX, minY],
+      [maxX, maxY],
+    ],
+    { layers: interactiveLayerIds },
+  );
+}
+
+export function selectionBoxFeature(start: SelectionLngLat, end: SelectionLngLat): SelectionBoxFeature {
+  return {
+    type: "Feature",
+    properties: {},
+    geometry: {
+      type: "Polygon",
+      coordinates: [
+        [
+          [start.lng, start.lat],
+          [end.lng, start.lat],
+          [end.lng, end.lat],
+          [start.lng, end.lat],
+          [start.lng, start.lat],
+        ],
+      ],
+    },
+  };
+}
+
+function selectionBoxFeatureCollection(feature: SelectionBoxFeature | null): SelectionBoxFeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: feature ? [feature] : [],
+  };
+}
+
+function selectionBoxSource(map: maplibregl.Map): maplibregl.GeoJSONSource | null {
+  const source = map.getSource(SELECTION_BOX_SOURCE_ID);
+  return source && "setData" in source ? (source as maplibregl.GeoJSONSource) : null;
+}
+
+function ensureSelectionBoxLayers(map: maplibregl.Map): maplibregl.GeoJSONSource {
+  const existingSource = selectionBoxSource(map);
+  if (existingSource) {
+    return existingSource;
+  }
+
+  map.addSource(SELECTION_BOX_SOURCE_ID, {
+    type: "geojson",
+    data: EMPTY_SELECTION_BOX_FEATURES,
+  });
+
+  map.addLayer({
+    id: SELECTION_BOX_FILL_LAYER_ID,
+    type: "fill",
+    source: SELECTION_BOX_SOURCE_ID,
+    paint: {
+      "fill-color": "#2563eb",
+      "fill-opacity": 0.12,
+    },
+  });
+
+  map.addLayer({
+    id: SELECTION_BOX_LINE_LAYER_ID,
+    type: "line",
+    source: SELECTION_BOX_SOURCE_ID,
+    paint: {
+      "line-color": "#2563eb",
+      "line-opacity": 0.9,
+      "line-width": 2,
+      "line-dasharray": [2, 1],
+    },
+  });
+
+  return selectionBoxSource(map) as maplibregl.GeoJSONSource;
+}
+
+function setSelectionBoxFeature(map: maplibregl.Map, feature: SelectionBoxFeature | null): void {
+  ensureSelectionBoxLayers(map).setData(selectionBoxFeatureCollection(feature));
+}
+
+function setMapSelectionCursor(map: maplibregl.Map, active: boolean): void {
+  map.getCanvas().style.cursor = active ? "crosshair" : "";
 }
 
 function layerLabelForFeature(feature: maplibregl.MapGeoJSONFeature | undefined): string | undefined {
@@ -184,6 +324,15 @@ export function syncExistingRenderedLayers(map: maplibregl.Map, source: LoadedMa
   return layerIds;
 }
 
+export function syncBasemapVisibility(map: maplibregl.Map, mode: BasemapMode): void {
+  if (map.getLayer(STREET_BASE_LAYER_ID)) {
+    map.setLayoutProperty(STREET_BASE_LAYER_ID, "visibility", mode === "street" ? "visible" : "none");
+  }
+  if (map.getLayer(SATELLITE_BASE_LAYER_ID)) {
+    map.setLayoutProperty(SATELLITE_BASE_LAYER_ID, "visibility", mode === "satellite" ? "visible" : "none");
+  }
+}
+
 function styleLayerSourceId(styleLayer: maplibregl.LayerSpecification): string | null {
   if (!("source" in styleLayer) || typeof styleLayer.source !== "string") {
     return null;
@@ -242,7 +391,8 @@ async function loadMapSource(
   map: maplibregl.Map,
   protocol: Protocol | null,
   source: LoadedMapLayer,
-): Promise<{ vectorLayers: VectorLayerInfo[]; interactiveLayerIds: string[] }> {
+  shouldContinue: () => boolean,
+): Promise<{ vectorLayers: VectorLayerInfo[]; interactiveLayerIds: string[] } | null> {
   if (map.getSource(source.mapSourceId)) {
     return {
       vectorLayers: [],
@@ -253,6 +403,9 @@ async function loadMapSource(
   const pmtiles = new PMTiles(source.pmtilesUrl);
   protocol?.add(pmtiles);
   const metadata = (await pmtiles.getMetadata()) as PMTilesMetadata;
+  if (!shouldContinue()) {
+    return null;
+  }
   const vectorLayers = getVectorLayersForSource(metadata, source);
 
   map.addSource(source.mapSourceId, {
@@ -266,16 +419,74 @@ async function loadMapSource(
   };
 }
 
+async function syncLoadedMapSources({
+  map,
+  protocol,
+  sources,
+  managedSourceIds,
+  vectorLayersBySource,
+  shouldContinue,
+}: {
+  map: maplibregl.Map;
+  protocol: Protocol | null;
+  sources: LoadedMapLayer[];
+  managedSourceIds: Set<string>;
+  vectorLayersBySource: VectorLayersBySource;
+  shouldContinue: () => boolean;
+}): Promise<{ layers: VectorLayerInfo[]; interactiveLayerIds: string[] } | null> {
+  const nextLayers: VectorLayerInfo[] = [];
+  const nextInteractiveLayerIds: string[] = [];
+  const activeSourceIds = new Set(sources.map((source) => source.mapSourceId));
+  const activeLayerIds = new Set(sources.map((source) => source.id));
+
+  for (const source of sources) {
+    if (!shouldContinue()) return null;
+    managedSourceIds.add(source.mapSourceId);
+    const loadedSource = await loadMapSource(map, protocol, source, shouldContinue);
+    if (!shouldContinue() || !loadedSource) return null;
+    if (loadedSource.vectorLayers.length > 0) {
+      vectorLayersBySource[source.id] = loadedSource.vectorLayers;
+    }
+    nextLayers.push(...(vectorLayersBySource[source.id] ?? loadedSource.vectorLayers));
+    nextInteractiveLayerIds.push(...loadedSource.interactiveLayerIds);
+  }
+
+  if (!shouldContinue()) return null;
+  removeInactiveMapSources(map, activeSourceIds, managedSourceIds);
+  for (const loadedLayerId of Object.keys(vectorLayersBySource)) {
+    if (!activeLayerIds.has(loadedLayerId)) {
+      delete vectorLayersBySource[loadedLayerId];
+    }
+  }
+
+  return {
+    layers: nextLayers,
+    interactiveLayerIds: nextInteractiveLayerIds,
+  };
+}
+
 export function useMultiLayerMapInitialization(
   mapContainerRef: React.RefObject<HTMLDivElement | null>,
   sources: LoadedMapLayer[],
   onLayersLoaded: (layers: VectorLayerInfo[]) => void,
   onHover: (info: HoverInfo | null) => void,
   onPinnedPopup?: (info: HoverInfo | null) => void,
+  onFeatureSelection?: ((features: maplibregl.MapGeoJSONFeature[], mode: FeatureSelectionMode) => void) | undefined,
+  isSelectionActive = false,
+  basemapMode: BasemapMode = "street",
 ) {
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const initialBasemapModeRef = useRef(basemapMode);
   const protocolRef = useRef<Protocol | null>(null);
   const interactiveLayerIds = useRef<string[]>([]);
+  const onFeatureSelectionRef = useRef(onFeatureSelection);
+  const onHoverRef = useRef(onHover);
+  const onLayersLoadedRef = useRef(onLayersLoaded);
+  const onPinnedPopupRef = useRef(onPinnedPopup);
+  const isSelectionActiveRef = useRef(isSelectionActive);
+  const boxSelectionStartRef = useRef<{ x: number; y: number } | null>(null);
+  const boxSelectionStartLngLatRef = useRef<SelectionLngLat | null>(null);
+  const suppressNextClickSelectionRef = useRef(false);
   const vectorLayersBySource = useRef<VectorLayersBySource>({});
   const managedSourceIds = useRef<Set<string>>(new Set());
   const hoveredFeatureRef = useRef<{
@@ -283,6 +494,30 @@ export function useMultiLayerMapInitialization(
     sourceLayer: string;
     id: number | string;
   } | null>(null);
+
+  useEffect(() => {
+    onFeatureSelectionRef.current = onFeatureSelection;
+  }, [onFeatureSelection]);
+
+  useEffect(() => {
+    onHoverRef.current = onHover;
+  }, [onHover]);
+
+  useEffect(() => {
+    onLayersLoadedRef.current = onLayersLoaded;
+  }, [onLayersLoaded]);
+
+  useEffect(() => {
+    onPinnedPopupRef.current = onPinnedPopup;
+  }, [onPinnedPopup]);
+
+  useEffect(() => {
+    isSelectionActiveRef.current = isSelectionActive;
+    const map = mapRef.current;
+    if (map && boxSelectionStartRef.current === null) {
+      setMapSelectionCursor(map, isSelectionActive);
+    }
+  }, [isSelectionActive]);
 
   const clearHoverFeature = useCallback(() => {
     if (!mapRef.current || !hoveredFeatureRef.current) return;
@@ -295,6 +530,14 @@ export function useMultiLayerMapInitialization(
       { hover: false },
     );
     hoveredFeatureRef.current = null;
+  }, []);
+
+  const clearSelectionBox = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    boxSelectionStartRef.current = null;
+    boxSelectionStartLngLatRef.current = null;
+    setSelectionBoxFeature(map, null);
   }, []);
 
   const setHoverFeature = useCallback(
@@ -345,12 +588,29 @@ export function useMultiLayerMapInitialization(
             tileSize: 256,
             attribution: "© OpenStreetMap contributors",
           },
+          "esri-world-imagery": {
+            type: "raster",
+            tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+            tileSize: 256,
+            attribution: "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+          },
         },
         layers: [
           {
-            id: "osm-base",
+            id: STREET_BASE_LAYER_ID,
             type: "raster",
             source: "osm-tiles",
+            layout: {
+              visibility: initialBasemapModeRef.current === "street" ? "visible" : "none",
+            },
+          },
+          {
+            id: SATELLITE_BASE_LAYER_ID,
+            type: "raster",
+            source: "esri-world-imagery",
+            layout: {
+              visibility: initialBasemapModeRef.current === "satellite" ? "visible" : "none",
+            },
           },
         ],
       },
@@ -359,6 +619,11 @@ export function useMultiLayerMapInitialization(
     });
 
     mapRef.current = map;
+    syncBasemapVisibility(map, initialBasemapModeRef.current);
+
+    const updateCursorForCurrentSelectionState = () => {
+      setMapSelectionCursor(map, isSelectionActiveRef.current || boxSelectionStartRef.current !== null);
+    };
 
     map.on("mousemove", (event) => {
       if (!mapRef.current || interactiveLayerIds.current.length === 0) return;
@@ -367,11 +632,11 @@ export function useMultiLayerMapInitialization(
       });
 
       if (!features || features.length === 0) {
-        onHover(null);
+        onHoverRef.current(null);
         return;
       }
 
-      onHover({
+      onHoverRef.current({
         x: event.point.x,
         y: event.point.y,
         features,
@@ -383,56 +648,106 @@ export function useMultiLayerMapInitialization(
 
     map.on("click", (event) => {
       if (!mapRef.current || interactiveLayerIds.current.length === 0) return;
+      if (suppressNextClickSelectionRef.current) {
+        suppressNextClickSelectionRef.current = false;
+        return;
+      }
+      const selectedFeatures = queryRenderedSelectionFeatures({
+        map,
+        point: event.point,
+        interactiveLayerIds: interactiveLayerIds.current,
+      });
+      onFeatureSelectionRef.current?.(selectedFeatures, "replace");
       handleMapClick({
         map,
         point: event.point,
         lngLat: event.lngLat,
         interactiveLayerIds: interactiveLayerIds.current,
-        onPinnedPopup,
+        onPinnedPopup: onPinnedPopupRef.current,
       });
+    });
+
+    map.on("mousedown", (event) => {
+      if (!mapRef.current || interactiveLayerIds.current.length === 0) return;
+      if (!isSelectionActiveRef.current) return;
+      boxSelectionStartRef.current = { x: event.point.x, y: event.point.y };
+      boxSelectionStartLngLatRef.current = { lng: event.lngLat.lng, lat: event.lngLat.lat };
+      setSelectionBoxFeature(
+        map,
+        selectionBoxFeature(boxSelectionStartLngLatRef.current, boxSelectionStartLngLatRef.current),
+      );
+      setMapSelectionCursor(map, true);
+      map.dragPan.disable();
+      event.preventDefault();
+    });
+
+    map.on("mousemove", (event) => {
+      if (!boxSelectionStartRef.current || !boxSelectionStartLngLatRef.current) return;
+      setSelectionBoxFeature(
+        map,
+        selectionBoxFeature(boxSelectionStartLngLatRef.current, { lng: event.lngLat.lng, lat: event.lngLat.lat }),
+      );
+    });
+
+    map.on("mouseup", (event) => {
+      const start = boxSelectionStartRef.current;
+      const startLngLat = boxSelectionStartLngLatRef.current;
+      if (!start) return;
+      boxSelectionStartRef.current = null;
+      boxSelectionStartLngLatRef.current = null;
+      if (startLngLat) {
+        setSelectionBoxFeature(map, selectionBoxFeature(startLngLat, { lng: event.lngLat.lng, lat: event.lngLat.lat }));
+      }
+      map.dragPan.enable();
+      updateCursorForCurrentSelectionState();
+      suppressNextClickSelectionRef.current = true;
+      const selectedFeatures = queryRenderedBoxFeatures({
+        map,
+        start,
+        end: { x: event.point.x, y: event.point.y },
+        interactiveLayerIds: interactiveLayerIds.current,
+      });
+      onFeatureSelectionRef.current?.(selectedFeatures, "replace");
     });
 
     map.on("mouseleave", () => {
       clearHoverFeature();
-      onHover(null);
+      onHoverRef.current(null);
     });
 
     return () => {
       map.remove();
       mapRef.current = null;
       interactiveLayerIds.current = [];
-      onLayersLoaded([]);
+      boxSelectionStartRef.current = null;
+      boxSelectionStartLngLatRef.current = null;
+      onLayersLoadedRef.current([]);
     };
-  }, [mapContainerRef, onHover, onPinnedPopup, onLayersLoaded, clearHoverFeature]);
+  }, [mapContainerRef, clearHoverFeature]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    syncBasemapVisibility(map, basemapMode);
+  }, [basemapMode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    let cancelled = false;
 
     const loadSources = async () => {
-      const nextLayers: VectorLayerInfo[] = [];
-      const nextInteractiveLayerIds: string[] = [];
-      const activeSourceIds = new Set(sources.map((source) => source.mapSourceId));
-      const activeLayerIds = new Set(sources.map((source) => source.id));
-
-      for (const source of sources) {
-        managedSourceIds.current.add(source.mapSourceId);
-        const loadedSource = await loadMapSource(map, protocolRef.current, source);
-        if (loadedSource.vectorLayers.length > 0) {
-          vectorLayersBySource.current[source.id] = loadedSource.vectorLayers;
-        }
-        nextLayers.push(...(vectorLayersBySource.current[source.id] ?? loadedSource.vectorLayers));
-        nextInteractiveLayerIds.push(...loadedSource.interactiveLayerIds);
-      }
-
-      removeInactiveMapSources(map, activeSourceIds, managedSourceIds.current);
-      for (const loadedLayerId of Object.keys(vectorLayersBySource.current)) {
-        if (!activeLayerIds.has(loadedLayerId)) {
-          delete vectorLayersBySource.current[loadedLayerId];
-        }
-      }
-      interactiveLayerIds.current = nextInteractiveLayerIds;
-      onLayersLoaded(nextLayers);
+      const result = await syncLoadedMapSources({
+        map,
+        protocol: protocolRef.current,
+        sources,
+        managedSourceIds: managedSourceIds.current,
+        vectorLayersBySource: vectorLayersBySource.current,
+        shouldContinue: () => !cancelled,
+      });
+      if (!result) return;
+      interactiveLayerIds.current = result.interactiveLayerIds;
+      onLayersLoadedRef.current(result.layers);
       map.resize();
     };
 
@@ -443,7 +758,10 @@ export function useMultiLayerMapInitialization(
     map.once("load", () => {
       void loadSources();
     });
-  }, [sources, onLayersLoaded]);
+    return () => {
+      cancelled = true;
+    };
+  }, [sources]);
 
   useEffect(() => {
     const previous = document.body.style.overflow;
@@ -459,5 +777,6 @@ export function useMultiLayerMapInitialization(
     hoveredFeatureRef,
     setHoverFeature,
     clearHoverFeature,
+    clearSelectionBox,
   };
 }

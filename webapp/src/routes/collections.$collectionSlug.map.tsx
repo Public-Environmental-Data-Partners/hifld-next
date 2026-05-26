@@ -18,6 +18,13 @@ import type { PanelImperativeHandle } from "react-resizable-panels";
 import { z } from "zod";
 import { buildSourceFileUrl } from "@/components/dataset/sourceUrls";
 import { compareVersionValues, formatVersionLabel } from "@/components/dataset/versionLabel";
+import { FeatureTablePanel } from "@/components/map/FeatureTablePanel";
+import {
+  type FeatureSelectionMode,
+  normalizeSelectedFeatures,
+  type SelectedMapFeature,
+  updateSelectedFeatures,
+} from "@/components/map/featureSelection";
 import { clearedLayerPickerSelection, layerPickerSelectionAfterLayerRemoval } from "@/components/map/mapWorkspaceState";
 import { buildLoadedMapLayer, type LoadedMapLayer } from "@/components/map/multiLayerSources";
 import {
@@ -48,7 +55,7 @@ import type {
   VectorLayerInfo,
 } from "@/components/viewer/types";
 import { useLayerStyling } from "@/components/viewer/useLayerStyling";
-import { useMultiLayerMapInitialization } from "@/components/viewer/useMapInitialization";
+import { type BasemapMode, useMultiLayerMapInitialization } from "@/components/viewer/useMapInitialization";
 import {
   computeQuantileBreaks,
   DEFAULT_BREAK_COUNT,
@@ -498,12 +505,17 @@ export function MapWorkspace({
   const [sizeSectionOpen, setSizeSectionOpen] = useState(true);
   const [legendVisible, setLegendVisible] = useState(true);
   const [isSettingsCollapsed, setIsSettingsCollapsed] = useState(false);
+  const [isSelectionActive, setIsSelectionActive] = useState(false);
+  const [basemapMode, setBasemapMode] = useState<BasemapMode>("street");
   const [searchDraft, setSearchDraft] = useState(initialQuery ?? "");
   const [selectedDataset, setSelectedDataset] = useState<DatasetWithUrls | null>(null);
   const [selectedFileSlug, setSelectedFileSlug] = useState<string | undefined>(undefined);
   const [selectedVersion, setSelectedVersion] = useState<string | undefined>(undefined);
   const [selectedSourceId, setSelectedSourceId] = useState<string | undefined>(undefined);
   const [addingLayerDescriptorId, setAddingLayerDescriptorId] = useState<string | null>(null);
+  const [selectedFeatures, setSelectedFeatures] = useState<SelectedMapFeature[]>([]);
+  const [wasSelectionCapped, setWasSelectionCapped] = useState(false);
+  const [s2Level, setS2Level] = useState(16);
   const [loadedLayers, setLoadedLayers] = useState<LoadedMapLayer[]>(() =>
     initialLayers.map(resolvedToMapLayer).filter((entry): entry is LoadedMapLayer => entry !== null),
   );
@@ -546,15 +558,54 @@ export function MapWorkspace({
     };
   }, [searchDraft, updateQuery]);
 
-  const { mapRef, setHoverFeature, clearHoverFeature } = useMultiLayerMapInitialization(
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Shift" || event.repeat) return;
+      setIsSelectionActive(true);
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key !== "Shift") return;
+      setIsSelectionActive(false);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
+
+  const handleFeatureSelection = useCallback(
+    (features: maplibregl.MapGeoJSONFeature[], mode: FeatureSelectionMode) => {
+      const incoming = normalizeSelectedFeatures({ features, loadedLayers });
+      setSelectedFeatures((current) => {
+        const update = updateSelectedFeatures({ current, incoming, mode });
+        setWasSelectionCapped(update.wasCapped);
+        return update.rows;
+      });
+    },
+    [loadedLayers],
+  );
+
+  const { mapRef, setHoverFeature, clearHoverFeature, clearSelectionBox } = useMultiLayerMapInitialization(
     mapContainerRef,
     loadedLayers,
     setVectorLayers,
     setHoverInfo,
     setPinnedPopupInfo,
+    handleFeatureSelection,
+    isSelectionActive,
+    basemapMode,
   );
 
   useLayerStyling(mapRef, vectorLayers, layerStyles, setLayerStyles);
+
+  const clearSelectedFeatures = useCallback(() => {
+    clearSelectionBox();
+    setSelectedFeatures([]);
+    setWasSelectionCapped(false);
+  }, [clearSelectionBox]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -576,6 +627,15 @@ export function MapWorkspace({
     }
     setHoverFeature(feature);
   }, [hoverInfo, pinnedPopupInfo, setHoverFeature, clearHoverFeature]);
+
+  useEffect(() => {
+    const activeLayerIds = new Set(loadedLayers.map((layer) => layer.id));
+    setSelectedFeatures((current) => current.filter((feature) => activeLayerIds.has(feature.loadedLayerId)));
+  }, [loadedLayers]);
+
+  useEffect(() => {
+    mapRef.current?.resize();
+  });
 
   const activePopupInfo = pinnedPopupInfo ?? hoverInfo;
   const propertyEntries = popupProperties(activePopupInfo);
@@ -935,32 +995,71 @@ export function MapWorkspace({
           className="min-w-0 overflow-hidden"
           onResize={() => mapRef.current?.resize()}
         >
-          <div className="relative h-full w-full">
-            <div ref={mapContainerRef} className="h-full w-full" />
-            <MapControls mapRef={mapRef as React.RefObject<maplibregl.Map | null>} />
-            {activePopupInfo && activePopupInfo.features.length > 0 && (
-              <FeatureHoverPopup
-                hoverInfo={activePopupInfo}
-                selectedIndex={activePopupInfo.selectedIndex}
-                propertyEntries={propertyEntries}
-                onIndexChange={(index) => {
-                  if (activePopupInfo.isPinned) {
-                    setPinnedPopupInfo((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
-                    return;
+          <ResizablePanelGroup orientation="vertical" className="min-h-0">
+            <ResizablePanel
+              defaultSize={selectedFeatures.length > 0 ? "68%" : "100%"}
+              minSize="40%"
+              className="min-h-0 overflow-hidden"
+              onResize={() => mapRef.current?.resize()}
+            >
+              <div className="relative h-full w-full">
+                <div ref={mapContainerRef} className="h-full w-full" />
+                <MapControls
+                  mapRef={mapRef as React.RefObject<maplibregl.Map | null>}
+                  isSelectionActive={isSelectionActive}
+                  onToggleSelection={() => setIsSelectionActive((active) => !active)}
+                  onClearSelection={selectedFeatures.length > 0 ? clearSelectedFeatures : undefined}
+                  basemapMode={basemapMode}
+                  onToggleBasemap={() =>
+                    setBasemapMode((current) => (current === "satellite" ? "street" : "satellite"))
                   }
-                  setHoverInfo((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
-                }}
-                onClose={() => setPinnedPopupInfo(null)}
-              />
+                />
+                {activePopupInfo && activePopupInfo.features.length > 0 && (
+                  <FeatureHoverPopup
+                    hoverInfo={activePopupInfo}
+                    selectedIndex={activePopupInfo.selectedIndex}
+                    propertyEntries={propertyEntries}
+                    onIndexChange={(index) => {
+                      if (activePopupInfo.isPinned) {
+                        setPinnedPopupInfo((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
+                        return;
+                      }
+                      setHoverInfo((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
+                    }}
+                    onClose={() => setPinnedPopupInfo(null)}
+                  />
+                )}
+                {legendStyle && (
+                  <MapLegend
+                    items={legendItems}
+                    visible={legendVisible}
+                    onToggle={() => setLegendVisible(!legendVisible)}
+                  />
+                )}
+              </div>
+            </ResizablePanel>
+            {selectedFeatures.length > 0 && (
+              <>
+                <ResizableHandle withHandle />
+                <ResizablePanel
+                  defaultSize="32%"
+                  minSize="18%"
+                  className="min-h-0 overflow-hidden"
+                  onResize={() => mapRef.current?.resize()}
+                >
+                  <FeatureTablePanel
+                    features={selectedFeatures}
+                    wasSelectionCapped={wasSelectionCapped}
+                    s2Level={s2Level}
+                    onS2LevelChange={setS2Level}
+                    onClear={() => {
+                      clearSelectedFeatures();
+                    }}
+                  />
+                </ResizablePanel>
+              </>
             )}
-            {legendStyle && (
-              <MapLegend
-                items={legendItems}
-                visible={legendVisible}
-                onToggle={() => setLegendVisible(!legendVisible)}
-              />
-            )}
-          </div>
+          </ResizablePanelGroup>
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

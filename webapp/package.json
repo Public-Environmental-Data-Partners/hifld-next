@@ -55,6 +55,7 @@
     "lucide-react": "^0.544.0",
     "maplibre-gl": "^5.17.0",
     "nitro": "latest",
+    "nodes2ts": "^4.0.2",
     "pmtiles": "^3.2.1",
     "posthog-js": "^1.347.2",
     "radix-ui": "^1.4.3",
