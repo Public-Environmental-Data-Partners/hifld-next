@@ -31,6 +31,7 @@ interface SelectionLngLat {
 
 type SelectionBoxFeature = GeoJSON.Feature<GeoJSON.Polygon>;
 type SelectionBoxFeatureCollection = GeoJSON.FeatureCollection<GeoJSON.Polygon>;
+type PopupLngLat = NonNullable<HoverInfo["lngLat"]>;
 
 const SELECTION_BOX_SOURCE_ID = "selection-box-source";
 const SELECTION_BOX_FILL_LAYER_ID = "selection-box-fill";
@@ -113,6 +114,24 @@ export function handleMapClick({
     isPinned: true,
     lngLat,
   });
+}
+
+export function syncPinnedPopupPosition({
+  map,
+  lngLat,
+  element,
+}: {
+  map: Pick<maplibregl.Map, "project">;
+  lngLat: PopupLngLat | null | undefined;
+  element: HTMLDivElement | null | undefined;
+}): void {
+  if (!lngLat || !element) {
+    return;
+  }
+
+  const point = map.project({ lng: lngLat.lng, lat: lngLat.lat });
+  element.style.left = `${point.x + 12}px`;
+  element.style.top = `${point.y + 12}px`;
 }
 
 function queryRenderedSelectionFeatures({
@@ -474,6 +493,8 @@ export function useMultiLayerMapInitialization(
   onFeatureSelection?: ((features: maplibregl.MapGeoJSONFeature[], mode: FeatureSelectionMode) => void) | undefined,
   isSelectionActive = false,
   basemapMode: BasemapMode = "street",
+  pinnedPopupLngLat?: PopupLngLat | null,
+  pinnedPopupElementRef?: React.RefObject<HTMLDivElement | null>,
 ) {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const initialBasemapModeRef = useRef(basemapMode);
@@ -483,6 +504,8 @@ export function useMultiLayerMapInitialization(
   const onHoverRef = useRef(onHover);
   const onLayersLoadedRef = useRef(onLayersLoaded);
   const onPinnedPopupRef = useRef(onPinnedPopup);
+  const pinnedPopupLngLatRef = useRef(pinnedPopupLngLat);
+  const pinnedPopupElementRefRef = useRef(pinnedPopupElementRef);
   const isSelectionActiveRef = useRef(isSelectionActive);
   const boxSelectionStartRef = useRef<{ x: number; y: number } | null>(null);
   const boxSelectionStartLngLatRef = useRef<SelectionLngLat | null>(null);
@@ -510,6 +533,14 @@ export function useMultiLayerMapInitialization(
   useEffect(() => {
     onPinnedPopupRef.current = onPinnedPopup;
   }, [onPinnedPopup]);
+
+  useEffect(() => {
+    pinnedPopupLngLatRef.current = pinnedPopupLngLat;
+  }, [pinnedPopupLngLat]);
+
+  useEffect(() => {
+    pinnedPopupElementRefRef.current = pinnedPopupElementRef;
+  }, [pinnedPopupElementRef]);
 
   useEffect(() => {
     isSelectionActiveRef.current = isSelectionActive;
@@ -624,6 +655,13 @@ export function useMultiLayerMapInitialization(
     const updateCursorForCurrentSelectionState = () => {
       setMapSelectionCursor(map, isSelectionActiveRef.current || boxSelectionStartRef.current !== null);
     };
+    const updatePinnedPopupPosition = () => {
+      syncPinnedPopupPosition({
+        map,
+        lngLat: pinnedPopupLngLatRef.current,
+        element: pinnedPopupElementRefRef.current?.current,
+      });
+    };
 
     map.on("mousemove", (event) => {
       if (!mapRef.current || interactiveLayerIds.current.length === 0) return;
@@ -715,6 +753,9 @@ export function useMultiLayerMapInitialization(
       onHoverRef.current(null);
     });
 
+    map.on("move", updatePinnedPopupPosition);
+    map.on("resize", updatePinnedPopupPosition);
+
     return () => {
       map.remove();
       mapRef.current = null;
@@ -762,6 +803,16 @@ export function useMultiLayerMapInitialization(
       cancelled = true;
     };
   }, [sources]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    syncPinnedPopupPosition({
+      map,
+      lngLat: pinnedPopupLngLat,
+      element: pinnedPopupElementRef?.current,
+    });
+  }, [pinnedPopupLngLat, pinnedPopupElementRef]);
 
   useEffect(() => {
     const previous = document.body.style.overflow;

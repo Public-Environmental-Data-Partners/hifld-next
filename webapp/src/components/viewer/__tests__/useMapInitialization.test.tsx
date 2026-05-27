@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   getVectorLayers,
   handleMapClick,
+  syncPinnedPopupPosition,
   removeInactiveMapSources,
   selectionBoxFeature,
   syncBasemapVisibility,
@@ -121,6 +122,23 @@ describe("useMapInitialization helpers", () => {
     });
 
     expect(map.queryRenderedFeatures).not.toHaveBeenCalled();
+  });
+
+  it("syncs pinned popup element position from its geographic anchor", () => {
+    const element = document.createElement("div");
+    const map = {
+      project: vi.fn(() => ({ x: 42, y: 84 })),
+    };
+
+    syncPinnedPopupPosition({
+      map,
+      lngLat: { lng: -77.03, lat: 38.9 },
+      element,
+    });
+
+    expect(map.project).toHaveBeenCalledWith({ lng: -77.03, lat: 38.9 });
+    expect(element.style.left).toBe("54px");
+    expect(element.style.top).toBe("96px");
   });
 
   it("hides existing rendered layers with map layout visibility", () => {

@@ -303,6 +303,14 @@ function popupProperties(hoverInfo: HoverInfo | null): PopupPropertyEntry[] {
     .sort(([left], [right]) => left.localeCompare(right));
 }
 
+function selectedFeatureIdFromHoverInfo(hoverInfo: HoverInfo | null, loadedLayers: LoadedMapLayer[]): string | null {
+  const hoveredFeature = hoverInfo?.features[hoverInfo.selectedIndex ?? 0] ?? null;
+  if (!hoveredFeature) {
+    return null;
+  }
+  return normalizeSelectedFeatures({ features: [hoveredFeature], loadedLayers })[0]?.id ?? null;
+}
+
 export function resolvedToMapLayer(entry: ResolvedDescriptor): LoadedMapLayer | null {
   if (entry.descriptor.formatType !== "pmtiles") return null;
   const url = buildSourceFileUrl(entry.source);
@@ -492,6 +500,7 @@ export function MapWorkspace({
   onSearchQueryChange,
 }: MapWorkspaceProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  const pinnedPopupElementRef = useRef<HTMLDivElement>(null);
   const settingsPanelRef = useRef<PanelImperativeHandle | null>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialLayerKeyRef = useRef(initialLayerKey);
@@ -597,6 +606,8 @@ export function MapWorkspace({
     handleFeatureSelection,
     isSelectionActive,
     basemapMode,
+    pinnedPopupInfo?.lngLat ?? null,
+    pinnedPopupElementRef,
   );
 
   useLayerStyling(mapRef, vectorLayers, layerStyles, setLayerStyles);
@@ -639,6 +650,23 @@ export function MapWorkspace({
 
   const activePopupInfo = pinnedPopupInfo ?? hoverInfo;
   const propertyEntries = popupProperties(activePopupInfo);
+  const highlightedFeatureId = useMemo(
+    () => selectedFeatureIdFromHoverInfo(hoverInfo, loadedLayers),
+    [hoverInfo, loadedLayers],
+  );
+  const zoomToSelectedFeature = useCallback(
+    (feature: SelectedMapFeature) => {
+      if (!feature.centroid) return;
+      const map = mapRef.current;
+      if (!map) return;
+      map.easeTo({
+        center: [feature.centroid.lng, feature.centroid.lat],
+        zoom: Math.max(map.getZoom(), 14),
+        duration: 500,
+      });
+    },
+    [mapRef],
+  );
   const legendLayer = vectorLayers[0] ?? null;
   const legendStyle = legendLayer ? (layerStyles[legendLayer.id] ?? null) : null;
   const legendBreaks = legendStyle ? parseBreaks(legendStyle.breaksText) : [];
@@ -1016,6 +1044,7 @@ export function MapWorkspace({
                 />
                 {activePopupInfo && activePopupInfo.features.length > 0 && (
                   <FeatureHoverPopup
+                    popupRef={activePopupInfo.isPinned ? pinnedPopupElementRef : undefined}
                     hoverInfo={activePopupInfo}
                     selectedIndex={activePopupInfo.selectedIndex}
                     propertyEntries={propertyEntries}
@@ -1049,9 +1078,11 @@ export function MapWorkspace({
                 >
                   <FeatureTablePanel
                     features={selectedFeatures}
+                    highlightedFeatureId={highlightedFeatureId}
                     wasSelectionCapped={wasSelectionCapped}
                     s2Level={s2Level}
                     onS2LevelChange={setS2Level}
+                    onFeatureClick={zoomToSelectedFeature}
                     onClear={() => {
                       clearSelectedFeatures();
                     }}

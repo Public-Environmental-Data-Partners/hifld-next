@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ChevronsUpDown, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronsUpDown, Info, LocateFixed, Search, X } from "lucide-react";
 import * as React from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
   buildFeatureDiff,
@@ -28,19 +29,22 @@ import type { SelectedMapFeature } from "./featureSelection";
 
 interface FeatureTablePanelProps {
   features: SelectedMapFeature[];
+  highlightedFeatureId?: string | null | undefined;
   wasSelectionCapped: boolean;
   s2Level: number;
   onS2LevelChange: (level: number) => void;
+  onFeatureClick?: ((feature: SelectedMapFeature) => void) | undefined;
   onClear: () => void;
 }
 
 type FeaturePanelTab = "selected" | "diff";
 type DiffCellSide = "left" | "right";
+type DiffColumnMode = "changed" | "all";
 
 const S2_LEVEL_OPTIONS = [
-  { label: "Tight", value: 18 },
-  { label: "Normal", value: 16 },
-  { label: "Loose", value: 14 },
+  { label: "Tight (~100 m)", value: 18 },
+  { label: "Normal (~500 m)", value: 16 },
+  { label: "Loose (~2 km)", value: 14 },
 ];
 
 function sortedPropertyKeys(features: SelectedMapFeature[]): string[] {
@@ -125,6 +129,31 @@ function selectedFeatureSubset({
   );
 }
 
+function selectedFeatureSortValue(feature: SelectedMapFeature, column: string): string {
+  if (column === "feature") {
+    return feature.featureId;
+  }
+  return feature.properties[column] ?? "";
+}
+
+function sortSelectedFeatures(features: SelectedMapFeature[], sort: FeatureDiffSort | undefined): SelectedMapFeature[] {
+  if (!sort) {
+    return features;
+  }
+  const direction = sort.direction === "asc" ? 1 : -1;
+  return [...features].sort(
+    (left, right) =>
+      selectedFeatureSortValue(left, sort.column).localeCompare(
+        selectedFeatureSortValue(right, sort.column),
+        undefined,
+        {
+          numeric: true,
+          sensitivity: "base",
+        },
+      ) * direction,
+  );
+}
+
 function statusVariant(status: FeatureDiffStatus): "default" | "secondary" | "outline" | "destructive" {
   if (status === "changed" || status === "possible match") return "default";
   if (status === "left only" || status === "right only") return "secondary";
@@ -143,6 +172,10 @@ function SelectedFeaturesTable({
   selectedVersion,
   onSelectedLayerKeyChange,
   onSelectedVersionChange,
+  sort,
+  onSortChange,
+  highlightedFeatureId,
+  onFeatureClick,
 }: {
   features: SelectedMapFeature[];
   query: string;
@@ -151,6 +184,10 @@ function SelectedFeaturesTable({
   selectedVersion: string;
   onSelectedLayerKeyChange: (layerKey: string) => void;
   onSelectedVersionChange: (version: string) => void;
+  sort: FeatureDiffSort | undefined;
+  onSortChange: (sort: FeatureDiffSort) => void;
+  highlightedFeatureId?: string | null | undefined;
+  onFeatureClick?: ((feature: SelectedMapFeature) => void) | undefined;
 }) {
   const groups = buildFeatureGroupOptions(features);
   const selectedGroup = groups.find((group) => group.key === selectedLayerKey) ?? groups[0];
@@ -161,7 +198,10 @@ function SelectedFeaturesTable({
       ? selectedFeatureSubset({ features, selectedLayerKey: selectedGroup.key, selectedVersion: activeVersion })
       : [];
   const propertyKeys = sortedPropertyKeys(scopedFeatures);
-  const visibleFeatures = scopedFeatures.filter((feature) => featureMatchesQuery(feature, query));
+  const visibleFeatures = sortSelectedFeatures(
+    scopedFeatures.filter((feature) => featureMatchesQuery(feature, query)),
+    sort,
+  );
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
@@ -203,18 +243,52 @@ function SelectedFeaturesTable({
         <table className="w-full min-w-[640px] text-sm">
           <thead className="sticky top-0 z-10 bg-background">
             <tr className="border-b text-left text-xs text-muted-foreground">
-              <th className="px-3 py-2 font-medium">Feature</th>
+              <th className="px-3 py-2 font-medium">
+                <SelectedFeatureColumnHeader column="feature" label="Feature" sort={sort} onSortChange={onSortChange} />
+              </th>
               {propertyKeys.map((key) => (
                 <th key={key} className="px-3 py-2 font-medium">
-                  {key}
+                  <SelectedFeatureColumnHeader column={key} label={key} sort={sort} onSortChange={onSortChange} />
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {visibleFeatures.map((feature) => (
-              <tr key={feature.id} className="border-b align-top">
-                <td className="max-w-40 truncate px-3 py-2 font-mono text-xs">{feature.featureId}</td>
+              <tr
+                key={feature.id}
+                data-testid="selected-feature-row"
+                className={cn(
+                  "border-b align-top transition-colors",
+                  feature.id === highlightedFeatureId ? "bg-accent/50" : undefined,
+                  feature.centroid && onFeatureClick ? "cursor-pointer hover:bg-accent/30" : undefined,
+                )}
+                onClick={() => {
+                  if (feature.centroid) {
+                    onFeatureClick?.(feature);
+                  }
+                }}
+              >
+                <td className="max-w-48 px-3 py-2 font-mono text-xs">
+                  <span className="flex min-w-0 items-center gap-2">
+                    {feature.centroid && onFeatureClick ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0"
+                        aria-label={`Zoom to feature ${feature.featureId}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onFeatureClick(feature);
+                        }}
+                      >
+                        <LocateFixed className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : null}
+                    <span className="min-w-0 truncate">{feature.featureId}</span>
+                  </span>
+                </td>
                 {propertyKeys.map((key) => (
                   <td key={key} className="max-w-56 break-words px-3 py-2">
                     {feature.properties[key] ?? ""}
@@ -234,6 +308,32 @@ function SelectedFeaturesTable({
   );
 }
 
+function SelectedFeatureColumnHeader({
+  column,
+  label,
+  sort,
+  onSortChange,
+}: {
+  column: string;
+  label: string;
+  sort: FeatureDiffSort | undefined;
+  onSortChange: (sort: FeatureDiffSort) => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-7 max-w-full gap-1 px-1 text-xs"
+      aria-label={`Sort by ${label}`}
+      onClick={() => onSortChange(nextSort(sort, column))}
+    >
+      <span className="truncate">{label}</span>
+      <SortIcon sort={sort} column={column} />
+    </Button>
+  );
+}
+
 function DiffTable({
   features,
   s2Level,
@@ -244,8 +344,12 @@ function DiffTable({
   onRightVersionChange,
   matchKeyPairs,
   onMatchKeyPairsChange,
+  columnMode,
+  onColumnModeChange,
   sort,
   onSortChange,
+  highlightedFeatureId,
+  onFeatureClick,
 }: {
   features: SelectedMapFeature[];
   s2Level: number;
@@ -256,8 +360,12 @@ function DiffTable({
   onRightVersionChange: (version: string) => void;
   matchKeyPairs: FeatureDiffMatchKeyPair[];
   onMatchKeyPairsChange: (pairs: FeatureDiffMatchKeyPair[]) => void;
+  columnMode: DiffColumnMode;
+  onColumnModeChange: (mode: DiffColumnMode) => void;
   sort: FeatureDiffSort | undefined;
   onSortChange: (sort: FeatureDiffSort) => void;
+  highlightedFeatureId?: string | null | undefined;
+  onFeatureClick?: ((feature: SelectedMapFeature) => void) | undefined;
 }) {
   const versions = comparableFeatureDiffVersions(features);
   const leftKeyOptions = featureDiffMatchKeyOptions(features, leftVersion);
@@ -266,7 +374,8 @@ function DiffTable({
   const usesGeometry = matchKeyPairs.some(
     (pair) => pair.left === GEOMETRY_MATCH_COLUMN && pair.right === GEOMETRY_MATCH_COLUMN,
   );
-  const visibleColumns = changedFeatureDiffColumns(diff);
+  const changedColumns = changedFeatureDiffColumns(diff);
+  const visibleColumns = columnMode === "changed" ? changedColumns : diff.columns;
 
   if (!diff.canCompare) {
     return (
@@ -289,6 +398,8 @@ function DiffTable({
         rightKeyOptions={rightKeyOptions}
         matchKeyPairs={matchKeyPairs}
         onMatchKeyPairsChange={onMatchKeyPairsChange}
+        columnMode={columnMode}
+        onColumnModeChange={onColumnModeChange}
         usesGeometry={usesGeometry}
         s2Level={s2Level}
         onS2LevelChange={onS2LevelChange}
@@ -305,6 +416,8 @@ function DiffTable({
             matchKeyPairs={matchKeyPairs}
             sort={sort}
             onSortChange={onSortChange}
+            highlightedFeatureId={highlightedFeatureId}
+            onFeatureClick={onFeatureClick}
           />
         )}
       </div>
@@ -332,6 +445,8 @@ function DiffToolbar({
   rightKeyOptions,
   matchKeyPairs,
   onMatchKeyPairsChange,
+  columnMode,
+  onColumnModeChange,
   usesGeometry,
   s2Level,
   onS2LevelChange,
@@ -345,6 +460,8 @@ function DiffToolbar({
   rightKeyOptions: FeatureDiffColumn[];
   matchKeyPairs: FeatureDiffMatchKeyPair[];
   onMatchKeyPairsChange: (pairs: FeatureDiffMatchKeyPair[]) => void;
+  columnMode: DiffColumnMode;
+  onColumnModeChange: (mode: DiffColumnMode) => void;
   usesGeometry: boolean;
   s2Level: number;
   onS2LevelChange: (level: number) => void;
@@ -379,27 +496,60 @@ function DiffToolbar({
         </select>
       </div>
       <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 text-xs text-muted-foreground lg:justify-end">
+        <div className="flex shrink-0 items-center gap-2">
+          Columns
+          <select
+            aria-label="Columns"
+            value={columnMode}
+            onChange={(event) => onColumnModeChange(event.target.value as DiffColumnMode)}
+            className="h-8 w-40 rounded-md border bg-background px-2 text-sm text-foreground"
+          >
+            <option value="changed">Changed columns</option>
+            <option value="all">All columns</option>
+          </select>
+        </div>
         <MatchKeyPicker
           leftOptions={leftKeyOptions}
           rightOptions={rightKeyOptions}
+          leftVersion={leftVersion}
+          rightVersion={rightVersion}
           pairs={matchKeyPairs}
           onChange={onMatchKeyPairsChange}
         />
         {usesGeometry && (
           <div className="flex shrink-0 items-center gap-2">
-            S2 tolerance
-            <Select value={String(s2Level)} onValueChange={(value) => onS2LevelChange(Number(value))}>
-              <SelectTrigger className="h-8 w-28">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {S2_LEVEL_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={String(option.value)}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <span className="flex items-center gap-1">
+              Geographic tolerance
+              <TooltipProvider delayDuration={0}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Explain geographic tolerance"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-72">
+                    Uses S2 grid cells around each selected feature centroid. Tighter tolerance uses smaller cells;
+                    loose tolerance accepts larger nearby areas.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </span>
+            <select
+              aria-label="Geographic tolerance"
+              value={String(s2Level)}
+              onChange={(event) => onS2LevelChange(Number(event.target.value))}
+              className="h-8 w-40 rounded-md border bg-background px-2 text-sm text-foreground"
+            >
+              {S2_LEVEL_OPTIONS.map((option) => (
+                <option key={option.value} value={String(option.value)}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </div>
         )}
       </div>
@@ -413,12 +563,16 @@ function ChangedColumnsDiffGrid({
   matchKeyPairs,
   sort,
   onSortChange,
+  highlightedFeatureId,
+  onFeatureClick,
 }: {
   diff: FeatureDiffResult;
   columns: FeatureDiffColumn[];
   matchKeyPairs: FeatureDiffMatchKeyPair[];
   sort: FeatureDiffSort | undefined;
   onSortChange: (sort: FeatureDiffSort) => void;
+  highlightedFeatureId?: string | null | undefined;
+  onFeatureClick?: ((feature: SelectedMapFeature) => void) | undefined;
 }) {
   return (
     <table className="w-full min-w-[760px] text-sm">
@@ -458,31 +612,101 @@ function ChangedColumnsDiffGrid({
       </thead>
       <tbody>
         {diff.rows.map((row) => (
-          <tr key={row.id} data-testid="feature-diff-row" className="border-b align-top">
-            <td className="sticky left-0 bg-background px-3 py-2">
-              <Badge variant={statusVariant(row.status)}>{row.status}</Badge>
-              <div className="mt-1 text-xs text-muted-foreground">{row.matchMethod}</div>
-            </td>
-            <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">
-              {Math.round(row.confidence * 100)}%
-            </td>
-            <td className="max-w-64 border-l px-3 py-2 text-xs">
-              <MatchKeyValues row={row} matchKeyPairs={matchKeyPairs} />
-            </td>
-            {columns.map((column) => (
-              <DiffCell
-                key={`${row.id}-${column.key}`}
-                version={diff.rightVersion ?? "Right"}
-                column={column}
-                cell={row.cells[column.key] ?? emptyDiffCell()}
-                side="right"
-              />
-            ))}
-          </tr>
+          <DiffGridRow
+            key={row.id}
+            row={row}
+            columns={columns}
+            rightVersion={diff.rightVersion ?? "Right"}
+            matchKeyPairs={matchKeyPairs}
+            highlightedFeatureId={highlightedFeatureId}
+            onFeatureClick={onFeatureClick}
+          />
         ))}
       </tbody>
     </table>
   );
+}
+
+function DiffGridRow({
+  row,
+  columns,
+  rightVersion,
+  matchKeyPairs,
+  highlightedFeatureId,
+  onFeatureClick,
+}: {
+  row: FeatureDiffRow;
+  columns: FeatureDiffColumn[];
+  rightVersion: string;
+  matchKeyPairs: FeatureDiffMatchKeyPair[];
+  highlightedFeatureId?: string | null | undefined;
+  onFeatureClick?: ((feature: SelectedMapFeature) => void) | undefined;
+}) {
+  const targetFeature = zoomTargetForDiffRow(row);
+  const isClickable = Boolean(targetFeature?.centroid && onFeatureClick);
+  const isHighlighted = row.left?.id === highlightedFeatureId || row.right?.id === highlightedFeatureId;
+
+  const zoomToTarget = () => {
+    if (targetFeature?.centroid) {
+      onFeatureClick?.(targetFeature);
+    }
+  };
+
+  return (
+    <tr
+      data-testid="feature-diff-row"
+      className={cn(
+        "border-b align-top transition-colors",
+        isHighlighted ? "bg-accent/50" : undefined,
+        isClickable ? "cursor-pointer hover:bg-accent/30" : undefined,
+      )}
+      onClick={zoomToTarget}
+    >
+      <td className={cn("sticky left-0 px-3 py-2", isHighlighted ? "bg-accent/50" : "bg-background")}>
+        <span className="flex items-center gap-2">
+          {isClickable ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0"
+              aria-label={`Zoom to diff row ${row.id}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                zoomToTarget();
+              }}
+            >
+              <LocateFixed className="h-3.5 w-3.5" />
+            </Button>
+          ) : null}
+          <Badge variant={statusVariant(row.status)}>{row.status}</Badge>
+        </span>
+      </td>
+      <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{Math.round(row.confidence * 100)}%</td>
+      <td className="max-w-64 border-l px-3 py-2 text-xs">
+        <MatchKeyValues row={row} matchKeyPairs={matchKeyPairs} />
+      </td>
+      {columns.map((column) => (
+        <DiffCell
+          key={`${row.id}-${column.key}`}
+          version={rightVersion}
+          column={column}
+          cell={row.cells[column.key] ?? emptyDiffCell()}
+          side="right"
+        />
+      ))}
+    </tr>
+  );
+}
+
+function zoomTargetForDiffRow(row: FeatureDiffRow): SelectedMapFeature | null {
+  if (row.right?.centroid) {
+    return row.right;
+  }
+  if (row.left?.centroid) {
+    return row.left;
+  }
+  return row.right ?? row.left;
 }
 
 function matchKeyLabel(pair: FeatureDiffMatchKeyPair): string {
@@ -689,6 +913,8 @@ function addableMatchKeyPair({
 interface MatchKeyPickerProps {
   leftOptions: { key: string; label: string }[];
   rightOptions: { key: string; label: string }[];
+  leftVersion: string;
+  rightVersion: string;
   pairs: FeatureDiffMatchKeyPair[];
   onChange: (pairs: FeatureDiffMatchKeyPair[]) => void;
 }
@@ -703,7 +929,7 @@ class MatchKeyPicker extends React.Component<MatchKeyPickerProps, MatchKeyPicker
   };
 
   override render() {
-    const { leftOptions, rightOptions, pairs, onChange } = this.props;
+    const { leftOptions, rightOptions, leftVersion, rightVersion, pairs, onChange } = this.props;
     const fallbackLeft = leftOptions[0]?.key ?? "";
     const fallbackRight = rightOptions[0]?.key ?? "";
     const visiblePairs =
@@ -722,45 +948,51 @@ class MatchKeyPicker extends React.Component<MatchKeyPickerProps, MatchKeyPicker
             <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="end" avoidCollisions={false} className="max-h-80 w-56 overflow-auto p-3" side="bottom">
+        <PopoverContent align="end" avoidCollisions={false} className="max-h-80 w-64 overflow-auto p-3" side="bottom">
           <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Match rows by</div>
           <div className="space-y-2">
             {visiblePairs.map((pair, index) => (
               <div key={pair.id} className="grid grid-cols-1 items-center gap-2">
-                <select
-                  aria-label={`Left match key ${index + 1}`}
-                  value={pair.left}
-                  onChange={(event) => {
-                    const nextPairs = visiblePairs.map((entry, entryIndex) =>
-                      entryIndex === index ? nextPairForSide(entry, "left", event.target.value) : entry,
-                    );
-                    onChange(nextPairs);
-                  }}
-                  className="h-8 w-full min-w-0 truncate rounded-md border bg-background px-2 text-sm"
-                >
-                  {leftOptions.map((option) => (
-                    <option key={option.key} value={option.key}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label={`Right match key ${index + 1}`}
-                  value={pair.right}
-                  onChange={(event) => {
-                    const nextPairs = visiblePairs.map((entry, entryIndex) =>
-                      entryIndex === index ? nextPairForSide(entry, "right", event.target.value) : entry,
-                    );
-                    onChange(nextPairs);
-                  }}
-                  className="h-8 w-full min-w-0 truncate rounded-md border bg-background px-2 text-sm"
-                >
-                  {rightOptions.map((option) => (
-                    <option key={option.key} value={option.key}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                <div className="space-y-1">
+                  <div className="text-xs font-medium text-muted-foreground">{leftVersion} key</div>
+                  <select
+                    aria-label={`Left match key ${index + 1}`}
+                    value={pair.left}
+                    onChange={(event) => {
+                      const nextPairs = visiblePairs.map((entry, entryIndex) =>
+                        entryIndex === index ? nextPairForSide(entry, "left", event.target.value) : entry,
+                      );
+                      onChange(nextPairs);
+                    }}
+                    className="h-8 w-full min-w-0 truncate rounded-md border bg-background px-2 text-sm"
+                  >
+                    {leftOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-xs font-medium text-muted-foreground">{rightVersion} key</div>
+                  <select
+                    aria-label={`Right match key ${index + 1}`}
+                    value={pair.right}
+                    onChange={(event) => {
+                      const nextPairs = visiblePairs.map((entry, entryIndex) =>
+                        entryIndex === index ? nextPairForSide(entry, "right", event.target.value) : entry,
+                      );
+                      onChange(nextPairs);
+                    }}
+                    className="h-8 w-full min-w-0 truncate rounded-md border bg-background px-2 text-sm"
+                  >
+                    {rightOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <Button
                   type="button"
                   variant="ghost"
@@ -805,6 +1037,8 @@ interface FeatureTablePanelState {
   leftVersion: string;
   rightVersion: string;
   matchKeyPairs: FeatureDiffMatchKeyPair[];
+  selectedSort: FeatureDiffSort | undefined;
+  diffColumnMode: DiffColumnMode;
   sort: FeatureDiffSort | undefined;
 }
 
@@ -817,6 +1051,8 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
     leftVersion: "",
     rightVersion: "",
     matchKeyPairs: [],
+    selectedSort: undefined,
+    diffColumnMode: "changed",
     sort: undefined,
   };
 
@@ -879,9 +1115,20 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
   }
 
   override render() {
-    const { features, wasSelectionCapped, s2Level, onS2LevelChange, onClear } = this.props;
-    const { activeTab, query, selectedLayerKey, selectedVersion, leftVersion, rightVersion, matchKeyPairs, sort } =
-      this.state;
+    const { features, highlightedFeatureId, wasSelectionCapped, s2Level, onS2LevelChange, onFeatureClick, onClear } =
+      this.props;
+    const {
+      activeTab,
+      query,
+      selectedLayerKey,
+      selectedVersion,
+      leftVersion,
+      rightVersion,
+      matchKeyPairs,
+      selectedSort,
+      diffColumnMode,
+      sort,
+    } = this.state;
     const canDiff = isComparableFeatureDiffSelection(features);
 
     return (
@@ -889,19 +1136,19 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <div className="text-sm font-semibold">{features.length} selected features</div>
-            {wasSelectionCapped && <Badge variant="secondary">Selection is capped at 100 features.</Badge>}
+            {wasSelectionCapped && <Badge variant="secondary">Selection is capped at 100 features per layer.</Badge>}
           </div>
           <div className="flex items-center gap-2">
-            <div className="rounded-md border p-0.5">
-              <Button
-                type="button"
-                variant={activeTab === "selected" ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() => this.setState({ activeTab: "selected" })}
-              >
-                Selected features
-              </Button>
-              {canDiff && (
+            {canDiff && (
+              <div className="rounded-md border p-0.5">
+                <Button
+                  type="button"
+                  variant={activeTab === "selected" ? "secondary" : "ghost"}
+                  size="sm"
+                  onClick={() => this.setState({ activeTab: "selected" })}
+                >
+                  Selected features
+                </Button>
                 <Button
                   type="button"
                   variant={activeTab === "diff" ? "secondary" : "ghost"}
@@ -910,8 +1157,8 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
                 >
                   Version diff
                 </Button>
-              )}
-            </div>
+              </div>
+            )}
             <Button type="button" variant="ghost" size="icon" onClick={onClear} aria-label="Clear selected features">
               <X className="h-4 w-4" />
             </Button>
@@ -934,6 +1181,10 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
                 });
               }}
               onSelectedVersionChange={(nextVersion) => this.setState({ selectedVersion: nextVersion })}
+              sort={selectedSort}
+              onSortChange={(nextSortValue) => this.setState({ selectedSort: nextSortValue })}
+              highlightedFeatureId={highlightedFeatureId}
+              onFeatureClick={onFeatureClick}
             />
           ) : (
             <DiffTable
@@ -960,8 +1211,12 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
               }}
               matchKeyPairs={matchKeyPairs}
               onMatchKeyPairsChange={(nextPairs) => this.setState({ matchKeyPairs: nextPairs })}
+              columnMode={diffColumnMode}
+              onColumnModeChange={(nextColumnMode) => this.setState({ diffColumnMode: nextColumnMode })}
               sort={sort}
               onSortChange={(nextSortValue) => this.setState({ sort: nextSortValue })}
+              highlightedFeatureId={highlightedFeatureId}
+              onFeatureClick={onFeatureClick}
             />
           )}
         </div>

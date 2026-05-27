@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import type { Ref } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -11,6 +12,7 @@ interface FeatureHoverPopupProps {
   propertyEntries: PopupPropertyEntry[];
   onIndexChange: (index: number) => void;
   onClose?: () => void;
+  popupRef?: Ref<HTMLDivElement> | undefined;
 }
 
 export function FeatureHoverPopup({
@@ -19,6 +21,7 @@ export function FeatureHoverPopup({
   propertyEntries,
   onIndexChange,
   onClose,
+  popupRef,
 }: FeatureHoverPopupProps) {
   const selectedFeature = hoverInfo.features[selectedIndex];
   const layerId = selectedFeature?.layer?.id || "Feature";
@@ -26,6 +29,7 @@ export function FeatureHoverPopup({
 
   return (
     <div
+      ref={popupRef}
       className="absolute z-10 max-w-md rounded-md border bg-background/95 shadow-md"
       style={{ left: hoverInfo.x + 12, top: hoverInfo.y + 12 }}
     >

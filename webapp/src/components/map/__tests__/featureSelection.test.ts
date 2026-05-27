@@ -83,7 +83,7 @@ describe("feature selection helpers", () => {
     });
   });
 
-  it("dedupes selected features and caps appended selections at 100", () => {
+  it("dedupes selected features and caps appended selections at 100 per loaded layer", () => {
     const existing = normalizeSelectedFeatures({
       features: [feature()],
       loadedLayers: [layer],
@@ -104,5 +104,47 @@ describe("feature selection helpers", () => {
     expect(result.rows).toHaveLength(100);
     expect(result.wasCapped).toBe(true);
     expect(new Set(result.rows.map((row) => row.id)).size).toBe(100);
+  });
+
+  it("allows each loaded layer to keep up to 100 selected features", () => {
+    const secondLayer: LoadedMapLayer = {
+      ...layer,
+      id: "loaded-hospitals-v100",
+      name: "Hospitals / v1.0.0",
+      descriptor: {
+        ...descriptor,
+        version: "v1.0.0",
+        sourceId: 15,
+      },
+      mapSourceId: "source-loaded-hospitals-v100",
+    };
+    const firstLayerFeatures = Array.from({ length: 100 }, (_, index) =>
+      feature({
+        id: `first-${index}`,
+        source: layer.mapSourceId,
+        properties: { OBJECTID: index, NAME: `Current ${index}` },
+      }),
+    );
+    const secondLayerFeatures = Array.from({ length: 100 }, (_, index) =>
+      feature({
+        id: `second-${index}`,
+        source: secondLayer.mapSourceId,
+        properties: { OBJECTID: index, NAME: `Previous ${index}` },
+      }),
+    );
+
+    const result = updateSelectedFeatures({
+      current: [],
+      incoming: normalizeSelectedFeatures({
+        features: [...firstLayerFeatures, ...secondLayerFeatures],
+        loadedLayers: [layer, secondLayer],
+      }),
+      mode: "replace",
+    });
+
+    expect(result.rows).toHaveLength(200);
+    expect(result.wasCapped).toBe(false);
+    expect(result.rows.filter((row) => row.loadedLayerId === layer.id)).toHaveLength(100);
+    expect(result.rows.filter((row) => row.loadedLayerId === secondLayer.id)).toHaveLength(100);
   });
 });

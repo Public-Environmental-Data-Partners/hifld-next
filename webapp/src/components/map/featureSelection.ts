@@ -177,19 +177,25 @@ export function updateSelectedFeatures({
   const candidates = mode === "replace" ? incoming : [...current, ...incoming];
   const rows: SelectedMapFeature[] = [];
   const seen = new Set<string>();
+  const countByLoadedLayer = new Map<string, number>();
+  let wasCapped = false;
 
   for (const candidate of candidates) {
     if (seen.has(candidate.id)) {
       continue;
     }
     seen.add(candidate.id);
-    if (rows.length < MAX_SELECTED_FEATURES) {
-      rows.push(candidate);
+    const layerCount = countByLoadedLayer.get(candidate.loadedLayerId) ?? 0;
+    if (layerCount >= MAX_SELECTED_FEATURES) {
+      wasCapped = true;
+      continue;
     }
+    countByLoadedLayer.set(candidate.loadedLayerId, layerCount + 1);
+    rows.push(candidate);
   }
 
   return {
     rows,
-    wasCapped: seen.size > MAX_SELECTED_FEATURES,
+    wasCapped,
   };
 }
