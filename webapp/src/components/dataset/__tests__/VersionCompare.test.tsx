@@ -80,4 +80,77 @@ describe("VersionCompare", () => {
     expect(screen.getByText("population")).toBeInTheDocument();
     expect(screen.getByText("Removed")).toBeInTheDocument();
   });
+
+  it("handles null size metadata in the metadata table without crashing", () => {
+    const sourceWithNullSize: DatasetSource = {
+      ...sourceB,
+      source_metadata: {
+        ...sourceB.source_metadata,
+        version: "v1",
+        size_bytes: null,
+      },
+    };
+
+    render(<VersionCompare leftSource={sourceA} rightSource={sourceWithNullSize} />);
+
+    expect(screen.getByText("size_bytes")).toBeInTheDocument();
+  });
+
+  it("does not show summary cards above the diff tables", () => {
+    render(<VersionCompare leftSource={sourceA} rightSource={sourceB} />);
+
+    expect(screen.queryByText("Rows")).not.toBeInTheDocument();
+    expect(screen.queryByText("Changed Fields")).not.toBeInTheDocument();
+    expect(screen.queryByText("Size")).not.toBeInTheDocument();
+  });
+
+  it("does not duplicate quality status in the summary cards", () => {
+    render(<VersionCompare leftSource={sourceA} rightSource={sourceB} />);
+
+    expect(screen.queryByText("Quality")).not.toBeInTheDocument();
+    expect(screen.getByText("quality_check_passed")).toBeInTheDocument();
+  });
+
+  it("does not mark columns changed unless the datatype changes", () => {
+    const left: DatasetSource = {
+      ...sourceA,
+      source_metadata: {
+        ...sourceA.source_metadata,
+        columns_hash: "same-visible-schema",
+        columns: [
+          {
+            name: "district_name",
+            type: "STRING",
+            description: "Congressional district name",
+            nullable: false,
+            example_values: ["A"],
+            length: 10,
+            possible_values: ["A", "B"],
+          },
+        ],
+      },
+    };
+    const right: DatasetSource = {
+      ...sourceB,
+      source_metadata: {
+        ...sourceB.source_metadata,
+        columns_hash: "same-visible-schema-next",
+        columns: [
+          {
+            name: "district_name",
+            type: "STRING",
+            description: "Updated but not datatype",
+            nullable: true,
+            example_values: ["B"],
+            length: 20,
+            possible_values: ["C", "D"],
+          },
+        ],
+      },
+    };
+
+    render(<VersionCompare leftSource={left} rightSource={right} />);
+
+    expect(screen.getByText("No schema changes")).toBeInTheDocument();
+  });
 });

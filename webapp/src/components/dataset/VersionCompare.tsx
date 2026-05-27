@@ -1,5 +1,4 @@
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ColumnSchema, DatasetSource, SpatialDatasetFileMetadata } from "@/lib/api-client";
 
@@ -38,20 +37,16 @@ function isDifferent(
   return JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
 }
 
-function getColumns(metadata?: SpatialDatasetFileMetadata): ColumnSchema[] {
-  return metadata?.columns ?? [];
+function isColumnSchemaDifferent(left: ColumnSchema | undefined, right: ColumnSchema | undefined): boolean {
+  if (!left || !right) {
+    return left !== right;
+  }
+
+  return left.type !== right.type;
 }
 
-function formatBytes(value: number | undefined): string {
-  if (value === undefined || value === 0) return "Unknown";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let size = value;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex++;
-  }
-  return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+function getColumns(metadata?: SpatialDatasetFileMetadata): ColumnSchema[] {
+  return metadata?.columns ?? [];
 }
 
 function sourceLabel(source: DatasetSource, fallback: string): string {
@@ -91,7 +86,7 @@ export function VersionCompare({
       changeType = "Added";
     } else if (left && !right) {
       changeType = "Removed";
-    } else if (left && right && isDifferent(left, right)) {
+    } else if (left && right && isColumnSchemaDifferent(left, right)) {
       changeType = "Changed";
     }
 
@@ -99,51 +94,15 @@ export function VersionCompare({
   });
 
   const changedSchemaRows = schemaRows.filter((row) => row.changeType !== "Unchanged");
-  const changedMetadataCount = METADATA_KEYS.filter((key) => isDifferent(metadataA?.[key], metadataB?.[key])).length;
   const addedColumns = changedSchemaRows.filter((row) => row.changeType === "Added").length;
   const removedColumns = changedSchemaRows.filter((row) => row.changeType === "Removed").length;
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-3 md:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Rows</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold">
-            {normalizeValue(metadataA?.feature_count)} → {normalizeValue(metadataB?.feature_count)}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Quality</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold">
-            {normalizeValue(metadataB?.quality_check_passed)}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Size</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold">{formatBytes(metadataB?.size_bytes)}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Changed Fields</CardTitle>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold">
-            {changedMetadataCount + changedSchemaRows.length}
-          </CardContent>
-        </Card>
-      </div>
-
       <section className="space-y-3">
         <div>
           <h2 className="text-lg font-semibold">Metadata Changes</h2>
-          <p className="text-sm text-muted-foreground">
-            Compare file-level metadata between the chosen left and right sources.
-          </p>
+          <p className="text-sm text-muted-foreground">Compare file-level metadata between the chosen versions.</p>
         </div>
         <Table>
           <TableHeader>
@@ -249,6 +208,11 @@ function ColumnDetails({ column }: { column: ColumnSchema }) {
       {column.description ? (
         <div>
           <span className="font-medium">Description:</span> {column.description}
+        </div>
+      ) : null}
+      {column.possible_values?.length ? (
+        <div>
+          <span className="font-medium">Values:</span> {column.possible_values.join(", ")}
         </div>
       ) : null}
     </div>

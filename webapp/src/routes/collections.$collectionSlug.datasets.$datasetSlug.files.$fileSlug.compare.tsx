@@ -1,15 +1,9 @@
-import { createFileRoute, Link, notFound, useNavigate, useSearch } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
-import { z } from "zod";
-import {
-  buildCompareSearchForLocation,
-  getComparableLocations,
-  getVersionSourcesForLocation,
-  hasAnyComparableLocations,
-} from "@/components/dataset/compareSources";
+import { useState } from "react";
+import { getComparableVersionSources, getDefaultCompareVersionPair } from "@/components/dataset/compareSources";
 import { VersionCompare } from "@/components/dataset/VersionCompare";
 import { formatVersionLabel } from "@/components/dataset/versionLabel";
-import { descriptorForSource, encodeSourceDescriptor } from "@/components/map/sourceDescriptors";
 import { Button } from "@/components/ui/button";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -21,49 +15,7 @@ import {
   getFileVersions,
 } from "@/lib/api-client";
 
-type CompareSearch = {
-  format?: string;
-  location?: number;
-  v1?: string;
-  v2?: string;
-};
-
-const compareSearchSchema = z
-  .object({
-    format: z.string().optional(),
-    location: z.coerce.number().finite().optional(),
-    v1: z.string().optional(),
-    v2: z.string().optional(),
-  })
-  .catch({});
-
-function parseCompareSearch(search: z.input<typeof compareSearchSchema>): CompareSearch {
-  const parsed = compareSearchSchema.parse(search);
-  const result: CompareSearch = {};
-  if (parsed.format !== undefined) result.format = parsed.format;
-  if (parsed.location !== undefined) result.location = parsed.location;
-  if (parsed.v1 !== undefined) result.v1 = parsed.v1;
-  if (parsed.v2 !== undefined) result.v2 = parsed.v2;
-  return result;
-}
-
-function completeCompareSearch(next: CompareSearch, fallback: Required<CompareSearch>): Required<CompareSearch> {
-  return {
-    format: next.format ?? fallback.format,
-    location: next.location ?? fallback.location,
-    v1: next.v1 ?? fallback.v1,
-    v2: next.v2 ?? fallback.v2,
-  };
-}
-
-function compareSearchForFormat(format: string, location: number | undefined, v1: string, v2: string): CompareSearch {
-  const result: CompareSearch = { format, v1, v2 };
-  if (location !== undefined) result.location = location;
-  return result;
-}
-
 export const Route = createFileRoute("/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/compare")({
-  validateSearch: parseCompareSearch,
   loader: async ({ params }) => {
     const collection = await getCollectionBySlug({
       data: { slug: params.collectionSlug },
@@ -135,29 +87,18 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
 function FileComparePage() {
   const { dataset, file, versions } = Route.useLoaderData();
   const params = Route.useParams();
-  const search = useSearch({ from: Route.fullPath });
-  const navigate = useNavigate({ from: Route.fullPath });
 
-  const availableFormats = versions.formats.filter((formatEntry) => hasAnyComparableLocations(formatEntry));
+  const versionSources = getComparableVersionSources(versions.formats);
+  const { left: defaultSourceA, right: defaultSourceB } = getDefaultCompareVersionPair(versionSources);
+  const [selectedVersionA, setSelectedVersionA] = useState(() => String(defaultSourceA?.version ?? ""));
+  const [selectedVersionB, setSelectedVersionB] = useState(() => String(defaultSourceB?.version ?? ""));
 
-  const selectedFormatType =
-    search.format ??
-    availableFormats.find((formatEntry) => formatEntry.format.format_type === "geoparquet")?.format.format_type ??
-    availableFormats[0]?.format.format_type;
+  const selectedSourceA =
+    versionSources.find((source) => String(source.version) === selectedVersionA) ?? defaultSourceA;
+  const selectedSourceB =
+    versionSources.find((source) => String(source.version) === selectedVersionB) ?? defaultSourceB;
 
-  const selectedFormat = availableFormats.find((formatEntry) => formatEntry.format.format_type === selectedFormatType);
-  const comparableLocations = getComparableLocations(selectedFormat);
-  const selectedLocationId =
-    comparableLocations.find((location) => location.id === search.location)?.id ?? comparableLocations[0]?.id;
-  const versionSources = getVersionSourcesForLocation(selectedFormat, selectedLocationId);
-
-  const defaultSourceA = versionSources[0];
-  const defaultSourceB = versionSources[1];
-
-  const selectedSourceA = versionSources.find((source) => String(source.version) === search.v1) ?? defaultSourceA;
-  const selectedSourceB = versionSources.find((source) => String(source.version) === search.v2) ?? defaultSourceB;
-
-  if (!selectedFormat || !selectedLocationId || !selectedSourceA || !selectedSourceB) {
+  if (!selectedSourceA || !selectedSourceB) {
     return (
       <div className="max-w-4xl mx-auto space-y-6 p-4 sm:p-6 md:p-8">
         <Button variant="ghost" asChild>
@@ -172,33 +113,6 @@ function FileComparePage() {
       </div>
     );
   }
-
-  const fallbackSearch: Required<CompareSearch> = {
-    format: selectedFormat.format.format_type,
-    location: selectedLocationId,
-    v1: String(selectedSourceA.version),
-    v2: String(selectedSourceB.version),
-  };
-
-  const updateSearch = (next: CompareSearch) =>
-    navigate({
-      search: completeCompareSearch(next, fallbackSearch),
-      replace: true,
-    });
-  const leftDescriptor = descriptorForSource({
-    collectionSlug: params.collectionSlug,
-    datasetSlug: params.datasetSlug,
-    fileSlug: params.fileSlug,
-    formatType: selectedFormat.format.format_type,
-    source: selectedSourceA,
-  });
-  const rightDescriptor = descriptorForSource({
-    collectionSlug: params.collectionSlug,
-    datasetSlug: params.datasetSlug,
-    fileSlug: params.fileSlug,
-    formatType: selectedFormat.format.format_type,
-    source: selectedSourceB,
-  });
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 p-4 sm:p-6 md:p-8">
@@ -215,93 +129,21 @@ function FileComparePage() {
             {dataset.name} / {file.name}
           </p>
         </div>
-        {leftDescriptor && rightDescriptor ? (
-          <Button variant="outline" asChild>
-            <Link
-              to="/collections/$collectionSlug/compare"
-              params={{ collectionSlug: params.collectionSlug }}
-              search={{
-                left: encodeSourceDescriptor(leftDescriptor),
-                right: encodeSourceDescriptor(rightDescriptor),
-                mode: "metadata",
-              }}
-            >
-              Open cross-layer compare
-            </Link>
-          </Button>
-        ) : null}
       </div>
 
       <div className="space-y-6">
         <div className="space-y-3">
           <div>
-            <h2 className="text-sm font-medium">Scope</h2>
-            <p className="text-sm text-muted-foreground">Choose the format and storage location to compare within.</p>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <div className="text-sm text-muted-foreground">Format</div>
-              <Select
-                value={selectedFormat.format.format_type}
-                onValueChange={(value) => {
-                  const nextFormat = availableFormats.find((formatEntry) => formatEntry.format.format_type === value);
-                  const nextLocationId = getComparableLocations(nextFormat)[0]?.id;
-                  const nextSearch = buildCompareSearchForLocation(nextFormat, nextLocationId);
-                  updateSearch(
-                    compareSearchForFormat(value, nextLocationId, nextSearch?.v1 ?? "", nextSearch?.v2 ?? ""),
-                  );
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select format" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableFormats.map((formatEntry) => (
-                    <SelectItem key={formatEntry.format.format_type} value={formatEntry.format.format_type}>
-                      {formatEntry.format.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <div className="text-sm text-muted-foreground">Location</div>
-              <Select
-                value={String(selectedLocationId)}
-                onValueChange={(value) => {
-                  const nextSearch = buildCompareSearchForLocation(selectedFormat, Number(value));
-                  updateSearch({
-                    location: Number(value),
-                    v1: nextSearch?.v1 ?? "",
-                    v2: nextSearch?.v2 ?? "",
-                  });
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select location" />
-                </SelectTrigger>
-                <SelectContent>
-                  {comparableLocations.map((location) => (
-                    <SelectItem key={location.id} value={String(location.id)}>
-                      {location.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          <div>
             <h2 className="text-sm font-medium">Versions</h2>
-            <p className="text-sm text-muted-foreground">Pick the two versions to compare within the selected scope.</p>
+            <p className="text-sm text-muted-foreground">
+              Pick the two file versions to compare. Metadata is resolved from the best available source for each
+              version.
+            </p>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <div className="text-sm text-muted-foreground">Version A</div>
-              <Select value={String(selectedSourceA.version)} onValueChange={(value) => updateSearch({ v1: value })}>
+              <Select value={String(selectedSourceA.version)} onValueChange={setSelectedVersionA}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select version A" />
                 </SelectTrigger>
@@ -317,7 +159,7 @@ function FileComparePage() {
 
             <div className="space-y-2">
               <div className="text-sm text-muted-foreground">Version B</div>
-              <Select value={String(selectedSourceB.version)} onValueChange={(value) => updateSearch({ v2: value })}>
+              <Select value={String(selectedSourceB.version)} onValueChange={setSelectedVersionB}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select version B" />
                 </SelectTrigger>
@@ -337,8 +179,8 @@ function FileComparePage() {
       <VersionCompare
         leftSource={selectedSourceA}
         rightSource={selectedSourceB}
-        leftLabel={`Left source: ${formatVersionLabel(selectedSourceA.version)}`}
-        rightLabel={`Right source: ${formatVersionLabel(selectedSourceB.version)}`}
+        leftLabel={`Version ${formatVersionLabel(selectedSourceA.version)}`}
+        rightLabel={`Version ${formatVersionLabel(selectedSourceB.version)}`}
       />
     </div>
   );

@@ -1,8 +1,16 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { ArrowLeft, Table } from "lucide-react";
+import { ArrowLeft, BookOpen, FileJson, GitCompare, MapIcon, Table } from "lucide-react";
 import { useEffect, useState } from "react";
+import { hasComparableVersions } from "@/components/dataset/compareSources";
 import { FileFormatTree } from "@/components/dataset/FileFormatTree";
-import { ParquetViewerPanel } from "@/components/dataset/ParquetViewerPanel";
+import { findSelectedParquetOption, ParquetPreviewDrawer } from "@/components/dataset/ParquetPreviewDrawer";
+import {
+  concreteParquetPreviewOptions,
+  defaultParquetPreviewSelection,
+  type ParquetPreviewOption,
+  type ParquetPreviewSelection,
+} from "@/components/dataset/parquetPreviewOptions";
+import { hasSchemaMetadata } from "@/components/dataset/schemaSources";
 import { buildSourceFileUrl } from "@/components/dataset/sourceUrls";
 import { compareVersionValues } from "@/components/dataset/versionLabel";
 import { descriptorForSource, encodeSourceDescriptor } from "@/components/map/sourceDescriptors";
@@ -23,11 +31,6 @@ interface SelectedSource {
 
 interface SelectedSourcesByFormat {
   [formatType: string]: SelectedSource;
-}
-
-interface ParquetFilePreview {
-  url: string;
-  fileName: string;
 }
 
 function latestSourcesByLocation(sources: FileSource[]): Map<number, { source: FileSource; version: string | number }> {
@@ -60,44 +63,6 @@ function initialSelectedSources(file: DatasetFile): SelectedSourcesByFormat {
     }
   }
   return initial;
-}
-
-function sourcePath(source: FileSource): string | undefined {
-  return "path" in source.location ? source.location.path : undefined;
-}
-
-function parquetPreviewFromSource(source: FileSource | null): ParquetFilePreview | null {
-  if (!source) {
-    return null;
-  }
-
-  const url = buildSourceFileUrl(source);
-  const path = sourcePath(source);
-  if (!url || !path || path.includes("*")) {
-    return null;
-  }
-
-  return {
-    url,
-    fileName: path.split("/").pop() || "data.parquet",
-  };
-}
-
-function firstParquetFilePreview(file: DatasetFile, selectedSource: FileSource | null): ParquetFilePreview | null {
-  const selectedPreview = parquetPreviewFromSource(selectedSource);
-  if (selectedPreview) {
-    return selectedPreview;
-  }
-
-  const geoparquetFormat = file.formats?.find((f) => f.format.format_type === "geoparquet");
-  for (const source of geoparquetFormat?.sources ?? []) {
-    const preview = parquetPreviewFromSource(source);
-    if (preview) {
-      return preview;
-    }
-  }
-
-  return null;
 }
 
 function FileDetailPending() {
@@ -179,6 +144,7 @@ function FileDetailPage() {
     url: string;
     fileName: string;
   } | null>(null);
+  const [parquetSelection, setParquetSelection] = useState<ParquetPreviewSelection | null>(null);
 
   // Initialize selected sources with the latest version for each format
   useEffect(() => {
@@ -210,6 +176,8 @@ function FileDetailPage() {
   // Get selected sources for each format
   const geoparquetSource = getSelectedSource("geoparquet");
   const pmtilesSource = getSelectedSource("pmtiles");
+  const geoparquetFormat = file.formats?.find((f) => f.format.format_type === "geoparquet");
+  const parquetPreviewOptions = concreteParquetPreviewOptions(geoparquetFormat);
 
   // Extract URLs from selected sources
   const pmtilesUrl = getUrlFromSource(pmtilesSource);
@@ -229,7 +197,31 @@ function FileDetailPage() {
   // Extract metadata from selected source
   const featureCount = geoparquetSource?.source_metadata?.feature_count;
 
-  const firstParquetFile = firstParquetFilePreview(file, geoparquetSource);
+  const canCompareVersions = hasComparableVersions(file.formats);
+  const canViewSchema = hasSchemaMetadata(file.formats);
+  const selectParquetOption = (option: ParquetPreviewOption) => {
+    setParquetSelection({
+      storageLocationId: option.storageLocationId,
+      version: option.version,
+      sourceId: option.sourceId,
+    });
+    setSelectedSources((prev) => ({
+      ...prev,
+      geoparquet: {
+        storageLocationId: option.storageLocationId,
+        version: option.version,
+      },
+    }));
+    setParquetViewer({ url: option.url, fileName: option.fileName });
+  };
+
+  const openParquetDrawer = () => {
+    const selection = defaultParquetPreviewSelection(geoparquetFormat, geoparquetSource);
+    const option = findSelectedParquetOption(parquetPreviewOptions, selection);
+    if (option) {
+      selectParquetOption(option);
+    }
+  };
 
   const cleanDescription = file.description
     ?.replace(/<[^>]*>/g, "")
@@ -252,8 +244,8 @@ function FileDetailPage() {
             Back to {dataset.name}
           </Link>
         </Button>
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="min-w-0 flex-1">
+        <div className="space-y-5">
+          <div className="min-w-0">
             <h1 className="text-2xl sm:text-3xl md:text-4xl font-mono font-bold tracking-tight break-words">
               {file.name}
             </h1>
@@ -263,27 +255,84 @@ function FileDetailPage() {
               </p>
             )}
           </div>
-          <div className="flex flex-col gap-2 min-w-0 sm:min-w-[200px]">
-            <Button variant="outline" asChild className="font-mono w-full">
-              <a
-                href={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                View Metadata
-              </a>
-            </Button>
-            <Button asChild className="w-full">
-              <Link to="/collections/$collectionSlug/map" params={{ collectionSlug }} search={mapSearch}>
-                Map Viewer
-              </Link>
-            </Button>
-            {firstParquetFile && (
-              <Button variant="outline" onClick={() => setParquetViewer(firstParquetFile)} className="w-full">
-                <Table className="h-4 w-4 mr-2 shrink-0" />
-                Data Table
+          <div className="flex flex-col gap-3 border-y py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button asChild className="h-12 justify-start px-4 sm:h-9 sm:justify-center">
+                <Link to="/collections/$collectionSlug/map" params={{ collectionSlug }} search={mapSearch}>
+                  <MapIcon className="h-4 w-4 mr-2 shrink-0" />
+                  Map Viewer
+                </Link>
               </Button>
-            )}
+              {parquetPreviewOptions.length > 0 && (
+                <Button
+                  variant="outline"
+                  onClick={openParquetDrawer}
+                  className="h-12 justify-start px-4 sm:h-9 sm:justify-center"
+                >
+                  <Table className="h-4 w-4 mr-2 shrink-0" />
+                  Data Table
+                </Button>
+              )}
+            </div>
+            <div className="flex w-full flex-col divide-y border text-sm text-muted-foreground sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-1 sm:divide-y-0 sm:border-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                asChild
+                className="h-12 justify-start px-4 font-normal text-muted-foreground sm:h-8 sm:px-2"
+              >
+                <a
+                  href={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <FileJson className="h-4 w-4 mr-1.5 shrink-0" />
+                  View metadata
+                </a>
+              </Button>
+              {canViewSchema && (
+                <>
+                  <span aria-hidden="true" className="hidden text-border sm:inline">
+                    /
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    asChild
+                    className="h-12 justify-start px-4 font-normal text-muted-foreground sm:h-8 sm:px-2"
+                  >
+                    <Link
+                      to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema"
+                      params={{ collectionSlug, datasetSlug, fileSlug }}
+                    >
+                      <BookOpen className="h-4 w-4 mr-1.5 shrink-0" />
+                      Schema
+                    </Link>
+                  </Button>
+                </>
+              )}
+              {canCompareVersions && (
+                <>
+                  <span aria-hidden="true" className="hidden text-border sm:inline">
+                    /
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    asChild
+                    className="h-12 justify-start px-4 font-normal text-muted-foreground sm:h-8 sm:px-2"
+                  >
+                    <Link
+                      to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/compare"
+                      params={{ collectionSlug, datasetSlug, fileSlug }}
+                    >
+                      <GitCompare className="h-4 w-4 mr-1.5 shrink-0" />
+                      Compare versions
+                    </Link>
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -332,9 +381,7 @@ function FileDetailPage() {
               [formatType]: { storageLocationId, version },
             }));
           }}
-          onViewParquet={(url, fileName) => {
-            setParquetViewer({ url, fileName });
-          }}
+          onViewParquet={selectParquetOption}
           pmtilesUrl={pmtilesUrl}
           collectionId={collection.id}
           collectionSlug={collectionSlug}
@@ -355,24 +402,21 @@ function FileDetailPage() {
   return (
     <div>
       {parquetViewer ? (
-        <ResizablePanelGroup orientation="vertical" className="min-h-[calc(100vh-4rem)]">
-          <ResizablePanel defaultSize="70%" minSize="40%" className="min-h-0 overflow-y-auto">
-            {content}
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel
-            defaultSize="30%"
-            minSize="20%"
-            maxSize="60%"
-            className="min-h-[240px] overflow-hidden flex flex-col"
-          >
-            <ParquetViewerPanel
-              url={parquetViewer.url}
-              fileName={parquetViewer.fileName}
+        <div className="h-[calc(100vh-4rem)]">
+          <ResizablePanelGroup orientation="vertical">
+            <ResizablePanel defaultSize="45%" minSize="25%" className="min-h-0 overflow-y-auto">
+              {content}
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ParquetPreviewDrawer
+              options={parquetPreviewOptions}
+              selection={parquetSelection}
+              viewer={parquetViewer}
+              onSelectOption={selectParquetOption}
               onClose={() => setParquetViewer(null)}
             />
-          </ResizablePanel>
-        </ResizablePanelGroup>
+          </ResizablePanelGroup>
+        </div>
       ) : (
         content
       )}

@@ -62,7 +62,7 @@ export interface ColumnSchema {
 
 export interface SpatialDatasetFileMetadata {
   version: string;
-  size_bytes?: number;
+  size_bytes?: number | null;
   mime_type?: string;
   feature_count?: number;
   bounds?: [number, number, number, number]; // [minx, miny, maxx, maxy]

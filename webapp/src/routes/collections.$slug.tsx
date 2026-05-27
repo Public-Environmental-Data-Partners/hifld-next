@@ -1,5 +1,5 @@
 import { createFileRoute, Link, notFound, useNavigate, useSearch } from "@tanstack/react-router";
-import { ArrowLeft, ArrowLeftRight, Database, Loader2, Map as MapIcon, Search } from "lucide-react";
+import { ArrowLeft, Database, Loader2, Map as MapIcon, Search } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { DatasetCard } from "@/components/dataset";
@@ -522,12 +522,6 @@ function CollectionDetailPage() {
                 <Link to="/collections/$collectionSlug/map" params={{ collectionSlug: collection.slug }}>
                   <MapIcon className="mr-2 h-4 w-4" />
                   Map Workspace
-                </Link>
-              </Button>
-              <Button variant="outline" size="sm" asChild className="font-mono">
-                <Link to="/collections/$collectionSlug/compare" params={{ collectionSlug: collection.slug }}>
-                  <ArrowLeftRight className="mr-2 h-4 w-4" />
-                  Compare Sources
                 </Link>
               </Button>
               <Button variant="outline" size="sm" asChild className="font-mono">
