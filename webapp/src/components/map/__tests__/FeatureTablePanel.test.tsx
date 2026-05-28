@@ -57,6 +57,28 @@ describe("FeatureTablePanel", () => {
     expect(screen.queryByRole("button", { name: "Selected features" })).not.toBeInTheDocument();
     expect(screen.getByText("General Hospital")).toBeInTheDocument();
     expect(screen.getByText("Selection is capped at 100 features per layer.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear selected features" })).toHaveClass("h-11", "w-11", "sm:size-9");
+  });
+
+  it("keeps selected feature controls and table scrolling constrained for narrow panels", () => {
+    render(
+      <FeatureTablePanel
+        features={[selectedFeature("v1.0.0", { OBJECTID: "1", NAME: "General Hospital" })]}
+        wasSelectionCapped={false}
+        s2Level={16}
+        onS2LevelChange={() => undefined}
+        onClear={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Select layer" })).toHaveClass("h-11", "sm:h-8", "w-full");
+    expect(screen.getByRole("combobox", { name: "Version" })).toHaveClass("h-11", "sm:h-8", "w-full");
+    expect(screen.getByPlaceholderText("Search selected features...")).toHaveClass("h-11", "sm:h-8");
+    expect(screen.getByTestId("selected-features-scroll")).toHaveClass(
+      "overflow-x-auto",
+      "sm:overflow-auto",
+      "sm:overscroll-contain",
+    );
   });
 
   it("scopes selected feature rows by layer and version selectors", () => {
@@ -172,6 +194,9 @@ describe("FeatureTablePanel", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Version diff" }));
+    expect(screen.getByRole("button", { name: "Selected features" })).toHaveClass("min-h-11", "sm:min-h-8");
+    expect(screen.getByRole("button", { name: "Version diff" })).toHaveClass("min-h-11", "sm:min-h-8");
+    expect(screen.getByTestId("feature-diff-scroll")).toHaveClass("overflow-auto", "overscroll-contain");
     expect(screen.queryByText("1 changed")).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Left version" })).toHaveValue("v1.0.0");
     expect(screen.getByRole("combobox", { name: "Right version" })).toHaveValue("v1.1.0");

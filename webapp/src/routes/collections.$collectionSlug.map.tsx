@@ -43,6 +43,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FeatureHoverPopup } from "@/components/viewer/FeatureHoverPopup";
 import { LayerStylingEditor } from "@/components/viewer/LayerStylingEditor";
 import { MapControls } from "@/components/viewer/MapControls";
@@ -75,6 +76,7 @@ type MapSearch = {
 
 const MAP_DATASET_PAGE_SIZE = 12;
 const SEARCH_DEBOUNCE_MS = 500;
+const MOBILE_SETTINGS_MEDIA_QUERY = "(max-width: 767.98px)";
 
 const mapSearchSchema = z
   .object({
@@ -328,6 +330,22 @@ function pmtilesFormatForFile(file: DatasetFile) {
   return file.formats?.find((formatEntry) => formatEntry.format.format_type === "pmtiles") ?? null;
 }
 
+function useIsMobileMapLayout(): boolean {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window === "undefined" ? false : window.matchMedia(MOBILE_SETTINGS_MEDIA_QUERY).matches,
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia(MOBILE_SETTINGS_MEDIA_QUERY);
+    const handleChange = (event: MediaQueryListEvent) => setIsMobile(event.matches);
+    setIsMobile(query.matches);
+    query.addEventListener("change", handleChange);
+    return () => query.removeEventListener("change", handleChange);
+  }, []);
+
+  return isMobile;
+}
+
 function selectablePmtilesFiles(dataset: DatasetWithUrls): DatasetFile[] {
   return (dataset.files ?? []).filter((file) => (pmtilesFormatForFile(file)?.sources.length ?? 0) > 0);
 }
@@ -514,6 +532,7 @@ export function MapWorkspace({
   const [sizeSectionOpen, setSizeSectionOpen] = useState(true);
   const [legendVisible, setLegendVisible] = useState(true);
   const [isSettingsCollapsed, setIsSettingsCollapsed] = useState(false);
+  const [isMobileSettingsOpen, setIsMobileSettingsOpen] = useState(false);
   const [isSelectionActive, setIsSelectionActive] = useState(false);
   const [basemapMode, setBasemapMode] = useState<BasemapMode>("street");
   const [searchDraft, setSearchDraft] = useState(initialQuery ?? "");
@@ -528,6 +547,7 @@ export function MapWorkspace({
   const [loadedLayers, setLoadedLayers] = useState<LoadedMapLayer[]>(() =>
     initialLayers.map(resolvedToMapLayer).filter((entry): entry is LoadedMapLayer => entry !== null),
   );
+  const isMobileMapLayout = useIsMobileMapLayout();
   const currentDescriptors = loadedLayers.map((layer) => layer.descriptor);
 
   const updateQuery = useCallback(
@@ -647,6 +667,12 @@ export function MapWorkspace({
   useEffect(() => {
     mapRef.current?.resize();
   });
+
+  useEffect(() => {
+    if (!isMobileMapLayout) {
+      setIsMobileSettingsOpen(false);
+    }
+  }, [isMobileMapLayout]);
 
   const activePopupInfo = pinnedPopupInfo ?? hoverInfo;
   const propertyEntries = popupProperties(activePopupInfo);
@@ -788,6 +814,239 @@ export function MapWorkspace({
     settingsPanelRef.current.collapse();
   };
 
+  const settingsPanelContent = (
+    <div className="p-4">
+      <Card className="w-full min-w-0">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Layers className="h-4 w-4" />
+            Layers
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="space-y-2">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Dataset</div>
+            <DatasetSearchCombobox
+              datasets={datasets}
+              query={searchDraft}
+              selectedDataset={selectedDataset}
+              currentDescriptors={currentDescriptors}
+              collectionSlug={collection.slug}
+              onQueryChange={setSearchDraft}
+              onSelectDataset={selectDataset}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Loaded</div>
+            {loadedLayers.length === 0 ? (
+              <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                Add a dataset from the list below to plot its PMTiles layer.
+              </div>
+            ) : (
+              loadedLayers.map((layer) => {
+                const layerVectorLayers = vectorLayers.filter((entry) => entry.loadedLayerId === layer.id);
+                return (
+                  <LoadedLayerItem
+                    key={layer.id}
+                    layer={layer}
+                    vectorLayerCount={layerVectorLayers.length}
+                    onVisibleChange={(visible) =>
+                      setLoadedLayers((prev) =>
+                        prev.map((entry) => (entry.id === layer.id ? { ...entry, visible } : entry)),
+                      )
+                    }
+                    onRemove={() => removeLoadedLayer(layer)}
+                  />
+                );
+              })
+            )}
+          </div>
+
+          {selectedDataset && (
+            <div className="space-y-3 rounded-md border p-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold">{selectedDataset.name}</div>
+                <div className="text-xs text-muted-foreground">Choose a PMTiles layer source to plot.</div>
+              </div>
+              {selectableFiles.length === 0 ? (
+                <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                  This dataset does not have a PMTiles source available for the map.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-medium text-muted-foreground">File</div>
+                    <Select value={selectedFile?.slug ?? ""} onValueChange={selectFile}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select file" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {selectableFiles.map((file) => (
+                          <SelectItem key={file.slug} value={file.slug}>
+                            {file.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-medium text-muted-foreground">Version</div>
+                    <Select value={resolvedVersion} onValueChange={selectVersion}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select version" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {versionOptions.map((version) => (
+                          <SelectItem key={version} value={version}>
+                            {formatVersionLabel(version)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-medium text-muted-foreground">Source</div>
+                    <Select value={selectedSource ? String(selectedSource.id) : ""} onValueChange={setSelectedSourceId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select source" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {versionSourceOptions.map((source) => (
+                          <SelectItem key={source.id} value={String(source.id)}>
+                            {sourceLabel(source)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="w-full"
+                    disabled={!selectedDescriptor || selectedDescriptorAlreadyLoaded || isAddingSelectedLayer}
+                    onClick={addSelectedLayer}
+                  >
+                    <Plus className="h-4 w-4" />
+                    {isAddingSelectedLayer
+                      ? "Adding layer"
+                      : selectedDescriptorAlreadyLoaded
+                        ? "Layer loaded"
+                        : "Add layer"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="mt-4 space-y-3">
+        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Style layers</div>
+        {vectorLayers.length === 0 ? (
+          <Card className="w-full min-w-0 border-dashed">
+            <CardContent className="p-3 text-sm text-muted-foreground">
+              Add a PMTiles layer to edit styling.
+            </CardContent>
+          </Card>
+        ) : (
+          vectorLayers.map((layer) => {
+            const style = layerStyles[layer.id] ?? null;
+            const breaks = style ? parseBreaks(style.breaksText) : [];
+            const colors = style ? getColorRamp(style.colorScheme, breaks.length + 1) : [];
+            const loadedLayer = loadedLayers.find((entry) => entry.id === layer.loadedLayerId) ?? null;
+            return (
+              <StyleLayerCard
+                key={layer.id}
+                layer={layer}
+                loadedLayer={loadedLayer}
+                style={style}
+                breaks={breaks}
+                colors={colors}
+                mapRef={mapRef}
+                colorSectionOpen={colorSectionOpen}
+                setColorSectionOpen={setColorSectionOpen}
+                sizeSectionOpen={sizeSectionOpen}
+                setSizeSectionOpen={setSizeSectionOpen}
+                onStyleChange={(nextStyle) => {
+                  setLayerStyles((prev) => ({
+                    ...prev,
+                    [layer.id]: nextStyle,
+                  }));
+                }}
+              />
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+
+  const mapWorkspaceContent = (
+    <ResizablePanelGroup orientation="vertical" className="min-h-0">
+      <ResizablePanel
+        defaultSize={selectedFeatures.length > 0 ? (isMobileMapLayout ? "38%" : "68%") : "100%"}
+        minSize={isMobileMapLayout ? "24%" : "40%"}
+        className="min-h-0 overflow-hidden"
+        onResize={() => mapRef.current?.resize()}
+      >
+        <div className="relative h-full w-full">
+          <div ref={mapContainerRef} className="h-full w-full" />
+          <MapControls
+            mapRef={mapRef as React.RefObject<maplibregl.Map | null>}
+            isSelectionActive={isSelectionActive}
+            onToggleSelection={() => setIsSelectionActive((active) => !active)}
+            onClearSelection={selectedFeatures.length > 0 ? clearSelectedFeatures : undefined}
+            basemapMode={basemapMode}
+            onToggleBasemap={() => setBasemapMode((current) => (current === "satellite" ? "street" : "satellite"))}
+          />
+          {activePopupInfo && activePopupInfo.features.length > 0 && (
+            <FeatureHoverPopup
+              popupRef={activePopupInfo.isPinned ? pinnedPopupElementRef : undefined}
+              hoverInfo={activePopupInfo}
+              selectedIndex={activePopupInfo.selectedIndex}
+              propertyEntries={propertyEntries}
+              onIndexChange={(index) => {
+                if (activePopupInfo.isPinned) {
+                  setPinnedPopupInfo((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
+                  return;
+                }
+                setHoverInfo((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
+              }}
+              onClose={() => setPinnedPopupInfo(null)}
+            />
+          )}
+          {legendStyle && (
+            <MapLegend items={legendItems} visible={legendVisible} onToggle={() => setLegendVisible(!legendVisible)} />
+          )}
+        </div>
+      </ResizablePanel>
+      {selectedFeatures.length > 0 && (
+        <>
+          <ResizableHandle withHandle />
+          <ResizablePanel
+            defaultSize={isMobileMapLayout ? "62%" : "32%"}
+            minSize={isMobileMapLayout ? "42%" : "18%"}
+            className="min-h-0 overflow-hidden"
+            onResize={() => mapRef.current?.resize()}
+          >
+            <FeatureTablePanel
+              features={selectedFeatures}
+              highlightedFeatureId={highlightedFeatureId}
+              wasSelectionCapped={wasSelectionCapped}
+              s2Level={s2Level}
+              onS2LevelChange={setS2Level}
+              onFeatureClick={zoomToSelectedFeature}
+              onClear={() => {
+                clearSelectedFeatures();
+              }}
+            />
+          </ResizablePanel>
+        </>
+      )}
+    </ResizablePanelGroup>
+  );
+
   return (
     <div className="flex h-[calc(100svh-3.5rem)] min-h-0 flex-col overflow-hidden bg-background">
       <div className="flex h-14 shrink-0 items-center justify-between border-b px-4">
@@ -823,276 +1082,69 @@ export function MapWorkspace({
             )}
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={toggleSettingsPanel}
-          title={isSettingsCollapsed ? "Show settings" : "Hide settings"}
-        >
-          <PanelLeft className="mr-2 h-4 w-4" />
-          {isSettingsCollapsed ? "Settings" : "Hide"}
-        </Button>
+        <div className="shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsMobileSettingsOpen(true)}
+            title="Show settings"
+            className={isMobileSettingsOpen ? "hidden" : "md:hidden"}
+          >
+            <PanelLeft className="mr-2 h-4 w-4" />
+            Settings
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={toggleSettingsPanel}
+            title={isSettingsCollapsed ? "Show settings" : "Hide settings"}
+            className="hidden md:inline-flex"
+          >
+            <PanelLeft className="mr-2 h-4 w-4" />
+            {isSettingsCollapsed ? "Settings" : "Hide"}
+          </Button>
+        </div>
       </div>
 
-      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-        <ResizablePanel
-          defaultSize="28%"
-          minSize="22%"
-          maxSize="42%"
-          collapsible
-          collapsedSize="0%"
-          panelRef={settingsPanelRef}
-          onResize={(panelSize) => setIsSettingsCollapsed(panelSize.asPercentage === 0)}
-          className="min-w-0 overflow-hidden"
-        >
-          <ScrollArea className="h-full">
-            <div className="p-4">
-              <Card className="w-full min-w-0">
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2 text-sm">
-                    <Layers className="h-4 w-4" />
-                    Layers
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-5">
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Dataset</div>
-                    <DatasetSearchCombobox
-                      datasets={datasets}
-                      query={searchDraft}
-                      selectedDataset={selectedDataset}
-                      currentDescriptors={currentDescriptors}
-                      collectionSlug={collection.slug}
-                      onQueryChange={setSearchDraft}
-                      onSelectDataset={selectDataset}
-                    />
-                  </div>
+      <Sheet open={isMobileSettingsOpen} onOpenChange={setIsMobileSettingsOpen}>
+        <SheetContent side="left" className="w-[90vw] max-w-[90vw] gap-0 p-0 sm:max-w-[90vw] md:hidden">
+          <SheetHeader className="border-b pr-12">
+            <SheetTitle className="flex items-center gap-2 text-sm">
+              <Layers className="h-4 w-4" />
+              Settings
+            </SheetTitle>
+          </SheetHeader>
+          <ScrollArea className="min-h-0 flex-1">{settingsPanelContent}</ScrollArea>
+        </SheetContent>
+      </Sheet>
 
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Loaded</div>
-                    {loadedLayers.length === 0 ? (
-                      <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                        Add a dataset from the list below to plot its PMTiles layer.
-                      </div>
-                    ) : (
-                      loadedLayers.map((layer) => {
-                        const layerVectorLayers = vectorLayers.filter((entry) => entry.loadedLayerId === layer.id);
-                        return (
-                          <LoadedLayerItem
-                            key={layer.id}
-                            layer={layer}
-                            vectorLayerCount={layerVectorLayers.length}
-                            onVisibleChange={(visible) =>
-                              setLoadedLayers((prev) =>
-                                prev.map((entry) => (entry.id === layer.id ? { ...entry, visible } : entry)),
-                              )
-                            }
-                            onRemove={() => removeLoadedLayer(layer)}
-                          />
-                        );
-                      })
-                    )}
-                  </div>
-
-                  {selectedDataset && (
-                    <div className="space-y-3 rounded-md border p-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold">{selectedDataset.name}</div>
-                        <div className="text-xs text-muted-foreground">Choose a PMTiles layer source to plot.</div>
-                      </div>
-                      {selectableFiles.length === 0 ? (
-                        <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                          This dataset does not have a PMTiles source available for the map.
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          <div className="space-y-1.5">
-                            <div className="text-xs font-medium text-muted-foreground">File</div>
-                            <Select value={selectedFile?.slug ?? ""} onValueChange={selectFile}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select file" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {selectableFiles.map((file) => (
-                                  <SelectItem key={file.slug} value={file.slug}>
-                                    {file.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1.5">
-                            <div className="text-xs font-medium text-muted-foreground">Version</div>
-                            <Select value={resolvedVersion} onValueChange={selectVersion}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select version" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {versionOptions.map((version) => (
-                                  <SelectItem key={version} value={version}>
-                                    {formatVersionLabel(version)}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1.5">
-                            <div className="text-xs font-medium text-muted-foreground">Source</div>
-                            <Select
-                              value={selectedSource ? String(selectedSource.id) : ""}
-                              onValueChange={setSelectedSourceId}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select source" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {versionSourceOptions.map((source) => (
-                                  <SelectItem key={source.id} value={String(source.id)}>
-                                    {sourceLabel(source)}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="w-full"
-                            disabled={!selectedDescriptor || selectedDescriptorAlreadyLoaded || isAddingSelectedLayer}
-                            onClick={addSelectedLayer}
-                          >
-                            <Plus className="h-4 w-4" />
-                            {isAddingSelectedLayer
-                              ? "Adding layer"
-                              : selectedDescriptorAlreadyLoaded
-                                ? "Layer loaded"
-                                : "Add layer"}
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <div className="mt-4 space-y-3">
-                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Style layers</div>
-                {vectorLayers.length === 0 ? (
-                  <Card className="w-full min-w-0 border-dashed">
-                    <CardContent className="p-3 text-sm text-muted-foreground">
-                      Add a PMTiles layer to edit styling.
-                    </CardContent>
-                  </Card>
-                ) : (
-                  vectorLayers.map((layer) => {
-                    const style = layerStyles[layer.id] ?? null;
-                    const breaks = style ? parseBreaks(style.breaksText) : [];
-                    const colors = style ? getColorRamp(style.colorScheme, breaks.length + 1) : [];
-                    const loadedLayer = loadedLayers.find((entry) => entry.id === layer.loadedLayerId) ?? null;
-                    return (
-                      <StyleLayerCard
-                        key={layer.id}
-                        layer={layer}
-                        loadedLayer={loadedLayer}
-                        style={style}
-                        breaks={breaks}
-                        colors={colors}
-                        mapRef={mapRef}
-                        colorSectionOpen={colorSectionOpen}
-                        setColorSectionOpen={setColorSectionOpen}
-                        sizeSectionOpen={sizeSectionOpen}
-                        setSizeSectionOpen={setSizeSectionOpen}
-                        onStyleChange={(nextStyle) => {
-                          setLayerStyles((prev) => ({
-                            ...prev,
-                            [layer.id]: nextStyle,
-                          }));
-                        }}
-                      />
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          </ScrollArea>
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel
-          defaultSize="72%"
-          minSize="58%"
-          className="min-w-0 overflow-hidden"
-          onResize={() => mapRef.current?.resize()}
-        >
-          <ResizablePanelGroup orientation="vertical" className="min-h-0">
-            <ResizablePanel
-              defaultSize={selectedFeatures.length > 0 ? "68%" : "100%"}
-              minSize="40%"
-              className="min-h-0 overflow-hidden"
-              onResize={() => mapRef.current?.resize()}
-            >
-              <div className="relative h-full w-full">
-                <div ref={mapContainerRef} className="h-full w-full" />
-                <MapControls
-                  mapRef={mapRef as React.RefObject<maplibregl.Map | null>}
-                  isSelectionActive={isSelectionActive}
-                  onToggleSelection={() => setIsSelectionActive((active) => !active)}
-                  onClearSelection={selectedFeatures.length > 0 ? clearSelectedFeatures : undefined}
-                  basemapMode={basemapMode}
-                  onToggleBasemap={() =>
-                    setBasemapMode((current) => (current === "satellite" ? "street" : "satellite"))
-                  }
-                />
-                {activePopupInfo && activePopupInfo.features.length > 0 && (
-                  <FeatureHoverPopup
-                    popupRef={activePopupInfo.isPinned ? pinnedPopupElementRef : undefined}
-                    hoverInfo={activePopupInfo}
-                    selectedIndex={activePopupInfo.selectedIndex}
-                    propertyEntries={propertyEntries}
-                    onIndexChange={(index) => {
-                      if (activePopupInfo.isPinned) {
-                        setPinnedPopupInfo((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
-                        return;
-                      }
-                      setHoverInfo((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
-                    }}
-                    onClose={() => setPinnedPopupInfo(null)}
-                  />
-                )}
-                {legendStyle && (
-                  <MapLegend
-                    items={legendItems}
-                    visible={legendVisible}
-                    onToggle={() => setLegendVisible(!legendVisible)}
-                  />
-                )}
-              </div>
-            </ResizablePanel>
-            {selectedFeatures.length > 0 && (
-              <>
-                <ResizableHandle withHandle />
-                <ResizablePanel
-                  defaultSize="32%"
-                  minSize="18%"
-                  className="min-h-0 overflow-hidden"
-                  onResize={() => mapRef.current?.resize()}
-                >
-                  <FeatureTablePanel
-                    features={selectedFeatures}
-                    highlightedFeatureId={highlightedFeatureId}
-                    wasSelectionCapped={wasSelectionCapped}
-                    s2Level={s2Level}
-                    onS2LevelChange={setS2Level}
-                    onFeatureClick={zoomToSelectedFeature}
-                    onClear={() => {
-                      clearSelectedFeatures();
-                    }}
-                  />
-                </ResizablePanel>
-              </>
-            )}
-          </ResizablePanelGroup>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+      {isMobileMapLayout ? (
+        <div className="min-h-0 flex-1">{mapWorkspaceContent}</div>
+      ) : (
+        <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+          <ResizablePanel
+            defaultSize="28%"
+            minSize="22%"
+            maxSize="42%"
+            collapsible
+            collapsedSize="0%"
+            panelRef={settingsPanelRef}
+            onResize={(panelSize) => setIsSettingsCollapsed(panelSize.asPercentage === 0)}
+            className="min-w-0 overflow-hidden"
+          >
+            <ScrollArea className="h-full">{settingsPanelContent}</ScrollArea>
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel
+            defaultSize="72%"
+            minSize="58%"
+            className="min-w-0 overflow-hidden"
+            onResize={() => mapRef.current?.resize()}
+          >
+            {mapWorkspaceContent}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      )}
     </div>
   );
 }

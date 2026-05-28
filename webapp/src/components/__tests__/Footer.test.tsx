@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import Footer from "../Footer";
 
 describe("Footer", () => {
-  it("centers footer text and stacks footer links on small screens", () => {
+  it("left-aligns footer text and stacks footer links on small screens", () => {
     render(<Footer />);
 
     const footerCopy = screen
@@ -12,7 +12,8 @@ describe("Footer", () => {
     const feedbackLink = screen.getByRole("link", { name: "Share feedback" });
     const linkList = feedbackLink.closest("div");
 
-    expect(footerCopy).toHaveClass("text-center", "sm:text-left");
-    expect(linkList).toHaveClass("flex-col", "items-center", "sm:flex-row");
+    expect(footerCopy).toHaveClass("text-sm", "text-muted-foreground");
+    expect(footerCopy).not.toHaveClass("text-center");
+    expect(linkList).toHaveClass("flex-col", "items-start", "sm:flex-row", "sm:items-center");
   });
 });

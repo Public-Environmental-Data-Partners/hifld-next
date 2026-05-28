@@ -203,10 +203,10 @@ function SelectedFeaturesTable({
     sort,
   );
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto overscroll-contain sm:overflow-hidden">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 sm:px-4">
         <Select value={selectedGroup?.key ?? ""} onValueChange={onSelectedLayerKeyChange}>
-          <SelectTrigger className="h-8 min-w-56 max-w-80">
+          <SelectTrigger aria-label="Select layer" className="h-11 w-full min-w-0 sm:h-8 sm:w-56 sm:max-w-80">
             <SelectValue placeholder="Select layer" />
           </SelectTrigger>
           <SelectContent>
@@ -218,7 +218,7 @@ function SelectedFeaturesTable({
           </SelectContent>
         </Select>
         <Select value={activeVersion ?? ""} onValueChange={onSelectedVersionChange}>
-          <SelectTrigger className="h-8 w-40">
+          <SelectTrigger aria-label="Version" className="h-11 w-full min-w-0 sm:h-8 sm:w-40">
             <SelectValue placeholder="Version" />
           </SelectTrigger>
           <SelectContent>
@@ -229,17 +229,20 @@ function SelectedFeaturesTable({
             ))}
           </SelectContent>
         </Select>
-        <div className="flex min-w-52 flex-1 items-center gap-2">
-          <Search className="h-4 w-4 text-muted-foreground" />
+        <div className="relative w-full min-w-0 flex-1 sm:min-w-52">
+          <Search className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
           <Input
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder="Search selected features..."
-            className="h-8"
+            className="h-11 pl-10 sm:h-8"
           />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div
+        data-testid="selected-features-scroll"
+        className="min-w-0 shrink-0 overflow-x-auto sm:min-h-0 sm:flex-1 sm:overflow-auto sm:overscroll-contain"
+      >
         <table className="w-full min-w-[640px] text-sm">
           <thead className="sticky top-0 z-10 bg-background">
             <tr className="border-b text-left text-xs text-muted-foreground">
@@ -276,7 +279,7 @@ function SelectedFeaturesTable({
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 shrink-0"
+                        className="h-11 w-11 shrink-0 sm:h-7 sm:w-7"
                         aria-label={`Zoom to feature ${feature.featureId}`}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -387,7 +390,7 @@ function DiffTable({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       <DiffToolbar
         versions={versions}
         leftVersion={leftVersion}
@@ -404,7 +407,7 @@ function DiffTable({
         s2Level={s2Level}
         onS2LevelChange={onS2LevelChange}
       />
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div data-testid="feature-diff-scroll" className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
         {visibleColumns.length === 0 ? (
           <div className="flex h-24 items-center justify-center border-b text-sm text-muted-foreground">
             No changed columns in this selection.
@@ -467,13 +470,13 @@ function DiffToolbar({
   onS2LevelChange: (level: number) => void;
 }) {
   return (
-    <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2">
-      <div className="flex flex-wrap items-center gap-2 text-xs">
+    <div className="flex shrink-0 flex-wrap items-stretch justify-between gap-3 border-b px-3 py-2 sm:items-center sm:px-4">
+      <div className="flex w-full min-w-0 flex-wrap items-center gap-2 text-xs sm:w-auto">
         <select
           aria-label="Left version"
           value={leftVersion}
           onChange={(event) => onLeftVersionChange(event.target.value)}
-          className="h-8 w-36 rounded-md border bg-background px-2 text-sm"
+          className="h-11 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm sm:h-8 sm:w-36 sm:flex-none"
         >
           {versions.map((version) => (
             <option key={version} value={version}>
@@ -481,12 +484,12 @@ function DiffToolbar({
             </option>
           ))}
         </select>
-        <span className="text-muted-foreground">to</span>
+        <span className="shrink-0 text-muted-foreground">to</span>
         <select
           aria-label="Right version"
           value={rightVersion}
           onChange={(event) => onRightVersionChange(event.target.value)}
-          className="h-8 w-36 rounded-md border bg-background px-2 text-sm"
+          className="h-11 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm sm:h-8 sm:w-36 sm:flex-none"
         >
           {versions.map((version) => (
             <option key={version} value={version}>
@@ -495,14 +498,14 @@ function DiffToolbar({
           ))}
         </select>
       </div>
-      <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 text-xs text-muted-foreground lg:justify-end">
-        <div className="flex shrink-0 items-center gap-2">
+      <div className="flex w-full min-w-0 flex-wrap items-stretch justify-start gap-2 text-xs text-muted-foreground lg:w-auto lg:items-center lg:justify-end">
+        <div className="flex w-full min-w-0 flex-col gap-1 sm:w-auto sm:flex-row sm:items-center sm:gap-2">
           Columns
           <select
             aria-label="Columns"
             value={columnMode}
             onChange={(event) => onColumnModeChange(event.target.value as DiffColumnMode)}
-            className="h-8 w-40 rounded-md border bg-background px-2 text-sm text-foreground"
+            className="h-11 w-full min-w-0 rounded-md border bg-background px-2 text-sm text-foreground sm:h-8 sm:w-40"
           >
             <option value="changed">Changed columns</option>
             <option value="all">All columns</option>
@@ -517,7 +520,7 @@ function DiffToolbar({
           onChange={onMatchKeyPairsChange}
         />
         {usesGeometry && (
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex w-full min-w-0 flex-col gap-1 sm:w-auto sm:flex-row sm:items-center sm:gap-2">
             <span className="flex items-center gap-1">
               Geographic tolerance
               <TooltipProvider delayDuration={0}>
@@ -526,7 +529,7 @@ function DiffToolbar({
                     <button
                       type="button"
                       aria-label="Explain geographic tolerance"
-                      className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="inline-flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-5 sm:w-5"
                     >
                       <Info className="h-3.5 w-3.5" />
                     </button>
@@ -542,7 +545,7 @@ function DiffToolbar({
               aria-label="Geographic tolerance"
               value={String(s2Level)}
               onChange={(event) => onS2LevelChange(Number(event.target.value))}
-              className="h-8 w-40 rounded-md border bg-background px-2 text-sm text-foreground"
+              className="h-11 w-full min-w-0 rounded-md border bg-background px-2 text-sm text-foreground sm:h-8 sm:w-40"
             >
               {S2_LEVEL_OPTIONS.map((option) => (
                 <option key={option.value} value={String(option.value)}>
@@ -669,7 +672,7 @@ function DiffGridRow({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-7 w-7 shrink-0"
+              className="h-11 w-11 shrink-0 sm:h-7 sm:w-7"
               aria-label={`Zoom to diff row ${row.id}`}
               onClick={(event) => {
                 event.stopPropagation();
@@ -942,13 +945,18 @@ class MatchKeyPicker extends React.Component<MatchKeyPickerProps, MatchKeyPicker
           <button
             type="button"
             aria-label="Match row keys"
-            className="flex min-h-8 w-36 cursor-pointer items-center justify-between gap-2 rounded-md border bg-background px-3 py-1.5 text-sm text-foreground shadow-xs outline-none transition-[color,box-shadow] hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="flex min-h-11 w-full cursor-pointer items-center justify-between gap-2 rounded-md border bg-background px-3 py-1.5 text-sm text-foreground shadow-xs outline-none transition-[color,box-shadow] hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:min-h-8 sm:w-36"
           >
             <span className="min-w-0 truncate">Match rows</span>
             <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="end" avoidCollisions={false} className="max-h-80 w-64 overflow-auto p-3" side="bottom">
+        <PopoverContent
+          align="end"
+          avoidCollisions={false}
+          className="max-h-80 w-64 max-w-[calc(100vw-2rem)] overflow-auto p-3"
+          side="bottom"
+        >
           <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Match rows by</div>
           <div className="space-y-2">
             {visiblePairs.map((pair, index) => (
@@ -964,7 +972,7 @@ class MatchKeyPicker extends React.Component<MatchKeyPickerProps, MatchKeyPicker
                       );
                       onChange(nextPairs);
                     }}
-                    className="h-8 w-full min-w-0 truncate rounded-md border bg-background px-2 text-sm"
+                    className="h-11 w-full min-w-0 truncate rounded-md border bg-background px-2 text-sm sm:h-8"
                   >
                     {leftOptions.map((option) => (
                       <option key={option.key} value={option.key}>
@@ -984,7 +992,7 @@ class MatchKeyPicker extends React.Component<MatchKeyPickerProps, MatchKeyPicker
                       );
                       onChange(nextPairs);
                     }}
-                    className="h-8 w-full min-w-0 truncate rounded-md border bg-background px-2 text-sm"
+                    className="h-11 w-full min-w-0 truncate rounded-md border bg-background px-2 text-sm sm:h-8"
                   >
                     {rightOptions.map((option) => (
                       <option key={option.key} value={option.key}>
@@ -1132,19 +1140,20 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
     const canDiff = isComparableFeatureDiffSelection(features);
 
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2">
+      <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-3 py-2 sm:px-4">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <div className="text-sm font-semibold">{features.length} selected features</div>
             {wasSelectionCapped && <Badge variant="secondary">Selection is capped at 100 features per layer.</Badge>}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 sm:w-auto">
             {canDiff && (
-              <div className="rounded-md border p-0.5">
+              <div className="flex w-full min-w-0 rounded-md border p-0.5 sm:w-auto">
                 <Button
                   type="button"
                   variant={activeTab === "selected" ? "secondary" : "ghost"}
                   size="sm"
+                  className="min-h-11 flex-1 sm:min-h-8 sm:flex-none"
                   onClick={() => this.setState({ activeTab: "selected" })}
                 >
                   Selected features
@@ -1153,13 +1162,21 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
                   type="button"
                   variant={activeTab === "diff" ? "secondary" : "ghost"}
                   size="sm"
+                  className="min-h-11 flex-1 sm:min-h-8 sm:flex-none"
                   onClick={() => this.setState({ activeTab: "diff" })}
                 >
                   Version diff
                 </Button>
               </div>
             )}
-            <Button type="button" variant="ghost" size="icon" onClick={onClear} aria-label="Clear selected features">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11 sm:size-9"
+              onClick={onClear}
+              aria-label="Clear selected features"
+            >
               <X className="h-4 w-4" />
             </Button>
           </div>
