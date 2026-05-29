@@ -41,12 +41,20 @@ describe("multi-layer map helpers", () => {
       descriptor,
       name: "Hospitals",
       pmtilesUrl: "https://example.test/hospitals.pmtiles",
+      sourceMetadata: {
+        version: "v1.1.0",
+        geometry_type: "Point",
+        columns: [
+          { name: "name", type: "string", nullable: false },
+          { name: "beds", type: "float", nullable: false, min: 1, max: 100 },
+        ],
+      },
     });
 
     expect(
       getVectorLayersForSource(
         {
-          vector_layers: [{ id: "default", fields: { name: "String" } }],
+          vector_layers: [{ id: "default", fields: { name: "String", beds: "Number" } }],
         },
         loadedLayer,
       ),
@@ -57,7 +65,9 @@ describe("multi-layer map helpers", () => {
         loadedLayerId: loadedLayer.id,
         mapSourceId: loadedLayer.mapSourceId,
         mapLayerBaseId: `${loadedLayer.mapSourceId}-default`,
-        fields: ["name"],
+        fields: ["name", "beds"],
+        numericFields: [{ name: "beds", min: 1, max: 100 }],
+        geometryType: "Point",
       },
     ]);
   });

@@ -1143,6 +1143,9 @@ function SourceSelector({ formatType, formatEntry, selectedSources, onSourceChan
     selectedSource?.version && versionArray.some((version) => String(version) === String(selectedSource.version))
       ? selectedSource.version
       : firstVersion;
+  const currentSource = versionSources.find((source) => String(source.version ?? "1") === String(currentVersion));
+  const versionDescription = currentSource?.source_metadata?.description?.trim();
+
   return (
     <div className="space-y-2">
       {/* Location selector */}
@@ -1198,6 +1201,13 @@ function SourceSelector({ formatType, formatEntry, selectedSources, onSourceChan
         </div>
       ) : versionArray.length === 1 ? (
         <div className="text-xs text-muted-foreground">Version: {formatVersionLabel(firstVersion)}</div>
+      ) : null}
+
+      {versionDescription ? (
+        <div className="border-l-2 bg-muted/20 px-3 py-2 text-xs">
+          <p className="font-medium text-foreground">Version note</p>
+          <p className="mt-1 text-muted-foreground">{versionDescription}</p>
+        </div>
       ) : null}
     </div>
   );

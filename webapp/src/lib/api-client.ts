@@ -62,6 +62,7 @@ export interface ColumnSchema {
 
 export interface SpatialDatasetFileMetadata {
   version: string;
+  description?: string | null;
   size_bytes?: number | null;
   mime_type?: string;
   feature_count?: number;

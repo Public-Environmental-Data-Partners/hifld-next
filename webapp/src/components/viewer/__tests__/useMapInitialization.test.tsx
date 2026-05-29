@@ -1,5 +1,8 @@
+import type { RefObject } from "react";
+import type maplibregl from "maplibre-gl";
 import { describe, expect, it, vi } from "vitest";
 import {
+  type BasemapMode,
   getVectorLayers,
   handleMapClick,
   syncPinnedPopupPosition,
@@ -7,6 +10,7 @@ import {
   selectionBoxFeature,
   syncBasemapVisibility,
   syncExistingRenderedLayers,
+  syncBasemapVisibilityAfterStyleLoad,
 } from "../useMapInitialization";
 
 vi.mock("maplibre-gl", () => ({
@@ -22,6 +26,58 @@ function mockMapWithFeatures(features: unknown[]) {
   };
 }
 
+interface MockMap {
+  addLayer: ReturnType<typeof vi.fn>;
+  addSource: ReturnType<typeof vi.fn>;
+  dragPan: {
+    disable: ReturnType<typeof vi.fn>;
+    enable: ReturnType<typeof vi.fn>;
+  };
+  getCanvas: ReturnType<typeof vi.fn>;
+  getLayer: ReturnType<typeof vi.fn>;
+  getSource: ReturnType<typeof vi.fn>;
+  getStyle: ReturnType<typeof vi.fn>;
+  loaded: ReturnType<typeof vi.fn>;
+  on: ReturnType<typeof vi.fn>;
+  once: ReturnType<typeof vi.fn>;
+  queryRenderedFeatures: ReturnType<typeof vi.fn>;
+  remove: ReturnType<typeof vi.fn>;
+  resize: ReturnType<typeof vi.fn>;
+  setFeatureState: ReturnType<typeof vi.fn>;
+  setLayoutProperty: ReturnType<typeof vi.fn>;
+}
+
+function createMockMap(): MockMap {
+  const layerIds = new Set<string>();
+  return {
+    addLayer: vi.fn((layer: { id: string }) => {
+      layerIds.add(layer.id);
+    }),
+    addSource: vi.fn(),
+    dragPan: {
+      disable: vi.fn(),
+      enable: vi.fn(),
+    },
+    getCanvas: vi.fn(() => ({ style: { cursor: "" } })),
+    getLayer: vi.fn((layerId: string) => layerIds.has(layerId)),
+    getSource: vi.fn(() => undefined),
+    getStyle: vi.fn(() => ({
+      layers: [
+        { id: "background", type: "background" },
+        { id: "water", type: "fill", source: "openmaptiles" },
+      ],
+    })),
+    loaded: vi.fn(() => false),
+    on: vi.fn(),
+    once: vi.fn(),
+    queryRenderedFeatures: vi.fn(() => []),
+    remove: vi.fn(),
+    resize: vi.fn(),
+    setFeatureState: vi.fn(),
+    setLayoutProperty: vi.fn(),
+  };
+}
+
 describe("useMapInitialization helpers", () => {
   it("extracts vector layer metadata", () => {
     expect(
@@ -31,7 +87,7 @@ describe("useMapInitialization helpers", () => {
           { fields: { ignored: "String" } },
         ],
       }),
-    ).toEqual([{ id: "test-layer", fields: ["name", "id"] }]);
+    ).toEqual([{ id: "test-layer", fields: ["name", "id"], numericFields: [{ name: "id" }] }]);
   });
 
   it("builds a geographic selection box polygon", () => {
@@ -56,12 +112,56 @@ describe("useMapInitialization helpers", () => {
   it("toggles street and satellite basemap visibility", () => {
     const map = {
       getLayer: vi.fn((layerId: string) => layerId === "osm-base" || layerId === "satellite-base"),
+      getStyle: vi.fn(() => ({
+        layers: [
+          { id: "background", type: "background" },
+          { id: "water", type: "fill", source: "openmaptiles" },
+          { id: "road", type: "line", source: "openmaptiles" },
+          { id: "place-label", type: "symbol", source: "openfreemap" },
+          { id: "source-layer-fill", type: "fill", source: "source-layer" },
+        ],
+      })),
       setLayoutProperty: vi.fn(),
     };
 
     syncBasemapVisibility(map, "satellite");
 
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("water", "visibility", "none");
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("road", "visibility", "none");
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("place-label", "visibility", "none");
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("background", "visibility", "none");
+    expect(map.setLayoutProperty).not.toHaveBeenCalledWith("source-layer-fill", "visibility", "none");
     expect(map.setLayoutProperty).toHaveBeenCalledWith("osm-base", "visibility", "none");
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("satellite-base", "visibility", "visible");
+  });
+
+  it("skips OpenMapTiles layer sync when the style has not loaded yet", () => {
+    const map = {
+      getLayer: vi.fn(() => false),
+      getStyle: vi.fn(() => undefined),
+      setLayoutProperty: vi.fn(),
+    };
+
+    expect(() => syncBasemapVisibility(map, "street")).not.toThrow();
+    expect(map.setLayoutProperty).not.toHaveBeenCalled();
+  });
+
+  it("uses the latest basemap mode when the remote style finishes loading", () => {
+    const map = createMockMap();
+    const basemapModeRef: RefObject<BasemapMode> = { current: "street" };
+
+    basemapModeRef.current = "satellite";
+    syncBasemapVisibilityAfterStyleLoad(map as maplibregl.Map, basemapModeRef);
+
+    expect(map.addLayer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "satellite-base",
+        source: "esri-world-imagery",
+      }),
+      "background",
+    );
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("background", "visibility", "none");
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("water", "visibility", "none");
     expect(map.setLayoutProperty).toHaveBeenCalledWith("satellite-base", "visibility", "visible");
   });
 

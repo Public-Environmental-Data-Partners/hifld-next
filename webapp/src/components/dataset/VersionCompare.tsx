@@ -3,6 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { ColumnSchema, DatasetSource, SpatialDatasetFileMetadata } from "@/lib/api-client";
 
 type MetadataKey =
+  | "description"
   | "feature_count"
   | "bounds"
   | "geometry_type"
@@ -12,6 +13,7 @@ type MetadataKey =
   | "columns_hash";
 
 const METADATA_KEYS: MetadataKey[] = [
+  "description",
   "feature_count",
   "bounds",
   "geometry_type",

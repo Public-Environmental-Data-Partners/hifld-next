@@ -1,9 +1,10 @@
 import maplibregl from "maplibre-gl";
-import { useCallback, useEffect, useRef } from "react";
+import { type RefObject, useCallback, useEffect, useRef } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { PMTiles, Protocol } from "pmtiles";
 import type { LoadedMapLayer } from "@/components/map/multiLayerSources";
-import type { HoverInfo, VectorLayerInfo } from "./types";
+import type { ColumnSchema } from "@/lib/api-client";
+import type { HoverInfo, NumericFieldSummary, VectorLayerInfo } from "./types";
 import { DEFAULT_STYLE } from "./utils";
 
 interface PMTilesVectorLayerMetadata {
@@ -21,6 +22,64 @@ interface VectorLayersBySource {
   [sourceId: string]: VectorLayerInfo[] | undefined;
 }
 
+function isNumericFieldType(type: string | number | boolean | undefined): boolean {
+  if (typeof type === "number") {
+    return true;
+  }
+  if (typeof type !== "string") {
+    return false;
+  }
+  const normalized = type.toLowerCase();
+  return (
+    normalized.includes("number") ||
+    normalized.includes("int") ||
+    normalized.includes("float") ||
+    normalized.includes("double") ||
+    normalized.includes("decimal")
+  );
+}
+
+function isNumericColumn(column: ColumnSchema | undefined): boolean {
+  if (!column) {
+    return false;
+  }
+  return isNumericFieldType(column.type) || column.min !== undefined || column.max !== undefined;
+}
+
+function numericFieldSummaries({
+  fields,
+  metadataColumns,
+}: {
+  fields: PMTilesVectorLayerMetadata["fields"];
+  metadataColumns: ColumnSchema[] | undefined;
+}): NumericFieldSummary[] {
+  const summaries = new Map<string, NumericFieldSummary>();
+  const fieldEntries = Object.entries(fields ?? {});
+
+  for (const [name, type] of fieldEntries) {
+    if (isNumericFieldType(type)) {
+      summaries.set(name, { name });
+    }
+  }
+
+  for (const column of metadataColumns ?? []) {
+    if (!isNumericColumn(column)) {
+      continue;
+    }
+    const hasField = fieldEntries.length === 0 || fields?.[column.name] !== undefined;
+    if (!hasField) {
+      continue;
+    }
+    summaries.set(column.name, {
+      name: column.name,
+      min: column.min,
+      max: column.max,
+    });
+  }
+
+  return [...summaries.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
 export type FeatureSelectionMode = "replace" | "append";
 export type BasemapMode = "street" | "satellite";
 
@@ -36,12 +95,54 @@ type PopupLngLat = NonNullable<HoverInfo["lngLat"]>;
 const SELECTION_BOX_SOURCE_ID = "selection-box-source";
 const SELECTION_BOX_FILL_LAYER_ID = "selection-box-fill";
 const SELECTION_BOX_LINE_LAYER_ID = "selection-box-line";
+const OPENMAPTILES_STYLE_URL = "https://tiles.openfreemap.org/styles/bright";
+const OPENMAPTILES_SOURCE_IDS = new Set(["openmaptiles", "openfreemap"]);
 const STREET_BASE_LAYER_ID = "osm-base";
+const STREET_BASE_SOURCE_ID = "osm-tiles";
 const SATELLITE_BASE_LAYER_ID = "satellite-base";
+const SATELLITE_BASE_SOURCE_ID = "esri-world-imagery";
 const EMPTY_SELECTION_BOX_FEATURES: SelectionBoxFeatureCollection = {
   type: "FeatureCollection",
   features: [],
 };
+
+function fallbackBasemapStyle(mode: BasemapMode): maplibregl.StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      [STREET_BASE_SOURCE_ID]: {
+        type: "raster",
+        tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        tileSize: 256,
+        attribution: "© OpenStreetMap contributors",
+      },
+      [SATELLITE_BASE_SOURCE_ID]: {
+        type: "raster",
+        tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+        tileSize: 256,
+        attribution: "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+      },
+    },
+    layers: [
+      {
+        id: STREET_BASE_LAYER_ID,
+        type: "raster",
+        source: STREET_BASE_SOURCE_ID,
+        layout: {
+          visibility: mode === "street" ? "visible" : "none",
+        },
+      },
+      {
+        id: SATELLITE_BASE_LAYER_ID,
+        type: "raster",
+        source: SATELLITE_BASE_SOURCE_ID,
+        layout: {
+          visibility: mode === "satellite" ? "visible" : "none",
+        },
+      },
+    ],
+  };
+}
 
 export function getVectorLayers(metadata: PMTilesMetadata): VectorLayerInfo[] {
   const vectorLayers = metadata.vector_layers ?? [];
@@ -52,6 +153,7 @@ export function getVectorLayers(metadata: PMTilesMetadata): VectorLayerInfo[] {
       layers.push({
         id: layer.id,
         fields: Object.keys(layer.fields ?? {}),
+        numericFields: numericFieldSummaries({ fields: layer.fields, metadataColumns: undefined }),
       });
     }
   }
@@ -67,6 +169,11 @@ export function getVectorLayersForSource(metadata: PMTilesMetadata, source: Load
     loadedLayerId: source.id,
     mapSourceId: source.mapSourceId,
     mapLayerBaseId: `${source.mapSourceId}-${layer.id}`,
+    numericFields: numericFieldSummaries({
+      fields: metadata.vector_layers?.find((metadataLayer) => metadataLayer.id === layer.id)?.fields,
+      metadataColumns: source.sourceMetadata?.columns,
+    }),
+    geometryType: source.sourceMetadata?.geometry_type,
   }));
 }
 
@@ -344,6 +451,13 @@ export function syncExistingRenderedLayers(map: maplibregl.Map, source: LoadedMa
 }
 
 export function syncBasemapVisibility(map: maplibregl.Map, mode: BasemapMode): void {
+  const style = map.getStyle();
+  for (const styleLayer of style?.layers ?? []) {
+    if (isStreetBasemapStyleLayer(styleLayer)) {
+      map.setLayoutProperty(styleLayer.id, "visibility", mode === "street" ? "visible" : "none");
+    }
+  }
+
   if (map.getLayer(STREET_BASE_LAYER_ID)) {
     map.setLayoutProperty(STREET_BASE_LAYER_ID, "visibility", mode === "street" ? "visible" : "none");
   }
@@ -352,11 +466,49 @@ export function syncBasemapVisibility(map: maplibregl.Map, mode: BasemapMode): v
   }
 }
 
+function ensureSatelliteBasemapLayer(map: maplibregl.Map): void {
+  if (!map.getSource(SATELLITE_BASE_SOURCE_ID)) {
+    map.addSource(SATELLITE_BASE_SOURCE_ID, {
+      type: "raster",
+      tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+      tileSize: 256,
+      attribution: "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+    });
+  }
+
+  if (map.getLayer(SATELLITE_BASE_LAYER_ID)) {
+    return;
+  }
+
+  const firstLayerId = map.getStyle().layers?.[0]?.id;
+  map.addLayer(
+    {
+      id: SATELLITE_BASE_LAYER_ID,
+      type: "raster",
+      source: SATELLITE_BASE_SOURCE_ID,
+      layout: {
+        visibility: "none",
+      },
+    },
+    firstLayerId,
+  );
+}
+
+export function syncBasemapVisibilityAfterStyleLoad(map: maplibregl.Map, basemapModeRef: RefObject<BasemapMode>): void {
+  ensureSatelliteBasemapLayer(map);
+  syncBasemapVisibility(map, basemapModeRef.current);
+}
+
 function styleLayerSourceId(styleLayer: maplibregl.LayerSpecification): string | null {
   if (!("source" in styleLayer) || typeof styleLayer.source !== "string") {
     return null;
   }
   return styleLayer.source;
+}
+
+function isStreetBasemapStyleLayer(styleLayer: maplibregl.LayerSpecification): boolean {
+  const sourceId = styleLayerSourceId(styleLayer);
+  return sourceId ? OPENMAPTILES_SOURCE_IDS.has(sourceId) : styleLayer.type === "background";
 }
 
 function hasRemainingStyleLayerForSource(
@@ -497,7 +649,7 @@ export function useMultiLayerMapInitialization(
   pinnedPopupElementRef?: React.RefObject<HTMLDivElement | null>,
 ) {
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const initialBasemapModeRef = useRef(basemapMode);
+  const currentBasemapModeRef = useRef(basemapMode);
   const protocolRef = useRef<Protocol | null>(null);
   const interactiveLayerIds = useRef<string[]>([]);
   const onFeatureSelectionRef = useRef(onFeatureSelection);
@@ -517,6 +669,8 @@ export function useMultiLayerMapInitialization(
     sourceLayer: string;
     id: number | string;
   } | null>(null);
+
+  currentBasemapModeRef.current = basemapMode;
 
   useEffect(() => {
     onFeatureSelectionRef.current = onFeatureSelection;
@@ -610,47 +764,30 @@ export function useMultiLayerMapInitialization(
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: {
-        version: 8,
-        sources: {
-          "osm-tiles": {
-            type: "raster",
-            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-            tileSize: 256,
-            attribution: "© OpenStreetMap contributors",
-          },
-          "esri-world-imagery": {
-            type: "raster",
-            tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
-            tileSize: 256,
-            attribution: "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
-          },
-        },
-        layers: [
-          {
-            id: STREET_BASE_LAYER_ID,
-            type: "raster",
-            source: "osm-tiles",
-            layout: {
-              visibility: initialBasemapModeRef.current === "street" ? "visible" : "none",
-            },
-          },
-          {
-            id: SATELLITE_BASE_LAYER_ID,
-            type: "raster",
-            source: "esri-world-imagery",
-            layout: {
-              visibility: initialBasemapModeRef.current === "satellite" ? "visible" : "none",
-            },
-          },
-        ],
-      },
+      style: OPENMAPTILES_STYLE_URL,
       center: [-98.5795, 39.8283],
       zoom: 4,
     });
 
     mapRef.current = map;
-    syncBasemapVisibility(map, initialBasemapModeRef.current);
+    let hasSyncedBasemapAfterStyleLoad = false;
+    let hasAppliedFallbackBasemapStyle = false;
+    const syncBasemapAfterStyleLoad = () => {
+      if (hasSyncedBasemapAfterStyleLoad) {
+        return;
+      }
+      hasSyncedBasemapAfterStyleLoad = true;
+      syncBasemapVisibilityAfterStyleLoad(map, currentBasemapModeRef);
+    };
+    map.once("style.load", syncBasemapAfterStyleLoad);
+    map.on("error", () => {
+      if (hasSyncedBasemapAfterStyleLoad || hasAppliedFallbackBasemapStyle) {
+        return;
+      }
+      hasAppliedFallbackBasemapStyle = true;
+      map.setStyle(fallbackBasemapStyle(currentBasemapModeRef.current));
+      map.once("style.load", syncBasemapAfterStyleLoad);
+    });
 
     const updateCursorForCurrentSelectionState = () => {
       setMapSelectionCursor(map, isSelectionActiveRef.current || boxSelectionStartRef.current !== null);

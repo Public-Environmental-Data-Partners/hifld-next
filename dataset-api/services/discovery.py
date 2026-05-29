@@ -182,6 +182,7 @@ class DiscoveryService:
                     if key
                     in {
                         "version",
+                        "description",
                         "size_bytes",
                         "mime_type",
                         "feature_count",

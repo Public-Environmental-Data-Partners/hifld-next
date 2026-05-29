@@ -58,7 +58,7 @@ import type {
 import { useLayerStyling } from "@/components/viewer/useLayerStyling";
 import { type BasemapMode, useMultiLayerMapInitialization } from "@/components/viewer/useMapInitialization";
 import {
-  computeQuantileBreaks,
+  automaticBreaksForNumericField,
   DEFAULT_BREAK_COUNT,
   getColorRamp,
   getLegendItems,
@@ -188,17 +188,30 @@ function datasetHasLoadedLayer(
   return false;
 }
 
+function sampledBreakValues(map: maplibregl.Map | null, layer: VectorLayerInfo, property: string): number[] {
+  if (!map) {
+    return [];
+  }
+  return getSampledValues(map, layer.sourceLayerId ?? layer.id, property, 5000, layer.mapSourceId);
+}
+
 function computeMissingBreakUpdates(
-  map: maplibregl.Map,
+  map: maplibregl.Map | null,
   vectorLayers: VectorLayerInfo[],
   layerStyles: LayerStylesById,
 ): LayerStyleUpdates {
   const updates: LayerStyleUpdates = {};
   for (const layer of vectorLayers) {
     const style = layerStyles[layer.id];
-    if (!style?.colorProperty || style.breaksText) continue;
-    const values = getSampledValues(map, layer.sourceLayerId ?? layer.id, style.colorProperty, 5000, layer.mapSourceId);
-    const nextText = computeQuantileBreaks(values, DEFAULT_BREAK_COUNT).join(", ");
+    if (!style?.colorProperty || style.breakMode !== "auto" || style.breaksText) continue;
+    const numericField = layer.numericFields.find((field) => field.name === style.colorProperty);
+    const sampledValues = sampledBreakValues(map, layer, style.colorProperty);
+    const breaks = automaticBreaksForNumericField({
+      field: numericField,
+      sampledValues,
+      count: DEFAULT_BREAK_COUNT,
+    });
+    const nextText = breaks.join(", ");
     if (nextText) {
       updates[layer.id] = { ...style, breaksText: nextText };
     }
@@ -313,6 +326,17 @@ function selectedFeatureIdFromHoverInfo(hoverInfo: HoverInfo | null, loadedLayer
   return normalizeSelectedFeatures({ features: [hoveredFeature], loadedLayers })[0]?.id ?? null;
 }
 
+function selectedMapFeatureFromHoverInfo(
+  hoverInfo: HoverInfo | null,
+  loadedLayers: LoadedMapLayer[],
+): SelectedMapFeature | null {
+  const hoveredFeature = hoverInfo?.features[hoverInfo.selectedIndex ?? 0] ?? null;
+  if (!hoveredFeature) {
+    return null;
+  }
+  return normalizeSelectedFeatures({ features: [hoveredFeature], loadedLayers })[0] ?? null;
+}
+
 export function resolvedToMapLayer(entry: ResolvedDescriptor): LoadedMapLayer | null {
   if (entry.descriptor.formatType !== "pmtiles") return null;
   const url = buildSourceFileUrl(entry.source);
@@ -322,6 +346,7 @@ export function resolvedToMapLayer(entry: ResolvedDescriptor): LoadedMapLayer | 
     name: `${entry.file.name} / ${formatVersionLabel(entry.source.version ?? "1")}`,
     datasetName: entry.dataset.name,
     storageLocationName: entry.source.storage_location?.name,
+    sourceMetadata: entry.source.source_metadata,
     pmtilesUrl: url,
   });
 }
@@ -449,7 +474,7 @@ interface StyleLayerCardProps {
   style: LayerStyle | null;
   breaks: number[];
   colors: string[];
-  mapRef: React.RefObject<maplibregl.Map | null>;
+  getSampledBreaks: (layer: VectorLayerInfo, property: string) => number[];
   colorSectionOpen: boolean;
   setColorSectionOpen: (open: boolean) => void;
   sizeSectionOpen: boolean;
@@ -463,7 +488,7 @@ function StyleLayerCard({
   style,
   breaks,
   colors,
-  mapRef,
+  getSampledBreaks,
   colorSectionOpen,
   setColorSectionOpen,
   sizeSectionOpen,
@@ -492,7 +517,7 @@ function StyleLayerCard({
               activeStyle={style}
               activeBreaks={breaks}
               activeColors={colors}
-              mapRef={mapRef}
+              getSampledBreaks={getSampledBreaks}
               colorSectionOpen={colorSectionOpen}
               setColorSectionOpen={setColorSectionOpen}
               sizeSectionOpen={sizeSectionOpen}
@@ -632,6 +657,11 @@ export function MapWorkspace({
 
   useLayerStyling(mapRef, vectorLayers, layerStyles, setLayerStyles);
 
+  const getSampledBreaks = useCallback(
+    (layer: VectorLayerInfo, property: string) => sampledBreakValues(mapRef.current, layer, property),
+    [mapRef],
+  );
+
   const clearSelectedFeatures = useCallback(() => {
     clearSelectionBox();
     setSelectedFeatures([]);
@@ -639,9 +669,7 @@ export function MapWorkspace({
   }, [clearSelectionBox]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const updates = computeMissingBreakUpdates(map, vectorLayers, layerStyles);
+    const updates = computeMissingBreakUpdates(mapRef.current, vectorLayers, layerStyles);
     if (Object.keys(updates).length === 0) return;
     setLayerStyles((prev) => ({
       ...prev,
@@ -676,6 +704,10 @@ export function MapWorkspace({
 
   const activePopupInfo = pinnedPopupInfo ?? hoverInfo;
   const propertyEntries = popupProperties(activePopupInfo);
+  const activePopupSelectedFeature = useMemo(
+    () => selectedMapFeatureFromHoverInfo(activePopupInfo, loadedLayers),
+    [activePopupInfo, loadedLayers],
+  );
   const highlightedFeatureId = useMemo(
     () => selectedFeatureIdFromHoverInfo(hoverInfo, loadedLayers),
     [hoverInfo, loadedLayers],
@@ -693,11 +725,29 @@ export function MapWorkspace({
     },
     [mapRef],
   );
-  const legendLayer = vectorLayers[0] ?? null;
-  const legendStyle = legendLayer ? (layerStyles[legendLayer.id] ?? null) : null;
-  const legendBreaks = legendStyle ? parseBreaks(legendStyle.breaksText) : [];
-  const legendColors = legendStyle ? getColorRamp(legendStyle.colorScheme, legendBreaks.length + 1) : [];
-  const legendItems = useMemo(() => getLegendItems(legendBreaks, legendColors), [legendBreaks, legendColors]);
+  const legendGroups = useMemo(
+    () =>
+      vectorLayers.flatMap((layer) => {
+        const style = layerStyles[layer.id];
+        if (!style) return [];
+        const breaks = parseBreaks(style.breaksText);
+        if (style.colorProperty && breaks.length === 0) {
+          return [];
+        }
+        const colors = getColorRamp(style.colorScheme, breaks.length + 1);
+        const loadedLayer = loadedLayers.find((entry) => entry.id === layer.loadedLayerId);
+        return [
+          {
+            id: layer.id,
+            title: loadedLayer?.name ?? layer.sourceLayerId ?? layer.id,
+            field: style.colorProperty ?? undefined,
+            items: getLegendItems(breaks, colors),
+          },
+        ];
+      }),
+    [layerStyles, loadedLayers, vectorLayers],
+  );
+  const legendTitle = legendGroups.length === 1 ? (legendGroups[0]?.field ?? "Layer colors") : "Layer colors";
   const headerLayer = loadedLayers.length === 1 ? loadedLayers[0] : null;
   const headerPrimary =
     headerLayer?.datasetName ?? (loadedLayers.length > 1 ? `${loadedLayers.length} map layers` : collection.name);
@@ -963,7 +1013,7 @@ export function MapWorkspace({
                 style={style}
                 breaks={breaks}
                 colors={colors}
-                mapRef={mapRef}
+                getSampledBreaks={getSampledBreaks}
                 colorSectionOpen={colorSectionOpen}
                 setColorSectionOpen={setColorSectionOpen}
                 sizeSectionOpen={sizeSectionOpen}
@@ -1006,6 +1056,7 @@ export function MapWorkspace({
               hoverInfo={activePopupInfo}
               selectedIndex={activePopupInfo.selectedIndex}
               propertyEntries={propertyEntries}
+              selectedMapFeature={activePopupSelectedFeature}
               onIndexChange={(index) => {
                 if (activePopupInfo.isPinned) {
                   setPinnedPopupInfo((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
@@ -1016,8 +1067,13 @@ export function MapWorkspace({
               onClose={() => setPinnedPopupInfo(null)}
             />
           )}
-          {legendStyle && (
-            <MapLegend items={legendItems} visible={legendVisible} onToggle={() => setLegendVisible(!legendVisible)} />
+          {legendGroups.length > 0 && (
+            <MapLegend
+              title={legendTitle}
+              groups={legendGroups}
+              visible={legendVisible}
+              onToggle={() => setLegendVisible(!legendVisible)}
+            />
           )}
         </div>
       </ResizablePanel>

@@ -1,7 +1,8 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { ArrowLeft, BookOpen, FileJson, GitCompare, MapIcon, Table } from "lucide-react";
+import { ArrowLeft, BookOpen, FileJson, GitCompare, MapIcon, MessageSquareWarning, Table } from "lucide-react";
 import { useEffect, useState } from "react";
 import { hasComparableVersions } from "@/components/dataset/compareSources";
+import { DataQualityFeedbackDialog } from "@/components/dataset/DataQualityFeedbackDialog";
 import { FileFormatTree } from "@/components/dataset/FileFormatTree";
 import { findSelectedParquetOption, ParquetPreviewDrawer } from "@/components/dataset/ParquetPreviewDrawer";
 import {
@@ -255,31 +256,27 @@ function FileDetailPage() {
               </p>
             )}
           </div>
-          <div className="flex flex-col gap-3 border-y py-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button asChild className="h-12 justify-start px-4 sm:h-9 sm:justify-center">
+          <div className="space-y-3 border-y py-4">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button asChild className="h-12 justify-start px-4">
                 <Link to="/collections/$collectionSlug/map" params={{ collectionSlug }} search={mapSearch}>
                   <MapIcon className="h-4 w-4 mr-2 shrink-0" />
                   Map Viewer
                 </Link>
               </Button>
               {parquetPreviewOptions.length > 0 && (
-                <Button
-                  variant="outline"
-                  onClick={openParquetDrawer}
-                  className="h-12 justify-start px-4 sm:h-9 sm:justify-center"
-                >
+                <Button variant="outline" onClick={openParquetDrawer} className="h-12 justify-start px-4">
                   <Table className="h-4 w-4 mr-2 shrink-0" />
                   Data Table
                 </Button>
               )}
             </div>
-            <div className="flex w-full flex-col divide-y border text-sm text-muted-foreground sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-1 sm:divide-y-0 sm:border-0">
+            <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
               <Button
                 variant="ghost"
                 size="sm"
                 asChild
-                className="h-12 justify-start px-4 font-normal text-muted-foreground sm:h-8 sm:px-2"
+                className="h-10 justify-start px-3 font-normal text-muted-foreground"
               >
                 <a
                   href={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}`}
@@ -290,47 +287,50 @@ function FileDetailPage() {
                   View metadata
                 </a>
               </Button>
-              {canViewSchema && (
-                <>
-                  <span aria-hidden="true" className="hidden text-border sm:inline">
-                    /
-                  </span>
+              <DataQualityFeedbackDialog
+                context={{ collectionSlug, datasetSlug, fileSlug }}
+                trigger={
                   <Button
                     variant="ghost"
                     size="sm"
-                    asChild
-                    className="h-12 justify-start px-4 font-normal text-muted-foreground sm:h-8 sm:px-2"
+                    className="h-10 justify-start px-3 font-normal text-muted-foreground"
                   >
-                    <Link
-                      to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema"
-                      params={{ collectionSlug, datasetSlug, fileSlug }}
-                    >
-                      <BookOpen className="h-4 w-4 mr-1.5 shrink-0" />
-                      Schema
-                    </Link>
+                    <MessageSquareWarning className="h-4 w-4 mr-1.5 shrink-0" />
+                    Report issue
                   </Button>
-                </>
+                }
+              />
+              {canViewSchema && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  asChild
+                  className="h-10 justify-start px-3 font-normal text-muted-foreground"
+                >
+                  <Link
+                    to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema"
+                    params={{ collectionSlug, datasetSlug, fileSlug }}
+                  >
+                    <BookOpen className="h-4 w-4 mr-1.5 shrink-0" />
+                    Schema
+                  </Link>
+                </Button>
               )}
               {canCompareVersions && (
-                <>
-                  <span aria-hidden="true" className="hidden text-border sm:inline">
-                    /
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    asChild
-                    className="h-12 justify-start px-4 font-normal text-muted-foreground sm:h-8 sm:px-2"
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  asChild
+                  className="h-10 justify-start px-3 font-normal text-muted-foreground"
+                >
+                  <Link
+                    to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/compare"
+                    params={{ collectionSlug, datasetSlug, fileSlug }}
                   >
-                    <Link
-                      to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/compare"
-                      params={{ collectionSlug, datasetSlug, fileSlug }}
-                    >
-                      <GitCompare className="h-4 w-4 mr-1.5 shrink-0" />
-                      Compare versions
-                    </Link>
-                  </Button>
-                </>
+                    <GitCompare className="h-4 w-4 mr-1.5 shrink-0" />
+                    Compare versions
+                  </Link>
+                </Button>
               )}
             </div>
           </div>

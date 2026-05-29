@@ -13,12 +13,21 @@ export type VectorLayerInfo = {
   mapSourceId?: string | undefined;
   mapLayerBaseId?: string | undefined;
   fields: string[];
+  numericFields: NumericFieldSummary[];
+  geometryType?: string | undefined;
+};
+
+export type NumericFieldSummary = {
+  name: string;
+  min?: number | undefined;
+  max?: number | undefined;
 };
 
 export type LayerStyle = {
   colorProperty: string | null;
   colorScheme: string;
   breaksText: string;
+  breakMode: "auto" | "manual";
   opacity: number;
   radius: number;
   lineWidth: number;

@@ -1,5 +1,16 @@
-import { ArrowDown, ArrowUp, ChevronsUpDown, Info, LocateFixed, Search, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronsUpDown,
+  ExternalLink,
+  Info,
+  MessageSquareWarning,
+  MoreHorizontal,
+  Search,
+  X,
+} from "lucide-react";
 import * as React from "react";
+import { DataQualityFeedbackDialog } from "@/components/dataset/DataQualityFeedbackDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { googleMapsSearchUrl } from "@/lib/externalMaps";
 import { cn } from "@/lib/utils";
 import {
   buildFeatureDiff,
@@ -246,14 +258,14 @@ function SelectedFeaturesTable({
         <table className="w-full min-w-[640px] text-sm">
           <thead className="sticky top-0 z-10 bg-background">
             <tr className="border-b text-left text-xs text-muted-foreground">
-              <th className="px-3 py-2 font-medium">
-                <SelectedFeatureColumnHeader column="feature" label="Feature" sort={sort} onSortChange={onSortChange} />
-              </th>
               {propertyKeys.map((key) => (
                 <th key={key} className="px-3 py-2 font-medium">
                   <SelectedFeatureColumnHeader column={key} label={key} sort={sort} onSortChange={onSortChange} />
                 </th>
               ))}
+              <th className="sticky right-0 w-12 bg-background px-2 py-2 text-right font-medium">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -262,7 +274,7 @@ function SelectedFeaturesTable({
                 key={feature.id}
                 data-testid="selected-feature-row"
                 className={cn(
-                  "border-b align-top transition-colors",
+                  "group border-b align-top transition-colors",
                   feature.id === highlightedFeatureId ? "bg-accent/50" : undefined,
                   feature.centroid && onFeatureClick ? "cursor-pointer hover:bg-accent/30" : undefined,
                 )}
@@ -272,31 +284,23 @@ function SelectedFeaturesTable({
                   }
                 }}
               >
-                <td className="max-w-48 px-3 py-2 font-mono text-xs">
-                  <span className="flex min-w-0 items-center gap-2">
-                    {feature.centroid && onFeatureClick ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-11 w-11 shrink-0 sm:h-7 sm:w-7"
-                        aria-label={`Zoom to feature ${feature.featureId}`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onFeatureClick(feature);
-                        }}
-                      >
-                        <LocateFixed className="h-3.5 w-3.5" />
-                      </Button>
-                    ) : null}
-                    <span className="min-w-0 truncate">{feature.featureId}</span>
-                  </span>
-                </td>
                 {propertyKeys.map((key) => (
                   <td key={key} className="max-w-56 break-words px-3 py-2">
                     {feature.properties[key] ?? ""}
                   </td>
                 ))}
+                <td
+                  className={cn(
+                    "sticky right-0 w-12 px-2 py-2 text-right",
+                    feature.id === highlightedFeatureId ? "bg-accent/50" : "bg-background",
+                    feature.centroid && onFeatureClick ? "group-hover:bg-accent/30" : undefined,
+                  )}
+                >
+                  {feature.centroid && onFeatureClick ? (
+                    <span className="sr-only">Click row to zoom to feature {feature.featureId}</span>
+                  ) : null}
+                  <SelectedFeatureActions feature={feature} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -308,6 +312,53 @@ function SelectedFeaturesTable({
         )}
       </div>
     </div>
+  );
+}
+
+function SelectedFeatureActions({ feature }: { feature: SelectedMapFeature }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-11 w-11 shrink-0 text-muted-foreground hover:text-foreground sm:h-7 sm:w-7"
+          aria-label={`Actions for feature ${feature.featureId}`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-48 p-1" side="bottom" onClick={(event) => event.stopPropagation()}>
+        <div className="flex flex-col gap-1">
+          {feature.centroid ? (
+            <Button variant="ghost" size="sm" asChild className="justify-start">
+              <a href={googleMapsSearchUrl(feature.centroid)} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Google Maps
+              </a>
+            </Button>
+          ) : null}
+          <DataQualityFeedbackDialog
+            context={{
+              collectionSlug: feature.collectionSlug,
+              datasetSlug: feature.datasetSlug,
+              fileSlug: feature.fileSlug,
+              version: feature.version,
+              sourceId: feature.sourceId,
+              feature,
+            }}
+            trigger={
+              <Button type="button" variant="ghost" size="sm" className="justify-start">
+                <MessageSquareWarning className="mr-2 h-4 w-4" />
+                Report issue
+              </Button>
+            }
+          />
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -667,21 +718,7 @@ function DiffGridRow({
     >
       <td className={cn("sticky left-0 px-3 py-2", isHighlighted ? "bg-accent/50" : "bg-background")}>
         <span className="flex items-center gap-2">
-          {isClickable ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-11 w-11 shrink-0 sm:h-7 sm:w-7"
-              aria-label={`Zoom to diff row ${row.id}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                zoomToTarget();
-              }}
-            >
-              <LocateFixed className="h-3.5 w-3.5" />
-            </Button>
-          ) : null}
+          {isClickable ? <span className="sr-only">Click row to zoom to diff row {row.id}</span> : null}
           <Badge variant={statusVariant(row.status)}>{row.status}</Badge>
         </span>
       </td>

@@ -185,6 +185,7 @@ def make_storage_files() -> dict[str, bytes]:
 def test_spatial_dataset_file_metadata_uses_typed_columns() -> None:
     """Verify the expected behavior."""
     metadata = SpatialDatasetFileMetadata(
+        description="Processed by Niyam IT.",
         columns=[
             {
                 "name": "district_name",
@@ -192,12 +193,13 @@ def test_spatial_dataset_file_metadata_uses_typed_columns() -> None:
                 "description": "Congressional district name",
                 "nullable": False,
             }
-        ]
+        ],
     )
 
     assert isinstance(metadata.columns, list)
     assert isinstance(metadata.columns[0], ColumnSchema)
     assert metadata.columns[0].description == "Congressional district name"
+    assert metadata.description == "Processed by Niyam IT."
 
 
 def test_seed_formats_includes_new_discoverable_formats() -> None:
@@ -239,6 +241,7 @@ def test_discovery_service_yields_discovered_versions() -> None:
         "test-dataset/test-dataset/v1.1.0/geoparquet/test-dataset-1.parquet",
     ]
     assert latest_geoparquet.metadata is not None
+    assert latest_geoparquet.metadata.description == "Dataset description"
     assert latest_geoparquet.metadata.columns is not None
     assert latest_geoparquet.metadata.columns[1].description == "Population estimate"
     assert latest_geoparquet.metadata.columns[1].num_null_values == 1
@@ -921,6 +924,7 @@ def test_discover_job_logs_dry_run_object_paths_and_summary(
         "location_path": "test-dataset/test-dataset/v1.0.0/geoparquet/*.parquet",
         "source_metadata": {
             "version": "v1",
+            "description": None,
             "size_bytes": None,
             "mime_type": None,
             "feature_count": 12,

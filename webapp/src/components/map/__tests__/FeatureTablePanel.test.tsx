@@ -147,11 +147,7 @@ describe("FeatureTablePanel", () => {
 
     expect(onFeatureClick).toHaveBeenCalledTimes(1);
     expect(onFeatureClick).toHaveBeenLastCalledWith(feature);
-
-    await user.click(screen.getByRole("button", { name: `Zoom to feature ${feature.featureId}` }));
-
-    expect(onFeatureClick).toHaveBeenCalledTimes(2);
-    expect(onFeatureClick).toHaveBeenLastCalledWith(feature);
+    expect(screen.queryByRole("button", { name: `Zoom to feature ${feature.featureId}` })).not.toBeInTheDocument();
   });
 
   it("hides source layer ids and feature counts from selector labels", () => {
@@ -244,11 +240,7 @@ describe("FeatureTablePanel", () => {
 
     expect(onFeatureClick).toHaveBeenCalledTimes(1);
     expect(onFeatureClick).toHaveBeenLastCalledWith(rightFeature);
-
-    await user.click(screen.getByRole("button", { name: /Zoom to diff row/ }));
-
-    expect(onFeatureClick).toHaveBeenCalledTimes(2);
-    expect(onFeatureClick).toHaveBeenLastCalledWith(rightFeature);
+    expect(screen.queryByRole("button", { name: /Zoom to diff row/ })).not.toBeInTheDocument();
   });
 
   it("falls back to the old diff feature when the new side lacks a centroid", async () => {

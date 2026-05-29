@@ -126,6 +126,32 @@ describe('FeatureHoverPopup', () => {
     expect(select).toHaveAttribute('aria-expanded', 'false')
   })
 
+  it('does not warn about duplicate keys for anonymous features from the same layer', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const multiFeatureInfo = createMockHoverInfo({
+      features: [
+        createMockFeature({ properties: { name: 'Feature 1' } }),
+        createMockFeature({ properties: { name: 'Feature 2' } }),
+      ],
+    })
+
+    render(
+      <FeatureHoverPopup
+        hoverInfo={multiFeatureInfo}
+        selectedIndex={0}
+        propertyEntries={[['name', 'Feature 1']]}
+        onIndexChange={vi.fn()}
+      />
+    )
+
+    expect(consoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Encountered two children with the same key'),
+      expect.anything(),
+    )
+
+    consoleError.mockRestore()
+  })
+
   it('positions popup correctly based on hoverInfo coordinates', () => {
     const mockHoverInfo = createMockHoverInfo({ x: 100, y: 200 })
     const { container } = render(
@@ -201,4 +227,3 @@ describe('FeatureHoverPopup', () => {
     expect(screen.getByText('No properties available.')).toBeInTheDocument()
   })
 })
-

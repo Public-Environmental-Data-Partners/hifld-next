@@ -1,5 +1,5 @@
 import { buildSourceFileUrl } from "@/components/dataset/sourceUrls";
-import type { Dataset, DatasetFile, DatasetSource } from "@/lib/api-client";
+import type { Dataset, DatasetFile, DatasetSource, SpatialDatasetFileMetadata } from "@/lib/api-client";
 import type { SourceDescriptor } from "./sourceDescriptors";
 import { sourceDescriptorId } from "./sourceDescriptors";
 
@@ -9,6 +9,7 @@ export interface LoadedMapLayer {
   datasetName?: string | undefined;
   storageLocationName?: string | undefined;
   descriptor: SourceDescriptor;
+  sourceMetadata?: SpatialDatasetFileMetadata | undefined;
   pmtilesUrl: string;
   mapSourceId: string;
   visible: boolean;
@@ -34,12 +35,14 @@ export function buildLoadedMapLayer({
   datasetName,
   storageLocationName,
   pmtilesUrl,
+  sourceMetadata,
 }: {
   descriptor: SourceDescriptor;
   name: string;
   datasetName?: string | undefined;
   storageLocationName?: string | undefined;
   pmtilesUrl: string;
+  sourceMetadata?: SpatialDatasetFileMetadata | undefined;
 }): LoadedMapLayer {
   const id = sourceDescriptorId(descriptor);
   return {
@@ -48,6 +51,7 @@ export function buildLoadedMapLayer({
     datasetName,
     storageLocationName,
     descriptor,
+    sourceMetadata,
     pmtilesUrl,
     mapSourceId: `source-${id}`,
     visible: true,

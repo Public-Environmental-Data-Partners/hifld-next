@@ -59,11 +59,14 @@ export function SchemaViewer({
           {fileName} / {formatVersionLabel(selectedVersion)}
         </p>
         {selectedSchemaSource ? (
-          <p className="text-sm text-muted-foreground">
-            Schema from {selectedSchemaSource.formatName},{" "}
-            {selectedSchemaSource.source.storage_location?.name ?? "unknown location"},{" "}
-            {formatVersionLabel(selectedSchemaSource.source.version)}.
-          </p>
+          <div className="space-y-1 text-sm text-muted-foreground">
+            <p>
+              Schema from {selectedSchemaSource.formatName},{" "}
+              {selectedSchemaSource.source.storage_location?.name ?? "unknown location"},{" "}
+              {formatVersionLabel(selectedSchemaSource.source.version)}.
+            </p>
+            {metadata?.description ? <p>{metadata.description}</p> : null}
+          </div>
         ) : null}
       </div>
 
