@@ -65,13 +65,18 @@ import {
   getSampledValues,
   parseBreaks,
 } from "@/components/viewer/utils";
-import type { Collection, Dataset, DatasetFile, DatasetSource, DatasetWithUrls } from "@/lib/api-client";
-import { getCollectionBySlug, getCollectionDatasets, getDatasetBySlug, getDatasetFileBySlug } from "@/lib/api-client";
+import type {
+  Collection,
+  Dataset,
+  DatasetFile,
+  DatasetSource,
+  DatasetWithUrls,
+  PaginatedResponse,
+} from "@/lib/api-client";
+import { getCollectionBySlug, getDatasetBySlug, getDatasetFileBySlug } from "@/lib/api-client";
 
 type MapSearch = {
   source?: string;
-  query?: string;
-  offset?: number;
 };
 
 const MAP_DATASET_PAGE_SIZE = 12;
@@ -81,8 +86,6 @@ const MOBILE_SETTINGS_MEDIA_QUERY = "(max-width: 767.98px)";
 const mapSearchSchema = z
   .object({
     source: z.string().optional(),
-    query: z.string().optional(),
-    offset: z.coerce.number().int().min(0).optional(),
   })
   .catch({});
 
@@ -90,8 +93,6 @@ function parseMapSearch(search: z.input<typeof mapSearchSchema>): MapSearch {
   const parsed = mapSearchSchema.parse(search);
   const result: MapSearch = {};
   if (parsed.source !== undefined) result.source = parsed.source;
-  if (parsed.query !== undefined) result.query = parsed.query;
-  if (parsed.offset !== undefined) result.offset = parsed.offset;
   return result;
 }
 
@@ -236,17 +237,42 @@ export async function resolveDescriptor(descriptor: SourceDescriptor | null): Pr
   };
 }
 
-export function searchDatasetsForMapImport({ collectionId, query }: { collectionId: number; query: string }) {
+interface CollectionDatasetSearchApiResponse {
+  datasets: DatasetWithUrls[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+function collectionMapSearchUrl(collectionSlug: string, query: string): string {
   const trimmedQuery = query.trim();
-  return getCollectionDatasets({
-    data: {
-      collectionId,
-      includeUrls: false,
-      limit: MAP_DATASET_PAGE_SIZE,
-      offset: 0,
-      ...(trimmedQuery ? { search: trimmedQuery } : {}),
-    },
+  const params = new URLSearchParams({
+    limit: String(MAP_DATASET_PAGE_SIZE),
+    offset: "0",
+    omit: "description",
   });
+  if (trimmedQuery) params.set("search", trimmedQuery);
+  return `/api/collections/${encodeURIComponent(collectionSlug)}?${params.toString()}`;
+}
+
+export async function searchDatasetsForMapImport({
+  collectionSlug,
+  query,
+}: {
+  collectionSlug: string;
+  query: string;
+}): Promise<PaginatedResponse<DatasetWithUrls>> {
+  const response = await fetch(collectionMapSearchUrl(collectionSlug, query));
+  if (!response.ok) {
+    throw new Error(`Dataset search failed: ${response.status}`);
+  }
+  const body = (await response.json()) as CollectionDatasetSearchApiResponse;
+  return {
+    items: body.datasets,
+    total: body.total,
+    limit: body.limit,
+    offset: body.offset,
+  };
 }
 
 export const Route = createFileRoute("/collections/$collectionSlug/map")({
@@ -572,7 +598,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
       setIsDatasetSearchLoading(true);
       setDatasetSearchError(null);
       void searchDatasetsForMapImport({
-        collectionId: collection.id,
+        collectionSlug: collection.slug,
         query: searchDraft,
       })
         .then((response) => {
@@ -594,7 +620,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
         clearTimeout(searchTimeoutRef.current);
       }
     };
-  }, [collection.id, searchDraft]);
+  }, [collection.slug, searchDraft]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

@@ -171,25 +171,31 @@ describe("collection map route", () => {
   });
 
   it("searches importable datasets with lightweight collection results", async () => {
-    const page = emptyDatasetPage();
-    vi.mocked(apiClient.getCollectionDatasets).mockResolvedValue(page);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        datasets: [dataset],
+        total: 1,
+        limit: 12,
+        offset: 0,
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(
       searchDatasetsForMapImport({
-        collectionId: collection.id,
+        collectionSlug: collection.slug,
         query: "hospitals",
       }),
-    ).resolves.toBe(page);
-
-    expect(apiClient.getCollectionDatasets).toHaveBeenCalledWith({
-      data: {
-        collectionId: collection.id,
-        includeUrls: false,
-        limit: 12,
-        offset: 0,
-        search: "hospitals",
-      },
+    ).resolves.toEqual({
+      items: [dataset],
+      total: 1,
+      limit: 12,
+      offset: 0,
     });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/collections/hifld?limit=12&offset=0&omit=description&search=hospitals");
+    expect(apiClient.getCollectionDatasets).not.toHaveBeenCalled();
   });
 
   it("turns a resolved initial source into a loaded map layer", () => {
