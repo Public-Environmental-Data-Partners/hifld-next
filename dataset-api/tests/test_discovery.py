@@ -39,6 +39,7 @@ EXPECTED_POPULATION_UNIQUE_VALUES = 11
 EXPECTED_UPDATED_FEATURE_COUNT = 24
 EXPECTED_DISCOVER_LIMIT = 5
 EXPECTED_SOURCE_COUNT = 2
+EXPECTED_MANIFEST_SIZE_BYTES = 123456
 
 
 class FakeStorageClient:
@@ -56,6 +57,19 @@ class FakeStorageClient:
         """Test helper for download_file."""
         local_path.parent.mkdir(parents=True, exist_ok=True)
         local_path.write_bytes(self.files[remote_path])
+
+    async def get_file_size(self, remote_path: str) -> int:
+        """Test helper for get_file_size."""
+        return len(self.files[remote_path])
+
+
+class FailingSizeStorageClient(FakeStorageClient):
+    """Test helper that cannot read object sizes."""
+
+    async def get_file_size(self, remote_path: str) -> int:
+        """Test helper for get_file_size."""
+        msg = f"Cannot read size for {remote_path}"
+        raise OSError(msg)
 
 
 def make_session() -> Session:
@@ -263,6 +277,68 @@ def test_discovery_service_yields_discovered_versions() -> None:
     assert {item.version for item in discovered_versions} == {"v1.0.0", "v1.1.0"}
 
 
+def test_discovery_service_calculates_size_bytes_from_discovered_objects() -> None:
+    """Verify the expected behavior."""
+    fake_storage = FakeStorageClient(make_storage_files())
+    service = DiscoveryService(storage_client=fake_storage)
+
+    async def collect_versions() -> list[DiscoveredVersion]:
+        """Test helper for collect_versions."""
+        return [item async for item in service.scan(prefix="test-dataset")]
+
+    discovered_versions = asyncio.run(collect_versions())
+
+    latest_geoparquet = next(
+        item for item in discovered_versions if item.version == "v1.1.0" and item.format_type == "geoparquet"
+    )
+    assert latest_geoparquet.metadata is not None
+    assert latest_geoparquet.metadata.size_bytes == len(b"parquet-v2") + len(b"parquet-v2-part2")
+
+    latest_pmtiles = next(
+        item for item in discovered_versions if item.version == "v1.1.0" and item.format_type == "pmtiles"
+    )
+    assert latest_pmtiles.metadata is not None
+    assert latest_pmtiles.metadata.size_bytes == len(b"pmtiles-v2")
+
+
+def test_discovery_service_preserves_manifest_size_bytes() -> None:
+    """Verify the expected behavior."""
+    files = make_storage_files()
+    manifest_path = "test-dataset/test-dataset/v1.1.0/metadata/quality_manifest.json"
+    quality_manifest = json.loads(files[manifest_path].decode("utf-8"))
+    quality_manifest["size_bytes"] = EXPECTED_MANIFEST_SIZE_BYTES
+    files[manifest_path] = json.dumps(quality_manifest).encode("utf-8")
+    service = DiscoveryService(storage_client=FakeStorageClient(files))
+
+    async def collect_versions() -> list[DiscoveredVersion]:
+        """Test helper for collect_versions."""
+        return [item async for item in service.scan(prefix="test-dataset")]
+
+    discovered_versions = asyncio.run(collect_versions())
+
+    latest_geoparquet = next(
+        item for item in discovered_versions if item.version == "v1.1.0" and item.format_type == "geoparquet"
+    )
+    assert latest_geoparquet.metadata is not None
+    assert latest_geoparquet.metadata.size_bytes == EXPECTED_MANIFEST_SIZE_BYTES
+
+
+def test_discovery_service_succeeds_when_size_calculation_fails(caplog: pytest.LogCaptureFixture) -> None:
+    """Verify the expected behavior."""
+    service = DiscoveryService(storage_client=FailingSizeStorageClient(make_storage_files()))
+
+    async def collect_versions() -> list[DiscoveredVersion]:
+        """Test helper for collect_versions."""
+        return [item async for item in service.scan(prefix="fallback-dataset")]
+
+    with caplog.at_level(logging.WARNING):
+        discovered_versions = asyncio.run(collect_versions())
+
+    fallback = next(item for item in discovered_versions if item.dataset_slug == "fallback-dataset")
+    assert fallback.metadata is None
+    assert "Could not calculate source size" in caplog.text
+
+
 def test_discovery_service_resolves_manifest_fallbacks_and_exact_slugs() -> None:
     """Verify the expected behavior."""
     fake_storage = FakeStorageClient(make_storage_files())
@@ -459,6 +535,52 @@ def test_catalog_ingest_upserts_discovered_version() -> None:
         )
         assert metadata["feature_count"] == EXPECTED_UPDATED_FEATURE_COUNT
         assert metadata["geometry_type"] == "Polygon"
+
+
+def test_catalog_ingest_refreshes_source_updated_at_without_changing_created_at() -> None:
+    """Verify the expected behavior."""
+    with make_session() as session:
+        collection = Collection(slug="target", name="Target Collection")
+        storage_location = make_storage_location()
+        session.add(collection)
+        session.add(storage_location)
+        session.commit()
+        session.refresh(collection)
+        session.refresh(storage_location)
+        ingest = CatalogIngestService(session)
+
+        create_result = ingest.upsert_discovered_version(
+            collection_id=collection.id,
+            storage_location_id=storage_location.id,
+            dataset_slug="test-dataset",
+            file_slug="test-dataset",
+            format_type="geoparquet",
+            version="v1.0.0",
+            location_path="test-dataset/test-dataset/v1.0.0/geoparquet/test-dataset-0.parquet",
+            source_metadata=SpatialDatasetFileMetadata(version="v1", feature_count=12),
+        )
+        assert create_result.file_source_id is not None
+
+        file_source = session.get(FileSource, create_result.file_source_id)
+        assert file_source is not None
+        original_created_at = file_source.created_at
+        original_updated_at = file_source.updated_at
+
+        upsert_result = ingest.upsert_discovered_version(
+            collection_id=collection.id,
+            storage_location_id=storage_location.id,
+            dataset_slug="test-dataset",
+            file_slug="test-dataset",
+            format_type="geoparquet",
+            version="v1.0.0",
+            location_path="test-dataset/test-dataset/v1.0.0/geoparquet/test-dataset-updated.parquet",
+            source_metadata=SpatialDatasetFileMetadata(version="v1", feature_count=24),
+        )
+        assert upsert_result.created is False
+
+        session.refresh(file_source)
+        assert file_source.created_at == original_created_at
+        assert file_source.updated_at > original_updated_at
 
 
 def test_catalog_ingest_uses_exact_slugs_when_manifest_metadata_is_missing() -> None:

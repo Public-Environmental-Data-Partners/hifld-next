@@ -30,10 +30,9 @@ describe("MapLegend", () => {
     expect(screen.getByText("Color by BEDS")).toBeInTheDocument();
   });
 
-  it("renders multiple styled layer groups in one map overlay", () => {
+  it("renders multiple styled layer groups without a generic panel title", () => {
     render(
       <MapLegend
-        title="Layer colors"
         groups={[
           {
             id: "hospitals-v1",
@@ -53,7 +52,8 @@ describe("MapLegend", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Layer colors" })).toBeInTheDocument();
+    expect(screen.queryByText("Layer colors")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide color key" })).toBeInTheDocument();
     expect(screen.getByText("Hospitals / v1.1.0")).toBeInTheDocument();
     expect(screen.getByText("Color by BEDS")).toBeInTheDocument();
     expect(screen.getByText("Schools / v1.0.0")).toBeInTheDocument();
@@ -83,10 +83,9 @@ describe("MapLegend", () => {
     expect(screen.getByTestId("map-legend-scroll")).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
   });
 
-  it("renders a solid-color layer group without calling it a generic legend", () => {
+  it("renders a solid-color layer group without a generic panel title", () => {
     render(
       <MapLegend
-        title="Layer colors"
         groups={[
           {
             id: "hospitals-v1",
@@ -99,7 +98,8 @@ describe("MapLegend", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Layer colors" })).toBeInTheDocument();
+    expect(screen.queryByText("Layer colors")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide color key" })).toBeInTheDocument();
     expect(screen.getByText("Solid color")).toBeInTheDocument();
     expect(screen.getByText("All values")).toBeInTheDocument();
   });

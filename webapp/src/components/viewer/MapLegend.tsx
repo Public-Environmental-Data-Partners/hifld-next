@@ -15,16 +15,19 @@ export interface LegendGroup {
 
 interface MapLegendProps {
   groups: LegendGroup[];
-  title: string;
+  title?: string | undefined;
   visible: boolean;
   onToggle: () => void;
 }
 
 export function MapLegend({ groups, title, visible, onToggle }: MapLegendProps) {
+  const toggleLabel = title ? `Hide ${title}` : "Hide color key";
+  const showLabel = title ? `Show ${title}` : "Show color key";
+
   if (!visible) {
     return (
       <div className="absolute bottom-4 left-4 z-10">
-        <Button variant="secondary" size="icon" onClick={onToggle} className="h-9 w-9 shadow-md" aria-label={title}>
+        <Button variant="secondary" size="icon" onClick={onToggle} className="h-9 w-9 shadow-md" aria-label={showLabel}>
           <Info className="h-4 w-4" />
         </Button>
       </div>
@@ -34,10 +37,14 @@ export function MapLegend({ groups, title, visible, onToggle }: MapLegendProps) 
   return (
     <div className="absolute bottom-4 left-4 z-10 flex max-h-[calc(100%-2rem)] max-w-[min(22rem,calc(100%-2rem))] flex-col overflow-hidden rounded-lg border bg-background/95 shadow-lg sm:bottom-6 sm:left-6 sm:max-h-[min(24rem,calc(100%-3rem))] sm:max-w-[min(22rem,calc(100%-3rem))]">
       <div className="shrink-0 flex items-center justify-between gap-4 border-b px-4 py-3">
-        <h3 className="max-w-36 truncate text-sm font-semibold" title={title}>
-          {title}
-        </h3>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onToggle} aria-label={`Hide ${title}`}>
+        {title ? (
+          <h3 className="max-w-36 truncate text-sm font-semibold" title={title}>
+            {title}
+          </h3>
+        ) : (
+          <span aria-hidden className="h-6" />
+        )}
+        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onToggle} aria-label={toggleLabel}>
           <X className="h-3 w-3" />
         </Button>
       </div>

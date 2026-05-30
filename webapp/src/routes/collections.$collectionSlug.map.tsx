@@ -747,7 +747,7 @@ export function MapWorkspace({
       }),
     [layerStyles, loadedLayers, vectorLayers],
   );
-  const legendTitle = legendGroups.length === 1 ? (legendGroups[0]?.field ?? "Layer colors") : "Layer colors";
+  const legendTitle = legendGroups.length === 1 ? legendGroups[0]?.field : undefined;
   const headerLayer = loadedLayers.length === 1 ? loadedLayers[0] : null;
   const headerPrimary =
     headerLayer?.datasetName ?? (loadedLayers.length > 1 ? `${loadedLayers.length} map layers` : collection.name);

@@ -61,6 +61,10 @@ class StorageClient(Protocol):
         """Download a remote path to a local path."""
         ...
 
+    async def get_file_size(self, remote_path: str) -> int:
+        """Return the size of a remote path in bytes."""
+        ...
+
 
 class DiscoveryService:
     """Scan bucket-style storage and yield discovered version records."""
@@ -112,6 +116,12 @@ class DiscoveryService:
                     continue
 
                 yielded += 1
+                source_metadata = await self._metadata_with_computed_size(
+                    metadata=metadata_result.metadata,
+                    version=version,
+                    object_paths=format_files,
+                )
+
                 yield DiscoveredVersion(
                     dataset_slug=dataset_slug,
                     file_slug=file_slug,
@@ -119,7 +129,7 @@ class DiscoveryService:
                     format_type=format_type,
                     location_path=self._build_location_path(format_type, format_files),
                     object_paths=format_files,
-                    metadata=metadata_result.metadata,
+                    metadata=source_metadata,
                     metadata_object_paths=metadata_paths,
                     catalog_metadata_object_paths=catalog_metadata.object_paths,
                     dataset_name=catalog_metadata.dataset_name,
@@ -203,6 +213,33 @@ class DiscoveryService:
             metadata_payload["version"] = "v1"
 
         return self.MetadataResult(metadata=SpatialDatasetFileMetadata.model_validate(metadata_payload))
+
+    async def _metadata_with_computed_size(
+        self,
+        metadata: SpatialDatasetFileMetadata | None,
+        version: str,
+        object_paths: list[str],
+    ) -> SpatialDatasetFileMetadata | None:
+        if metadata is not None and metadata.size_bytes is not None:
+            return metadata
+
+        size_bytes = await self._calculate_object_paths_size(object_paths)
+        if size_bytes is None:
+            return metadata
+
+        if metadata is None:
+            return SpatialDatasetFileMetadata(version=version, size_bytes=size_bytes)
+        return metadata.model_copy(update={"size_bytes": size_bytes})
+
+    async def _calculate_object_paths_size(self, object_paths: list[str]) -> int | None:
+        total_size = 0
+        for object_path in object_paths:
+            try:
+                total_size += await self.storage_client.get_file_size(object_path)
+            except Exception:
+                logger.warning("Could not calculate source size for %s", object_path, exc_info=True)
+                return None
+        return total_size if total_size > 0 else None
 
     async def _load_catalog_metadata(
         self,

@@ -95,6 +95,8 @@ export interface DatasetSource {
   location: DatasetSourceLocation;
   source_metadata?: SpatialDatasetFileMetadata | undefined;
   storage_location?: StorageLocation | undefined;
+  created_at?: string | undefined;
+  updated_at?: string | undefined;
 }
 
 // Storage location config schemas

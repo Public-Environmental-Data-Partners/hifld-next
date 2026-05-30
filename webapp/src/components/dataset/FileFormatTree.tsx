@@ -10,6 +10,7 @@ import { CopyButton } from "./CopyButton";
 import { getLocationOptions, getVersionSourcesForLocation } from "./compareSources";
 import { DownloadButton } from "./DownloadButton";
 import { buildGeoparquetSourceTree, formatGeoparquetGlobLabel, type GeoparquetTreeNode } from "./geoparquetTree";
+import { MarkdownDescription } from "./MarkdownDescription";
 import { type ParquetPreviewOption, parquetPreviewOptionFromSource } from "./parquetPreviewOptions";
 import { ShapefileZipDownloadButton } from "./ShapefileZipDownloadButton";
 import { buildSourceFileUrl, buildSourceStorageUri } from "./sourceUrls";
@@ -25,6 +26,50 @@ function formatFileSize(bytes: number | null | undefined): string {
     unitIndex++;
   }
   return `${size.toFixed(unitIndex > 0 ? 1 : 0)} ${units[unitIndex]}`;
+}
+
+interface SourceLifecycleDetail {
+  label: string;
+  value: string;
+}
+
+function formatSourceTimestamp(timestamp: string | undefined): string | null {
+  if (!timestamp) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+export function sourceLifecycleDetails(source: DatasetSource | undefined): SourceLifecycleDetail[] {
+  if (!source) return [];
+  const details: SourceLifecycleDetail[] = [];
+  const cataloged = formatSourceTimestamp(source.created_at);
+  const sizeBytes = source.source_metadata?.size_bytes;
+
+  if (cataloged) details.push({ label: "Cataloged", value: cataloged });
+  if (typeof sizeBytes === "number" && sizeBytes > 0) {
+    details.push({ label: "Size", value: formatFileSize(sizeBytes) });
+  }
+
+  return details;
+}
+
+function SourceLifecycleMetadata({ source }: { source: DatasetSource | undefined }) {
+  const details = sourceLifecycleDetails(source);
+  if (details.length === 0) return null;
+
+  return (
+    <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-3">
+      {details.map((detail) => (
+        <p key={detail.label}>
+          <span className="font-medium text-foreground">{detail.label}:</span> {detail.value}
+        </p>
+      ))}
+    </div>
+  );
 }
 
 interface SelectedFormatSource {
@@ -373,9 +418,7 @@ export function FileFormatTree({
                                 </div>
                               </>
                             )}
-                            {displaySize > 0 && (
-                              <p className="text-xs text-muted-foreground">Total size: {formatFileSize(displaySize)}</p>
-                            )}
+                            <SourceLifecycleMetadata source={sourceWithGlob ?? allSources[0]} />
                           </>
                         );
                       })()}
@@ -427,9 +470,6 @@ export function FileFormatTree({
             >
               {pmtilesUrl && (
                 <div className="space-y-2">
-                  {pmtilesSizeBytes != null && (
-                    <p className="text-xs text-muted-foreground">Size: {formatFileSize(pmtilesSizeBytes)}</p>
-                  )}
                   <p className="text-xs text-muted-foreground break-all">{pmtilesUrl}</p>
                   <div className="flex items-center gap-2">
                     <CopyButton value={pmtilesUrl} label="Copy URL" />
@@ -473,9 +513,6 @@ export function FileFormatTree({
             >
               {geopackageUrl && (
                 <div className="space-y-2">
-                  {geopackageSizeBytes != null && (
-                    <p className="text-xs text-muted-foreground">Size: {formatFileSize(geopackageSizeBytes)}</p>
-                  )}
                   <p className="text-xs text-muted-foreground break-all">{geopackageUrl}</p>
                   <div className="flex items-center gap-2">
                     <CopyButton value={geopackageUrl} label="Copy URL" />
@@ -534,9 +571,6 @@ export function FileFormatTree({
             >
               {geojsonUrl && (
                 <div className="space-y-2">
-                  {geojsonSizeBytes != null && (
-                    <p className="text-xs text-muted-foreground">Size: {formatFileSize(geojsonSizeBytes)}</p>
-                  )}
                   <p className="text-xs text-muted-foreground break-all">{geojsonUrl}</p>
                   <div className="flex items-center gap-2">
                     <CopyButton value={geojsonUrl} label="Copy URL" />
@@ -586,9 +620,6 @@ export function FileFormatTree({
             >
               {fileGeodatabaseUrl && (
                 <div className="space-y-2">
-                  {fileGeodatabaseSizeBytes != null && (
-                    <p className="text-xs text-muted-foreground">Size: {formatFileSize(fileGeodatabaseSizeBytes)}</p>
-                  )}
                   <p className="text-xs text-muted-foreground break-all">{fileGeodatabaseUrl}</p>
                   <div className="flex items-center gap-2">
                     <CopyButton value={fileGeodatabaseUrl} label="Copy URL" />
@@ -743,7 +774,7 @@ function GeoparquetFileDetails({
 
   return (
     <div className="space-y-2">
-      {fileSizeBytes != null && <p className="text-xs text-muted-foreground">Size: {formatFileSize(fileSizeBytes)}</p>}
+      <SourceLifecycleMetadata source={source} />
       {fileStorageUri && <StorageUriDetails storageUri={fileStorageUri} />}
       {fileUrl && (
         <div>
@@ -1206,9 +1237,10 @@ function SourceSelector({ formatType, formatEntry, selectedSources, onSourceChan
       {versionDescription ? (
         <div className="border-l-2 bg-muted/20 px-3 py-2 text-xs">
           <p className="font-medium text-foreground">Version note</p>
-          <p className="mt-1 text-muted-foreground">{versionDescription}</p>
+          <MarkdownDescription markdown={versionDescription} className="mt-1" />
         </div>
       ) : null}
+      <SourceLifecycleMetadata source={currentSource} />
     </div>
   );
 }
