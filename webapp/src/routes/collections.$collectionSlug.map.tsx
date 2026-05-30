@@ -1,4 +1,4 @@
-import { createFileRoute, Link, notFound, useNavigate, useSearch } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound, useSearch } from "@tanstack/react-router";
 import {
   ArrowLeft,
   Check,
@@ -66,7 +66,7 @@ import {
   parseBreaks,
 } from "@/components/viewer/utils";
 import type { Collection, Dataset, DatasetFile, DatasetSource, DatasetWithUrls } from "@/lib/api-client";
-import { getCollectionBySlug, getCollectionDatasets, getDatasetFileBySlug } from "@/lib/api-client";
+import { getCollectionBySlug, getCollectionDatasets, getDatasetBySlug, getDatasetFileBySlug } from "@/lib/api-client";
 
 type MapSearch = {
   source?: string;
@@ -104,11 +104,8 @@ export interface ResolvedDescriptor {
 
 interface MapWorkspaceProps {
   collection: Collection;
-  datasets: DatasetWithUrls[];
   initialLayers: ResolvedDescriptor[];
   initialLayerKey: string | undefined;
-  initialQuery: string | undefined;
-  onSearchQueryChange?: (query: string) => void;
 }
 
 interface LayerStyleUpdates {
@@ -239,12 +236,23 @@ export async function resolveDescriptor(descriptor: SourceDescriptor | null): Pr
   };
 }
 
+export function searchDatasetsForMapImport({ collectionId, query }: { collectionId: number; query: string }) {
+  const trimmedQuery = query.trim();
+  return getCollectionDatasets({
+    data: {
+      collectionId,
+      includeUrls: false,
+      limit: MAP_DATASET_PAGE_SIZE,
+      offset: 0,
+      ...(trimmedQuery ? { search: trimmedQuery } : {}),
+    },
+  });
+}
+
 export const Route = createFileRoute("/collections/$collectionSlug/map")({
   validateSearch: parseMapSearch,
   loaderDeps: ({ search }) => ({
     source: search.source,
-    query: search.query,
-    offset: search.offset,
   }),
   loader: async ({ deps, params }) => {
     const collection = await getCollectionBySlug({
@@ -253,24 +261,9 @@ export const Route = createFileRoute("/collections/$collectionSlug/map")({
     if (!collection) {
       throw notFound();
     }
-    const [resolvedSource, datasetsResponse] = await Promise.all([
-      resolveDescriptor(decodeSourceDescriptor(deps.source)),
-      getCollectionDatasets({
-        data: {
-          collectionId: collection.id,
-          search: deps.query,
-          includeUrls: true,
-          limit: MAP_DATASET_PAGE_SIZE,
-          offset: deps.offset ?? 0,
-        },
-      }),
-    ]);
+    const resolvedSource = await resolveDescriptor(decodeSourceDescriptor(deps.source));
     return {
       collection,
-      datasets: datasetsResponse.items,
-      datasetsTotal: datasetsResponse.total,
-      datasetsLimit: datasetsResponse.limit ?? MAP_DATASET_PAGE_SIZE,
-      datasetsOffset: datasetsResponse.offset,
       resolved: resolvedSource ? [resolvedSource] : [],
     };
   },
@@ -284,31 +277,9 @@ export const Route = createFileRoute("/collections/$collectionSlug/map")({
 });
 
 function CollectionMapRoutePage() {
-  const { collection, datasets, resolved } = Route.useLoaderData();
+  const { collection, resolved } = Route.useLoaderData();
   const search = useSearch({ from: Route.fullPath });
-  const navigate = useNavigate({ from: Route.fullPath });
-  const handleSearchQueryChange = useCallback(
-    (query: string) => {
-      void navigate({
-        search: {
-          ...(search.source ? { source: search.source } : {}),
-          ...(query.trim() ? { query: query.trim() } : {}),
-        },
-        replace: true,
-      });
-    },
-    [navigate, search.source],
-  );
-  return (
-    <MapWorkspace
-      collection={collection}
-      datasets={datasets}
-      initialLayers={resolved}
-      initialLayerKey={search.source}
-      initialQuery={search.query}
-      onSearchQueryChange={handleSearchQueryChange}
-    />
-  );
+  return <MapWorkspace collection={collection} initialLayers={resolved} initialLayerKey={search.source} />;
 }
 
 function popupProperties(hoverInfo: HoverInfo | null): PopupPropertyEntry[] {
@@ -398,6 +369,8 @@ interface DatasetSearchComboboxProps {
   datasets: DatasetWithUrls[];
   query: string;
   selectedDataset: DatasetWithUrls | null;
+  isLoading: boolean;
+  error: string | null;
   currentDescriptors: SourceDescriptor[];
   collectionSlug: string;
   onQueryChange: (query: string) => void;
@@ -408,6 +381,8 @@ function DatasetSearchCombobox({
   datasets,
   query,
   selectedDataset,
+  isLoading,
+  error,
   currentDescriptors,
   collectionSlug,
   onQueryChange,
@@ -434,33 +409,41 @@ function DatasetSearchCombobox({
         <Command shouldFilter={false}>
           <CommandInput value={query} onValueChange={onQueryChange} placeholder="Search datasets..." />
           <CommandList>
-            <CommandEmpty>No matching datasets found.</CommandEmpty>
-            <CommandGroup>
-              {datasets.map((dataset) => {
-                const isSelected = selectedDataset?.id === dataset.id;
-                const isLoaded = datasetHasLoadedLayer(collectionSlug, dataset, currentDescriptors);
-                return (
-                  <CommandItem
-                    key={dataset.id}
-                    value={String(dataset.id)}
-                    onSelect={() => {
-                      onSelectDataset(dataset);
-                      setOpen(false);
-                    }}
-                    className="items-start"
-                  >
-                    <Check className={`mt-0.5 h-4 w-4 ${isSelected ? "opacity-100" : "opacity-0"}`} />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate">{dataset.name}</div>
-                      <div className="truncate text-xs text-muted-foreground">
-                        {dataset.files?.length ? `${dataset.files.length} files` : dataset.slug}
-                      </div>
-                    </div>
-                    {isLoaded && <span className="mt-0.5 shrink-0 text-xs text-muted-foreground">Loaded</span>}
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
+            {isLoading ? (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">Searching datasets...</div>
+            ) : error ? (
+              <div className="px-3 py-6 text-center text-sm text-destructive">Dataset search failed.</div>
+            ) : (
+              <>
+                <CommandEmpty>No matching datasets found.</CommandEmpty>
+                <CommandGroup>
+                  {datasets.map((dataset) => {
+                    const isSelected = selectedDataset?.id === dataset.id;
+                    const isLoaded = datasetHasLoadedLayer(collectionSlug, dataset, currentDescriptors);
+                    return (
+                      <CommandItem
+                        key={dataset.id}
+                        value={String(dataset.id)}
+                        onSelect={() => {
+                          onSelectDataset(dataset);
+                          setOpen(false);
+                        }}
+                        className="items-start"
+                      >
+                        <Check className={`mt-0.5 h-4 w-4 ${isSelected ? "opacity-100" : "opacity-0"}`} />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{dataset.name}</div>
+                          <div className="truncate text-xs text-muted-foreground">
+                            {dataset.files?.length ? `${dataset.files.length} files` : dataset.slug}
+                          </div>
+                        </div>
+                        {isLoaded && <span className="mt-0.5 shrink-0 text-xs text-muted-foreground">Loaded</span>}
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              </>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>
@@ -534,20 +517,14 @@ function StyleLayerCard({
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The workspace coordinates map state, source selection, and styling controls.
-export function MapWorkspace({
-  collection,
-  datasets,
-  initialLayers,
-  initialLayerKey,
-  initialQuery,
-  onSearchQueryChange,
-}: MapWorkspaceProps) {
+export function MapWorkspace({ collection, initialLayers, initialLayerKey }: MapWorkspaceProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const pinnedPopupElementRef = useRef<HTMLDivElement>(null);
   const settingsPanelRef = useRef<PanelImperativeHandle | null>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchRequestIdRef = useRef(0);
+  const datasetDetailsRequestIdRef = useRef(0);
   const initialLayerKeyRef = useRef(initialLayerKey);
-  const previousSearchDraftRef = useRef(initialQuery ?? "");
   const selectedDescriptorIdRef = useRef<string | null>(null);
   const [vectorLayers, setVectorLayers] = useState<VectorLayerInfo[]>([]);
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
@@ -560,8 +537,12 @@ export function MapWorkspace({
   const [isMobileSettingsOpen, setIsMobileSettingsOpen] = useState(false);
   const [isSelectionActive, setIsSelectionActive] = useState(false);
   const [basemapMode, setBasemapMode] = useState<BasemapMode>("street");
-  const [searchDraft, setSearchDraft] = useState(initialQuery ?? "");
+  const [searchDraft, setSearchDraft] = useState("");
+  const [datasetResults, setDatasetResults] = useState<DatasetWithUrls[]>([]);
+  const [isDatasetSearchLoading, setIsDatasetSearchLoading] = useState(false);
+  const [datasetSearchError, setDatasetSearchError] = useState<string | null>(null);
   const [selectedDataset, setSelectedDataset] = useState<DatasetWithUrls | null>(null);
+  const [isResolvingSelectedDataset, setIsResolvingSelectedDataset] = useState(false);
   const [selectedFileSlug, setSelectedFileSlug] = useState<string | undefined>(undefined);
   const [selectedVersion, setSelectedVersion] = useState<string | undefined>(undefined);
   const [selectedSourceId, setSelectedSourceId] = useState<string | undefined>(undefined);
@@ -575,20 +556,6 @@ export function MapWorkspace({
   const isMobileMapLayout = useIsMobileMapLayout();
   const currentDescriptors = loadedLayers.map((layer) => layer.descriptor);
 
-  const updateQuery = useCallback(
-    (query: string) => {
-      previousSearchDraftRef.current = query;
-      onSearchQueryChange?.(query);
-    },
-    [onSearchQueryChange],
-  );
-
-  useEffect(() => {
-    const nextQuery = initialQuery ?? "";
-    setSearchDraft(nextQuery);
-    previousSearchDraftRef.current = nextQuery;
-  }, [initialQuery]);
-
   useEffect(() => {
     if (!initialLayerKey || initialLayerKeyRef.current === initialLayerKey) return;
     initialLayerKeyRef.current = initialLayerKey;
@@ -596,21 +563,38 @@ export function MapWorkspace({
   }, [initialLayerKey, initialLayers]);
 
   useEffect(() => {
-    const queryChanged = previousSearchDraftRef.current !== searchDraft;
-    previousSearchDraftRef.current = searchDraft;
-    if (!queryChanged) return;
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
+    const requestId = searchRequestIdRef.current + 1;
+    searchRequestIdRef.current = requestId;
     searchTimeoutRef.current = setTimeout(() => {
-      updateQuery(searchDraft);
+      setIsDatasetSearchLoading(true);
+      setDatasetSearchError(null);
+      void searchDatasetsForMapImport({
+        collectionId: collection.id,
+        query: searchDraft,
+      })
+        .then((response) => {
+          if (searchRequestIdRef.current !== requestId) return;
+          setDatasetResults(response.items);
+        })
+        .catch((error: Error) => {
+          if (searchRequestIdRef.current !== requestId) return;
+          setDatasetResults([]);
+          setDatasetSearchError(error.message);
+        })
+        .finally(() => {
+          if (searchRequestIdRef.current !== requestId) return;
+          setIsDatasetSearchLoading(false);
+        });
     }, SEARCH_DEBOUNCE_MS);
     return () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
       }
     };
-  }, [searchDraft, updateQuery]);
+  }, [collection.id, searchDraft]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -783,10 +767,32 @@ export function MapWorkspace({
   }, [selectedDescriptorId]);
 
   const selectDataset = (dataset: DatasetWithUrls) => {
+    const requestId = datasetDetailsRequestIdRef.current + 1;
+    datasetDetailsRequestIdRef.current = requestId;
+    setIsResolvingSelectedDataset(true);
     setSelectedDataset(dataset);
     setSelectedFileSlug(undefined);
     setSelectedVersion(undefined);
     setSelectedSourceId(undefined);
+    void getDatasetBySlug({
+      data: {
+        collectionSlug: collection.slug,
+        datasetSlug: dataset.slug,
+        includeUrls: true,
+      },
+    })
+      .then((resolvedDataset) => {
+        if (datasetDetailsRequestIdRef.current !== requestId) return;
+        setSelectedDataset(resolvedDataset ?? dataset);
+      })
+      .catch(() => {
+        if (datasetDetailsRequestIdRef.current !== requestId) return;
+        setSelectedDataset(dataset);
+      })
+      .finally(() => {
+        if (datasetDetailsRequestIdRef.current !== requestId) return;
+        setIsResolvingSelectedDataset(false);
+      });
   };
 
   const selectFile = (fileSlug: string) => {
@@ -877,9 +883,11 @@ export function MapWorkspace({
           <div className="space-y-2">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Dataset</div>
             <DatasetSearchCombobox
-              datasets={datasets}
+              datasets={datasetResults}
               query={searchDraft}
               selectedDataset={selectedDataset}
+              isLoading={isDatasetSearchLoading}
+              error={datasetSearchError}
               currentDescriptors={currentDescriptors}
               collectionSlug={collection.slug}
               onQueryChange={setSearchDraft}
@@ -917,7 +925,11 @@ export function MapWorkspace({
             <div className="space-y-3 rounded-md border p-3">
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold">{selectedDataset.name}</div>
-                <div className="text-xs text-muted-foreground">Choose a PMTiles layer source to plot.</div>
+                <div className="text-xs text-muted-foreground">
+                  {isResolvingSelectedDataset
+                    ? "Loading available sources..."
+                    : "Choose a PMTiles layer source to plot."}
+                </div>
               </div>
               {selectableFiles.length === 0 ? (
                 <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">

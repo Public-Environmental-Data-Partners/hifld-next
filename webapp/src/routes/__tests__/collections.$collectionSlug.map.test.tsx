@@ -4,7 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { encodeSourceDescriptor, type SourceDescriptor } from "@/components/map/sourceDescriptors";
 import type { Collection, Dataset, DatasetFile, DatasetSource, DatasetWithUrls, PaginatedResponse } from "@/lib/api-client";
 import * as apiClient from "@/lib/api-client";
-import { Route as CollectionMapRoute, type ResolvedDescriptor, resolvedToMapLayer } from "../collections.$collectionSlug.map";
+import {
+  Route as CollectionMapRoute,
+  type ResolvedDescriptor,
+  resolvedToMapLayer,
+  searchDatasetsForMapImport,
+} from "../collections.$collectionSlug.map";
 
 vi.mock("@/lib/api-client", () => ({
   getCollectionBySlug: vi.fn(),
@@ -150,6 +155,40 @@ describe("collection map route", () => {
           fileSlug: "hospitals",
         },
       });
+    });
+  });
+
+  it("does not use the dataset search query as a map route loader dependency", () => {
+    const deps = CollectionMapRoute.options.loaderDeps?.({
+      search: {
+        source: "encoded-source",
+        query: "hospitals",
+        offset: 24,
+      },
+    });
+
+    expect(deps).toEqual({ source: "encoded-source" });
+  });
+
+  it("searches importable datasets with lightweight collection results", async () => {
+    const page = emptyDatasetPage();
+    vi.mocked(apiClient.getCollectionDatasets).mockResolvedValue(page);
+
+    await expect(
+      searchDatasetsForMapImport({
+        collectionId: collection.id,
+        query: "hospitals",
+      }),
+    ).resolves.toBe(page);
+
+    expect(apiClient.getCollectionDatasets).toHaveBeenCalledWith({
+      data: {
+        collectionId: collection.id,
+        includeUrls: false,
+        limit: 12,
+        offset: 0,
+        search: "hospitals",
+      },
     });
   });
 
