@@ -258,14 +258,18 @@ function FileDetailPage() {
           </div>
           <div className="space-y-3 border-y py-4">
             <div className="grid gap-2 sm:grid-cols-2">
-              <Button asChild className="h-12 justify-start px-4">
+              <Button asChild className="h-12 justify-start px-4 sm:justify-center">
                 <Link to="/collections/$collectionSlug/map" params={{ collectionSlug }} search={mapSearch}>
                   <MapIcon className="h-4 w-4 mr-2 shrink-0" />
                   Map Viewer
                 </Link>
               </Button>
               {parquetPreviewOptions.length > 0 && (
-                <Button variant="outline" onClick={openParquetDrawer} className="h-12 justify-start px-4">
+                <Button
+                  variant="outline"
+                  onClick={openParquetDrawer}
+                  className="h-12 justify-start px-4 sm:justify-center"
+                >
                   <Table className="h-4 w-4 mr-2 shrink-0" />
                   Data Table
                 </Button>

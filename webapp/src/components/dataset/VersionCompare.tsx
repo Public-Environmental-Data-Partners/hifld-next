@@ -1,3 +1,4 @@
+import { MarkdownDescription } from "@/components/dataset/MarkdownDescription";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ColumnSchema, DatasetSource, SpatialDatasetFileMetadata } from "@/lib/api-client";
@@ -30,6 +31,18 @@ function normalizeValue(value: MetadataValue): string {
   if (Array.isArray(value)) return value.join(", ");
   if (typeof value === "boolean") return value ? "Yes" : "No";
   return String(value);
+}
+
+function MetadataCellValue({ field, value }: { field: MetadataKey; value: MetadataValue }) {
+  if (field === "description") {
+    if (typeof value === "string" && value.trim()) {
+      return <MarkdownDescription markdown={value} className="text-sm" />;
+    }
+
+    return "—";
+  }
+
+  return normalizeValue(value);
 }
 
 function isDifferent(
@@ -124,10 +137,10 @@ export function VersionCompare({
                 <TableRow key={key}>
                   <TableCell className="font-mono text-xs">{key}</TableCell>
                   <TableCell className={changed ? "bg-amber-50 dark:bg-amber-950/30" : undefined}>
-                    {normalizeValue(left)}
+                    <MetadataCellValue field={key} value={left} />
                   </TableCell>
                   <TableCell className={changed ? "bg-amber-50 dark:bg-amber-950/30" : undefined}>
-                    {normalizeValue(right)}
+                    <MetadataCellValue field={key} value={right} />
                   </TableCell>
                 </TableRow>
               );

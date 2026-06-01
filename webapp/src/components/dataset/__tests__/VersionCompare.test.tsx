@@ -96,6 +96,22 @@ describe("VersionCompare", () => {
     expect(screen.getByText("size_bytes")).toBeInTheDocument();
   });
 
+  it("renders metadata descriptions as safe markdown", () => {
+    const sourceWithMarkdown: DatasetSource = {
+      ...sourceB,
+      source_metadata: {
+        ...sourceB.source_metadata,
+        version: "v1",
+        description: "Updated by [Niyam IT](https://niyamit.com).",
+      },
+    };
+
+    render(<VersionCompare leftSource={sourceA} rightSource={sourceWithMarkdown} />);
+
+    const link = screen.getByRole("link", { name: "Niyam IT" });
+    expect(link).toHaveAttribute("href", "https://niyamit.com");
+  });
+
   it("does not show summary cards above the diff tables", () => {
     render(<VersionCompare leftSource={sourceA} rightSource={sourceB} />);
 
