@@ -425,7 +425,12 @@ describe("FeatureTablePanel", () => {
     expect(screen.getByText("Match rows by").parentElement).toHaveAttribute("data-slot", "popover-content");
     expect(screen.getByText("Match rows by").parentElement).toHaveAttribute("data-side", "bottom");
     expect(screen.getByText("Match rows by").parentElement).toHaveAttribute("data-align", "end");
-    expect(screen.getByText("Match rows by").parentElement).toHaveClass("w-64");
+    expect(screen.getByText("Match rows by").parentElement).toHaveClass(
+      "w-64",
+      "max-h-[min(20rem,var(--radix-popover-content-available-height))]",
+      "overflow-y-auto",
+      "overscroll-contain",
+    );
     expect(screen.getByText("Match rows by").parentElement).not.toHaveClass("absolute");
     expect(screen.getByRole("combobox", { name: "Left match key 1" })).toHaveClass("w-full");
     expect(screen.getByRole("combobox", { name: "Right match key 1" })).toHaveClass("w-full");

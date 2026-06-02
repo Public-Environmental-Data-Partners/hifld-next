@@ -996,8 +996,8 @@ class MatchKeyPicker extends React.Component<MatchKeyPickerProps, MatchKeyPicker
         </PopoverTrigger>
         <PopoverContent
           align="end"
-          avoidCollisions={false}
-          className="max-h-80 w-64 max-w-[calc(100vw-2rem)] overflow-auto p-3"
+          collisionPadding={12}
+          className="max-h-[min(20rem,var(--radix-popover-content-available-height))] w-64 max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain p-3"
           side="bottom"
         >
           <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Match rows by</div>
