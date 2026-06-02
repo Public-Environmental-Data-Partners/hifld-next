@@ -219,6 +219,49 @@ const DatasetFileResponse = z
   .passthrough()
   .openapi("DatasetFileResponse");
 
+const DatasetFileSchemaResponse = z
+  .object({
+    links: LinkMap,
+    collection: Collection,
+    dataset: Dataset,
+    file: z
+      .object({
+        id: z.number(),
+        dataset_id: z.number(),
+        slug: z.string(),
+        name: z.string(),
+        description: z.string().nullable().optional(),
+        layer_name: z.string().nullable().optional(),
+      })
+      .passthrough(),
+    versions: z.array(z.union([z.string(), z.number()])),
+    selected_version: z.union([z.string(), z.number()]).nullable(),
+    schema: z
+      .object({
+        version: z.union([z.string(), z.number()]).nullable(),
+        format_type: FormatType,
+        format_name: z.string(),
+        source_id: z.number(),
+        storage_location: StorageLocation.nullable().optional(),
+        source: DatasetSource,
+        source_metadata: SpatialDatasetFileMetadata.nullable(),
+        summary: z
+          .object({
+            columnCount: z.number(),
+            featureCount: z.number().nullable(),
+            geometryType: z.string().nullable(),
+            invalidGeometryCount: z.number().nullable(),
+            qualityCheckPassed: z.boolean().nullable(),
+            columnsHash: z.string().nullable(),
+          })
+          .passthrough(),
+        columns: z.array(ColumnSchema),
+      })
+      .nullable(),
+  })
+  .passthrough()
+  .openapi("DatasetFileSchemaResponse");
+
 const registry = new OpenAPIRegistry();
 
 registry.register("ColumnSchema", ColumnSchema);
@@ -227,6 +270,7 @@ registry.register("DatasetSource", DatasetSource);
 registry.register("DatasetFile", DatasetFile);
 registry.register("DatasetDetailResponse", DatasetDetailResponse);
 registry.register("DatasetFileResponse", DatasetFileResponse);
+registry.register("DatasetFileSchemaResponse", DatasetFileSchemaResponse);
 
 registry.registerPath({
   method: "get",
@@ -418,6 +462,35 @@ registry.registerPath({
       content: {
         "application/json": {
           schema: DatasetFileResponse,
+        },
+      },
+    },
+    404: { description: "Not found", content: { "application/problem+json": { schema: Problem } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema",
+  summary: "Dataset file schema and data dictionary",
+  description:
+    "Focused schema metadata for a dataset file. Returns the best schema-capable source for the requested version, including data dictionary columns. Omit version to use the latest schema-capable version.",
+  request: {
+    params: z.object({
+      collectionSlug: z.string(),
+      datasetSlug: z.string(),
+      fileSlug: z.string(),
+    }),
+    query: z.object({
+      version: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Dataset file schema metadata",
+      content: {
+        "application/json": {
+          schema: DatasetFileSchemaResponse,
         },
       },
     },

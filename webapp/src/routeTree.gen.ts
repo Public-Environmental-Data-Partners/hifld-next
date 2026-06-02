@@ -42,6 +42,7 @@ import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewe
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.schema'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugCompareRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.compare'
 import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug'
+import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.schema'
 import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.sources.$sourceId.download-zip'
 
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
@@ -237,6 +238,15 @@ const ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute =
         ApiCollectionsCollectionSlugDatasetsDatasetSlugRoute,
     } as any,
   )
+const ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute =
+  ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRouteImport.update(
+    {
+      id: '/schema',
+      path: '/schema',
+      getParentRoute: () =>
+        ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute,
+    } as any,
+  )
 const ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute =
   ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRouteImport.update(
     {
@@ -281,6 +291,7 @@ export interface FileRoutesByFullPath {
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute
 }
 export interface FileRoutesByTo {
@@ -313,6 +324,7 @@ export interface FileRoutesByTo {
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute
 }
 export interface FileRoutesById {
@@ -350,6 +362,7 @@ export interface FileRoutesById {
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute
 }
 export interface FileRouteTypes {
@@ -388,6 +401,7 @@ export interface FileRouteTypes {
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/'
+    | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -420,6 +434,7 @@ export interface FileRouteTypes {
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
+    | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip'
   id:
     | '__root__'
@@ -456,6 +471,7 @@ export interface FileRouteTypes {
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/'
+    | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip'
   fileRoutesById: FileRoutesById
 }
@@ -711,6 +727,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteImport
       parentRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRoute
     }
+    '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': {
+      id: '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
+      path: '/schema'
+      fullPath: '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
+      preLoaderRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRouteImport
+      parentRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+    }
     '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip': {
       id: '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip'
       path: '/sources/$sourceId/download-zip'
@@ -801,11 +824,14 @@ const CommonsRouteWithChildren =
   CommonsRoute._addFileChildren(CommonsRouteChildren)
 
 interface ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren {
+  ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute
 }
 
 const ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren: ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren =
   {
+    ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute:
+      ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute,
     ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute:
       ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute,
   }

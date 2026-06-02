@@ -441,7 +441,10 @@ function DiffTable({
   }
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
+    <div
+      data-testid="feature-diff-panel"
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto overscroll-contain sm:overflow-hidden"
+    >
       <DiffToolbar
         versions={versions}
         leftVersion={leftVersion}
@@ -458,7 +461,10 @@ function DiffTable({
         s2Level={s2Level}
         onS2LevelChange={onS2LevelChange}
       />
-      <div data-testid="feature-diff-scroll" className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
+      <div
+        data-testid="feature-diff-scroll"
+        className="min-w-0 shrink-0 overflow-x-auto sm:min-h-0 sm:flex-1 sm:overflow-auto sm:overscroll-contain"
+      >
         {visibleColumns.length === 0 ? (
           <div className="flex h-24 items-center justify-center border-b text-sm text-muted-foreground">
             No changed columns in this selection.

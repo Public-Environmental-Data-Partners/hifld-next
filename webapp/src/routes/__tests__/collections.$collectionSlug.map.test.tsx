@@ -1,7 +1,7 @@
 import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import { waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { encodeSourceDescriptor, type SourceDescriptor } from "@/components/map/sourceDescriptors";
+import { encodeSourceDescriptor, encodeSourceDescriptorList, type SourceDescriptor } from "@/components/map/sourceDescriptors";
 import type { Collection, Dataset, DatasetFile, DatasetSource, DatasetWithUrls, PaginatedResponse } from "@/lib/api-client";
 import * as apiClient from "@/lib/api-client";
 import {
@@ -66,6 +66,17 @@ const source: DatasetSource = {
   },
 };
 
+const sourceV2: DatasetSource = {
+  ...source,
+  id: 16,
+  version: "v1.1.0",
+  url: "https://example.test/hospitals-v110.pmtiles",
+  location: {
+    version: "v1.1.0",
+    path: "hospitals-v110.pmtiles",
+  },
+};
+
 const descriptor: SourceDescriptor = {
   collectionSlug: collection.slug,
   datasetSlug: dataset.slug,
@@ -74,6 +85,12 @@ const descriptor: SourceDescriptor = {
   storageLocationId: 4,
   version: "v1.0.0",
   sourceId: source.id,
+};
+
+const descriptorV2: SourceDescriptor = {
+  ...descriptor,
+  version: "v1.1.0",
+  sourceId: sourceV2.id,
 };
 
 const file: DatasetFile = {
@@ -99,7 +116,7 @@ const file: DatasetFile = {
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
       },
-      sources: [source],
+      sources: [source, sourceV2],
     },
   ],
 };
@@ -158,6 +175,20 @@ describe("collection map route", () => {
     });
   });
 
+  it("resolves multiple initial source descriptors on the canonical map URL", async () => {
+    const encodedSources = encodeSourceDescriptorList([descriptor, descriptorV2]);
+    const router = createTestRouter();
+
+    await router.navigate({
+      to: "/collections/hifld/map",
+      search: { sources: encodedSources },
+    });
+
+    await waitFor(() => {
+      expect(apiClient.getDatasetFileBySlug).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("does not use the dataset search query as a map route loader dependency", () => {
     const deps = CollectionMapRoute.options.loaderDeps?.({
       search: {
@@ -167,7 +198,7 @@ describe("collection map route", () => {
       },
     });
 
-    expect(deps).toEqual({ source: "encoded-source" });
+    expect(deps).toEqual({ source: "encoded-source", sources: undefined });
   });
 
   it("searches importable datasets with lightweight collection results", async () => {

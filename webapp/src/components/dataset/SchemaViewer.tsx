@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ColumnSchema } from "@/lib/api-client";
+import { MarkdownDescription } from "./MarkdownDescription";
 import { getSchemaSummary, type SchemaSourceSelection } from "./schemaSources";
 import { formatVersionLabel } from "./versionLabel";
 
@@ -11,7 +13,7 @@ interface SchemaViewerProps {
   selectedVersion: string | number;
   versionOptions: Array<string | number>;
   selectedSchemaSource: SchemaSourceSelection | null;
-  rawMetadataHref: string;
+  metadataHref: string;
   onVersionChange: (version: string) => void;
 }
 
@@ -41,7 +43,7 @@ export function SchemaViewer({
   selectedVersion,
   versionOptions,
   selectedSchemaSource,
-  rawMetadataHref,
+  metadataHref,
   onVersionChange,
 }: SchemaViewerProps) {
   const [search, setSearch] = useState("");
@@ -52,32 +54,43 @@ export function SchemaViewer({
   const filteredColumns = columns.filter((column) => columnMatchesSearch(column, search));
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <h1 className="font-mono text-3xl font-bold tracking-tight">Schema</h1>
-        <p className="text-muted-foreground">
-          {fileName} / {formatVersionLabel(selectedVersion)}
-        </p>
+    <div className="box-border w-full max-w-full min-w-0 space-y-6 overflow-hidden">
+      <div className="box-border w-full max-w-full min-w-0 space-y-3">
+        <div className="flex w-full max-w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-2">
+            <h1 className="font-mono text-3xl font-bold tracking-tight">Schema</h1>
+            <p className="break-words text-muted-foreground">
+              {fileName} / {formatVersionLabel(selectedVersion)}
+            </p>
+          </div>
+          <Button variant="outline" asChild className="box-border w-full max-w-full min-w-0 sm:w-auto sm:shrink-0">
+            <a href={metadataHref} target="_blank" rel="noopener noreferrer">
+              View metadata
+            </a>
+          </Button>
+        </div>
         {selectedSchemaSource ? (
-          <div className="space-y-1 text-sm text-muted-foreground">
+          <div className="min-w-0 space-y-1 text-sm text-muted-foreground">
             <p>
               Schema from {selectedSchemaSource.formatName},{" "}
               {selectedSchemaSource.source.storage_location?.name ?? "unknown location"},{" "}
               {formatVersionLabel(selectedSchemaSource.source.version)}.
             </p>
-            {metadata?.description ? <p>{metadata.description}</p> : null}
+            {metadata?.description ? (
+              <MarkdownDescription markdown={metadata.description} className="break-words" />
+            ) : null}
           </div>
         ) : null}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid w-full max-w-full min-w-0 gap-3 sm:grid-cols-3">
         <SummaryItem label="Columns" value={`${summary.columnCount} columns`} />
         <SummaryItem label="Features" value={formatCount(summary.featureCount)} />
         <SummaryItem label="Geometry" value={summary.geometryType ?? "—"} />
       </div>
 
       <div className="flex flex-col gap-3 border-y py-4 lg:flex-row lg:items-end">
-        <div className="min-w-40 space-y-1">
+        <div className="min-w-0 space-y-1 lg:min-w-40">
           <label className="text-xs font-medium text-muted-foreground" htmlFor="schema-version">
             Version
           </label>
@@ -94,7 +107,7 @@ export function SchemaViewer({
             ))}
           </select>
         </div>
-        <div className="min-w-56 flex-1 space-y-1">
+        <div className="min-w-0 flex-1 space-y-1 lg:min-w-56">
           <label className="text-xs font-medium text-muted-foreground" htmlFor="schema-search">
             Search columns
           </label>
@@ -115,54 +128,56 @@ export function SchemaViewer({
           <p className="mt-2 text-sm text-muted-foreground">
             Raw file metadata may still contain source details for this dataset file.
           </p>
-          <a className="mt-4 inline-flex text-sm underline underline-offset-4" href={rawMetadataHref}>
-            View raw metadata
+          <a className="mt-4 inline-flex text-sm underline underline-offset-4" href={metadataHref}>
+            View metadata
           </a>
         </div>
       ) : filteredColumns.length === 0 ? (
         <div className="border p-6 text-sm text-muted-foreground">No columns match the current filters.</div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Column</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Nullable</TableHead>
-              <TableHead>Nulls</TableHead>
-              <TableHead>Unique</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Examples / Values</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredColumns.map((column) => (
-              <TableRow key={column.name}>
-                <TableCell className="align-top font-mono text-xs">{column.name}</TableCell>
-                <TableCell className="align-top">
-                  <Badge variant="outline">{column.type}</Badge>
-                </TableCell>
-                <TableCell className="align-top">{column.nullable ? "Yes" : "No"}</TableCell>
-                <TableCell className="align-top">{formatCount(column.num_null_values ?? null)}</TableCell>
-                <TableCell className="align-top">{formatCount(column.num_unique_values ?? null)}</TableCell>
-                <TableCell className="max-w-md align-top text-sm">
-                  {column.description || <span className="text-muted-foreground">—</span>}
-                  <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
-                    <span>Range: {formatRange(column)}</span>
-                    <span>Length: {column.length ?? "—"}</span>
-                  </div>
-                </TableCell>
-                <TableCell className="max-w-sm align-top text-sm">
-                  <div>
-                    <span className="font-medium">Examples:</span> {formatValues(column.example_values)}
-                  </div>
-                  <div className="mt-1">
-                    <span className="font-medium">Values:</span> {formatValues(column.possible_values)}
-                  </div>
-                </TableCell>
+        <div className="max-w-full overflow-x-auto overscroll-x-contain">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Column</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Nullable</TableHead>
+                <TableHead>Nulls</TableHead>
+                <TableHead>Unique</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>Examples / Values</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {filteredColumns.map((column) => (
+                <TableRow key={column.name}>
+                  <TableCell className="align-top font-mono text-xs">{column.name}</TableCell>
+                  <TableCell className="align-top">
+                    <Badge variant="outline">{column.type}</Badge>
+                  </TableCell>
+                  <TableCell className="align-top">{column.nullable ? "Yes" : "No"}</TableCell>
+                  <TableCell className="align-top">{formatCount(column.num_null_values ?? null)}</TableCell>
+                  <TableCell className="align-top">{formatCount(column.num_unique_values ?? null)}</TableCell>
+                  <TableCell className="max-w-md align-top text-sm">
+                    {column.description || <span className="text-muted-foreground">—</span>}
+                    <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                      <span>Range: {formatRange(column)}</span>
+                      <span>Length: {column.length ?? "—"}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="max-w-sm align-top text-sm">
+                    <div>
+                      <span className="font-medium">Examples:</span> {formatValues(column.example_values)}
+                    </div>
+                    <div className="mt-1">
+                      <span className="font-medium">Values:</span> {formatValues(column.possible_values)}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
 
       {selectedSchemaSource ? (
@@ -177,9 +192,9 @@ export function SchemaViewer({
 
 function SummaryItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border p-4">
+    <div className="box-border w-full max-w-full min-w-0 border p-4">
       <div className="text-xs font-medium uppercase text-muted-foreground">{label}</div>
-      <div className="mt-2 text-lg font-semibold">{value}</div>
+      <div className="mt-2 break-words text-lg font-semibold">{value}</div>
     </div>
   );
 }

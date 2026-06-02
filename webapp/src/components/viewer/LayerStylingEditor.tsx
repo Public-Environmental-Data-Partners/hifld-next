@@ -498,7 +498,7 @@ export function LayerStylingEditor({
   }
 
   const editorContent = (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4 overflow-hidden">
       <Separator />
       <ColorOpacitySection
         activeLayer={activeLayer}
@@ -522,7 +522,7 @@ export function LayerStylingEditor({
 
   if (embedded) {
     return (
-      <div className="space-y-3">
+      <div className="min-w-0 space-y-3">
         {showTitle && <div className="text-sm font-semibold">{title}</div>}
         {editorContent}
       </div>

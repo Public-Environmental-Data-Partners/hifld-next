@@ -10,6 +10,7 @@ describe("buildOpenApiDocument", () => {
     expect(doc.paths?.["/api/collections/{slug}"]).toBeDefined();
     expect(doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}"]).toBeDefined();
     expect(doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}"]).toBeDefined();
+    expect(doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema"]).toBeDefined();
     expect(doc.paths?.["/api/openapi"]).toBeDefined();
     expect(String(doc.info?.description)).toContain("GET /api");
     expect(String(doc.info?.description)).toContain("problem+json");

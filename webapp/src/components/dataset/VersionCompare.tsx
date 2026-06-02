@@ -113,11 +113,13 @@ export function VersionCompare({
   const removedColumns = changedSchemaRows.filter((row) => row.changeType === "Removed").length;
 
   return (
-    <div className="space-y-6">
-      <section className="space-y-3">
+    <div className="box-border w-full max-w-full min-w-0 space-y-6 overflow-hidden">
+      <section className="min-w-0 space-y-3">
         <div>
           <h2 className="text-lg font-semibold">Metadata Changes</h2>
-          <p className="text-sm text-muted-foreground">Compare file-level metadata between the chosen versions.</p>
+          <p className="break-words text-sm text-muted-foreground">
+            Compare file-level metadata between the chosen versions.
+          </p>
         </div>
         <Table>
           <TableHeader>
@@ -136,10 +138,10 @@ export function VersionCompare({
               return (
                 <TableRow key={key}>
                   <TableCell className="font-mono text-xs">{key}</TableCell>
-                  <TableCell className={changed ? "bg-amber-50 dark:bg-amber-950/30" : undefined}>
+                  <TableCell className={`max-w-sm break-words ${changed ? "bg-amber-50 dark:bg-amber-950/30" : ""}`}>
                     <MetadataCellValue field={key} value={left} />
                   </TableCell>
-                  <TableCell className={changed ? "bg-amber-50 dark:bg-amber-950/30" : undefined}>
+                  <TableCell className={`max-w-sm break-words ${changed ? "bg-amber-50 dark:bg-amber-950/30" : ""}`}>
                     <MetadataCellValue field={key} value={right} />
                   </TableCell>
                 </TableRow>
@@ -149,10 +151,10 @@ export function VersionCompare({
         </Table>
       </section>
 
-      <section className="space-y-3">
+      <section className="min-w-0 space-y-3">
         <div>
           <h2 className="text-lg font-semibold">Schema Changes</h2>
-          <p className="text-sm text-muted-foreground">
+          <p className="break-words text-sm text-muted-foreground">
             Added and removed are relative to the right source. Schema details come from source metadata and data
             dictionaries when available.
           </p>
@@ -191,10 +193,10 @@ export function VersionCompare({
                       {row.changeType}
                     </Badge>
                   </TableCell>
-                  <TableCell className="align-top">
+                  <TableCell className="max-w-sm align-top break-words">
                     {row.left ? <ColumnDetails column={row.left} /> : <span className="text-muted-foreground">—</span>}
                   </TableCell>
-                  <TableCell className="align-top">
+                  <TableCell className="max-w-sm align-top break-words">
                     {row.right ? (
                       <ColumnDetails column={row.right} />
                     ) : (
@@ -213,7 +215,7 @@ export function VersionCompare({
 
 function ColumnDetails({ column }: { column: ColumnSchema }) {
   return (
-    <div className="space-y-1 text-sm">
+    <div className="min-w-0 space-y-1 break-words text-sm">
       <div>
         <span className="font-medium">Type:</span> {column.type}
       </div>

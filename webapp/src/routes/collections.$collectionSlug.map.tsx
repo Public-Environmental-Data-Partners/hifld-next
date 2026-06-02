@@ -29,6 +29,7 @@ import { clearedLayerPickerSelection, layerPickerSelectionAfterLayerRemoval } fr
 import { buildLoadedMapLayer, type LoadedMapLayer } from "@/components/map/multiLayerSources";
 import {
   decodeSourceDescriptor,
+  decodeSourceDescriptorList,
   descriptorForSource,
   findSourceForDescriptor,
   type SourceDescriptor,
@@ -77,6 +78,7 @@ import { getCollectionBySlug, getDatasetBySlug, getDatasetFileBySlug } from "@/l
 
 type MapSearch = {
   source?: string;
+  sources?: string;
 };
 
 const MAP_DATASET_PAGE_SIZE = 12;
@@ -86,6 +88,7 @@ const MOBILE_SETTINGS_MEDIA_QUERY = "(max-width: 767.98px)";
 const mapSearchSchema = z
   .object({
     source: z.string().optional(),
+    sources: z.string().optional(),
   })
   .catch({});
 
@@ -93,6 +96,7 @@ function parseMapSearch(search: z.input<typeof mapSearchSchema>): MapSearch {
   const parsed = mapSearchSchema.parse(search);
   const result: MapSearch = {};
   if (parsed.source !== undefined) result.source = parsed.source;
+  if (parsed.sources !== undefined) result.sources = parsed.sources;
   return result;
 }
 
@@ -279,6 +283,7 @@ export const Route = createFileRoute("/collections/$collectionSlug/map")({
   validateSearch: parseMapSearch,
   loaderDeps: ({ search }) => ({
     source: search.source,
+    sources: search.sources,
   }),
   loader: async ({ deps, params }) => {
     const collection = await getCollectionBySlug({
@@ -287,10 +292,17 @@ export const Route = createFileRoute("/collections/$collectionSlug/map")({
     if (!collection) {
       throw notFound();
     }
-    const resolvedSource = await resolveDescriptor(decodeSourceDescriptor(deps.source));
+    const descriptors = deps.sources?.trim()
+      ? decodeSourceDescriptorList(deps.sources)
+      : [decodeSourceDescriptor(deps.source)].filter(
+          (descriptor): descriptor is SourceDescriptor => descriptor !== null,
+        );
+    const resolved = (await Promise.all(descriptors.map((descriptor) => resolveDescriptor(descriptor)))).filter(
+      (entry): entry is ResolvedDescriptor => entry !== null,
+    );
     return {
       collection,
-      resolved: resolvedSource ? [resolvedSource] : [],
+      resolved,
     };
   },
   component: CollectionMapRoutePage,
@@ -305,7 +317,9 @@ export const Route = createFileRoute("/collections/$collectionSlug/map")({
 function CollectionMapRoutePage() {
   const { collection, resolved } = Route.useLoaderData();
   const search = useSearch({ from: Route.fullPath });
-  return <MapWorkspace collection={collection} initialLayers={resolved} initialLayerKey={search.source} />;
+  return (
+    <MapWorkspace collection={collection} initialLayers={resolved} initialLayerKey={search.sources ?? search.source} />
+  );
 }
 
 function popupProperties(hoverInfo: HoverInfo | null): PopupPropertyEntry[] {
@@ -423,15 +437,18 @@ function DatasetSearchCombobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="h-auto min-h-9 w-full justify-between"
+          className="h-auto min-h-9 w-full min-w-0 justify-between"
         >
-          <span className={`truncate ${selectedDataset ? "" : "text-muted-foreground"}`}>
+          <span className={`min-w-0 truncate ${selectedDataset ? "" : "text-muted-foreground"}`}>
             {selectedDataset?.name ?? "Search datasets..."}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[var(--radix-popover-trigger-width)] max-w-none p-0" align="start">
+      <PopoverContent
+        className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] min-w-0 p-0"
+        align="start"
+      >
         <Command shouldFilter={false}>
           <CommandInput value={query} onValueChange={onQueryChange} placeholder="Search datasets..." />
           <CommandList>
@@ -509,9 +526,12 @@ function StyleLayerCard({
 
   return (
     <Collapsible>
-      <Card className="w-full min-w-0">
+      <Card className="w-full max-w-full min-w-0">
         <CollapsibleTrigger asChild>
-          <button type="button" className="group flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
+          <button
+            type="button"
+            className="group flex w-full max-w-full min-w-0 items-center justify-between gap-3 px-4 py-3 text-left"
+          >
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold">{title}</div>
               {subtitle && <div className="truncate text-xs text-muted-foreground">{subtitle}</div>}
@@ -520,7 +540,7 @@ function StyleLayerCard({
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <CardContent className="pt-0">
+          <CardContent className="min-w-0 pt-0">
             <LayerStylingEditor
               activeLayer={layer}
               activeStyle={style}
@@ -897,16 +917,16 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   };
 
   const settingsPanelContent = (
-    <div className="p-4">
-      <Card className="w-full min-w-0">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-sm">
+    <div className="box-border w-full max-w-full min-w-0 overflow-hidden p-3 sm:p-4">
+      <Card className="w-full max-w-full min-w-0">
+        <CardHeader className="px-4 pb-3 sm:px-6">
+          <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
             <Layers className="h-4 w-4" />
             Layers
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="space-y-2">
+        <CardContent className="min-w-0 space-y-5 px-4 sm:px-6">
+          <div className="min-w-0 space-y-2">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Dataset</div>
             <DatasetSearchCombobox
               datasets={datasetResults}
@@ -948,7 +968,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
           </div>
 
           {selectedDataset && (
-            <div className="space-y-3 rounded-md border p-3">
+            <div className="box-border w-full max-w-full min-w-0 space-y-3 overflow-hidden rounded-md border p-3">
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold">{selectedDataset.name}</div>
                 <div className="text-xs text-muted-foreground">
@@ -962,11 +982,11 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
                   This dataset does not have a PMTiles source available for the map.
                 </div>
               ) : (
-                <div className="space-y-3">
-                  <div className="space-y-1.5">
+                <div className="min-w-0 space-y-3">
+                  <div className="min-w-0 space-y-1.5">
                     <div className="text-xs font-medium text-muted-foreground">File</div>
                     <Select value={selectedFile?.slug ?? ""} onValueChange={selectFile}>
-                      <SelectTrigger>
+                      <SelectTrigger className="max-w-full">
                         <SelectValue placeholder="Select file" />
                       </SelectTrigger>
                       <SelectContent>
@@ -978,10 +998,10 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="min-w-0 space-y-1.5">
                     <div className="text-xs font-medium text-muted-foreground">Version</div>
                     <Select value={resolvedVersion} onValueChange={selectVersion}>
-                      <SelectTrigger>
+                      <SelectTrigger className="max-w-full">
                         <SelectValue placeholder="Select version" />
                       </SelectTrigger>
                       <SelectContent>
@@ -993,10 +1013,10 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="min-w-0 space-y-1.5">
                     <div className="text-xs font-medium text-muted-foreground">Source</div>
                     <Select value={selectedSource ? String(selectedSource.id) : ""} onValueChange={setSelectedSourceId}>
-                      <SelectTrigger>
+                      <SelectTrigger className="max-w-full">
                         <SelectValue placeholder="Select source" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1029,7 +1049,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
         </CardContent>
       </Card>
 
-      <div className="mt-4 space-y-3">
+      <div className="mt-4 min-w-0 space-y-3">
         <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Style layers</div>
         {vectorLayers.length === 0 ? (
           <Card className="w-full min-w-0 border-dashed">
@@ -1201,14 +1221,17 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
       </div>
 
       <Sheet open={isMobileSettingsOpen} onOpenChange={setIsMobileSettingsOpen}>
-        <SheetContent side="left" className="w-[90vw] max-w-[90vw] gap-0 p-0 sm:max-w-[90vw] md:hidden">
+        <SheetContent
+          side="left"
+          className="box-border w-[90vw] max-w-[90vw] min-w-0 gap-0 overflow-hidden p-0 sm:max-w-[90vw] md:hidden"
+        >
           <SheetHeader className="border-b pr-12">
             <SheetTitle className="flex items-center gap-2 text-sm">
               <Layers className="h-4 w-4" />
               Settings
             </SheetTitle>
           </SheetHeader>
-          <ScrollArea className="min-h-0 flex-1">{settingsPanelContent}</ScrollArea>
+          <ScrollArea className="min-h-0 min-w-0 flex-1 overflow-x-hidden">{settingsPanelContent}</ScrollArea>
         </SheetContent>
       </Sheet>
 

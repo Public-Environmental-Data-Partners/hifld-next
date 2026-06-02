@@ -41,9 +41,16 @@ const markdownComponents: Components = {
   img: ({ src, alt }) => {
     const safeSrc = src ? safeMarkdownImageUrl(src) : "";
     if (!safeSrc) return null;
-    return <img src={safeSrc} alt={alt ?? ""} className="mt-2 max-h-10 max-w-40 object-contain" loading="lazy" />;
+    return (
+      <img
+        src={safeSrc}
+        alt={alt ?? ""}
+        className="mt-2 max-h-10 max-w-full object-contain sm:max-w-40"
+        loading="lazy"
+      />
+    );
   },
-  p: ({ children }) => <p>{children}</p>,
+  p: ({ children }) => <p className="min-w-0 break-words">{children}</p>,
 };
 
 interface MarkdownDescriptionProps {
@@ -53,7 +60,7 @@ interface MarkdownDescriptionProps {
 
 export function MarkdownDescription({ markdown, className }: MarkdownDescriptionProps) {
   return (
-    <div className={cn("space-y-1 text-muted-foreground", className)}>
+    <div className={cn("min-w-0 max-w-full space-y-1 overflow-hidden text-muted-foreground", className)}>
       <ReactMarkdown
         rehypePlugins={[rehypeSanitize]}
         components={markdownComponents}

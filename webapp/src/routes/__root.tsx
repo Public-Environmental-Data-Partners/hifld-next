@@ -58,7 +58,7 @@ function PendingLayout() {
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
-      <main className="flex flex-1 flex-col">
+      <main className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
         <div className="flex flex-1 flex-col items-center justify-center">
           <PageLoader size="lg" />
         </div>
@@ -76,7 +76,7 @@ function RootLayout() {
     <PostHogProvider>
       <div className="flex flex-col min-h-screen">
         <Header />
-        <main className="flex flex-1 flex-col">
+        <main className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
           <Outlet />
         </main>
         <Footer />

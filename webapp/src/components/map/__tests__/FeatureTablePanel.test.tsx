@@ -192,7 +192,16 @@ describe("FeatureTablePanel", () => {
     await user.click(screen.getByRole("button", { name: "Version diff" }));
     expect(screen.getByRole("button", { name: "Selected features" })).toHaveClass("min-h-11", "sm:min-h-8");
     expect(screen.getByRole("button", { name: "Version diff" })).toHaveClass("min-h-11", "sm:min-h-8");
-    expect(screen.getByTestId("feature-diff-scroll")).toHaveClass("overflow-auto", "overscroll-contain");
+    expect(screen.getByTestId("feature-diff-panel")).toHaveClass(
+      "overflow-y-auto",
+      "overscroll-contain",
+      "sm:overflow-hidden",
+    );
+    expect(screen.getByTestId("feature-diff-scroll")).toHaveClass(
+      "overflow-x-auto",
+      "sm:overflow-auto",
+      "sm:overscroll-contain",
+    );
     expect(screen.queryByText("1 changed")).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Left version" })).toHaveValue("v1.0.0");
     expect(screen.getByRole("combobox", { name: "Right version" })).toHaveValue("v1.1.0");

@@ -17,6 +17,7 @@ import {
   getDatasetFileBySlug,
   getFileVersions,
 } from "@/lib/api-client";
+import { schemaPath } from "@/lib/api-links";
 
 const schemaSearchSchema = z
   .object({
@@ -120,7 +121,9 @@ function FileSchemaPage() {
       : latestVersion;
   const [selectedVersion, setSelectedVersion] = useState<string | number>(initialVersion ?? search.version ?? "1");
   const selectedSchemaSource = getBestSchemaSourceForVersion(versions.formats, selectedVersion);
-  const rawMetadataHref = `/api/collections/${params.collectionSlug}/datasets/${params.datasetSlug}/files/${params.fileSlug}`;
+  const metadataHref = schemaPath(params.collectionSlug, params.datasetSlug, params.fileSlug, {
+    version: selectedVersion,
+  });
 
   const onVersionChange = (version: string) => {
     setSelectedVersion(version);
@@ -134,7 +137,7 @@ function FileSchemaPage() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 md:p-8">
+    <div className="mx-auto box-border w-full max-w-[100vw] min-w-0 space-y-6 overflow-x-hidden px-4 py-4 sm:max-w-6xl sm:px-6 sm:py-6 md:px-8 md:py-8">
       <Button variant="ghost" asChild>
         <Link to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug" params={params}>
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -147,7 +150,7 @@ function FileSchemaPage() {
         selectedVersion={selectedVersion}
         versionOptions={versionOptions}
         selectedSchemaSource={selectedSchemaSource}
-        rawMetadataHref={rawMetadataHref}
+        metadataHref={metadataHref}
         onVersionChange={onVersionChange}
       />
     </div>
