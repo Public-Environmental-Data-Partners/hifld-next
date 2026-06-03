@@ -338,6 +338,20 @@ function popupProperties(hoverInfo: HoverInfo | null): PopupPropertyEntry[] {
     .sort(([left], [right]) => left.localeCompare(right));
 }
 
+export function closeMapPopup({
+  setPinnedPopupInfo,
+  setHoverInfo,
+  clearHoverFeature,
+}: {
+  setPinnedPopupInfo: (value: HoverInfo | null) => void;
+  setHoverInfo: (value: HoverInfo | null) => void;
+  clearHoverFeature: () => void;
+}) {
+  setPinnedPopupInfo(null);
+  setHoverInfo(null);
+  clearHoverFeature();
+}
+
 function selectedFeatureIdFromHoverInfo(hoverInfo: HoverInfo | null, loadedLayers: LoadedMapLayer[]): string | null {
   const hoveredFeature = hoverInfo?.features[hoverInfo.selectedIndex ?? 0] ?? null;
   if (!hoveredFeature) {
@@ -739,6 +753,10 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     }
   }, [isMobileMapLayout]);
 
+  const closeActivePopup = useCallback(() => {
+    closeMapPopup({ setPinnedPopupInfo, setHoverInfo, clearHoverFeature });
+  }, [clearHoverFeature]);
+
   const activePopupInfo = pinnedPopupInfo ?? hoverInfo;
   const propertyEntries = popupProperties(activePopupInfo);
   const activePopupSelectedFeature = useMemo(
@@ -1129,7 +1147,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
                 }
                 setHoverInfo((prev) => (prev ? { ...prev, selectedIndex: index } : prev));
               }}
-              onClose={() => setPinnedPopupInfo(null)}
+              onClose={closeActivePopup}
             />
           )}
           {legendGroups.length > 0 && (

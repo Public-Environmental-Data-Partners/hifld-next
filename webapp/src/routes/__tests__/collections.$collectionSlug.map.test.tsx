@@ -12,6 +12,7 @@ import {
   IMPORT_SELECT_VALUE_CLASSNAME,
   MOBILE_SETTINGS_SCROLL_CLASSNAME,
   Route as CollectionMapRoute,
+  closeMapPopup,
   type ResolvedDescriptor,
   resolvedToMapLayer,
   searchDatasetsForMapImport,
@@ -272,6 +273,18 @@ describe("collection map route", () => {
     expect(IMPORT_SELECT_VALUE_CLASSNAME.split(" ")).toEqual(
       expect.arrayContaining(["min-w-0", "flex-1", "truncate", "text-left"]),
     );
+  });
+
+  it("clears pinned and hover popup state when closing the map popup", () => {
+    const setPinnedPopupInfo = vi.fn();
+    const setHoverInfo = vi.fn();
+    const clearHoverFeature = vi.fn();
+
+    closeMapPopup({ setPinnedPopupInfo, setHoverInfo, clearHoverFeature });
+
+    expect(setPinnedPopupInfo).toHaveBeenCalledWith(null);
+    expect(setHoverInfo).toHaveBeenCalledWith(null);
+    expect(clearHoverFeature).toHaveBeenCalledTimes(1);
   });
 
   it("turns a resolved initial source into a loaded map layer", () => {
