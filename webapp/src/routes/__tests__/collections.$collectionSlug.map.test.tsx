@@ -6,7 +6,11 @@ import type { Collection, Dataset, DatasetFile, DatasetSource, DatasetWithUrls, 
 import * as apiClient from "@/lib/api-client";
 import {
   DATASET_SEARCH_LIST_CLASSNAME,
-  DATASET_SEARCH_POPOVER_CLASSNAME,
+  DATASET_SEARCH_PANEL_CLASSNAME,
+  IMPORT_LAYER_CARD_CLASSNAME,
+  IMPORT_SELECT_TRIGGER_CLASSNAME,
+  IMPORT_SELECT_VALUE_CLASSNAME,
+  MOBILE_SETTINGS_SCROLL_CLASSNAME,
   Route as CollectionMapRoute,
   type ResolvedDescriptor,
   resolvedToMapLayer,
@@ -232,7 +236,10 @@ describe("collection map route", () => {
   });
 
   it("keeps dataset search results constrained and touch-scrollable on mobile", () => {
-    expect(DATASET_SEARCH_POPOVER_CLASSNAME).toContain("max-w-[calc(100vw-2rem)]");
+    expect(DATASET_SEARCH_PANEL_CLASSNAME.split(" ")).toEqual(
+      expect.arrayContaining(["absolute", "top-full", "right-0", "left-0", "z-30"]),
+    );
+    expect(DATASET_SEARCH_PANEL_CLASSNAME).not.toContain("radix");
     expect(DATASET_SEARCH_LIST_CLASSNAME.split(" ")).toEqual(
       expect.arrayContaining([
         "max-h-[min(18rem,calc(100dvh-14rem))]",
@@ -243,6 +250,28 @@ describe("collection map route", () => {
       ]),
     );
     expect(DATASET_SEARCH_LIST_CLASSNAME).not.toContain("overflow-hidden");
+  });
+
+  it("keeps the mobile import picker card inside the settings drawer", () => {
+    expect(MOBILE_SETTINGS_SCROLL_CLASSNAME.split(" ")).toEqual(
+      expect.arrayContaining([
+        "min-w-0",
+        "overflow-y-auto",
+        "overflow-x-hidden",
+        "overscroll-contain",
+        "[-webkit-overflow-scrolling:touch]",
+      ]),
+    );
+    expect(IMPORT_LAYER_CARD_CLASSNAME.split(" ")).toEqual(
+      expect.arrayContaining(["box-border", "w-full", "max-w-full", "min-w-0", "overflow-hidden"]),
+    );
+    expect(IMPORT_LAYER_CARD_CLASSNAME).toContain("[contain:inline-size]");
+    expect(IMPORT_SELECT_TRIGGER_CLASSNAME.split(" ")).toEqual(
+      expect.arrayContaining(["w-full", "max-w-full", "min-w-0", "overflow-hidden"]),
+    );
+    expect(IMPORT_SELECT_VALUE_CLASSNAME.split(" ")).toEqual(
+      expect.arrayContaining(["min-w-0", "flex-1", "truncate", "text-left"]),
+    );
   });
 
   it("turns a resolved initial source into a loaded map layer", () => {

@@ -40,7 +40,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { PageLoader } from "@/components/ui/page-loader";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -84,10 +83,16 @@ type MapSearch = {
 const MAP_DATASET_PAGE_SIZE = 12;
 const SEARCH_DEBOUNCE_MS = 500;
 const MOBILE_SETTINGS_MEDIA_QUERY = "(max-width: 767.98px)";
-export const DATASET_SEARCH_POPOVER_CLASSNAME =
-  "w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] min-w-0 p-0";
+export const DATASET_SEARCH_PANEL_CLASSNAME =
+  "absolute top-full right-0 left-0 z-30 mt-2 min-w-0 rounded-md border bg-popover p-0 text-popover-foreground shadow-md";
 export const DATASET_SEARCH_LIST_CLASSNAME =
   "max-h-[min(18rem,calc(100dvh-14rem))] touch-pan-y overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]";
+export const MOBILE_SETTINGS_SCROLL_CLASSNAME =
+  "min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [-webkit-overflow-scrolling:touch]";
+export const IMPORT_LAYER_CARD_CLASSNAME =
+  "box-border w-full max-w-full min-w-0 space-y-3 overflow-hidden rounded-md border p-3 [contain:inline-size]";
+export const IMPORT_SELECT_TRIGGER_CLASSNAME = "w-full max-w-full min-w-0 overflow-hidden";
+export const IMPORT_SELECT_VALUE_CLASSNAME = "min-w-0 flex-1 truncate text-left";
 
 const mapSearchSchema = z
   .object({
@@ -435,69 +440,64 @@ export function DatasetSearchCombobox({
   const [open, setOpen] = useState(false);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className="h-auto min-h-9 w-full min-w-0 justify-between"
-        >
-          <span className={`min-w-0 truncate ${selectedDataset ? "" : "text-muted-foreground"}`}>
-            {selectedDataset?.name ?? "Search datasets..."}
-          </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        avoidCollisions={false}
-        className={DATASET_SEARCH_POPOVER_CLASSNAME}
-        side="bottom"
-        sideOffset={8}
+    <div className="relative min-w-0">
+      <Button
+        variant="outline"
+        role="combobox"
+        aria-expanded={open}
+        className="h-auto min-h-9 w-full min-w-0 justify-between"
+        onClick={() => setOpen((current) => !current)}
       >
-        <Command className="h-auto overflow-visible" shouldFilter={false}>
-          <CommandInput value={query} onValueChange={onQueryChange} placeholder="Search datasets..." />
-          <CommandList className={DATASET_SEARCH_LIST_CLASSNAME}>
-            {isLoading ? (
-              <div className="px-3 py-6 text-center text-sm text-muted-foreground">Searching datasets...</div>
-            ) : error ? (
-              <div className="px-3 py-6 text-center text-sm text-destructive">Dataset search failed.</div>
-            ) : (
-              <>
-                <CommandEmpty>No matching datasets found.</CommandEmpty>
-                <CommandGroup>
-                  {datasets.map((dataset) => {
-                    const isSelected = selectedDataset?.id === dataset.id;
-                    const isLoaded = datasetHasLoadedLayer(collectionSlug, dataset, currentDescriptors);
-                    return (
-                      <CommandItem
-                        key={dataset.id}
-                        value={String(dataset.id)}
-                        onSelect={() => {
-                          onSelectDataset(dataset);
-                          setOpen(false);
-                        }}
-                        className="items-start"
-                      >
-                        <Check className={`mt-0.5 h-4 w-4 ${isSelected ? "opacity-100" : "opacity-0"}`} />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate">{dataset.name}</div>
-                          <div className="truncate text-xs text-muted-foreground">
-                            {dataset.files?.length ? `${dataset.files.length} files` : dataset.slug}
+        <span className={`min-w-0 truncate ${selectedDataset ? "" : "text-muted-foreground"}`}>
+          {selectedDataset?.name ?? "Search datasets..."}
+        </span>
+        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+      </Button>
+      {open ? (
+        <div className={DATASET_SEARCH_PANEL_CLASSNAME}>
+          <Command className="h-auto overflow-visible" shouldFilter={false}>
+            <CommandInput value={query} onValueChange={onQueryChange} placeholder="Search datasets..." />
+            <CommandList className={DATASET_SEARCH_LIST_CLASSNAME}>
+              {isLoading ? (
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground">Searching datasets...</div>
+              ) : error ? (
+                <div className="px-3 py-6 text-center text-sm text-destructive">Dataset search failed.</div>
+              ) : (
+                <>
+                  <CommandEmpty>No matching datasets found.</CommandEmpty>
+                  <CommandGroup>
+                    {datasets.map((dataset) => {
+                      const isSelected = selectedDataset?.id === dataset.id;
+                      const isLoaded = datasetHasLoadedLayer(collectionSlug, dataset, currentDescriptors);
+                      return (
+                        <CommandItem
+                          key={dataset.id}
+                          value={String(dataset.id)}
+                          onSelect={() => {
+                            onSelectDataset(dataset);
+                            setOpen(false);
+                          }}
+                          className="items-start"
+                        >
+                          <Check className={`mt-0.5 h-4 w-4 ${isSelected ? "opacity-100" : "opacity-0"}`} />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate">{dataset.name}</div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {dataset.files?.length ? `${dataset.files.length} files` : dataset.slug}
+                            </div>
                           </div>
-                        </div>
-                        {isLoaded && <span className="mt-0.5 shrink-0 text-xs text-muted-foreground">Loaded</span>}
-                      </CommandItem>
-                    );
-                  })}
-                </CommandGroup>
-              </>
-            )}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+                          {isLoaded && <span className="mt-0.5 shrink-0 text-xs text-muted-foreground">Loaded</span>}
+                        </CommandItem>
+                      );
+                    })}
+                  </CommandGroup>
+                </>
+              )}
+            </CommandList>
+          </Command>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -975,7 +975,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
           </div>
 
           {selectedDataset && (
-            <div className="box-border w-full max-w-full min-w-0 space-y-3 overflow-hidden rounded-md border p-3">
+            <div className={IMPORT_LAYER_CARD_CLASSNAME}>
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold">{selectedDataset.name}</div>
                 <div className="text-xs text-muted-foreground">
@@ -993,8 +993,8 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
                   <div className="min-w-0 space-y-1.5">
                     <div className="text-xs font-medium text-muted-foreground">File</div>
                     <Select value={selectedFile?.slug ?? ""} onValueChange={selectFile}>
-                      <SelectTrigger className="max-w-full">
-                        <SelectValue placeholder="Select file" />
+                      <SelectTrigger className={IMPORT_SELECT_TRIGGER_CLASSNAME}>
+                        <SelectValue className={IMPORT_SELECT_VALUE_CLASSNAME} placeholder="Select file" />
                       </SelectTrigger>
                       <SelectContent>
                         {selectableFiles.map((file) => (
@@ -1008,8 +1008,8 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
                   <div className="min-w-0 space-y-1.5">
                     <div className="text-xs font-medium text-muted-foreground">Version</div>
                     <Select value={resolvedVersion} onValueChange={selectVersion}>
-                      <SelectTrigger className="max-w-full">
-                        <SelectValue placeholder="Select version" />
+                      <SelectTrigger className={IMPORT_SELECT_TRIGGER_CLASSNAME}>
+                        <SelectValue className={IMPORT_SELECT_VALUE_CLASSNAME} placeholder="Select version" />
                       </SelectTrigger>
                       <SelectContent>
                         {versionOptions.map((version) => (
@@ -1023,8 +1023,8 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
                   <div className="min-w-0 space-y-1.5">
                     <div className="text-xs font-medium text-muted-foreground">Source</div>
                     <Select value={selectedSource ? String(selectedSource.id) : ""} onValueChange={setSelectedSourceId}>
-                      <SelectTrigger className="max-w-full">
-                        <SelectValue placeholder="Select source" />
+                      <SelectTrigger className={IMPORT_SELECT_TRIGGER_CLASSNAME}>
+                        <SelectValue className={IMPORT_SELECT_VALUE_CLASSNAME} placeholder="Select source" />
                       </SelectTrigger>
                       <SelectContent>
                         {versionSourceOptions.map((source) => (
@@ -1238,7 +1238,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
               Settings
             </SheetTitle>
           </SheetHeader>
-          <ScrollArea className="min-h-0 min-w-0 flex-1 overflow-x-hidden">{settingsPanelContent}</ScrollArea>
+          <div className={MOBILE_SETTINGS_SCROLL_CLASSNAME}>{settingsPanelContent}</div>
         </SheetContent>
       </Sheet>
 
