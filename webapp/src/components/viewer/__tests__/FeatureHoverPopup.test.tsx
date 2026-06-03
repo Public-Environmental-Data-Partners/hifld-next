@@ -23,6 +23,13 @@ describe('FeatureHoverPopup', () => {
 
     expect(screen.getByText('Test Feature')).toBeInTheDocument()
     expect(screen.getByText('1')).toBeInTheDocument()
+    expect(screen.getByTestId('feature-popup-scroll')).toHaveClass(
+      'max-h-[min(12rem,calc(100dvh-14rem))]',
+      'touch-pan-y',
+      'overflow-auto',
+      'overscroll-contain',
+      '[-webkit-overflow-scrolling:touch]',
+    )
   })
 
   it('shows close button when pinned', () => {

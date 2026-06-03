@@ -3,7 +3,6 @@ import type { Ref } from "react";
 import { DataQualityFeedbackDialog } from "@/components/dataset/DataQualityFeedbackDialog";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { googleMapsSearchUrl } from "@/lib/externalMaps";
@@ -81,7 +80,10 @@ export function FeatureHoverPopup({
           </div>
         )}
       </div>
-      <ScrollArea className="h-48">
+      <div
+        data-testid="feature-popup-scroll"
+        className="max-h-[min(12rem,calc(100dvh-14rem))] touch-pan-y overflow-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -106,7 +108,7 @@ export function FeatureHoverPopup({
             )}
           </TableBody>
         </Table>
-      </ScrollArea>
+      </div>
     </div>
   );
 }

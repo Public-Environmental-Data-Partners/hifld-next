@@ -84,6 +84,10 @@ type MapSearch = {
 const MAP_DATASET_PAGE_SIZE = 12;
 const SEARCH_DEBOUNCE_MS = 500;
 const MOBILE_SETTINGS_MEDIA_QUERY = "(max-width: 767.98px)";
+export const DATASET_SEARCH_POPOVER_CLASSNAME =
+  "w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] min-w-0 p-0";
+export const DATASET_SEARCH_LIST_CLASSNAME =
+  "max-h-[min(18rem,calc(100dvh-14rem))] touch-pan-y overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]";
 
 const mapSearchSchema = z
   .object({
@@ -417,7 +421,7 @@ interface DatasetSearchComboboxProps {
   onSelectDataset: (dataset: DatasetWithUrls) => void;
 }
 
-function DatasetSearchCombobox({
+export function DatasetSearchCombobox({
   datasets,
   query,
   selectedDataset,
@@ -446,12 +450,15 @@ function DatasetSearchCombobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] min-w-0 p-0"
         align="start"
+        avoidCollisions={false}
+        className={DATASET_SEARCH_POPOVER_CLASSNAME}
+        side="bottom"
+        sideOffset={8}
       >
-        <Command shouldFilter={false}>
+        <Command className="h-auto overflow-visible" shouldFilter={false}>
           <CommandInput value={query} onValueChange={onQueryChange} placeholder="Search datasets..." />
-          <CommandList>
+          <CommandList className={DATASET_SEARCH_LIST_CLASSNAME}>
             {isLoading ? (
               <div className="px-3 py-6 text-center text-sm text-muted-foreground">Searching datasets...</div>
             ) : error ? (

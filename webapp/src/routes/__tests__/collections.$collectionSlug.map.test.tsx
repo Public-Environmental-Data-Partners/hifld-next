@@ -5,6 +5,8 @@ import { encodeSourceDescriptor, encodeSourceDescriptorList, type SourceDescript
 import type { Collection, Dataset, DatasetFile, DatasetSource, DatasetWithUrls, PaginatedResponse } from "@/lib/api-client";
 import * as apiClient from "@/lib/api-client";
 import {
+  DATASET_SEARCH_LIST_CLASSNAME,
+  DATASET_SEARCH_POPOVER_CLASSNAME,
   Route as CollectionMapRoute,
   type ResolvedDescriptor,
   resolvedToMapLayer,
@@ -227,6 +229,20 @@ describe("collection map route", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/collections/hifld?limit=12&offset=0&omit=description&search=hospitals");
     expect(apiClient.getCollectionDatasets).not.toHaveBeenCalled();
+  });
+
+  it("keeps dataset search results constrained and touch-scrollable on mobile", () => {
+    expect(DATASET_SEARCH_POPOVER_CLASSNAME).toContain("max-w-[calc(100vw-2rem)]");
+    expect(DATASET_SEARCH_LIST_CLASSNAME.split(" ")).toEqual(
+      expect.arrayContaining([
+        "max-h-[min(18rem,calc(100dvh-14rem))]",
+        "touch-pan-y",
+        "overflow-y-auto",
+        "overscroll-contain",
+        "[-webkit-overflow-scrolling:touch]",
+      ]),
+    );
+    expect(DATASET_SEARCH_LIST_CLASSNAME).not.toContain("overflow-hidden");
   });
 
   it("turns a resolved initial source into a loaded map layer", () => {
