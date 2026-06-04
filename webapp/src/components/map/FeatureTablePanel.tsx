@@ -60,9 +60,9 @@ const S2_LEVEL_OPTIONS = [
 ];
 
 function sortedPropertyKeys(features: SelectedMapFeature[]): string[] {
-  return [...new Set(features.flatMap((feature) => Object.keys(feature.properties)))]
-    .sort((left, right) => left.localeCompare(right))
-    .slice(0, 10);
+  return [...new Set(features.flatMap((feature) => Object.keys(feature.properties)))].sort((left, right) =>
+    left.localeCompare(right),
+  );
 }
 
 function featureMatchesQuery(feature: SelectedMapFeature, query: string): boolean {

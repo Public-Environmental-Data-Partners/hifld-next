@@ -81,6 +81,26 @@ describe("FeatureTablePanel", () => {
     );
   });
 
+  it("renders all selected feature property columns", () => {
+    const properties = Object.fromEntries(
+      Array.from({ length: 12 }, (_, index) => [`FIELD_${String(index + 1).padStart(2, "0")}`, `value ${index + 1}`]),
+    );
+
+    render(
+      <FeatureTablePanel
+        features={[selectedFeature("v1.0.0", properties)]}
+        wasSelectionCapped={false}
+        s2Level={16}
+        onS2LevelChange={() => undefined}
+        onClear={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Sort by FIELD_01" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sort by FIELD_12" })).toBeInTheDocument();
+    expect(screen.getByText("value 12")).toBeInTheDocument();
+  });
+
   it("scopes selected feature rows by layer and version selectors", () => {
     render(
       <FeatureTablePanel
