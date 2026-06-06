@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from re import sub
 
 import sqlalchemy.exc as sa_exc
@@ -500,6 +500,7 @@ class DatasetService:
 
         file_source.location = source_location_model(location)
         file_source.source_metadata = source_metadata_model(source_metadata)
+        file_source.updated_at = datetime.now(UTC)
         self.db.add(file_source)
         self.db.commit()
         self.db.refresh(file_source)
@@ -529,6 +530,7 @@ class DatasetService:
             merged["version"] = "v1"
 
         file_source.source_metadata = SpatialDatasetFileMetadata.model_validate(merged)
+        file_source.updated_at = datetime.now(UTC)
         self.db.add(file_source)
         self.db.commit()
         self.db.refresh(file_source)

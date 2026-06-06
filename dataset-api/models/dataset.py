@@ -100,6 +100,7 @@ class SpatialDatasetFileMetadata(BaseModel):
     """Pydantic schema for spatial dataset file metadata."""
 
     version: str = "v1"  # Schema version
+    description: str | None = None
 
     # File-specific metadata (only relevant when source_type="file")
     size_bytes: int | None = None  # File size in bytes

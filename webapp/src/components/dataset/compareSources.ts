@@ -3,13 +3,6 @@ import { compareVersionValues } from "./versionLabel";
 
 export { compareVersionValues } from "./versionLabel";
 
-export interface CompareSearchState {
-  format: string;
-  location: number;
-  v1: string;
-  v2: string;
-}
-
 export function getLocationOptions(formatEntry?: DatasetFormat): Array<{ id: number; name: string }> {
   if (!formatEntry?.sources) {
     return [];
@@ -62,23 +55,53 @@ export function hasAnyComparableLocations(formatEntry?: DatasetFormat): boolean 
   return getComparableLocations(formatEntry).length > 0;
 }
 
-export function buildCompareSearchForLocation(
-  formatEntry: DatasetFormat | undefined,
-  locationId: number | null | undefined,
-): CompareSearchState | null {
-  if (!formatEntry || !locationId) {
-    return null;
+function sourceScore(formatEntry: DatasetFormat, source: DatasetSource): number {
+  let score = 0;
+  if (formatEntry.format.format_type === "geoparquet") {
+    score += 100;
+  }
+  if (source.source_metadata?.columns?.length) {
+    score += 10;
+  }
+  if (source.source_metadata) {
+    score += 1;
+  }
+  return score;
+}
+
+export function getComparableVersionSources(formatEntries: DatasetFormat[] | undefined): DatasetSource[] {
+  const byVersion = new Map<string, { source: DatasetSource; score: number }>();
+
+  for (const formatEntry of formatEntries ?? []) {
+    for (const source of formatEntry.sources ?? []) {
+      const versionKey = String(source.version ?? "1");
+      const candidate = { source, score: sourceScore(formatEntry, source) };
+      const existing = byVersion.get(versionKey);
+      if (!existing || candidate.score > existing.score) {
+        byVersion.set(versionKey, candidate);
+      }
+    }
   }
 
-  const versionSources = getVersionSourcesForLocation(formatEntry, locationId);
-  if (versionSources.length < 2) {
-    return null;
+  return Array.from(byVersion.values())
+    .map((entry) => entry.source)
+    .sort((left, right) => compareVersionValues(left.version ?? "1", right.version ?? "1"));
+}
+
+export function hasComparableVersions(formatEntries: DatasetFormat[] | undefined): boolean {
+  return getComparableVersionSources(formatEntries).length >= 2;
+}
+
+export function getDefaultCompareVersionPair(versionSources: DatasetSource[]): {
+  left: DatasetSource | undefined;
+  right: DatasetSource | undefined;
+} {
+  if (versionSources.length === 0) {
+    return { left: undefined, right: undefined };
   }
 
   return {
-    format: formatEntry.format.format_type,
-    location: locationId,
-    v1: String(versionSources[0]?.version ?? ""),
-    v2: String(versionSources[1]?.version ?? ""),
+    left: versionSources.at(-1),
+    right: versionSources[0],
   };
 }

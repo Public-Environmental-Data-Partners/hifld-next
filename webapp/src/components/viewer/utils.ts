@@ -1,5 +1,5 @@
 import type maplibregl from "maplibre-gl";
-import type { ColorScheme, LayerStyle } from "./types";
+import type { ColorScheme, LayerStyle, NumericFieldSummary } from "./types";
 
 export type StyleExpression = readonly (string | number | boolean | StyleExpression)[];
 export type PaintValue = string | number | StyleExpression;
@@ -44,6 +44,7 @@ export const DEFAULT_STYLE: LayerStyle = {
   colorProperty: null,
   colorScheme: "viridis",
   breaksText: "",
+  breakMode: "auto",
   opacity: 0.7,
   radius: 4,
   lineWidth: 2,
@@ -68,7 +69,7 @@ export function computeQuantileBreaks(values: number[], count: number): number[]
     return [];
   }
   if (values.length === 0) {
-    return Array.from({ length: count }, (_, index) => index);
+    return [];
   }
 
   const sorted = [...values].sort((a, b) => a - b);
@@ -97,6 +98,33 @@ export function computeQuantileBreaks(values: number[], count: number): number[]
   return Array.from({ length: count }, (_, index) => Number((min + step * (index + 1)).toFixed(6)));
 }
 
+export function computeEqualIntervalBreaks(min: number, max: number, count: number): number[] {
+  if (count <= 0 || !Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+    return [];
+  }
+  const step = (max - min) / (count + 1);
+  return Array.from({ length: count }, (_, index) => Number((min + step * (index + 1)).toFixed(6)));
+}
+
+export function automaticBreaksForNumericField({
+  field,
+  sampledValues,
+  count,
+}: {
+  field: NumericFieldSummary | undefined;
+  sampledValues: number[];
+  count: number;
+}): number[] {
+  const finiteSampledValues = sampledValues.filter((value) => Number.isFinite(value));
+  if (finiteSampledValues.length > 0) {
+    return computeQuantileBreaks(finiteSampledValues, count);
+  }
+  return computeQuantileBreaks(
+    field?.min !== undefined && field.max !== undefined ? [field.min, field.max] : [],
+    count,
+  );
+}
+
 export function getValueRange(values: number[]) {
   if (values.length === 0) {
     return { min: 0, max: 0 };
@@ -120,8 +148,14 @@ export function applyScale(value: number, scale: LayerStyle["radiusScale"]) {
   return value;
 }
 
-export function getSampledValues(map: maplibregl.Map, layerId: string, property: string, limit = 5000): number[] {
-  const features = map.querySourceFeatures("pmtiles", {
+export function getSampledValues(
+  map: maplibregl.Map,
+  layerId: string,
+  property: string,
+  limit = 5000,
+  sourceId = "pmtiles",
+): number[] {
+  const features = map.querySourceFeatures(sourceId, {
     sourceLayer: layerId,
   });
   const values: number[] = [];

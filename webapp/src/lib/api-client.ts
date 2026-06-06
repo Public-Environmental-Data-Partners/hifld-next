@@ -62,7 +62,8 @@ export interface ColumnSchema {
 
 export interface SpatialDatasetFileMetadata {
   version: string;
-  size_bytes?: number;
+  description?: string | null;
+  size_bytes?: number | null;
   mime_type?: string;
   feature_count?: number;
   bounds?: [number, number, number, number]; // [minx, miny, maxx, maxy]
@@ -94,6 +95,8 @@ export interface DatasetSource {
   location: DatasetSourceLocation;
   source_metadata?: SpatialDatasetFileMetadata | undefined;
   storage_location?: StorageLocation | undefined;
+  created_at?: string | undefined;
+  updated_at?: string | undefined;
 }
 
 // Storage location config schemas

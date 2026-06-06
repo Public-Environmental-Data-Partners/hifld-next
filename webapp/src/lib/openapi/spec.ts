@@ -16,7 +16,261 @@ const Problem = z
   })
   .openapi("Problem");
 
+const DateTimeString = z.string().describe("ISO-like timestamp string from the catalog");
+
+const FormatType = z
+  .enum(["geoparquet", "pmtiles", "geopackage", "shapefile", "geojson", "file_geodatabase"])
+  .openapi("FormatType");
+
+const SourceType = z.enum(["file", "api"]).openapi("SourceType");
+
+const DatasetTags = z.record(z.string(), z.union([z.string(), z.array(z.string())])).openapi("DatasetTags");
+
+const Collection = z
+  .object({
+    id: z.number(),
+    slug: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    created_at: DateTimeString.optional(),
+    updated_at: DateTimeString.optional(),
+  })
+  .passthrough()
+  .openapi("Collection");
+
+const Dataset = z
+  .object({
+    id: z.number(),
+    slug: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    collection_id: z.number().optional(),
+    tags: DatasetTags.optional(),
+    created_at: DateTimeString.optional(),
+    updated_at: DateTimeString.optional(),
+    links: LinkMap.optional(),
+  })
+  .passthrough()
+  .openapi("Dataset");
+
+const ColumnSchema = z
+  .object({
+    name: z.string(),
+    type: z.string(),
+    description: z.string().nullable().optional(),
+    nullable: z.boolean(),
+    num_null_values: z.number().nullable().optional(),
+    num_unique_values: z.number().nullable().optional(),
+    example_values: z.array(z.string()).nullable().optional(),
+    min: z.number().nullable().optional(),
+    max: z.number().nullable().optional(),
+    length: z.number().nullable().optional(),
+    possible_values: z.array(z.string()).nullable().optional(),
+  })
+  .passthrough()
+  .openapi("ColumnSchema");
+
+const SpatialDatasetFileMetadata = z
+  .object({
+    version: z.string(),
+    description: z.string().nullable().optional(),
+    size_bytes: z.number().nullable().optional(),
+    mime_type: z.string().nullable().optional(),
+    feature_count: z.number().nullable().optional(),
+    bounds: z.tuple([z.number(), z.number(), z.number(), z.number()]).nullable().optional(),
+    geometry_type: z.string().nullable().optional(),
+    invalid_geometry_count: z.number().nullable().optional(),
+    quality_check_passed: z.boolean().nullable().optional(),
+    columns_hash: z.string().nullable().optional(),
+    columns: z.array(ColumnSchema).optional(),
+  })
+  .passthrough()
+  .openapi("SpatialDatasetFileMetadata");
+
+const SourceLocation = z
+  .union([
+    z.object({ type: z.literal("file").optional(), version: z.string(), path: z.string() }).passthrough(),
+    z
+      .object({
+        type: z.literal("api").optional(),
+        version: z.string(),
+        url: z.string(),
+        method: z.string().optional(),
+      })
+      .passthrough(),
+  ])
+  .openapi("SourceLocation");
+
+const StorageLocationConfig = z
+  .object({
+    type: z.string().optional(),
+    version: z.string(),
+    base_url: z.string(),
+    bucket: z.string().optional(),
+    endpoint_url: z.string().optional(),
+  })
+  .passthrough()
+  .openapi("StorageLocationConfig");
+
+const StorageLocation = z
+  .object({
+    id: z.number(),
+    slug: z.string().optional(),
+    name: z.string(),
+    backend_type: z.string(),
+    description: z.string().optional(),
+    config: StorageLocationConfig.nullable().optional(),
+    created_at: DateTimeString.optional(),
+    updated_at: DateTimeString.optional(),
+  })
+  .passthrough()
+  .openapi("StorageLocation");
+
+const DatasetSource = z
+  .object({
+    id: z.number(),
+    file_format_id: z.number().optional(),
+    storage_location_id: z.number().nullable().optional(),
+    version: z.union([z.string(), z.number()]).optional(),
+    source_type: SourceType,
+    location: SourceLocation,
+    source_metadata: SpatialDatasetFileMetadata.nullable().optional(),
+    url: z.string().nullable().optional(),
+    storage_uri: z.string().nullable().optional(),
+    glob_pattern: z.string().nullable().optional(),
+    storage_location: StorageLocation.nullable().optional(),
+    links: LinkMap.optional(),
+    references_source_id: z.number().nullable().optional(),
+    created_at: DateTimeString.optional(),
+    updated_at: DateTimeString.optional(),
+  })
+  .passthrough()
+  .openapi("DatasetSource");
+
+const Format = z
+  .object({
+    id: z.number(),
+    format_type: FormatType,
+    name: z.string(),
+    description: z.string().optional(),
+    mime_type: z.string().nullable().optional(),
+    created_at: DateTimeString.optional(),
+    updated_at: DateTimeString.optional(),
+  })
+  .passthrough()
+  .openapi("Format");
+
+const FileFormat = z
+  .object({
+    id: z.number(),
+    file_id: z.number().optional(),
+    dataset_id: z.number().optional(),
+    format_id: z.number(),
+    created_at: DateTimeString.optional(),
+    updated_at: DateTimeString.optional(),
+  })
+  .passthrough()
+  .openapi("FileFormat");
+
+const DatasetFormat = z
+  .object({
+    format: Format,
+    file_format: FileFormat.optional(),
+    dataset_format: FileFormat.optional(),
+    sources: z.array(DatasetSource),
+  })
+  .passthrough()
+  .openapi("DatasetFormat");
+
+const DatasetFile = z
+  .object({
+    id: z.number(),
+    dataset_id: z.number(),
+    name: z.string(),
+    slug: z.string(),
+    description: z.string().nullable().optional(),
+    layer_name: z.string().nullable().optional(),
+    source_file_path: z.string().nullable().optional(),
+    file_metadata: SpatialDatasetFileMetadata.nullable().optional(),
+    formats: z.array(DatasetFormat).optional(),
+    links: LinkMap.optional(),
+    created_at: DateTimeString.optional(),
+    updated_at: DateTimeString.optional(),
+  })
+  .passthrough()
+  .openapi("DatasetFile");
+
+const DatasetDetailResponse = z
+  .object({
+    links: LinkMap,
+    collection: Collection,
+    dataset: Dataset.extend({ files: z.array(DatasetFile).optional() }).passthrough(),
+  })
+  .passthrough()
+  .openapi("DatasetDetailResponse");
+
+const DatasetFileResponse = z
+  .object({
+    links: LinkMap,
+    collection: Collection,
+    dataset: Dataset,
+    file: DatasetFile,
+  })
+  .passthrough()
+  .openapi("DatasetFileResponse");
+
+const DatasetFileSchemaResponse = z
+  .object({
+    links: LinkMap,
+    collection: Collection,
+    dataset: Dataset,
+    file: z
+      .object({
+        id: z.number(),
+        dataset_id: z.number(),
+        slug: z.string(),
+        name: z.string(),
+        description: z.string().nullable().optional(),
+        layer_name: z.string().nullable().optional(),
+      })
+      .passthrough(),
+    versions: z.array(z.union([z.string(), z.number()])),
+    selected_version: z.union([z.string(), z.number()]).nullable(),
+    schema: z
+      .object({
+        version: z.union([z.string(), z.number()]).nullable(),
+        format_type: FormatType,
+        format_name: z.string(),
+        source_id: z.number(),
+        storage_location: StorageLocation.nullable().optional(),
+        source: DatasetSource,
+        source_metadata: SpatialDatasetFileMetadata.nullable(),
+        summary: z
+          .object({
+            columnCount: z.number(),
+            featureCount: z.number().nullable(),
+            geometryType: z.string().nullable(),
+            invalidGeometryCount: z.number().nullable(),
+            qualityCheckPassed: z.boolean().nullable(),
+            columnsHash: z.string().nullable(),
+          })
+          .passthrough(),
+        columns: z.array(ColumnSchema),
+      })
+      .nullable(),
+  })
+  .passthrough()
+  .openapi("DatasetFileSchemaResponse");
+
 const registry = new OpenAPIRegistry();
+
+registry.register("ColumnSchema", ColumnSchema);
+registry.register("SpatialDatasetFileMetadata", SpatialDatasetFileMetadata);
+registry.register("DatasetSource", DatasetSource);
+registry.register("DatasetFile", DatasetFile);
+registry.register("DatasetDetailResponse", DatasetDetailResponse);
+registry.register("DatasetFileResponse", DatasetFileResponse);
+registry.register("DatasetFileSchemaResponse", DatasetFileSchemaResponse);
 
 registry.registerPath({
   method: "get",
@@ -158,6 +412,89 @@ registry.registerPath({
         },
       },
     },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/collections/{collectionSlug}/datasets/{datasetSlug}",
+  summary: "Dataset detail in a collection",
+  description:
+    "Returns one dataset by collection and dataset slug. Use include_urls=true when source URLs are needed on nested file format sources.",
+  request: {
+    params: z.object({
+      collectionSlug: z.string(),
+      datasetSlug: z.string(),
+    }),
+    query: z.object({
+      include_urls: z.enum(["true", "false"]).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Dataset detail with file links",
+      content: {
+        "application/json": {
+          schema: DatasetDetailResponse,
+        },
+      },
+    },
+    404: { description: "Not found", content: { "application/problem+json": { schema: Problem } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}",
+  summary: "Dataset file metadata and source URLs",
+  description:
+    "Raw file metadata used by the View metadata action. Includes formats, source versions, storage locations, source lifecycle timestamps, source_metadata.description, source_metadata.size_bytes, and download links.",
+  request: {
+    params: z.object({
+      collectionSlug: z.string(),
+      datasetSlug: z.string(),
+      fileSlug: z.string(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Dataset file metadata",
+      content: {
+        "application/json": {
+          schema: DatasetFileResponse,
+        },
+      },
+    },
+    404: { description: "Not found", content: { "application/problem+json": { schema: Problem } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema",
+  summary: "Dataset file schema and data dictionary",
+  description:
+    "Focused schema metadata for a dataset file. Returns the best schema-capable source for the requested version, including data dictionary columns. Omit version to use the latest schema-capable version.",
+  request: {
+    params: z.object({
+      collectionSlug: z.string(),
+      datasetSlug: z.string(),
+      fileSlug: z.string(),
+    }),
+    query: z.object({
+      version: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Dataset file schema metadata",
+      content: {
+        "application/json": {
+          schema: DatasetFileSchemaResponse,
+        },
+      },
+    },
+    404: { description: "Not found", content: { "application/problem+json": { schema: Problem } } },
   },
 });
 

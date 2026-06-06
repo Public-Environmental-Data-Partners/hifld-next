@@ -6,7 +6,7 @@ import { VersionCompare } from "../VersionCompare";
 
 const sourceA: DatasetSource = {
   id: 1,
-  version: "v20260101" as unknown as number,
+  version: "v20260101",
   source_type: "file",
   location: {
     version: "v1",
@@ -31,7 +31,7 @@ const sourceA: DatasetSource = {
 
 const sourceB: DatasetSource = {
   id: 2,
-  version: "v20260214" as unknown as number,
+  version: "v20260214",
   source_type: "file",
   location: {
     version: "v1",
@@ -62,7 +62,7 @@ const sourceB: DatasetSource = {
 
 describe("VersionCompare", () => {
   it("renders metadata and schema differences side by side", () => {
-    render(<VersionCompare sourceA={sourceA} sourceB={sourceB} />);
+    render(<VersionCompare leftSource={sourceA} rightSource={sourceB} />);
 
     expect(screen.getByText("Metadata Changes")).toBeInTheDocument();
     expect(screen.getByText("Schema Changes")).toBeInTheDocument();
@@ -71,5 +71,102 @@ describe("VersionCompare", () => {
     expect(screen.getByText("population")).toBeInTheDocument();
     expect(screen.getByText("Population estimate")).toBeInTheDocument();
     expect(screen.getByText("Added")).toBeInTheDocument();
+  });
+
+  it("labels added and removed columns relative to the chosen right source", () => {
+    render(<VersionCompare leftSource={sourceB} rightSource={sourceA} leftLabel="Left source" rightLabel="Right source" />);
+
+    expect(screen.getAllByText("Right source").length).toBeGreaterThan(0);
+    expect(screen.getByText("population")).toBeInTheDocument();
+    expect(screen.getByText("Removed")).toBeInTheDocument();
+  });
+
+  it("handles null size metadata in the metadata table without crashing", () => {
+    const sourceWithNullSize: DatasetSource = {
+      ...sourceB,
+      source_metadata: {
+        ...sourceB.source_metadata,
+        version: "v1",
+        size_bytes: null,
+      },
+    };
+
+    render(<VersionCompare leftSource={sourceA} rightSource={sourceWithNullSize} />);
+
+    expect(screen.getByText("size_bytes")).toBeInTheDocument();
+  });
+
+  it("renders metadata descriptions as safe markdown", () => {
+    const sourceWithMarkdown: DatasetSource = {
+      ...sourceB,
+      source_metadata: {
+        ...sourceB.source_metadata,
+        version: "v1",
+        description: "Updated by [Niyam IT](https://niyamit.com).",
+      },
+    };
+
+    render(<VersionCompare leftSource={sourceA} rightSource={sourceWithMarkdown} />);
+
+    const link = screen.getByRole("link", { name: "Niyam IT" });
+    expect(link).toHaveAttribute("href", "https://niyamit.com");
+  });
+
+  it("does not show summary cards above the diff tables", () => {
+    render(<VersionCompare leftSource={sourceA} rightSource={sourceB} />);
+
+    expect(screen.queryByText("Rows")).not.toBeInTheDocument();
+    expect(screen.queryByText("Changed Fields")).not.toBeInTheDocument();
+    expect(screen.queryByText("Size")).not.toBeInTheDocument();
+  });
+
+  it("does not duplicate quality status in the summary cards", () => {
+    render(<VersionCompare leftSource={sourceA} rightSource={sourceB} />);
+
+    expect(screen.queryByText("Quality")).not.toBeInTheDocument();
+    expect(screen.getByText("quality_check_passed")).toBeInTheDocument();
+  });
+
+  it("does not mark columns changed unless the datatype changes", () => {
+    const left: DatasetSource = {
+      ...sourceA,
+      source_metadata: {
+        ...sourceA.source_metadata,
+        columns_hash: "same-visible-schema",
+        columns: [
+          {
+            name: "district_name",
+            type: "STRING",
+            description: "Congressional district name",
+            nullable: false,
+            example_values: ["A"],
+            length: 10,
+            possible_values: ["A", "B"],
+          },
+        ],
+      },
+    };
+    const right: DatasetSource = {
+      ...sourceB,
+      source_metadata: {
+        ...sourceB.source_metadata,
+        columns_hash: "same-visible-schema-next",
+        columns: [
+          {
+            name: "district_name",
+            type: "STRING",
+            description: "Updated but not datatype",
+            nullable: true,
+            example_values: ["B"],
+            length: 20,
+            possible_values: ["C", "D"],
+          },
+        ],
+      },
+    };
+
+    render(<VersionCompare leftSource={left} rightSource={right} />);
+
+    expect(screen.getByText("No schema changes")).toBeInTheDocument();
   });
 });

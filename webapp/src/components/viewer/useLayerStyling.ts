@@ -21,12 +21,13 @@ function buildScaledExpression(
   scale: LayerStyle["radiusScale"],
   baseValue: number,
   minimumValue: number,
+  sourceId: string,
 ): PaintValue {
   if (!property) {
     return baseValue;
   }
 
-  const values = getSampledValues(map, layerId, property)
+  const values = getSampledValues(map, layerId, property, 5000, sourceId)
     .map((value) => applyScale(value, scale))
     .filter((value) => Number.isFinite(value));
   const { min, max } = getValueRange(values);
@@ -66,9 +67,11 @@ function applyLayerStyle(map: maplibregl.Map, layer: VectorLayerInfo, style: Lay
     style.opacity,
   ];
 
-  const fillId = `pmtiles-${layer.id}-fill`;
-  const lineId = `pmtiles-${layer.id}-line`;
-  const circleId = `pmtiles-${layer.id}-circle`;
+  const sampleLayerId = layer.sourceLayerId ?? layer.id;
+  const baseLayerId = layer.mapLayerBaseId ?? `pmtiles-${layer.id}`;
+  const fillId = `${baseLayerId}-fill`;
+  const lineId = `${baseLayerId}-line`;
+  const circleId = `${baseLayerId}-circle`;
 
   if (map.getLayer(fillId)) {
     map.setPaintProperty(fillId, "fill-color", colorExpression);
@@ -79,11 +82,12 @@ function applyLayerStyle(map: maplibregl.Map, layer: VectorLayerInfo, style: Lay
   if (map.getLayer(lineId)) {
     const lineWidth = buildScaledExpression(
       map,
-      layer.id,
+      sampleLayerId,
       style.lineWidthProperty,
       style.lineWidthScale,
       style.lineWidth,
       1,
+      layer.mapSourceId ?? "pmtiles",
     );
     map.setPaintProperty(lineId, "line-color", colorExpression);
     map.setPaintProperty(lineId, "line-opacity", opacityExpression);
@@ -91,7 +95,15 @@ function applyLayerStyle(map: maplibregl.Map, layer: VectorLayerInfo, style: Lay
   }
 
   if (map.getLayer(circleId)) {
-    const radius = buildScaledExpression(map, layer.id, style.radiusProperty, style.radiusScale, style.radius, 2);
+    const radius = buildScaledExpression(
+      map,
+      sampleLayerId,
+      style.radiusProperty,
+      style.radiusScale,
+      style.radius,
+      2,
+      layer.mapSourceId ?? "pmtiles",
+    );
     map.setPaintProperty(circleId, "circle-color", colorExpression);
     map.setPaintProperty(circleId, "circle-opacity", opacityExpression);
     map.setPaintProperty(circleId, "circle-stroke-color", outlineExpression);

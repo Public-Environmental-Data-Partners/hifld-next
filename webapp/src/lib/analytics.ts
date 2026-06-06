@@ -53,11 +53,39 @@ export interface DownloadFailureProperties {
   source_count?: number | undefined;
 }
 
+export interface DatasetQualityFeedbackFeature {
+  id: string;
+  loadedLayerId: string;
+  layerName: string;
+  collectionSlug: string;
+  datasetSlug: string;
+  fileSlug: string;
+  version: string;
+  sourceId?: number | undefined;
+  sourceLayerId: string;
+  featureId: string;
+  centroid: { lng: number; lat: number } | null;
+  properties: { [propertyName: string]: string };
+  geometry?: { [propertyName: string]: string | number | boolean | null | readonly string[] | readonly number[] };
+}
+
+export interface DatasetQualityFeedbackInput {
+  reporter_email: string;
+  comment: string;
+  collection_slug: string;
+  dataset_slug: string;
+  file_slug: string;
+  version?: string | number | undefined;
+  source_id?: number | undefined;
+  feature?: DatasetQualityFeedbackFeature | undefined;
+}
+
 type AnalyticsEventProperties =
   | PageViewProperties
   | DownloadAnalyticsContext
   | DownloadSuccessProperties
-  | DownloadFailureProperties;
+  | DownloadFailureProperties
+  | (Omit<DatasetQualityFeedbackInput, "feature"> & { current_url?: string; feature_json?: string });
 
 function compactProperties(properties: AnalyticsEventProperties): PostHogEventProperties {
   return Object.fromEntries(Object.entries(properties).filter(([, value]) => value !== undefined));
@@ -231,6 +259,36 @@ export function trackDownloadSucceeded(context: DownloadAnalyticsContext, proper
 
 export function trackDownloadFailed(context: DownloadAnalyticsContext, properties: DownloadFailureProperties) {
   captureDownloadEvent("dataset_download_failed", context, properties);
+}
+
+function feedbackFeatureJson(feature: DatasetQualityFeedbackFeature): string {
+  const { geometry: _geometry, ...featureWithoutGeometry } = feature;
+  return JSON.stringify(featureWithoutGeometry);
+}
+
+export function trackDatasetQualityFeedbackSubmitted(input: DatasetQualityFeedbackInput) {
+  if (typeof window === "undefined") return;
+  if (!posthogInitialized) initPostHog();
+  if (!posthogInitialized || typeof posthog.capture !== "function") return;
+
+  try {
+    posthog.capture(
+      "dataset_quality_feedback_submitted",
+      compactProperties({
+        reporter_email: input.reporter_email,
+        comment: input.comment,
+        collection_slug: input.collection_slug,
+        dataset_slug: input.dataset_slug,
+        file_slug: input.file_slug,
+        version: input.version,
+        source_id: input.source_id,
+        current_url: window.location.href,
+        feature_json: input.feature ? feedbackFeatureJson(input.feature) : undefined,
+      }),
+    );
+  } catch (error) {
+    console.error("Failed to track dataset quality feedback:", error);
+  }
 }
 
 /**

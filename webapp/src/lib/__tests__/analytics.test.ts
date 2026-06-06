@@ -119,4 +119,58 @@ describe("download analytics", () => {
       duration_ms: 90,
     });
   });
+
+  it("tracks dataset quality feedback with feature JSON and no geometry", async () => {
+    const { trackDatasetQualityFeedbackSubmitted } = await import("../analytics");
+
+    trackDatasetQualityFeedbackSubmitted({
+      reporter_email: "analyst@example.com",
+      comment: "The address looks wrong.",
+      collection_slug: "hifld",
+      dataset_slug: "hospitals-3",
+      file_slug: "hospitals-3",
+      version: "v1.1.0",
+      source_id: 17,
+      feature: {
+        id: "feature-1",
+        loadedLayerId: "layer-1",
+        layerName: "Hospitals",
+        collectionSlug: "hifld",
+        datasetSlug: "hospitals-3",
+        fileSlug: "hospitals-3",
+        version: "v1.1.0",
+        sourceId: 17,
+        sourceLayerId: "hospitals",
+        featureId: "123",
+        centroid: { lng: -77.0365, lat: 38.8977 },
+        properties: { NAME: "General Hospital" },
+        geometry: { type: "Point", coordinates: [-77.0365, 38.8977] },
+      },
+    });
+
+    expect(capture).toHaveBeenCalledWith("dataset_quality_feedback_submitted", {
+      reporter_email: "analyst@example.com",
+      comment: "The address looks wrong.",
+      collection_slug: "hifld",
+      dataset_slug: "hospitals-3",
+      file_slug: "hospitals-3",
+      version: "v1.1.0",
+      source_id: 17,
+      current_url: "http://localhost:3000/",
+      feature_json: JSON.stringify({
+        id: "feature-1",
+        loadedLayerId: "layer-1",
+        layerName: "Hospitals",
+        collectionSlug: "hifld",
+        datasetSlug: "hospitals-3",
+        fileSlug: "hospitals-3",
+        version: "v1.1.0",
+        sourceId: 17,
+        sourceLayerId: "hospitals",
+        featureId: "123",
+        centroid: { lng: -77.0365, lat: 38.8977 },
+        properties: { NAME: "General Hospital" },
+      }),
+    });
+  });
 });

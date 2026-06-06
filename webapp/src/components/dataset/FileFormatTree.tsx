@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, File, FileJson, Folder, Map as MapIcon, Package } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -8,9 +7,11 @@ import type { DownloadAnalyticsContext } from "@/lib/analytics";
 import type { DatasetFile, DatasetFormat, DatasetSource, FileLocation } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { CopyButton } from "./CopyButton";
-import { buildCompareSearchForLocation, getLocationOptions, getVersionSourcesForLocation } from "./compareSources";
+import { getLocationOptions, getVersionSourcesForLocation } from "./compareSources";
 import { DownloadButton } from "./DownloadButton";
 import { buildGeoparquetSourceTree, formatGeoparquetGlobLabel, type GeoparquetTreeNode } from "./geoparquetTree";
+import { MarkdownDescription } from "./MarkdownDescription";
+import { type ParquetPreviewOption, parquetPreviewOptionFromSource } from "./parquetPreviewOptions";
 import { ShapefileZipDownloadButton } from "./ShapefileZipDownloadButton";
 import { buildSourceFileUrl, buildSourceStorageUri } from "./sourceUrls";
 import { formatVersionLabel, parseVersionValue } from "./versionLabel";
@@ -25,6 +26,50 @@ function formatFileSize(bytes: number | null | undefined): string {
     unitIndex++;
   }
   return `${size.toFixed(unitIndex > 0 ? 1 : 0)} ${units[unitIndex]}`;
+}
+
+interface SourceLifecycleDetail {
+  label: string;
+  value: string;
+}
+
+function formatSourceTimestamp(timestamp: string | undefined): string | null {
+  if (!timestamp) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+export function sourceLifecycleDetails(source: DatasetSource | undefined): SourceLifecycleDetail[] {
+  if (!source) return [];
+  const details: SourceLifecycleDetail[] = [];
+  const cataloged = formatSourceTimestamp(source.created_at);
+  const sizeBytes = source.source_metadata?.size_bytes;
+
+  if (cataloged) details.push({ label: "Cataloged", value: cataloged });
+  if (typeof sizeBytes === "number" && sizeBytes > 0) {
+    details.push({ label: "Size", value: formatFileSize(sizeBytes) });
+  }
+
+  return details;
+}
+
+function SourceLifecycleMetadata({ source }: { source: DatasetSource | undefined }) {
+  const details = sourceLifecycleDetails(source);
+  if (details.length === 0) return null;
+
+  return (
+    <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-3">
+      {details.map((detail) => (
+        <p key={detail.label}>
+          <span className="font-medium text-foreground">{detail.label}:</span> {detail.value}
+        </p>
+      ))}
+    </div>
+  );
 }
 
 interface SelectedFormatSource {
@@ -139,7 +184,7 @@ function downloadAnalyticsContext({
   fileSlug?: string | undefined;
   format: string;
   source?: DatasetSource | undefined;
-  sizeBytes?: number | undefined;
+  sizeBytes?: number | null | undefined;
   filename?: string | undefined;
 }): Omit<Partial<DownloadAnalyticsContext>, "download_method"> {
   const context: Omit<Partial<DownloadAnalyticsContext>, "download_method"> = {
@@ -153,7 +198,7 @@ function downloadAnalyticsContext({
     if (source.storage_location?.id !== undefined) context.storage_location_id = source.storage_location.id;
     if (source.version !== undefined) context.version = source.version;
   }
-  if (sizeBytes !== undefined) context.expected_size_bytes = sizeBytes;
+  if (sizeBytes != null) context.expected_size_bytes = sizeBytes;
   if (filename) context.filename = filename;
   return context;
 }
@@ -162,7 +207,7 @@ interface FileFormatTreeProps {
   file: DatasetFile;
   selectedSources: SelectedFormatSources;
   onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
-  onViewParquet?: (url: string, fileName: string) => void;
+  onViewParquet?: (option: ParquetPreviewOption) => void;
   pmtilesUrl: string | null;
   collectionId?: number;
   collectionSlug?: string;
@@ -191,7 +236,7 @@ interface GeoparquetTreeNodesProps {
   collectionSlug?: string | undefined;
   datasetSlug?: string | undefined;
   fileSlug?: string | undefined;
-  onViewParquet?: ((url: string, fileName: string) => void) | undefined;
+  onViewParquet?: ((option: ParquetPreviewOption) => void) | undefined;
 }
 
 type GeoparquetTreeNodeSharedProps = Omit<GeoparquetTreeNodesProps, "nodes">;
@@ -202,7 +247,7 @@ interface ShapefileDownloadModel {
   hasGlobPattern: boolean;
   hasExpandedSources: boolean;
   originalSource?: DatasetSource | undefined;
-  sizeBytes?: number | undefined;
+  sizeBytes?: number | null | undefined;
   zipFilename: string;
 }
 
@@ -284,9 +329,6 @@ export function FileFormatTree({
             onSourceChange={onSourceChange}
             isExpanded={expandedFormats.has("geoparquet-folder")}
             onToggle={() => toggleFormat("geoparquet-folder")}
-            collectionSlug={collectionSlug}
-            datasetSlug={datasetSlug}
-            fileSlug={fileSlug}
           >
             <div className="pl-6 space-y-1 mt-1">
               {/* Glob pattern */}
@@ -376,9 +418,7 @@ export function FileFormatTree({
                                 </div>
                               </>
                             )}
-                            {displaySize > 0 && (
-                              <p className="text-xs text-muted-foreground">Total size: {formatFileSize(displaySize)}</p>
-                            )}
+                            <SourceLifecycleMetadata source={sourceWithGlob ?? allSources[0]} />
                           </>
                         );
                       })()}
@@ -427,15 +467,9 @@ export function FileFormatTree({
               onSourceChange={onSourceChange}
               isExpanded={expandedFormats.has("pmtiles")}
               onToggle={() => toggleFormat("pmtiles")}
-              collectionSlug={collectionSlug}
-              datasetSlug={datasetSlug}
-              fileSlug={fileSlug}
             >
               {pmtilesUrl && (
                 <div className="space-y-2">
-                  {pmtilesSizeBytes != null && (
-                    <p className="text-xs text-muted-foreground">Size: {formatFileSize(pmtilesSizeBytes)}</p>
-                  )}
                   <p className="text-xs text-muted-foreground break-all">{pmtilesUrl}</p>
                   <div className="flex items-center gap-2">
                     <CopyButton value={pmtilesUrl} label="Copy URL" />
@@ -476,15 +510,9 @@ export function FileFormatTree({
               onSourceChange={onSourceChange}
               isExpanded={expandedFormats.has("geopackage")}
               onToggle={() => toggleFormat("geopackage")}
-              collectionSlug={collectionSlug}
-              datasetSlug={datasetSlug}
-              fileSlug={fileSlug}
             >
               {geopackageUrl && (
                 <div className="space-y-2">
-                  {geopackageSizeBytes != null && (
-                    <p className="text-xs text-muted-foreground">Size: {formatFileSize(geopackageSizeBytes)}</p>
-                  )}
                   <p className="text-xs text-muted-foreground break-all">{geopackageUrl}</p>
                   <div className="flex items-center gap-2">
                     <CopyButton value={geopackageUrl} label="Copy URL" />
@@ -540,15 +568,9 @@ export function FileFormatTree({
               onSourceChange={onSourceChange}
               isExpanded={expandedFormats.has("geojson")}
               onToggle={() => toggleFormat("geojson")}
-              collectionSlug={collectionSlug}
-              datasetSlug={datasetSlug}
-              fileSlug={fileSlug}
             >
               {geojsonUrl && (
                 <div className="space-y-2">
-                  {geojsonSizeBytes != null && (
-                    <p className="text-xs text-muted-foreground">Size: {formatFileSize(geojsonSizeBytes)}</p>
-                  )}
                   <p className="text-xs text-muted-foreground break-all">{geojsonUrl}</p>
                   <div className="flex items-center gap-2">
                     <CopyButton value={geojsonUrl} label="Copy URL" />
@@ -595,15 +617,9 @@ export function FileFormatTree({
               onSourceChange={onSourceChange}
               isExpanded={expandedFormats.has("file_geodatabase")}
               onToggle={() => toggleFormat("file_geodatabase")}
-              collectionSlug={collectionSlug}
-              datasetSlug={datasetSlug}
-              fileSlug={fileSlug}
             >
               {fileGeodatabaseUrl && (
                 <div className="space-y-2">
-                  {fileGeodatabaseSizeBytes != null && (
-                    <p className="text-xs text-muted-foreground">Size: {formatFileSize(fileGeodatabaseSizeBytes)}</p>
-                  )}
                   <p className="text-xs text-muted-foreground break-all">{fileGeodatabaseUrl}</p>
                   <div className="flex items-center gap-2">
                     <CopyButton value={fileGeodatabaseUrl} label="Copy URL" />
@@ -749,15 +765,16 @@ function GeoparquetFileDetails({
   collectionSlug?: string | undefined;
   datasetSlug?: string | undefined;
   fileSlug?: string | undefined;
-  onViewParquet?: ((url: string, fileName: string) => void) | undefined;
+  onViewParquet?: ((option: ParquetPreviewOption) => void) | undefined;
 }) {
   const fileUrl = buildSourceFileUrl(source);
   const fileStorageUri = buildSourceStorageUri(source);
+  const previewOption = parquetPreviewOptionFromSource(source);
   const fileSizeBytes = source.source_metadata?.size_bytes;
 
   return (
     <div className="space-y-2">
-      {fileSizeBytes != null && <p className="text-xs text-muted-foreground">Size: {formatFileSize(fileSizeBytes)}</p>}
+      <SourceLifecycleMetadata source={source} />
       {fileStorageUri && <StorageUriDetails storageUri={fileStorageUri} />}
       {fileUrl && (
         <div>
@@ -777,13 +794,13 @@ function GeoparquetFileDetails({
                 filename: fileName,
               })}
             />
-            {onViewParquet && (
+            {onViewParquet && previewOption && (
               <Button
                 size="sm"
                 variant="secondary"
                 onClick={(event) => {
                   event.stopPropagation();
-                  onViewParquet(fileUrl, fileName);
+                  onViewParquet(previewOption);
                 }}
               >
                 View Data
@@ -857,9 +874,6 @@ function ShapefileFormatNode({
       onSourceChange={onSourceChange}
       isExpanded={isExpanded}
       onToggle={onToggle}
-      collectionSlug={collectionSlug}
-      datasetSlug={datasetSlug}
-      fileSlug={fileSlug}
     >
       <ShapefileDownloadActions
         model={model}
@@ -871,7 +885,7 @@ function ShapefileFormatNode({
   );
 }
 
-function ShapefileSizeLine({ sizeBytes }: { sizeBytes?: number | undefined }) {
+function ShapefileSizeLine({ sizeBytes }: { sizeBytes?: number | null | undefined }) {
   if (sizeBytes == null) {
     return null;
   }
@@ -996,9 +1010,6 @@ interface FormatFileNodeProps {
   onToggle: () => void;
   children?: React.ReactNode;
   showSourceSelector?: boolean; // Whether to show location/version selector
-  collectionSlug?: string | undefined;
-  datasetSlug?: string | undefined;
-  fileSlug?: string | undefined;
 }
 
 function FormatFileNode({
@@ -1013,9 +1024,6 @@ function FormatFileNode({
   onToggle,
   children,
   showSourceSelector = true,
-  collectionSlug,
-  datasetSlug,
-  fileSlug,
 }: FormatFileNodeProps) {
   const hasChildren = !!children;
   const sources = formatEntry.sources || [];
@@ -1058,9 +1066,6 @@ function FormatFileNode({
                 formatEntry={formatEntry}
                 selectedSources={selectedSources}
                 onSourceChange={onSourceChange}
-                collectionSlug={collectionSlug}
-                datasetSlug={datasetSlug}
-                fileSlug={fileSlug}
               />
             </div>
           )}
@@ -1081,9 +1086,6 @@ interface FormatFolderNodeProps {
   isExpanded: boolean;
   onToggle: () => void;
   children?: React.ReactNode;
-  collectionSlug?: string | undefined;
-  datasetSlug?: string | undefined;
-  fileSlug?: string | undefined;
 }
 
 function FormatFolderNode({
@@ -1096,9 +1098,6 @@ function FormatFolderNode({
   isExpanded,
   onToggle,
   children,
-  collectionSlug,
-  datasetSlug,
-  fileSlug,
 }: FormatFolderNodeProps) {
   const sources = formatEntry.sources || [];
   const sourceCount = countDisplaySources(formatType, sources);
@@ -1137,9 +1136,6 @@ function FormatFolderNode({
                 formatEntry={formatEntry}
                 selectedSources={selectedSources}
                 onSourceChange={onSourceChange}
-                collectionSlug={collectionSlug}
-                datasetSlug={datasetSlug}
-                fileSlug={fileSlug}
               />
             </div>
           )}
@@ -1155,20 +1151,9 @@ interface SourceSelectorProps {
   formatEntry: NonNullable<DatasetFile["formats"]>[0];
   selectedSources: SelectedFormatSources;
   onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
-  collectionSlug?: string | undefined;
-  datasetSlug?: string | undefined;
-  fileSlug?: string | undefined;
 }
 
-function SourceSelector({
-  formatType,
-  formatEntry,
-  selectedSources,
-  onSourceChange,
-  collectionSlug,
-  datasetSlug,
-  fileSlug,
-}: SourceSelectorProps) {
+function SourceSelector({ formatType, formatEntry, selectedSources, onSourceChange }: SourceSelectorProps) {
   const selectedSource = selectedSources[formatType];
   const locationArray = getLocationOptions(formatEntry);
 
@@ -1189,7 +1174,8 @@ function SourceSelector({
     selectedSource?.version && versionArray.some((version) => String(version) === String(selectedSource.version))
       ? selectedSource.version
       : firstVersion;
-  const compareSearch = buildCompareSearchForLocation(formatEntry, currentLocationId);
+  const currentSource = versionSources.find((source) => String(source.version ?? "1") === String(currentVersion));
+  const versionDescription = currentSource?.source_metadata?.description?.trim();
 
   return (
     <div className="space-y-2">
@@ -1248,21 +1234,13 @@ function SourceSelector({
         <div className="text-xs text-muted-foreground">Version: {formatVersionLabel(firstVersion)}</div>
       ) : null}
 
-      {compareSearch && collectionSlug && datasetSlug && fileSlug ? (
-        <Button variant="outline" size="sm" asChild className="w-full sm:w-auto font-mono">
-          <Link
-            to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/compare"
-            params={{
-              collectionSlug,
-              datasetSlug,
-              fileSlug,
-            }}
-            search={compareSearch}
-          >
-            Compare Versions
-          </Link>
-        </Button>
+      {versionDescription ? (
+        <div className="border-l-2 bg-muted/20 px-3 py-2 text-xs">
+          <p className="font-medium text-foreground">Version note</p>
+          <MarkdownDescription markdown={versionDescription} className="mt-1" />
+        </div>
       ) : null}
+      <SourceLifecycleMetadata source={currentSource} />
     </div>
   );
 }

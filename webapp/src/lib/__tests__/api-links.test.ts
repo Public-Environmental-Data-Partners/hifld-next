@@ -6,6 +6,7 @@ import {
   datasetSelf,
   fileSelf,
   requestOrigin,
+  schemaSelf,
   sourceDownloadZip,
 } from "../api-links";
 
@@ -33,6 +34,9 @@ describe("path URLs", () => {
     );
     expect(fileSelf(o, "hifld", "my-ds", "f1")).toBe(
       "https://h.example/api/collections/hifld/datasets/my-ds/files/f1"
+    );
+    expect(schemaSelf(o, "hifld", "my-ds", "f1", { version: "v1.1.0" })).toBe(
+      "https://h.example/api/collections/hifld/datasets/my-ds/files/f1/schema?version=v1.1.0"
     );
     expect(sourceDownloadZip(o, "hifld", "my-ds", "f1", 42)).toBe(
       "https://h.example/api/collections/hifld/datasets/my-ds/files/f1/sources/42/download-zip"

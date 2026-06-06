@@ -70,6 +70,30 @@ export function fileSelf(origin: string, collectionSlug: string, datasetSlug: st
   return `${origin}/api/collections/${enc(collectionSlug)}/datasets/${enc(datasetSlug)}/files/${enc(fileSlug)}`;
 }
 
+export function schemaSelf(
+  origin: string,
+  collectionSlug: string,
+  datasetSlug: string,
+  fileSlug: string,
+  opts?: { version?: string | number | null | undefined },
+): string {
+  const u = new URL(
+    `${origin}/api/collections/${enc(collectionSlug)}/datasets/${enc(datasetSlug)}/files/${enc(fileSlug)}/schema`,
+  );
+  if (opts?.version != null) u.searchParams.set("version", String(opts.version));
+  return u.href;
+}
+
+export function schemaPath(
+  collectionSlug: string,
+  datasetSlug: string,
+  fileSlug: string,
+  opts?: { version?: string | number | null | undefined },
+): string {
+  const url = new URL(schemaSelf("https://local.invalid", collectionSlug, datasetSlug, fileSlug, opts));
+  return `${url.pathname}${url.search}`;
+}
+
 export function sourceDownloadZip(
   origin: string,
   collectionSlug: string,

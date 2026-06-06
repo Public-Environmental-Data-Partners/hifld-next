@@ -23,6 +23,13 @@ describe('FeatureHoverPopup', () => {
 
     expect(screen.getByText('Test Feature')).toBeInTheDocument()
     expect(screen.getByText('1')).toBeInTheDocument()
+    expect(screen.getByTestId('feature-popup-scroll')).toHaveClass(
+      'max-h-[min(12rem,calc(100dvh-14rem))]',
+      'touch-pan-y',
+      'overflow-auto',
+      'overscroll-contain',
+      '[-webkit-overflow-scrolling:touch]',
+    )
   })
 
   it('shows close button when pinned', () => {
@@ -126,6 +133,32 @@ describe('FeatureHoverPopup', () => {
     expect(select).toHaveAttribute('aria-expanded', 'false')
   })
 
+  it('does not warn about duplicate keys for anonymous features from the same layer', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const multiFeatureInfo = createMockHoverInfo({
+      features: [
+        createMockFeature({ properties: { name: 'Feature 1' } }),
+        createMockFeature({ properties: { name: 'Feature 2' } }),
+      ],
+    })
+
+    render(
+      <FeatureHoverPopup
+        hoverInfo={multiFeatureInfo}
+        selectedIndex={0}
+        propertyEntries={[['name', 'Feature 1']]}
+        onIndexChange={vi.fn()}
+      />
+    )
+
+    expect(consoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('Encountered two children with the same key'),
+      expect.anything(),
+    )
+
+    consoleError.mockRestore()
+  })
+
   it('positions popup correctly based on hoverInfo coordinates', () => {
     const mockHoverInfo = createMockHoverInfo({ x: 100, y: 200 })
     const { container } = render(
@@ -201,4 +234,3 @@ describe('FeatureHoverPopup', () => {
     expect(screen.getByText('No properties available.')).toBeInTheDocument()
   })
 })
-
