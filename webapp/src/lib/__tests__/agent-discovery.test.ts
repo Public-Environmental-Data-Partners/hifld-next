@@ -19,6 +19,13 @@ describe("agent-discovery", () => {
     const xml = buildSitemapXml("https://example.org");
     expect(xml).toContain("<loc>https://example.org/</loc>");
     expect(xml).toContain("/collections");
+    expect(xml).toContain("<loc>https://example.org/api</loc>");
+    expect(xml).toContain("<loc>https://example.org/api/openapi</loc>");
+    expect(xml).toContain("<loc>https://example.org/llms.txt</loc>");
+    expect(xml).toContain("<loc>https://example.org/.well-known/api-catalog</loc>");
+    expect(xml).toContain(
+      "<loc>https://example.org/.well-known/agent-skills/index.json</loc>"
+    );
   });
 
   it("buildRobotsTxt references sitemap.xml on same origin", () => {
@@ -32,7 +39,7 @@ describe("agent-discovery", () => {
     expect(txt).toContain("Content-Signal:");
     expect(txt).toContain("ai-train=no");
     expect(txt).toContain("search=yes");
-    expect(txt).toContain("ai-input=no");
+    expect(txt).toContain("ai-input=yes");
     expect(ROBOTS_CONTENT_SIGNAL).toMatch(/^Content-Signal:/);
   });
 });

@@ -31,4 +31,29 @@ describe("agent-skills discovery", () => {
       skillArtifactDigest(HIFLD_CATALOG_SKILL_MD),
     );
   });
+
+  it("documents concrete read-only catalog workflows for agents", () => {
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("GET /api");
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("GET /api/openapi");
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("GET /api/collections/{slug}");
+    expect(HIFLD_CATALOG_SKILL_MD).toContain(
+      "GET /api/collections/{collectionSlug}/datasets/{datasetSlug}",
+    );
+    expect(HIFLD_CATALOG_SKILL_MD).toContain(
+      "GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}",
+    );
+    expect(HIFLD_CATALOG_SKILL_MD).toContain(
+      "GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema",
+    );
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("latest schema-capable version");
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("source URLs");
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("GeoParquet");
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("no `/items`, `/features`");
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("read-only");
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("MCP/action tools");
+  });
+
+  it("does not document the stale collection dataset-listing route", () => {
+    expect(HIFLD_CATALOG_SKILL_MD).not.toContain("`GET /api/collections/{slug}/datasets`");
+  });
 });

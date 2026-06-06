@@ -11,9 +11,61 @@ describe("buildOpenApiDocument", () => {
     expect(doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}"]).toBeDefined();
     expect(doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}"]).toBeDefined();
     expect(doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema"]).toBeDefined();
+    expect(doc.paths?.["/api/datasets/{id}"]).toBeDefined();
     expect(doc.paths?.["/api/openapi"]).toBeDefined();
     expect(String(doc.info?.description)).toContain("GET /api");
+    expect(String(doc.info?.description)).toContain("GET /api/datasets/{id}");
     expect(String(doc.info?.description)).toContain("problem+json");
+  });
+
+  it("documents global dataset detail by numeric id", () => {
+    const doc = buildOpenApiDocument();
+    const path = doc.paths?.["/api/datasets/{id}"];
+    const operation = path?.get;
+
+    expect(operation).toMatchObject({
+      summary: "Dataset detail by numeric id",
+      responses: {
+        200: {
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/DatasetByIdResponse" },
+            },
+          },
+        },
+        400: { content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } } },
+        404: { content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } } },
+        502: { content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } } },
+      },
+    });
+    expect(operation?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "integer" },
+        }),
+      ]),
+    );
+    expect(doc.components?.schemas?.DatasetByIdResponse).toMatchObject({
+      type: "object",
+      properties: {
+        links: { $ref: "#/components/schemas/DatasetByIdLinks" },
+        dataset: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            slug: { type: "string" },
+            files: {
+              type: "array",
+              items: { $ref: "#/components/schemas/DatasetFile" },
+            },
+          },
+        },
+      },
+      required: ["links", "dataset"],
+    });
   });
 
   it("documents source lifecycle and source metadata fields exposed by file metadata", () => {

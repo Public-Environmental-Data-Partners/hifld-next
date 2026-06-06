@@ -15,7 +15,17 @@ export function discoveryLinkHeaderValue(): string {
 }
 
 export function buildSitemapXml(origin: string): string {
-  const paths = ["/", "/collections", "/about", "/commons"];
+  const paths = [
+    "/",
+    "/collections",
+    "/about",
+    "/commons",
+    "/api",
+    "/api/openapi",
+    "/llms.txt",
+    "/.well-known/api-catalog",
+    "/.well-known/agent-skills/index.json",
+  ];
   const urls = paths
     .map((p) => {
       const loc = new URL(p, origin).href.replace(/&/g, "&amp;");
@@ -31,7 +41,7 @@ ${urls}
 }
 
 /** Content Signals (https://contentsignals.org/, draft-romm-aipref-contentsignals). */
-export const ROBOTS_CONTENT_SIGNAL = "Content-Signal: ai-train=no, search=yes, ai-input=no";
+export const ROBOTS_CONTENT_SIGNAL = "Content-Signal: ai-train=no, search=yes, ai-input=yes";
 
 export function buildRobotsTxt(origin: string): string {
   return [
