@@ -5,7 +5,28 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Separator } from "@/components/ui/separator";
+import type { DatasetTags } from "@/lib/api-client";
 import { getCollectionBySlug, getDatasetBySlug } from "@/lib/api-client";
+import { pageTitle, plainTextForSeo, seoDescription } from "@/lib/seo";
+
+function datasetKeywordContent(tags: DatasetTags | undefined): string | undefined {
+  if (!tags) {
+    return undefined;
+  }
+
+  const keywords = new Set<string>();
+  for (const value of Object.values(tags)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        keywords.add(item);
+      }
+    } else {
+      keywords.add(value);
+    }
+  }
+
+  return keywords.size > 0 ? [...keywords].join(", ") : undefined;
+}
 
 export const Route = createFileRoute("/collections/$collectionSlug/datasets/$datasetSlug")({
   loader: async ({ params }) => {
@@ -34,6 +55,26 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
       throw error;
     }
   },
+  head: ({ loaderData, params }) => {
+    const dataset = loaderData?.dataset;
+    const title = pageTitle(dataset?.name ?? params.datasetSlug);
+    const description = seoDescription(dataset?.description);
+    const canonical = `/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
+      params.datasetSlug,
+    )}`;
+    const keywords = datasetKeywordContent(dataset?.tags);
+
+    return {
+      meta: [
+        { title },
+        ...(description ? [{ name: "description", content: description }] : []),
+        ...(keywords ? [{ name: "keywords", content: keywords }] : []),
+        { property: "og:title", content: title },
+        ...(description ? [{ property: "og:description", content: description }] : []),
+      ],
+      links: [{ rel: "canonical", href: canonical }],
+    };
+  },
   component: DatasetDetailPage,
   pendingComponent: () => (
     <div className="flex min-h-[50vh] flex-1 flex-col items-center justify-center">
@@ -51,10 +92,7 @@ function DatasetDetailPage() {
   // Check if we're on a child route (file detail page)
   const isFileRoute = router.location.pathname.includes("/files/");
 
-  const cleanDescription = dataset.description
-    ?.replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .trim();
+  const cleanDescription = plainTextForSeo(dataset.description);
 
   // If we're on a file route, just render the outlet (file detail page will handle its own layout)
   if (isFileRoute) {
