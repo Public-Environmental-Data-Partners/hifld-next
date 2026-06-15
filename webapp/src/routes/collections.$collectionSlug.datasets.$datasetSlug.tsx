@@ -72,7 +72,17 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
         { property: "og:title", content: title },
         ...(description ? [{ property: "og:description", content: description }] : []),
       ],
-      links: [{ rel: "canonical", href: canonical }],
+      links: [
+        { rel: "canonical", href: canonical },
+        {
+          rel: "alternate",
+          type: "application/json",
+          href: `/api/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
+            params.datasetSlug,
+          )}`,
+          title: "Dataset metadata JSON",
+        },
+      ],
     };
   },
   component: DatasetDetailPage,

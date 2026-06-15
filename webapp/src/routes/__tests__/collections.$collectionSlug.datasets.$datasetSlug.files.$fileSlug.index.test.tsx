@@ -52,5 +52,11 @@ describe("Dataset file detail route head", () => {
       rel: "canonical",
       href: "/collections/hifld/datasets/hospitals-3/files/hospitals-3",
     });
+    expect(result.links).toContainEqual({
+      rel: "alternate",
+      type: "application/json",
+      href: "/api/collections/hifld/datasets/hospitals-3/files/hospitals-3",
+      title: "File metadata JSON",
+    });
   });
 });

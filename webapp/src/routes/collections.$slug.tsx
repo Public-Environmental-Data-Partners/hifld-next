@@ -342,7 +342,15 @@ export const Route = createFileRoute("/collections/$slug")({
         { property: "og:title", content: title },
         ...(description ? [{ property: "og:description", content: description }] : []),
       ],
-      links: [{ rel: "canonical", href: canonical }],
+      links: [
+        { rel: "canonical", href: canonical },
+        {
+          rel: "alternate",
+          type: "application/json",
+          href: `/api/collections/${encodeURIComponent(collection?.slug ?? params.slug)}`,
+          title: "Collection metadata JSON",
+        },
+      ],
     };
   },
   component: CollectionDetailPage,
