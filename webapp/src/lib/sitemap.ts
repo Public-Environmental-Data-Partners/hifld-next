@@ -25,6 +25,15 @@ const datasetSchema = z.object({
   id: z.number(),
   slug: z.string(),
   name: z.string(),
+  files: z
+    .array(
+      z.object({
+        id: z.number(),
+        slug: z.string(),
+        name: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 const datasetPageSchema = z.object({
@@ -36,6 +45,7 @@ const datasetPageSchema = z.object({
 
 export type SitemapCollection = z.infer<typeof collectionSchema>;
 export type SitemapDataset = z.infer<typeof datasetSchema>;
+export type SitemapDatasetFile = NonNullable<SitemapDataset["files"]>[number];
 
 export interface SitemapDatasetGroup {
   collection: SitemapCollection;
@@ -45,6 +55,7 @@ export interface SitemapDatasetGroup {
 export interface SitemapFetchClient {
   fetchCollections: () => Promise<SitemapCollection[]>;
   fetchDatasetPage: (collectionId: number, limit: number, offset: number) => Promise<z.infer<typeof datasetPageSchema>>;
+  fetchDatasetFiles: (collectionId: number, datasetSlug: string) => Promise<SitemapDatasetFile[]>;
 }
 
 function escapeXml(value: string): string {
@@ -87,7 +98,11 @@ export function buildCatalogSitemapPaths(groups: SitemapDatasetGroup[]): string[
     paths.push(`/collections/${collectionSlug}`);
 
     for (const dataset of group.datasets) {
-      paths.push(`/collections/${collectionSlug}/datasets/${encodeURIComponent(dataset.slug)}`);
+      const datasetSlug = encodeURIComponent(dataset.slug);
+      paths.push(`/collections/${collectionSlug}/datasets/${datasetSlug}`);
+      for (const file of dataset.files ?? []) {
+        paths.push(`/collections/${collectionSlug}/datasets/${datasetSlug}/files/${encodeURIComponent(file.slug)}`);
+      }
     }
   }
 
@@ -118,6 +133,13 @@ export function createDatasetApiSitemapClient(baseUrl: string): SitemapFetchClie
       const response = await fetchJson(`${baseUrl}/api/collections/${collectionId}/datasets?${params}`);
       return datasetPageSchema.parse(await response.json());
     },
+    async fetchDatasetFiles(collectionId, datasetSlug) {
+      const response = await fetchJson(
+        `${baseUrl}/api/collections/${collectionId}/datasets/by-slug/${datasetSlug}/files`,
+      );
+      const dataset = datasetSchema.parse(await response.json());
+      return dataset.files ?? [];
+    },
   };
 }
 
@@ -131,7 +153,12 @@ export async function fetchSitemapDatasetGroups(client: SitemapFetchClient): Pro
 
     while (true) {
       const page = await client.fetchDatasetPage(collection.id, SITEMAP_DATASET_PAGE_SIZE, offset);
-      datasets.push(...page.items);
+      for (const dataset of page.items) {
+        datasets.push({
+          ...dataset,
+          files: dataset.files ?? (await client.fetchDatasetFiles(collection.id, dataset.slug)),
+        });
+      }
 
       const nextOffset = offset + page.items.length;
       if (page.items.length === 0 || nextOffset >= page.total) {

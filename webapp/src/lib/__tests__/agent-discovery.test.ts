@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  ROBOTS_CONTENT_SIGNAL,
-  buildRobotsTxt,
-  buildSitemapXml,
-  discoveryLinkHeaderValue,
-} from "../agent-discovery";
+import { ROBOTS_CONTENT_SIGNAL, buildRobotsTxt, buildSitemapXml, discoveryLinkHeaderValue } from "../agent-discovery";
 
 describe("agent-discovery", () => {
   it("discoveryLinkHeaderValue lists api, openapi, llms, api-catalog", () => {
@@ -34,12 +29,12 @@ describe("agent-discovery", () => {
     );
   });
 
-  it("buildRobotsTxt includes Content-Signal for ai-train, search, ai-input", () => {
+  it("buildRobotsTxt explicitly allows automated access", () => {
     const txt = buildRobotsTxt("https://example.org");
-    expect(txt).toContain("Content-Signal:");
-    expect(txt).toContain("ai-train=no");
-    expect(txt).toContain("search=yes");
-    expect(txt).toContain("ai-input=yes");
-    expect(ROBOTS_CONTENT_SIGNAL).toMatch(/^Content-Signal:/);
+    expect(txt).toContain("User-agent: *");
+    expect(txt).toContain("Allow: /");
+    expect(txt).toContain("Disallow:");
+    expect(txt).toContain("Content-Signal: ai-train=yes, search=yes, ai-input=yes");
+    expect(ROBOTS_CONTENT_SIGNAL).toBe("Content-Signal: ai-train=yes, search=yes, ai-input=yes");
   });
 });

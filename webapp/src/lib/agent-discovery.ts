@@ -41,12 +41,13 @@ ${urls}
 }
 
 /** Content Signals (https://contentsignals.org/, draft-romm-aipref-contentsignals). */
-export const ROBOTS_CONTENT_SIGNAL = "Content-Signal: ai-train=no, search=yes, ai-input=yes";
+export const ROBOTS_CONTENT_SIGNAL = "Content-Signal: ai-train=yes, search=yes, ai-input=yes";
 
 export function buildRobotsTxt(origin: string): string {
   return [
     "# https://www.robotstxt.org/robotstxt.html",
     "User-agent: *",
+    "Allow: /",
     "Disallow:",
     ROBOTS_CONTENT_SIGNAL,
     "",
