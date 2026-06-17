@@ -43,16 +43,13 @@ const datasetPageSchema = z.object({
   offset: z.number(),
 });
 
-const sitemapEntrySchema = z.object({
-  collection_slug: z.string(),
-  dataset_slug: z.string(),
-  file_slug: z.string().nullable(),
+const expandedCollectionSchema = collectionSchema.extend({
+  datasets: z.array(datasetSchema).optional(),
 });
 
 export type SitemapCollection = z.infer<typeof collectionSchema>;
 export type SitemapDataset = z.infer<typeof datasetSchema>;
 export type SitemapDatasetFile = NonNullable<SitemapDataset["files"]>[number];
-export type SitemapEntry = z.infer<typeof sitemapEntrySchema>;
 
 export interface SitemapDatasetGroup {
   collection: SitemapCollection;
@@ -60,7 +57,7 @@ export interface SitemapDatasetGroup {
 }
 
 export interface SitemapFetchClient {
-  fetchSitemapEntries: () => Promise<SitemapEntry[]>;
+  fetchCatalogGroups: () => Promise<SitemapDatasetGroup[]>;
   fetchCollections: () => Promise<SitemapCollection[]>;
   fetchDatasetPage: (collectionId: number, limit: number, offset: number) => Promise<z.infer<typeof datasetPageSchema>>;
   fetchDatasetFiles: (collectionId: number, datasetSlug: string) => Promise<SitemapDatasetFile[]>;
@@ -117,25 +114,6 @@ export function buildCatalogSitemapPaths(groups: SitemapDatasetGroup[]): string[
   return paths;
 }
 
-export function buildCatalogSitemapPathsFromEntries(entries: SitemapEntry[]): string[] {
-  const paths = new Set<string>(STATIC_SITEMAP_PATHS);
-
-  for (const entry of entries) {
-    const collectionSlug = encodeURIComponent(entry.collection_slug);
-    const datasetSlug = encodeURIComponent(entry.dataset_slug);
-    const datasetPath = `/collections/${collectionSlug}/datasets/${datasetSlug}`;
-
-    paths.add(`/collections/${collectionSlug}`);
-    paths.add(datasetPath);
-
-    if (entry.file_slug) {
-      paths.add(`${datasetPath}/files/${encodeURIComponent(entry.file_slug)}`);
-    }
-  }
-
-  return [...paths];
-}
-
 async function fetchJson(url: string): Promise<Response> {
   const response = await fetch(url);
   if (!response.ok) {
@@ -147,9 +125,14 @@ async function fetchJson(url: string): Promise<Response> {
 
 export function createDatasetApiSitemapClient(baseUrl: string): SitemapFetchClient {
   return {
-    async fetchSitemapEntries() {
-      const response = await fetchJson(`${baseUrl}/api/sitemap-entries`);
-      return z.array(sitemapEntrySchema).parse(await response.json());
+    async fetchCatalogGroups() {
+      const params = new URLSearchParams({ include: "datasets,files" });
+      const response = await fetchJson(`${baseUrl}/api/collections?${params}`);
+      const collections = z.array(expandedCollectionSchema).parse(await response.json());
+      return collections.map((collection) => ({
+        collection,
+        datasets: collection.datasets ?? [],
+      }));
     },
     async fetchCollections() {
       const response = await fetchJson(`${baseUrl}/api/collections`);
@@ -207,10 +190,10 @@ export async function fetchSitemapDatasetGroups(client: SitemapFetchClient): Pro
 export async function buildCatalogSitemapXml(origin: string): Promise<string> {
   const client = createDatasetApiSitemapClient(env.DATASET_API_URL);
   try {
-    const entries = await client.fetchSitemapEntries();
-    return buildSitemapXmlFromPaths(origin, buildCatalogSitemapPathsFromEntries(entries));
+    const groups = await client.fetchCatalogGroups();
+    return buildSitemapXmlFromPaths(origin, buildCatalogSitemapPaths(groups));
   } catch (error) {
-    console.warn("Failed to fetch compact sitemap entries; falling back to catalog walk:", error);
+    console.warn("Failed to fetch expanded catalog sitemap data; falling back to catalog walk:", error);
     const groups = await fetchSitemapDatasetGroups(client);
     return buildSitemapXmlFromPaths(origin, buildCatalogSitemapPaths(groups));
   }

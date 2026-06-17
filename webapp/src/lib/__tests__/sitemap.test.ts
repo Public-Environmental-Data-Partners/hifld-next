@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildCatalogSitemapPaths,
-  buildCatalogSitemapPathsFromEntries,
   buildSitemapXmlFromPaths,
   fetchSitemapDatasetGroups,
   type SitemapFetchClient,
@@ -32,18 +31,6 @@ describe("sitemap helpers", () => {
     expect(paths).toContain("/collections/hifld/datasets/hospitals-3/files/hospitals-3");
   });
 
-  it("builds catalog paths from compact sitemap entries without duplicate dataset URLs", () => {
-    const paths = buildCatalogSitemapPathsFromEntries([
-      { collection_slug: "hifld", dataset_slug: "hospitals-3", file_slug: "hospitals-3" },
-      { collection_slug: "hifld", dataset_slug: "hospitals-3", file_slug: "hospital-layer" },
-    ]);
-
-    expect(paths).toContain("/collections/hifld");
-    expect(paths.filter((path) => path === "/collections/hifld/datasets/hospitals-3")).toHaveLength(1);
-    expect(paths).toContain("/collections/hifld/datasets/hospitals-3/files/hospitals-3");
-    expect(paths).toContain("/collections/hifld/datasets/hospitals-3/files/hospital-layer");
-  });
-
   it("escapes URLs in sitemap XML", () => {
     const xml = buildSitemapXmlFromPaths("https://example.org", ["/collections/hifld?query=power&offset=100"]);
 
@@ -52,7 +39,7 @@ describe("sitemap helpers", () => {
 
   it("fetches multiple paginated dataset pages", async () => {
     const client: SitemapFetchClient = {
-      fetchSitemapEntries: vi.fn().mockResolvedValue([]),
+      fetchCatalogGroups: vi.fn().mockResolvedValue([]),
       fetchCollections: vi.fn().mockResolvedValue([{ id: 1, slug: "hifld", name: "HIFLD" }]),
       fetchDatasetFiles: vi.fn().mockResolvedValue([]),
       fetchDatasetPage: vi
@@ -80,7 +67,7 @@ describe("sitemap helpers", () => {
 
   it("fetches dataset files when collection dataset pages do not include file summaries", async () => {
     const client: SitemapFetchClient = {
-      fetchSitemapEntries: vi.fn().mockResolvedValue([]),
+      fetchCatalogGroups: vi.fn().mockResolvedValue([]),
       fetchCollections: vi.fn().mockResolvedValue([{ id: 1, slug: "hifld", name: "HIFLD" }]),
       fetchDatasetPage: vi.fn().mockResolvedValue({
         items: [{ id: 1, slug: "hospitals-3", name: "Hospitals" }],

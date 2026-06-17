@@ -22,7 +22,6 @@ from starlette.types import ASGIApp
 from alembic import command as alembic_command
 from api import collections as collections_router
 from api import datasets as datasets_router
-from api import sitemap as sitemap_router
 from config import config
 from database.db import init_db
 
@@ -148,7 +147,6 @@ app.add_middleware(
 # Include routers (read-only endpoints)
 app.include_router(collections_router.router)  # GET only
 app.include_router(datasets_router.router)  # GET only, nested under collections
-app.include_router(sitemap_router.router)  # GET only
 # Processing router removed - use scripts/import_datasets.py for dataset ingestion
 
 

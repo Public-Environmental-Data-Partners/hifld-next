@@ -347,6 +347,16 @@ registry.registerPath({
   method: "get",
   path: "/api/collections",
   summary: "List collections",
+  description:
+    "Catalog entrypoint. Use include=datasets,files for compact collection, dataset, and file/layer discovery without per-dataset follow-up requests.",
+  request: {
+    query: z.object({
+      include: z
+        .enum(["datasets", "datasets,files"])
+        .optional()
+        .describe("Expand compact child resources. Use datasets,files for sitemap or agent catalog discovery."),
+    }),
+  },
   responses: {
     200: {
       description: "OK",
@@ -373,7 +383,7 @@ registry.registerPath({
   path: "/api/collections/{slug}",
   summary: "List datasets in a collection (paginated)",
   description:
-    "This is the only collection-level list route: text search, tag filters, and pagination apply here (search, query, tag_filters, limit, offset, omit, include_urls). There is no /api/collections/{slug}/items, no ?q= shortcut on other paths, and no numeric dataset id in this URL—use dataset slug under .../datasets/{datasetSlug} next.",
+    "This is the only collection-level list route: text search, tag filters, and pagination apply here (search, query, tag_filters, limit, offset, omit, include_urls, include=files). There is no /api/collections/{slug}/items, no ?q= shortcut on other paths, and no numeric dataset id in this URL—use dataset slug under .../datasets/{datasetSlug} next.",
   request: {
     query: z.object({
       query: z.string().optional().describe("Alias for text filter (same effect as search on this route)"),
@@ -381,6 +391,7 @@ registry.registerPath({
       limit: z.coerce.number().int().positive().optional().describe("Defaults to 50 when omitted"),
       offset: z.coerce.number().int().nonnegative().optional(),
       include_urls: z.enum(["true", "false"]).optional(),
+      include: z.enum(["files"]).optional().describe("Use include=files to add compact file/layer summaries to items."),
       tag_filters: z.string().optional().describe("Use GET .../datasets/tags to discover allowed values"),
       omit: z.string().optional().describe("Comma-separated; use 'description' to omit long descriptions"),
     }),
