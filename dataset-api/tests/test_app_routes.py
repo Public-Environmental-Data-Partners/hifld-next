@@ -108,6 +108,56 @@ def test_dynamic_dataset_routes_do_not_infer_recursive_response_models() -> None
     assert detail_response.json()["files"][0]["slug"] == "alluvial-fans"
 
 
+def test_sitemap_entries_returns_url_inventory_without_nested_fetches() -> None:
+    """Verify sitemap inventory rows include collection, dataset, and file slugs."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        collection = Collection(slug="hifld", name="HIFLD")
+        session.add(collection)
+        session.commit()
+        session.refresh(collection)
+
+        dataset = Dataset(
+            slug="hospitals-3",
+            name="Hospitals",
+            description="Hospitals dataset",
+            collection_id=collection.id,
+        )
+        session.add(dataset)
+        session.commit()
+        session.refresh(dataset)
+
+        file_obj = File(dataset_id=dataset.id, slug="hospitals-3", name="Hospitals")
+        session.add(file_obj)
+        session.commit()
+
+    def override_get_db() -> Session:
+        with Session(engine) as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        client = TestClient(app)
+        response = client.get("/api/sitemap-entries")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == HTTP_OK
+    assert response.json() == [
+        {
+            "collection_slug": "hifld",
+            "dataset_slug": "hospitals-3",
+            "file_slug": "hospitals-3",
+        }
+    ]
+
+
 def test_file_source_json_dict_normalizes_json_columns_without_serializer_warnings() -> None:
     """Verify ORM-style JSON dict fields serialize without Pydantic warnings."""
     source = FileSource(
