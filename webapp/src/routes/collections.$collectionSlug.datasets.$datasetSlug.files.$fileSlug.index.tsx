@@ -21,6 +21,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Separator } from "@/components/ui/separator";
 import type { DatasetFile } from "@/lib/api-client";
 import { getCollectionBySlug, getDatasetBySlug, getDatasetFileById, getDatasetFileBySlug } from "@/lib/api-client";
+import { pageTitle, plainTextForSeo, seoDescription } from "@/lib/seo";
 
 type FileFormat = NonNullable<DatasetFile["formats"]>[number];
 type FileSource = FileFormat["sources"][number];
@@ -132,6 +133,36 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
       throw error;
     }
   },
+  head: ({ loaderData, params }) => {
+    const dataset = loaderData?.dataset;
+    const file = loaderData?.file;
+    const fileName = file?.name ?? params.fileSlug;
+    const title = pageTitle(dataset?.name ? `${fileName} | ${dataset.name}` : fileName);
+    const description = seoDescription(file?.description);
+    const canonical = `/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
+      params.datasetSlug,
+    )}/files/${encodeURIComponent(params.fileSlug)}`;
+
+    return {
+      meta: [
+        { title },
+        ...(description ? [{ name: "description", content: description }] : []),
+        { property: "og:title", content: title },
+        ...(description ? [{ property: "og:description", content: description }] : []),
+      ],
+      links: [
+        { rel: "canonical", href: canonical },
+        {
+          rel: "alternate",
+          type: "application/json",
+          href: `/api/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
+            params.datasetSlug,
+          )}/files/${encodeURIComponent(params.fileSlug)}`,
+          title: "File metadata JSON",
+        },
+      ],
+    };
+  },
   component: FileDetailPage,
   pendingComponent: FileDetailPending,
   pendingMs: 200,
@@ -224,10 +255,7 @@ function FileDetailPage() {
     }
   };
 
-  const cleanDescription = file.description
-    ?.replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .trim();
+  const cleanDescription = plainTextForSeo(file.description);
 
   const content = (
     <div className="max-w-4xl mx-auto space-y-8 p-4 sm:p-6 md:p-8">

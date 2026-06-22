@@ -1,4 +1,5 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -9,10 +10,67 @@ export interface PaginationProps {
   limit: number;
   offset: number;
   onPageChange: (newOffset: number) => void;
+  hrefForOffset?: (newOffset: number) => string;
   className?: string;
 }
 
-export function Pagination({ total, limit, offset, onPageChange, className }: PaginationProps) {
+interface PaginationControlProps {
+  ariaCurrent?: "page" | undefined;
+  ariaLabel: string;
+  children: ReactNode;
+  className?: string;
+  disabled?: boolean | undefined;
+  href?: string | undefined;
+  isActive?: boolean | undefined;
+  onActivate: () => void;
+}
+
+function PaginationControl({
+  ariaCurrent,
+  ariaLabel,
+  children,
+  className,
+  disabled,
+  href,
+  isActive,
+  onActivate,
+}: PaginationControlProps) {
+  const buttonClassName = cn(className, isActive && "pointer-events-none");
+
+  if (href && !disabled && !isActive) {
+    return (
+      <Button variant="outline" size="sm" asChild className={buttonClassName}>
+        <a
+          href={href}
+          aria-label={ariaLabel}
+          aria-current={ariaCurrent}
+          onClick={(event) => {
+            event.preventDefault();
+            onActivate();
+          }}
+        >
+          {children}
+        </a>
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      variant={isActive ? "default" : "outline"}
+      size="sm"
+      onClick={onActivate}
+      disabled={disabled}
+      className={buttonClassName}
+      aria-label={ariaLabel}
+      aria-current={ariaCurrent}
+    >
+      {children}
+    </Button>
+  );
+}
+
+export function Pagination({ total, limit, offset, onPageChange, hrefForOffset, className }: PaginationProps) {
   const currentPage = Math.floor(offset / limit) + 1;
   const totalPages = Math.ceil(total / limit);
   const startItem = offset + 1;
@@ -78,10 +136,15 @@ export function Pagination({ total, limit, offset, onPageChange, className }: Pa
       </div>
 
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={handlePrevious} disabled={offset === 0} aria-label="Previous page">
+        <PaginationControl
+          ariaLabel="Previous page"
+          disabled={offset === 0}
+          href={hrefForOffset?.(Math.max(0, offset - limit))}
+          onActivate={handlePrevious}
+        >
           <ChevronLeft className="h-4 w-4" />
           Previous
-        </Button>
+        </PaginationControl>
 
         <div className="flex items-center gap-1">
           {getPageItems().map((item) => {
@@ -95,33 +158,33 @@ export function Pagination({ total, limit, offset, onPageChange, className }: Pa
 
             const pageNum = item.page;
             const isActive = pageNum === currentPage;
+            const pageOffset = (pageNum - 1) * limit;
 
             return (
-              <Button
+              <PaginationControl
                 key={pageNum}
-                variant={isActive ? "default" : "outline"}
-                size="sm"
-                onClick={() => handlePageClick(pageNum)}
-                className={cn("min-w-[2.5rem]", isActive && "pointer-events-none")}
-                aria-label={`Go to page ${pageNum}`}
-                aria-current={isActive ? "page" : undefined}
+                ariaLabel={`Go to page ${pageNum}`}
+                ariaCurrent={isActive ? "page" : undefined}
+                className="min-w-[2.5rem]"
+                href={hrefForOffset?.(pageOffset)}
+                isActive={isActive}
+                onActivate={() => handlePageClick(pageNum)}
               >
                 {pageNum}
-              </Button>
+              </PaginationControl>
             );
           })}
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleNext}
+        <PaginationControl
+          ariaLabel="Next page"
           disabled={offset + limit >= total}
-          aria-label="Next page"
+          href={hrefForOffset?.(offset + limit)}
+          onActivate={handleNext}
         >
           Next
           <ChevronRight className="h-4 w-4" />
-        </Button>
+        </PaginationControl>
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { trackSearchQuery, trackTagFilter } from "@/lib/analytics";
 import type { DatasetTags, DatasetWithUrls } from "@/lib/api-client";
 import { getCollectionBySlug, getCollectionDatasets, getCollectionTagValues } from "@/lib/api-client";
+import { pageTitle, seoDescription } from "@/lib/seo";
 
 const SEARCH_DEBOUNCE_MS = 500;
 
@@ -94,6 +95,20 @@ export function getSyncedSearchQuery({
   }
 
   return nextUrlQuery;
+}
+
+export function collectionPageHref(collectionSlug: string, search: CollectionSearch, newOffset: number): string {
+  const nextSearchInput: CollectionSearch = { offset: newOffset };
+  const query = trimmedSearchParam(search.query);
+  if (query) nextSearchInput.query = query;
+  if (search.limit !== undefined) nextSearchInput.limit = search.limit;
+  const nextSearch = buildCollectionSearch(nextSearchInput);
+  const params = new URLSearchParams();
+  if (nextSearch.query) params.set("query", nextSearch.query);
+  if (nextSearch.limit !== undefined) params.set("limit", String(nextSearch.limit));
+  if (nextSearch.offset !== undefined) params.set("offset", String(nextSearch.offset));
+  const queryString = params.toString();
+  return `/collections/${encodeURIComponent(collectionSlug)}${queryString ? `?${queryString}` : ""}`;
 }
 
 interface FilteredDatasetFetchArgs {
@@ -217,6 +232,7 @@ interface DatasetResultsProps {
   limit: number;
   offset: number;
   onPageChange: (newOffset: number) => void;
+  hrefForOffset: (newOffset: number) => string;
   searchQuery: string;
   total: number;
 }
@@ -228,6 +244,7 @@ function DatasetResults({
   limit,
   offset,
   onPageChange,
+  hrefForOffset,
   searchQuery,
   total,
 }: DatasetResultsProps) {
@@ -248,7 +265,14 @@ function DatasetResults({
           ))}
         </div>
         {total > limit && (
-          <Pagination total={total} limit={limit} offset={offset} onPageChange={onPageChange} className="mt-8" />
+          <Pagination
+            total={total}
+            limit={limit}
+            offset={offset}
+            onPageChange={onPageChange}
+            hrefForOffset={hrefForOffset}
+            className="mt-8"
+          />
         )}
       </>
     );
@@ -304,6 +328,30 @@ export const Route = createFileRoute("/collections/$slug")({
       console.error("Error in collection detail loader:", error);
       throw error;
     }
+  },
+  head: ({ loaderData, params }) => {
+    const collection = loaderData?.collection;
+    const title = pageTitle(collection?.name ?? params.slug);
+    const description = seoDescription(collection?.description);
+    const canonical = `/collections/${encodeURIComponent(collection?.slug ?? params.slug)}`;
+
+    return {
+      meta: [
+        { title },
+        ...(description ? [{ name: "description", content: description }] : []),
+        { property: "og:title", content: title },
+        ...(description ? [{ property: "og:description", content: description }] : []),
+      ],
+      links: [
+        { rel: "canonical", href: canonical },
+        {
+          rel: "alternate",
+          type: "application/json",
+          href: `/api/collections/${encodeURIComponent(collection?.slug ?? params.slug)}`,
+          title: "Collection metadata JSON",
+        },
+      ],
+    };
   },
   component: CollectionDetailPage,
 });
@@ -487,6 +535,15 @@ function CollectionDetailPage() {
     }
   };
 
+  const hrefForOffset = useCallback(
+    (newOffset: number) => {
+      const nextSearch: CollectionSearch = { limit: currentLimit };
+      if (search.query) nextSearch.query = search.query;
+      return collectionPageHref(collection.slug, nextSearch, newOffset);
+    },
+    [collection.slug, currentLimit, search.query],
+  );
+
   // Handle tag filter change
   const handleFilterChange = async (key: string, values: string[]) => {
     const otherFilters = selectedTagFilters.filter((f) => f.key !== key);
@@ -565,6 +622,7 @@ function CollectionDetailPage() {
           limit={currentLimit}
           offset={offset}
           onPageChange={handlePageChange}
+          hrefForOffset={hrefForOffset}
           searchQuery={searchQuery}
           total={total}
         />

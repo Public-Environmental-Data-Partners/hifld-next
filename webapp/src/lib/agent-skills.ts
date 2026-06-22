@@ -19,8 +19,17 @@ Use this skill when you need to explore **collections**, **datasets**, and **fil
 ## Typical flow
 
 1. \`GET /api/collections\` — list collections.
-2. \`GET /api/collections/{slug}/datasets\` — datasets in a collection (see OpenAPI for query params).
-3. Follow \`links\` and relation URLs from responses rather than inventing path shapes.
+2. \`GET /api/collections/{slug}\` — search datasets in one collection with \`search\` or \`query\`, \`tag_filters\`, \`limit\`, \`offset\`, \`omit\`, and \`include_urls\`.
+3. \`GET /api/collections/{collectionSlug}/datasets/{datasetSlug}\` — open dataset detail by collection and dataset slug.
+4. \`GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}\` — inspect file metadata, formats, sources, returned \`links\`, source URLs, and GeoParquet options.
+5. \`GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema\` — inspect schema/data dictionary metadata. Omit \`version\` to use the latest schema-capable version.
+6. For local analysis, download returned source URLs or GeoParquet and use DuckDB, GeoPandas, or similar tools.
+7. Follow \`links\` and relation URLs from responses rather than inventing path shapes.
+
+## Constraints
+
+- This site is read-only and does not expose MCP/action tools for mutations.
+- This API is not OGC API-Features or STAC: no \`/items\`, \`/features\`, \`/download\`, or \`/map\` JSON routes.
 
 Unknown paths under \`/api\` return \`404\` with \`application/problem+json\` and links back to \`/api\` and OpenAPI.
 `;

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { waitFor } from '@testing-library/react'
 import { createRouter, createRootRoute, createRoute } from '@tanstack/react-router'
-import { getSyncedSearchQuery, Route as CollectionsSlugRoute } from '../collections.$slug'
+import { collectionPageHref, getSyncedSearchQuery, Route as CollectionsSlugRoute } from '../collections.$slug'
 import * as apiClient from '@/lib/api-client'
 import type { Collection, DatasetWithUrls, PaginatedResponse } from '@/lib/api-client'
 
@@ -161,6 +161,14 @@ describe('CollectionDetailPage - API Integration Tests', () => {
   }
 
   describe('Pagination API calls', () => {
+    it('builds crawlable collection pagination hrefs', () => {
+      expect(collectionPageHref('hifld', { limit: 100 }, 100)).toBe('/collections/hifld?offset=100')
+      expect(collectionPageHref('hifld', { query: 'hospitals', limit: 100 }, 200)).toBe(
+        '/collections/hifld?query=hospitals&offset=200'
+      )
+      expect(collectionPageHref('hifld', { limit: 25 }, 0)).toBe('/collections/hifld?limit=25')
+    })
+
     it('should call getCollectionDatasets with correct limit and offset on initial load', async () => {
       const mockDatasets = createMockDatasets(1, 0)
       const mockResponse = createMockResponse(mockDatasets, 14, 1, 0)

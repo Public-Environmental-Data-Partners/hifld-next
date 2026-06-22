@@ -100,21 +100,62 @@ CollectionDep = Annotated[Collection, Depends(verify_collection_exists)]
 
 
 @dataclass(slots=True)
+class DatasetIncludeQuery:
+    """Dataset list include query parameters."""
+
+    include_urls: bool = False
+    include_files: bool = False
+
+
+@dataclass(slots=True)
+class PaginationQuery:
+    """Pagination query parameters."""
+
+    limit: int | None = None
+    offset: int | None = None
+
+
+@dataclass(slots=True)
 class DatasetListQuery:
     """Dataset list query parameters."""
 
     search: str | None = None
     include_urls: bool = False
+    include_files: bool = False
     limit: int | None = None
     offset: int | None = None
     tag_filters: str | None = None
 
 
-def dataset_list_query(
-    search: str | None = Query(None, max_length=MAX_SEARCH_LENGTH, description="Search query (max 500 characters)"),
+def dataset_include_query(
     include_urls: bool = Query(False, description="Include full URLs constructed from storage location"),
+    include: str | None = Query(None, description="Comma-separated expansions: files"),
+) -> DatasetIncludeQuery:
+    """Build dataset include query parameters."""
+    return DatasetIncludeQuery(
+        include_urls=include_urls,
+        include_files="files" in parse_dataset_include(include),
+    )
+
+
+DatasetIncludeQueryDep = Annotated[DatasetIncludeQuery, Depends(dataset_include_query)]
+
+
+def pagination_query(
     limit: int | None = Query(None, ge=1, le=1000, description="Maximum number of datasets to return"),
     offset: int | None = Query(None, ge=0, description="Number of datasets to skip"),
+) -> PaginationQuery:
+    """Build pagination query parameters."""
+    return PaginationQuery(limit=limit, offset=offset)
+
+
+PaginationQueryDep = Annotated[PaginationQuery, Depends(pagination_query)]
+
+
+def dataset_list_query(
+    include_query: DatasetIncludeQueryDep,
+    pagination: PaginationQueryDep,
+    search: str | None = Query(None, max_length=MAX_SEARCH_LENGTH, description="Search query (max 500 characters)"),
     tag_filters: str | None = Query(
         None,
         description="JSON object with tag filters, e.g. {'geometry_type': 'Point', 'categories': ['Boundaries']}",
@@ -123,9 +164,10 @@ def dataset_list_query(
     """Build list query parameters."""
     return DatasetListQuery(
         search=search,
-        include_urls=include_urls,
-        limit=limit,
-        offset=offset,
+        include_urls=include_query.include_urls,
+        include_files=include_query.include_files,
+        limit=pagination.limit,
+        offset=pagination.offset,
         tag_filters=tag_filters,
     )
 
@@ -257,6 +299,18 @@ def parse_tag_filters(tag_filters: str | None) -> dict[str, str | list[str]] | N
     return filters
 
 
+def parse_dataset_include(include: str | None) -> set[str]:
+    """Parse optional dataset list include values."""
+    if not include:
+        return set()
+    values = {part.strip().lower() for part in include.split(",") if part.strip()}
+    allowed = {"files"}
+    unsupported = values - allowed
+    if unsupported:
+        raise HTTPException(status_code=400, detail=f"Unsupported include values: {', '.join(sorted(unsupported))}")
+    return values
+
+
 @router.get("", response_model=None)
 async def list_datasets(
     collection_id: int,
@@ -278,6 +332,13 @@ async def list_datasets(
     if query.include_urls:
         return {
             "items": datasets_with_urls(service, datasets),
+            "total": total,
+            "limit": query.limit,
+            "offset": query.offset or 0,
+        }
+    if query.include_files:
+        return {
+            "items": datasets_with_files(service.db, datasets),
             "total": total,
             "limit": query.limit,
             "offset": query.offset or 0,
@@ -307,6 +368,29 @@ def datasets_with_urls(service: DatasetService, datasets: Sequence[Dataset]) -> 
                 logger.warning("Could not dump dataset %s, using minimal dict: %s", dataset_id, dump_error)
                 result.append({"id": dataset_id})
     return result
+
+
+def datasets_with_files(db: Session, datasets: Sequence[Dataset]) -> APIList:
+    """Shape dataset list items with compact file children."""
+    payloads: dict[int, APIDict] = {}
+    files_by_dataset: dict[int, APIList] = {}
+    dataset_ids: list[int] = []
+    for dataset in datasets:
+        payload = model_json_dict(dataset)
+        files_by_dataset[dataset.id] = []
+        payload["files"] = files_by_dataset[dataset.id]
+        payloads[dataset.id] = payload
+        dataset_ids.append(dataset.id)
+
+    if dataset_ids:
+        statement = select(File).where(col(File.dataset_id).in_(dataset_ids)).order_by(col(File.name))
+        for file_obj in db.exec(statement).all():
+            dataset_payload = payloads.get(file_obj.dataset_id)
+            if dataset_payload is None:
+                continue
+            files_by_dataset[file_obj.dataset_id].append(model_json_dict(file_obj))
+
+    return list(payloads.values())
 
 
 @router.get("/{dataset_id}/files/{file_id}", response_model=None)

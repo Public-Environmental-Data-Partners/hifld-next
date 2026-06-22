@@ -6,7 +6,8 @@
 
 1. **[GET /api](/api)** - Bootstrap JSON: `links` to OpenAPI, `llms.txt`, collections, and short `hints` on URL shape.
 2. **[GET /api/openapi](/api/openapi)** - OpenAPI 3.1: every path, query param, and problem response shape.
-3. This API is **not** OGC API-Features or STAC: there is **no** `/items`, `/features`, `/download`, or `/map` on these JSON routes. Dataset paths use **string slugs**, not numeric IDs in the URL (not `/api/collections/hifld/3418`).
+3. This API is **not** OGC API-Features or STAC: no `/items`, `/features`, `/download`, or `/map` JSON routes. Dataset paths use **string slugs**, not numeric IDs in the URL (not `/api/collections/hifld/3418`).
+4. The site is **read-only** for agents and does not expose MCP/action tools for mutations.
 
 ## Search and pagination (one place only)
 
@@ -26,17 +27,25 @@ Example (replace host with your origin):
 GET /api/collections/hifld?search=wastewater&limit=25&omit=description
 ```
 
-Then open one dataset:
+Then open one dataset by collection and dataset slug:
 
 ```
-GET /api/collections/hifld/datasets/epa-frs-icis-wastewater-treatment-plants
+GET /api/collections/{collectionSlug}/datasets/{datasetSlug}
 ```
 
 Then file metadata (slug from the dataset JSON):
 
 ```
-GET /api/collections/hifld/datasets/epa-frs-icis-wastewater-treatment-plants/files/{fileSlug}
+GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}
 ```
+
+Then schema metadata/data dictionary:
+
+```
+GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema
+```
+
+Omit `version` on the schema endpoint to use the latest schema-capable version.
 
 Unknown paths under `/api` return **404** with **application/problem+json** and a `links` object pointing back to `/api`, OpenAPI, and this file.
 
@@ -59,10 +68,11 @@ Unknown paths under `/api` return **404** with **application/problem+json** and 
 ## Files and downloads
 
 - File metadata and sources: `/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}` (see OpenAPI). Use response `links` and source URLs; zip proxy uses `.../sources/{id}/download-zip`. Errors use `application/problem+json`.
+- Schema metadata: `/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema`; omit `version` for the latest schema-capable version.
 
 ## Bulk analysis
 
-For statewide filters or heavy analytics, **download GeoParquet (or other formats) from file metadata** and use **DuckDB**, **GeoPandas**, or similar locally. The HTTP API is for discovery and metadata, not a spatial database.
+For statewide filters or heavy analytics, **download GeoParquet (or other formats) from file metadata source URLs** and use **DuckDB**, **GeoPandas**, or similar locally. The HTTP API is for discovery and metadata, not a spatial database.
 
 ## Upstream
 
