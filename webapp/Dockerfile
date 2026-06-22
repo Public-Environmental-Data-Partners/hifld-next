@@ -15,10 +15,8 @@ RUN npm install
 
 # Declare build-time args AFTER install so they don't affect the npm install environment.
 ARG NODE_ENV=production
-ARG VITE_PUBLIC_DATASET_API_URL=""
 
 ENV NODE_ENV=${NODE_ENV}
-ENV VITE_PUBLIC_DATASET_API_URL=${VITE_PUBLIC_DATASET_API_URL}
 
 # Copy source code
 COPY . .
@@ -48,5 +46,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s \
     CMD node -e "require('http').get('http://localhost:8080/', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
 # Run the Nitro server
-# Nitro reads DATASET_API_URL from the runtime environment
+# Nitro reads deployment configuration from the runtime environment.
 CMD ["node", ".output/server/index.mjs"]

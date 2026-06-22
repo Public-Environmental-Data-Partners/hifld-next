@@ -1,4 +1,5 @@
 export interface RuntimeClientConfig {
+  publicDatasetApiUrl?: string;
   posthogKey?: string;
   posthogHost: string;
 }
@@ -22,12 +23,15 @@ export function runtimeClientConfigFromWindow(): RuntimeClientConfig {
   }
 
   const config = window.__HIFLD_CLIENT_CONFIG__;
+  const publicDatasetApiUrl = nonEmpty(config?.publicDatasetApiUrl);
   const posthogKey = nonEmpty(config?.posthogKey);
   const posthogHost = nonEmpty(config?.posthogHost) ?? DEFAULT_POSTHOG_HOST;
-  if (posthogKey) {
-    return { posthogKey, posthogHost };
+  const runtimeConfig: RuntimeClientConfig = { posthogHost };
+  if (publicDatasetApiUrl) {
+    runtimeConfig.publicDatasetApiUrl = publicDatasetApiUrl;
   }
-  return {
-    posthogHost,
-  };
+  if (posthogKey) {
+    runtimeConfig.posthogKey = posthogKey;
+  }
+  return runtimeConfig;
 }

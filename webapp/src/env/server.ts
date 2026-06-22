@@ -7,8 +7,6 @@ export const env = createEnv({
     DATASET_API_URL: z.string().url(),
   },
   runtimeEnv: {
-    ...process.env,
-    // Local dev convenience: allow using only VITE_PUBLIC_DATASET_API_URL in .env
-    DATASET_API_URL: process.env["DATASET_API_URL"] || process.env["VITE_PUBLIC_DATASET_API_URL"],
+    DATASET_API_URL: process.env["DATASET_API_URL"],
   },
 });

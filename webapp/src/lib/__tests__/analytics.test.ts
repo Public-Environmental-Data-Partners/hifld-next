@@ -12,14 +12,6 @@ vi.mock("posthog-js", () => ({
   },
 }));
 
-vi.mock("@/env/client", () => ({
-  env: {
-    PUBLIC_POSTHOG_KEY: "ph_test",
-    PUBLIC_POSTHOG_HOST: "https://posthog.test",
-    PUBLIC_DATASET_API_URL: "https://api.test",
-  },
-}));
-
 describe("download analytics", () => {
   beforeEach(async () => {
     capture.mockClear();
