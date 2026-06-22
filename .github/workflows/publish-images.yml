@@ -17,7 +17,6 @@ permissions:
 env:
   DATASET_API_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/dataset-api
   WEBAPP_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/webapp
-  DEFAULT_LB_DOMAIN: hifld.publicenvirodata.org
 
 jobs:
   publish:
@@ -36,11 +35,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve image tags and build args
+      - name: Resolve image tags
         id: meta
-        env:
-          LB_DOMAIN: ${{ vars.LB_DOMAIN || vars.TF_VAR_LB_DOMAIN }}
-          VITE_PUBLIC_DATASET_API_URL: ${{ vars.VITE_PUBLIC_DATASET_API_URL }}
         run: |
           set -euo pipefail
 
@@ -52,15 +48,6 @@ jobs:
             webapp_tags="${webapp_tags}"$'\n'"${WEBAPP_IMAGE}:latest"
           fi
 
-          public_api_url="$VITE_PUBLIC_DATASET_API_URL"
-          if [ -z "$public_api_url" ]; then
-            lb_domain="$LB_DOMAIN"
-            if [ -z "$lb_domain" ]; then
-              lb_domain="$DEFAULT_LB_DOMAIN"
-            fi
-            public_api_url="https://${lb_domain}"
-          fi
-
           {
             echo "dataset_tags<<EOF"
             echo "$dataset_tags"
@@ -68,7 +55,6 @@ jobs:
             echo "webapp_tags<<EOF"
             echo "$webapp_tags"
             echo "EOF"
-            echo "public_api_url=$public_api_url"
           } >> "$GITHUB_OUTPUT"
 
       - name: Build and push dataset-api
@@ -90,4 +76,3 @@ jobs:
           tags: ${{ steps.meta.outputs.webapp_tags }}
           build-args: |
             NODE_ENV=production
-            VITE_PUBLIC_DATASET_API_URL=${{ steps.meta.outputs.public_api_url }}

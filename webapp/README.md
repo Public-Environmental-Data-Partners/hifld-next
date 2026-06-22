@@ -19,20 +19,15 @@ Production runs on GKE behind the external Application Load Balancer. The server
 DATASET_API_URL=http://dataset-api.hifld-next.svc.cluster.local
 ```
 
-The build-time public API origin should be the load balancer origin, usually:
-
-```bash
-VITE_PUBLIC_DATASET_API_URL=https://hifld.publicenvirodata.org
-```
-
 Runtime browser settings are supplied by the running webapp server and served from `/runtime-config.js`:
 
 ```bash
+PUBLIC_DATASET_API_URL=https://your-public-webapp-origin.example
 PUBLIC_POSTHOG_KEY=your-posthog-key
 PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
 ```
 
-Leave `PUBLIC_POSTHOG_KEY` unset to disable analytics. Do not use `VITE_PUBLIC_POSTHOG_*` values; PostHog config is intentionally not baked into public images.
+Leave `PUBLIC_POSTHOG_KEY` unset to disable analytics. Do not use `VITE_PUBLIC_*` values for deployment-specific browser config; these values are intentionally not baked into public images.
 
 ## Public JSON API
 

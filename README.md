@@ -69,7 +69,7 @@ This repo publishes application images to GHCR:
 - `ghcr.io/public-environmental-data-partners/hifld-next/dataset-api`
 - `ghcr.io/public-environmental-data-partners/hifld-next/webapp`
 
-The `Publish app images` workflow tags both images with the full commit SHA and also publishes `latest` from `main`. It passes only non-secret build-time values, such as the webapp public API origin.
+The `Publish app images` workflow tags both images with the full commit SHA and also publishes `latest` from `main`. Images are portable and do not bake deployment-specific runtime configuration.
 
 The production deployment path is the `Deploy containers` GitHub Actions workflow in the IaC repo. It fetches GKE credentials and deploys a selected GHCR image tag with Helm upgrades for:
 
@@ -77,4 +77,4 @@ The production deployment path is the `Deploy containers` GitHub Actions workflo
 - `dataset-discovery`
 - `webapp`
 
-The webapp should receive `DATASET_API_URL=http://dataset-api.hifld-next.svc.cluster.local` at runtime. Its public build-time API URL should point at the load balancer origin, usually `https://hifld.publicenvirodata.org`, so browser-visible links remain same-origin. Optional analytics config is loaded from `/runtime-config.js`, which reads deployer-supplied runtime env such as `PUBLIC_POSTHOG_KEY`; public GHCR images do not contain a PostHog key. Use explicit SHA image tags for production rollouts and rollbacks; `latest` is only a convenience default.
+The webapp receives runtime configuration from the deployer. `DATASET_API_URL` points the server at the internal dataset API, while browser-visible settings such as `PUBLIC_DATASET_API_URL` and optional analytics values are served from `/runtime-config.js`. Public GHCR images do not contain deployment-specific origins or PostHog keys. Use explicit SHA image tags for production rollouts and rollbacks; `latest` is only a convenience default.
