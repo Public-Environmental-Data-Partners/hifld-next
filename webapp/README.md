@@ -11,6 +11,20 @@ DATASET_API_URL=http://127.0.0.1:8000 npm run dev
 
 The webapp proxies the FastAPI dataset service through same-origin `/api/*` routes.
 
+## Production Configuration
+
+Production runs on GKE behind the external Application Load Balancer. The server runtime should use the internal dataset API service:
+
+```bash
+DATASET_API_URL=http://dataset-api.hifld-next.svc.cluster.local
+```
+
+The build-time public API origin should be the load balancer origin, usually:
+
+```bash
+VITE_PUBLIC_DATASET_API_URL=https://hifld.publicenvirodata.org
+```
+
 ## Public JSON API
 
 - `GET /api` returns bootstrap links for OpenAPI, collections, `llms.txt`, and agent discovery.

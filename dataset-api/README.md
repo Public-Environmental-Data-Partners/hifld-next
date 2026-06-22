@@ -50,8 +50,14 @@ Production artifact storage is GCS. Local storage tests use SeaweedFS:
 Catalog/data operations should run as named jobs, not request-time work:
 
 - `jobs.discover` scans object storage and upserts discovered datasets.
+- `jobs.config_sync` syncs configured formats and storage locations into the catalog database.
 - `scripts.seed_formats` seeds supported format definitions.
 - `scripts.seed_storage` seeds GCS and SeaweedFS storage locations.
+
+In production, the `dataset-discovery` Helm release schedules these jobs as Kubernetes CronJobs:
+
+- `dataset-discovery-config-sync-prod`
+- `dataset-discovery-hifld-prod`
 
 ## Tests
 

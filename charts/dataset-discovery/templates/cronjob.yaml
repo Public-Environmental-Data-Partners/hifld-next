@@ -234,6 +234,7 @@ spec:
               command:
                 - uv
                 - run
+                - --no-sync
                 - python
                 - -m
                 - jobs.config_sync

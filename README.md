@@ -62,3 +62,11 @@ HIFLD_RUN_SEAWEEDFS_INTEGRATION=1 uv run pytest tests/test_storage_client.py -v
 ## Deployment
 
 Production infrastructure lives in `../hifld-next-iac`. The webapp, dataset API, discovery, and config reconciliation run on GKE with Helm-managed releases. The public webapp is served through the external Application Load Balancer; the dataset API is internal-only at `http://dataset-api.hifld-next.svc.cluster.local`.
+
+The production deployment path is the `Deploy containers` GitHub Actions workflow in the IaC repo. It builds and pushes the `dataset-api` and `webapp` images, fetches GKE credentials, and runs Helm upgrades for:
+
+- `dataset-api`
+- `dataset-discovery`
+- `webapp`
+
+The webapp should receive `DATASET_API_URL=http://dataset-api.hifld-next.svc.cluster.local` at runtime. Its public build-time API URL should point at the load balancer origin, usually `https://hifld.publicenvirodata.org`, so browser-visible links remain same-origin.
