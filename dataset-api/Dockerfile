@@ -36,7 +36,7 @@ RUN uv sync --frozen --no-dev
 # Copy application code
 COPY . .
 
-# Set default port (Cloud Run can override with PORT env var)
+# Set default port
 ENV PORT=8000
 
 # Expose port

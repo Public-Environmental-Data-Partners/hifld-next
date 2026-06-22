@@ -61,4 +61,4 @@ HIFLD_RUN_SEAWEEDFS_INTEGRATION=1 uv run pytest tests/test_storage_client.py -v
 
 ## Deployment
 
-Production infrastructure lives in `../hifld-next-iac`. Cloud Run services and jobs use dedicated service accounts, Secret Manager-backed database URLs, and pinned image tags. The webapp is public; dataset API public access is explicit and defaults off in Terraform CI.
+Production infrastructure lives in `../hifld-next-iac`. The webapp, dataset API, discovery, and config reconciliation run on GKE with Helm-managed releases. The public webapp is served through the external Application Load Balancer; the dataset API is internal-only at `http://dataset-api.hifld-next.svc.cluster.local`.

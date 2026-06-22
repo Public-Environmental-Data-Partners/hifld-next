@@ -40,7 +40,7 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
     """Middleware to add request timeout protection.
 
     Applies different timeouts based on the request path:
-    - Download endpoints (download-zip, export) get 280 seconds (just under Cloud Run's 300s limit)
+    - Download endpoints (download-zip, export) get 280 seconds
     - All other endpoints get 60 seconds
     """
 
@@ -132,7 +132,7 @@ app = FastAPI(
 
 # Request timeout middleware (must be first to catch all requests)
 # Default timeout: 60s for most endpoints
-# Long timeout: 280s for download/export endpoints (just under Cloud Run's 300s limit)
+# Long timeout: 280s for download/export endpoints
 app.add_middleware(TimeoutMiddleware, timeout=60.0, long_timeout=280.0)
 
 # CORS middleware
