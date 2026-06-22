@@ -1,4 +1,4 @@
-"""Cloud Run Job entrypoint for discovering datasets into the catalog database."""
+"""Job entrypoint for discovering datasets into the catalog database."""
 
 import asyncio
 import json

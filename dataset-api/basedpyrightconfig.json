@@ -4,7 +4,6 @@
     "database",
     "jobs",
     "models",
-    "processing",
     "schemas",
     "services",
     "storage",

@@ -9,6 +9,7 @@ HIFLD Next is a catalog and delivery app for public geospatial datasets.
 - Google Cloud Storage is the production artifact store for GeoParquet, PMTiles, GeoJSON, shapefile ZIPs, file geodatabases, and metadata manifests.
 - SeaweedFS is the supported local object-storage backend for testing storage discovery and URL generation.
 - Dagster/GKE own ingestion and data operations.
+- Dataset quality, schema, feature counts, file sizes, and related comparison data come from Dagster-published `quality_manifest.json` and `data_dictionary.json` files ingested by discovery.
 - The dataset API intentionally runs Alembic migrations and SQLModel table initialization on startup.
 
 GeoServer has been removed from the active architecture.
@@ -61,4 +62,19 @@ HIFLD_RUN_SEAWEEDFS_INTEGRATION=1 uv run pytest tests/test_storage_client.py -v
 
 ## Deployment
 
-Production infrastructure lives in `../hifld-next-iac`. Cloud Run services and jobs use dedicated service accounts, Secret Manager-backed database URLs, and pinned image tags. The webapp is public; dataset API public access is explicit and defaults off in Terraform CI.
+Production infrastructure lives in `../hifld-next-iac`. The webapp, dataset API, discovery, and config reconciliation run on GKE with Helm-managed releases. The public webapp is served through the external Application Load Balancer; the dataset API is internal-only at `http://dataset-api.hifld-next.svc.cluster.local`.
+
+This repo publishes application images to GHCR:
+
+- `ghcr.io/public-environmental-data-partners/hifld-next/dataset-api`
+- `ghcr.io/public-environmental-data-partners/hifld-next/webapp`
+
+The `Publish app images` workflow tags both images with the full commit SHA and also publishes `latest` from `main`. It passes only non-secret build-time values, such as the webapp public API origin.
+
+The production deployment path is the `Deploy containers` GitHub Actions workflow in the IaC repo. It fetches GKE credentials and deploys a selected GHCR image tag with Helm upgrades for:
+
+- `dataset-api`
+- `dataset-discovery`
+- `webapp`
+
+The webapp should receive `DATASET_API_URL=http://dataset-api.hifld-next.svc.cluster.local` at runtime. Its public build-time API URL should point at the load balancer origin, usually `https://hifld.publicenvirodata.org`, so browser-visible links remain same-origin. Optional analytics config is loaded from `/runtime-config.js`, which reads deployer-supplied runtime env such as `PUBLIC_POSTHOG_KEY`; public GHCR images do not contain a PostHog key. Use explicit SHA image tags for production rollouts and rollbacks; `latest` is only a convenience default.

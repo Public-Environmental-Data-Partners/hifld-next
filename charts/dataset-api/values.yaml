@@ -1,0 +1,48 @@
+replicaCount: 1
+
+image:
+  repository: ""
+  tag: latest
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+  annotations: {}
+
+containerPort: 8000
+
+env: []
+secretEnv: []
+
+resources: {}
+
+podLabels: {}
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+securityContext: {}
+podSecurityContext: {}
+
+livenessProbe:
+  enabled: true
+  path: /health
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  path: /health
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3

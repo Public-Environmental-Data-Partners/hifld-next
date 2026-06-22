@@ -16,13 +16,9 @@ RUN npm install
 # Declare build-time args AFTER install so they don't affect the npm install environment.
 ARG NODE_ENV=production
 ARG VITE_PUBLIC_DATASET_API_URL=""
-ARG VITE_PUBLIC_POSTHOG_KEY=""
-ARG VITE_PUBLIC_POSTHOG_HOST="https://us.i.posthog.com"
 
 ENV NODE_ENV=${NODE_ENV}
 ENV VITE_PUBLIC_DATASET_API_URL=${VITE_PUBLIC_DATASET_API_URL}
-ENV VITE_PUBLIC_POSTHOG_KEY=${VITE_PUBLIC_POSTHOG_KEY}
-ENV VITE_PUBLIC_POSTHOG_HOST=${VITE_PUBLIC_POSTHOG_HOST}
 
 # Copy source code
 COPY . .
@@ -40,7 +36,7 @@ WORKDIR /app
 COPY --from=builder /app/.output ./.output
 COPY --from=builder /app/package.json ./
 
-# Set port environment variable (Cloud Run uses PORT env var)
+# Set port environment variable
 ENV PORT=8080
 ENV NODE_ENV=production
 
@@ -52,6 +48,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s \
     CMD node -e "require('http').get('http://localhost:8080/', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
 # Run the Nitro server
-# Nitro reads DATASET_API_URL from Cloud Run environment at runtime
+# Nitro reads DATASET_API_URL from the runtime environment
 CMD ["node", ".output/server/index.mjs"]
-

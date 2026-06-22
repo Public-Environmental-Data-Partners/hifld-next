@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 # Load environment variables with precedence
 # Only load .env files if DATABASE_URL is not already set (i.e., in production)
-# This prevents .env files from overriding Cloud Run environment variables
+# This prevents .env files from overriding runtime environment variables
 if not os.getenv("DATABASE_URL"):
     load_dotenv(BASE_DIR / ".env")  # Load defaults first
     load_dotenv(BASE_DIR / ".env.local", override=True)  # Override with local settings
@@ -42,9 +42,9 @@ class Config:
 
 
 class ScriptsConfig(Config):
-    """Extended configuration for scripts - includes storage settings for dataset processing."""
+    """Extended configuration for storage-oriented maintenance scripts."""
 
-    # Storage configuration (only needed for dataset processing scripts)
+    # Storage configuration for local maintenance scripts.
     STORAGE_TYPE: str = os.getenv("STORAGE_TYPE", "seaweedfs")
     SEAWEEDFS_FILER_URL: str = os.getenv("SEAWEEDFS_FILER_URL", "http://localhost:8888")
     SEAWEEDFS_BUCKET: str = os.getenv("SEAWEEDFS_BUCKET", "hifld")

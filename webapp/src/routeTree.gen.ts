@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
+import { Route as RuntimeConfigDotjsRouteImport } from './routes/runtime-config[.]js'
 import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
 import { Route as MapRouteImport } from './routes/map'
 import { Route as CommonsRouteImport } from './routes/commons'
@@ -48,6 +49,11 @@ import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSo
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
   path: '/sitemap.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RuntimeConfigDotjsRoute = RuntimeConfigDotjsRouteImport.update({
+  id: '/runtime-config.js',
+  path: '/runtime-config.js',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
@@ -264,6 +270,7 @@ export interface FileRoutesByFullPath {
   '/commons': typeof CommonsRouteWithChildren
   '/map': typeof MapRoute
   '/robots.txt': typeof RobotsDottxtRoute
+  '/runtime-config.js': typeof RuntimeConfigDotjsRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/.well-known/api-catalog': typeof DotwellKnownApiCatalogRouteRoute
   '/api/$': typeof ApiSplatRoute
@@ -298,6 +305,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/map': typeof MapRoute
   '/robots.txt': typeof RobotsDottxtRoute
+  '/runtime-config.js': typeof RuntimeConfigDotjsRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/.well-known/api-catalog': typeof DotwellKnownApiCatalogRouteRoute
   '/api/$': typeof ApiSplatRoute
@@ -335,6 +343,7 @@ export interface FileRoutesById {
   '/commons': typeof CommonsRouteWithChildren
   '/map': typeof MapRoute
   '/robots.txt': typeof RobotsDottxtRoute
+  '/runtime-config.js': typeof RuntimeConfigDotjsRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/.well-known/api-catalog': typeof DotwellKnownApiCatalogRouteRoute
   '/api/$': typeof ApiSplatRoute
@@ -374,6 +383,7 @@ export interface FileRouteTypes {
     | '/commons'
     | '/map'
     | '/robots.txt'
+    | '/runtime-config.js'
     | '/sitemap.xml'
     | '/.well-known/api-catalog'
     | '/api/$'
@@ -408,6 +418,7 @@ export interface FileRouteTypes {
     | '/'
     | '/map'
     | '/robots.txt'
+    | '/runtime-config.js'
     | '/sitemap.xml'
     | '/.well-known/api-catalog'
     | '/api/$'
@@ -444,6 +455,7 @@ export interface FileRouteTypes {
     | '/commons'
     | '/map'
     | '/robots.txt'
+    | '/runtime-config.js'
     | '/sitemap.xml'
     | '/.well-known/api-catalog'
     | '/api/$'
@@ -482,6 +494,7 @@ export interface RootRouteChildren {
   CommonsRoute: typeof CommonsRouteWithChildren
   MapRoute: typeof MapRoute
   RobotsDottxtRoute: typeof RobotsDottxtRoute
+  RuntimeConfigDotjsRoute: typeof RuntimeConfigDotjsRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   DotwellKnownApiCatalogRouteRoute: typeof DotwellKnownApiCatalogRouteRoute
   ApiSplatRoute: typeof ApiSplatRoute
@@ -501,6 +514,13 @@ declare module '@tanstack/react-router' {
       path: '/sitemap.xml'
       fullPath: '/sitemap.xml'
       preLoaderRoute: typeof SitemapDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/runtime-config.js': {
+      id: '/runtime-config.js'
+      path: '/runtime-config.js'
+      fullPath: '/runtime-config.js'
+      preLoaderRoute: typeof RuntimeConfigDotjsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/robots.txt': {
@@ -895,6 +915,7 @@ const rootRouteChildren: RootRouteChildren = {
   CommonsRoute: CommonsRouteWithChildren,
   MapRoute: MapRoute,
   RobotsDottxtRoute: RobotsDottxtRoute,
+  RuntimeConfigDotjsRoute: RuntimeConfigDotjsRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   DotwellKnownApiCatalogRouteRoute: DotwellKnownApiCatalogRouteRoute,
   ApiSplatRoute: ApiSplatRoute,

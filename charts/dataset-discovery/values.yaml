@@ -12,7 +12,7 @@ database:
   urlKey: DATABASE_URL
 
 defaults:
-  command: ["uv", "run", "python", "-m", "jobs.discover"]
+  command: ["uv", "run", "--no-sync", "python", "-m", "jobs.discover"]
   concurrencyPolicy: Forbid
   restartPolicy: Never
   backoffLimit: 1

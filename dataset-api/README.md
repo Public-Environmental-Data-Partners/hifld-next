@@ -8,6 +8,7 @@ FastAPI catalog service for HIFLD Next datasets.
 - Shape storage URLs for GCS and local SeaweedFS-backed sources.
 - Run startup database initialization: Alembic `upgrade head`, revision logging, then SQLModel `create_all`.
 - Support discovery/config jobs that write catalog records outside the request path.
+- Read dataset quality, schema, file size, and feature-count metadata from stored `FileSource.source_metadata`.
 
 GeoServer is not part of the active runtime.
 
@@ -50,8 +51,16 @@ Production artifact storage is GCS. Local storage tests use SeaweedFS:
 Catalog/data operations should run as named jobs, not request-time work:
 
 - `jobs.discover` scans object storage and upserts discovered datasets.
+- `jobs.config_sync` syncs configured formats and storage locations into the catalog database.
 - `scripts.seed_formats` seeds supported format definitions.
 - `scripts.seed_storage` seeds GCS and SeaweedFS storage locations.
+
+In production, the `dataset-discovery` Helm release schedules these jobs as Kubernetes CronJobs:
+
+- `dataset-discovery-config-sync-prod`
+- `dataset-discovery-hifld-prod`
+
+Dataset quality is not computed by API requests. Dagster publishes `quality_manifest.json` and `data_dictionary.json` alongside dataset versions; discovery ingests those files into `FileSource.source_metadata`; compare and detail API responses read only that stored metadata.
 
 ## Tests
 
@@ -93,7 +102,6 @@ Dataset-specific service logic lives under `services/dataset/`:
 | `queries.py` | Dataset search, count, and tag query construction |
 | `shaping.py` | API response shaping for datasets, files, formats, and sources |
 | `downloads.py` | Download and shapefile ZIP response helpers |
-| `quality.py` | Quality metadata computation and normalization |
 
 Import the public service from `services.dataset`:
 
