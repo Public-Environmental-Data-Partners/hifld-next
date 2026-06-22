@@ -104,6 +104,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             },
           ]}
         /> */}
+        <script src="/runtime-config.js" />
         <Scripts />
       </body>
     </html>

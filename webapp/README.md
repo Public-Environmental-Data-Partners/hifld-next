@@ -23,7 +23,11 @@ The build-time public API origin should be the load balancer origin, usually:
 
 ```bash
 VITE_PUBLIC_DATASET_API_URL=https://hifld.publicenvirodata.org
+PUBLIC_POSTHOG_KEY=your-posthog-key
+PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
 ```
+
+`VITE_PUBLIC_DATASET_API_URL` is a build-time public origin. PostHog settings are runtime values read by `/runtime-config.js`; leave `PUBLIC_POSTHOG_KEY` unset to disable analytics.
 
 ## Public JSON API
 

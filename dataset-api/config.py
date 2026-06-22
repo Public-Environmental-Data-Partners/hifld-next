@@ -42,9 +42,9 @@ class Config:
 
 
 class ScriptsConfig(Config):
-    """Extended configuration for scripts - includes storage settings for dataset processing."""
+    """Extended configuration for storage-oriented maintenance scripts."""
 
-    # Storage configuration (only needed for dataset processing scripts)
+    # Storage configuration for local maintenance scripts.
     STORAGE_TYPE: str = os.getenv("STORAGE_TYPE", "seaweedfs")
     SEAWEEDFS_FILER_URL: str = os.getenv("SEAWEEDFS_FILER_URL", "http://localhost:8888")
     SEAWEEDFS_BUCKET: str = os.getenv("SEAWEEDFS_BUCKET", "hifld")

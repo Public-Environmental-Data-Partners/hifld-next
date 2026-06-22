@@ -10,7 +10,6 @@ src = [
   "database",
   "jobs",
   "models",
-  "processing",
   "schemas",
   # "scripts",
   "services",

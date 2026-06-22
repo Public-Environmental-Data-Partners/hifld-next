@@ -12,8 +12,9 @@ flowchart LR
   discovery["dataset-discovery CronJob on GKE"] --> api
   discovery --> gcs
   dagster["Dagster on GKE"] --> staging["GCS staging bucket"]
+  dagster --> metadata["quality_manifest.json / data_dictionary.json"]
+  metadata --> gcs
   dagster --> gcs
-  dagster --> api
   local["Local development"] --> seaweed["SeaweedFS filer + S3 API"]
   local --> api
 ```
@@ -27,10 +28,13 @@ flowchart LR
 - The dataset API serves catalog reads and intentionally initializes database schema on startup.
 - GCS stores production dataset artifacts and catalog configuration inputs.
 - SeaweedFS is the supported local object-storage backend.
-- Dagster/GKE own ingestion, quality computation, and promotion into published artifacts.
+- Dagster/GKE own ingestion, geospatial processing, quality computation, and promotion into published artifacts.
+- Dataset quality and schema views use stored version metadata from `quality_manifest.json` and `data_dictionary.json`; the dataset API does not compute quality on request.
 - GKE CronJobs own catalog config reconciliation and dataset discovery.
 - Terraform in `../hifld-next-iac` manages GKE, the load balancer, buckets, IAM, secrets, Neon, and GitHub Actions identity.
-- GitHub Actions builds container images and deploys the Helm releases for `dataset-api`, `webapp`, and `dataset-discovery`.
+- GitHub Actions in this repo builds and publishes GHCR images for `dataset-api` and `webapp`.
+- GitHub Actions in `../hifld-next-iac` deploys selected GHCR image tags with Helm for `dataset-api`, `webapp`, and `dataset-discovery`.
+- Runtime client settings such as PostHog are supplied by the deployer through environment variables and served by `/runtime-config.js`; they are not baked into public GHCR images.
 
 ## Removed Legacy
 

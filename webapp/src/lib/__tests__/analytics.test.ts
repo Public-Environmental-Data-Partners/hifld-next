@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const capture = vi.fn();
+const init = vi.fn((_key: string, options: { loaded?: (posthog: unknown) => void }) => {
+  options.loaded?.({ capture });
+});
 
 vi.mock("posthog-js", () => ({
   default: {
-    init: vi.fn((_key: string, options: { loaded?: (posthog: unknown) => void }) => {
-      options.loaded?.({ capture });
-    }),
+    init,
     capture,
   },
 }));
@@ -22,6 +23,26 @@ vi.mock("@/env/client", () => ({
 describe("download analytics", () => {
   beforeEach(async () => {
     capture.mockClear();
+    init.mockClear();
+    vi.resetModules();
+    window.__HIFLD_CLIENT_CONFIG__ = {
+      posthogKey: "ph_runtime",
+      posthogHost: "https://posthog-runtime.test",
+    };
+  });
+
+  it("initializes PostHog from runtime client config", async () => {
+    const { trackPageView } = await import("../analytics");
+
+    trackPageView("/collections");
+
+    expect(init).toHaveBeenCalledWith(
+      "ph_runtime",
+      expect.objectContaining({
+        api_host: "https://posthog-runtime.test",
+      }),
+    );
+    expect(capture).toHaveBeenCalledWith("$pageview", expect.objectContaining({ path: "/collections" }));
   });
 
   it("tracks a download click without full URLs or undefined fields", async () => {

@@ -21,11 +21,10 @@ from models.dataset import (
     SpatialDatasetFileMetadata,
     StorageLocation,
 )
-from schemas.types import APIDict, APIList, JSONDict, model_json_dict
+from schemas.types import APIDict, APIList, JSONDict, json_value, model_json_dict
 from services.collections import CollectionService
 from services.dataset import DatasetService, FormatSourceCreate
 from services.dataset.downloads import shapefile_zip_response
-from services.dataset.quality import compute_quality_for_source, metadata_to_dict
 
 
 logger = logging.getLogger(__name__)
@@ -244,7 +243,6 @@ class QualityQuery:
     format_type: str | None = None
     storage_location_id: int | None = None
     storage_location_name: str | None = None
-    compute_if_missing: bool = False
 
 
 def quality_query(
@@ -252,7 +250,6 @@ def quality_query(
     format_type: str | None = Query(None),
     storage_location_id: int | None = Query(None),
     storage_location_name: str | None = Query(None),
-    compute_if_missing: bool = Query(False),
 ) -> QualityQuery:
     """Build quality comparison query parameters."""
     return QualityQuery(
@@ -260,7 +257,6 @@ def quality_query(
         format_type=format_type,
         storage_location_id=storage_location_id,
         storage_location_name=storage_location_name,
-        compute_if_missing=compute_if_missing,
     )
 
 
@@ -309,6 +305,15 @@ def parse_dataset_include(include: str | None) -> set[str]:
     if unsupported:
         raise HTTPException(status_code=400, detail=f"Unsupported include values: {', '.join(sorted(unsupported))}")
     return values
+
+
+def metadata_to_dict(source_metadata: SpatialDatasetFileMetadata | JSONDict | None) -> APIDict:
+    """Convert stored source metadata models or mappings to a plain dict."""
+    if isinstance(source_metadata, dict):
+        return {str(key): json_value(value) for key, value in source_metadata.items()}
+    if isinstance(source_metadata, SpatialDatasetFileMetadata):
+        return model_json_dict(source_metadata)
+    return {}
 
 
 @router.get("", response_model=None)
@@ -755,45 +760,6 @@ def version_file_metadata(file_entry: DatasetVersionFileUpsert) -> SpatialDatase
     return SpatialDatasetFileMetadata.model_validate(metadata_dict)
 
 
-@router.post("/by-slug/{dataset_slug}/files/{file_slug}/sources/{source_id}/compute-quality", response_model=None)
-async def compute_source_quality(
-    context: DatasetFileSourceContextDep,
-) -> APIDict:
-    """Compute quality metadata from a published file source and persist it."""
-    dataset = context.service.get_dataset_by_slug(collection_id=context.collection_id, slug=context.dataset_slug)
-    if not dataset:
-        raise HTTPException(status_code=404, detail="Dataset not found")
-
-    file_obj = context.service.get_file_by_slug(dataset.id, context.file_slug)
-    if not file_obj:
-        raise HTTPException(status_code=404, detail="File not found")
-
-    statement = (
-        select(FileSource)
-        .where(FileSource.id == context.source_id)
-        .join(FileFormat, col(FileSource.file_format_id) == col(FileFormat.id))
-        .where(FileFormat.file_id == file_obj.id)
-    )
-    file_source = context.db.exec(statement).first()
-    if not file_source:
-        raise HTTPException(status_code=404, detail="File source not found")
-
-    try:
-        quality = await compute_quality_for_source(file_source)
-        updated = context.service.update_source_metadata(file_source.id, quality)
-    except Exception as exc:
-        logger.error("Failed to compute source quality for %s: %s", context.source_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to compute quality: {exc}") from exc
-
-    return {
-        "dataset_slug": context.dataset_slug,
-        "file_slug": context.file_slug,
-        "source_id": context.source_id,
-        "version": file_source.version,
-        "source_metadata": metadata_to_dict(updated.source_metadata if updated else file_source.source_metadata),
-    }
-
-
 @router.get("/by-slug/{dataset_slug}/quality", response_model=None)
 async def get_dataset_quality_comparison(
     context: DatasetSlugContextDep,
@@ -803,7 +769,7 @@ async def get_dataset_quality_comparison(
     dataset = context.service.get_dataset_by_slug(collection_id=context.collection_id, slug=context.dataset_slug)
     if not dataset:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    results = await quality_comparison_results(context, query, dataset.id)
+    results = quality_comparison_results(context, query, dataset.id)
     return {
         "dataset_slug": context.dataset_slug,
         "file_slug": query.file_slug,
@@ -811,7 +777,7 @@ async def get_dataset_quality_comparison(
     }
 
 
-async def quality_comparison_results(
+def quality_comparison_results(
     context: DatasetSlugContext,
     query: QualityQuery,
     dataset_id: int,
@@ -833,11 +799,11 @@ async def quality_comparison_results(
 
     results = []
     for file_obj in files:
-        results.extend(await quality_rows_for_file(context, query, file_obj, selected_storage_id))
+        results.extend(quality_rows_for_file(context, query, file_obj, selected_storage_id))
     return results
 
 
-async def quality_rows_for_file(
+def quality_rows_for_file(
     context: DatasetSlugContext,
     query: QualityQuery,
     file_obj: File,
@@ -852,7 +818,7 @@ async def quality_rows_for_file(
             continue
         sources = quality_sources_for_format(context, file_format, selected_storage_id)
         if sources:
-            rows.append(await quality_row_for_sources(context, query, file_obj, file_format, sources))
+            rows.append(quality_row_for_sources(file_obj, file_format, sources))
     return rows
 
 
@@ -870,9 +836,7 @@ def quality_sources_for_format(
     return list(context.db.exec(source_stmt).all())
 
 
-async def quality_row_for_sources(
-    context: DatasetSlugContext,
-    query: QualityQuery,
+def quality_row_for_sources(
     file_obj: File,
     file_format: FileFormat,
     sources: list[FileSource],
@@ -880,16 +844,8 @@ async def quality_row_for_sources(
     """Build a single quality comparison row from ordered sources."""
     latest = sources[0]
     original = sources[-1]
-    for candidate in [latest, original]:
-        metadata = metadata_to_dict(candidate.source_metadata)
-        if query.compute_if_missing and "feature_count" not in metadata:
-            computed = await compute_quality_for_source(candidate)
-            context.service.update_source_metadata(candidate.id, computed)
-
-    latest_source = context.service.db.get(FileSource, latest.id) or latest
-    original_source = context.service.db.get(FileSource, original.id) or original
-    latest_meta = metadata_to_dict(latest_source.source_metadata)
-    original_meta = metadata_to_dict(original_source.source_metadata)
+    latest_meta = metadata_to_dict(latest.source_metadata)
+    original_meta = metadata_to_dict(original.source_metadata)
     latest_count = latest_meta.get("feature_count")
     original_count = original_meta.get("feature_count")
     row_delta = (

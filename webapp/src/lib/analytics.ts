@@ -3,7 +3,7 @@
  */
 
 import posthog from "posthog-js";
-import { env } from "@/env/client";
+import { runtimeClientConfigFromWindow } from "./runtime-client-config";
 
 // Initialize PostHog on the client side
 let posthogInitialized = false;
@@ -116,11 +116,12 @@ function captureDownloadEvent(
 export function initPostHog() {
   if (typeof window === "undefined") return;
   if (posthogInitialized) return;
-  if (!env.PUBLIC_POSTHOG_KEY) return;
+  const config = runtimeClientConfigFromWindow();
+  if (!config.posthogKey) return;
 
   try {
-    posthog.init(env.PUBLIC_POSTHOG_KEY, {
-      api_host: env.PUBLIC_POSTHOG_HOST,
+    posthog.init(config.posthogKey, {
+      api_host: config.posthogHost,
       // Privacy settings
       autocapture: false, // Disable auto-capture for privacy
       capture_pageview: false, // We'll track pageviews manually

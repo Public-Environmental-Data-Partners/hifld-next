@@ -30,6 +30,13 @@ def test_geoserver_routes_are_not_registered() -> None:
     assert not any(path.startswith("/api/geoserver") for path in routes)
 
 
+def test_quality_compute_routes_are_not_registered() -> None:
+    """Verify dataset quality is not computed on demand by the API."""
+    routes = {getattr(route, "path", "") for route in app.routes if getattr(route, "path", "")}
+
+    assert not any(path.endswith("/compute-quality") for path in routes)
+
+
 def test_dataset_service_module_exports_public_service() -> None:
     """Verify dataset service code is exported from the dataset module."""
     assert DatasetService.__name__ == "DatasetService"
