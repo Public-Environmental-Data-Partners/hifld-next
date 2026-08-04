@@ -13,6 +13,7 @@ from sqlmodel import SQLModel, Session, create_engine
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import main
+from api.datasets import DatasetVersionUpsertRequest
 from database.db import get_db
 from main import app
 from models.dataset import Collection, Dataset, File, FileSource, StorageLocation
@@ -40,6 +41,43 @@ def test_quality_compute_routes_are_not_registered() -> None:
 def test_dataset_service_module_exports_public_service() -> None:
     """Verify dataset service code is exported from the dataset module."""
     assert DatasetService.__name__ == "DatasetService"
+
+
+def test_openapi_schema_includes_dataset_version_upsert_request() -> None:
+    """Verify recursive JSON metadata does not break OpenAPI generation."""
+    cached_schema = app.openapi_schema
+    try:
+        app.openapi_schema = None
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/openapi.json")
+
+        assert response.status_code == HTTP_OK
+        schemas = response.json()["components"]["schemas"]
+        assert {"DatasetVersionUpsertRequest", "JSONDict", "JSONValue"} <= schemas.keys()
+    finally:
+        app.openapi_schema = cached_schema
+
+
+def test_dataset_version_request_accepts_nested_json_metadata() -> None:
+    """Verify named recursive aliases preserve nested metadata validation."""
+    payload = {
+        "version": "2026-08-04",
+        "storage_location_name": "gcs",
+        "files": [
+            {
+                "file_slug": "hospitals",
+                "path": "hifld/hospitals.parquet",
+                "format_type": "geoparquet",
+                "source_type": "file",
+                "source_metadata": {"columns": [{"name": "geometry", "nullable": True}]},
+            }
+        ],
+        "overwrite_existing": False,
+    }
+
+    request = DatasetVersionUpsertRequest.model_validate(payload)
+
+    assert request.model_dump(exclude_none=True) == payload
 
 
 def test_startup_database_setup_logs_revision_and_initializes_db(monkeypatch: MonkeyPatch) -> None:

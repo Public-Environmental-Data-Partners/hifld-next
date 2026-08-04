@@ -1,12 +1,20 @@
 """Shared structural type aliases."""
 
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 
 from pydantic import BaseModel
+from typing_extensions import TypeAliasType
 
 
-JSONValue: TypeAlias = str | int | float | bool | None | list["JSONValue"] | dict[str, "JSONValue"]
-JSONDict: TypeAlias = dict[str, JSONValue]
+if TYPE_CHECKING:
+    JSONValue: TypeAlias = str | int | float | bool | None | list["JSONValue"] | dict[str, "JSONValue"]
+    JSONDict: TypeAlias = dict[str, JSONValue]
+else:
+    JSONValue = TypeAliasType(
+        "JSONValue",
+        str | int | float | bool | None | list["JSONValue"] | dict[str, "JSONValue"],
+    )
+    JSONDict = TypeAliasType("JSONDict", dict[str, JSONValue])
 DatasetTags: TypeAlias = dict[str, str | list[str]]
 APIValue: TypeAlias = "BaseModel | JSONValue | APIList | APIDict"
 APIDict: TypeAlias = dict[str, APIValue]
