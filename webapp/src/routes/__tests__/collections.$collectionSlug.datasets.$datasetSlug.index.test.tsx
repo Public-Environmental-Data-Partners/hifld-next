@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Route as DatasetDetailRoute } from "../collections.$collectionSlug.datasets.$datasetSlug";
+import { Route as DatasetDetailRoute } from "../collections.$collectionSlug.datasets.$datasetSlug.index";
 
 describe("Dataset detail route head", () => {
   it("emits dataset-specific title, description, canonical, and Open Graph metadata", async () => {
@@ -50,6 +50,16 @@ describe("Dataset detail route head", () => {
       type: "application/json",
       href: "/api/collections/hifld/datasets/hospitals-3",
       title: "Dataset metadata JSON",
+    });
+
+    const ldScript = result.scripts?.find((script) => script.type === "application/ld+json");
+    expect(ldScript).toBeDefined();
+    const jsonLd = JSON.parse(ldScript?.children ?? "{}");
+    expect(jsonLd).toMatchObject({
+      "@type": "Dataset",
+      name: "Hospitals",
+      url: "/collections/hifld/datasets/hospitals-3",
+      isPartOf: { "@type": "Collection", name: "HIFLD" },
     });
   });
 });
