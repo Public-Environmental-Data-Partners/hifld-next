@@ -20,6 +20,10 @@ export const Route = createRootRoute({
         content: "width=device-width, initial-scale=1",
       },
       {
+        name: "google-site-verification",
+        content: "_d5YsP3LmfWFOX_117H8_nHZtXnLhT1Aodb3jPUc44g",
+      },
+      {
         title: "HIFLD Next | PEDP",
       },
     ],
