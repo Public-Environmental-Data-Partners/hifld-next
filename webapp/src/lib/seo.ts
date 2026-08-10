@@ -1,3 +1,5 @@
+import type { DatasetTags } from "@/lib/api-client";
+
 const DEFAULT_DESCRIPTION_LIMIT = 155;
 
 type HtmlEntityName = "amp" | "gt" | "lt" | "nbsp" | "quot";
@@ -55,4 +57,136 @@ export function seoDescription(value: string | null | undefined, maxLength = DEF
 export function pageTitle(name: string, suffix = "HIFLD Next | PEDP"): string {
   const cleanName = plainTextForSeo(name);
   return cleanName ? `${cleanName} | ${suffix}` : suffix;
+}
+
+/** Flatten a dataset's tag map into a de-duplicated list of keyword strings. */
+export function datasetKeywords(tags: DatasetTags | null | undefined): string[] {
+  if (!tags) {
+    return [];
+  }
+
+  const keywords = new Set<string>();
+  for (const value of Object.values(tags)) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        keywords.add(item);
+      }
+    } else {
+      keywords.add(value);
+    }
+  }
+
+  return [...keywords];
+}
+
+const DATASET_JSONLD_DESCRIPTION_LIMIT = 5000;
+
+const CATALOG_NAME = "HIFLD Next";
+
+export interface JsonLdParent {
+  type: "Collection" | "Dataset";
+  name: string;
+}
+
+export interface DatasetJsonLdInput {
+  name: string;
+  description?: string | null | undefined;
+  /** Canonical page path or absolute URL for the dataset detail page. */
+  url: string;
+  /** Path or absolute URL to the machine-readable JSON metadata. */
+  metadataUrl?: string | undefined;
+  keywords?: string[] | undefined;
+  /** Parent entity this dataset/file belongs to (a Collection or a Dataset). */
+  isPartOf?: JsonLdParent | undefined;
+  dateModified?: string | undefined;
+}
+
+export interface DatasetJsonLd {
+  "@context": "https://schema.org";
+  "@type": "Dataset";
+  name: string;
+  url: string;
+  includedInDataCatalog: { "@type": "DataCatalog"; name: string };
+  description?: string;
+  keywords?: string[];
+  isPartOf?: { "@type": "Collection" | "Dataset"; name: string };
+  dateModified?: string;
+  distribution?: Array<{ "@type": "DataDownload"; encodingFormat: string; contentUrl: string }>;
+}
+
+/**
+ * Build a schema.org `Dataset` JSON-LD object for a dataset or file detail page.
+ * Emitting this makes the page eligible for Google Dataset Search and dataset
+ * rich results, which is a primary discovery channel for a data catalog.
+ */
+export function buildDatasetJsonLd(input: DatasetJsonLdInput): DatasetJsonLd {
+  const description = truncateSeoDescription(plainTextForSeo(input.description), DATASET_JSONLD_DESCRIPTION_LIMIT);
+  const keywords = (input.keywords ?? []).map((keyword) => plainTextForSeo(keyword)).filter(Boolean);
+  const parentName = input.isPartOf ? plainTextForSeo(input.isPartOf.name) : undefined;
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "Dataset",
+    name: plainTextForSeo(input.name),
+    url: input.url,
+    includedInDataCatalog: {
+      "@type": "DataCatalog",
+      name: CATALOG_NAME,
+    },
+    ...(description ? { description } : {}),
+    ...(keywords.length > 0 ? { keywords } : {}),
+    ...(input.isPartOf && parentName ? { isPartOf: { "@type": input.isPartOf.type, name: parentName } } : {}),
+    ...(input.dateModified ? { dateModified: input.dateModified } : {}),
+    ...(input.metadataUrl
+      ? {
+          distribution: [
+            {
+              "@type": "DataDownload",
+              encodingFormat: "application/json",
+              contentUrl: input.metadataUrl,
+            },
+          ],
+        }
+      : {}),
+  };
+}
+
+export interface DataCatalogJsonLdInput {
+  name: string;
+  description?: string | null | undefined;
+  /** Canonical page path or absolute URL for the collection detail page. */
+  url: string;
+  dateModified?: string | undefined;
+}
+
+export interface DataCatalogJsonLd {
+  "@context": "https://schema.org";
+  "@type": "DataCatalog";
+  name: string;
+  url: string;
+  isPartOf: { "@type": "DataCatalog"; name: string };
+  description?: string;
+  dateModified?: string;
+}
+
+/**
+ * Build a schema.org `DataCatalog` JSON-LD object for a collection detail page.
+ * A collection groups many datasets, so it maps to a (sub-)catalog within the
+ * top-level HIFLD Next catalog.
+ */
+export function buildDataCatalogJsonLd(input: DataCatalogJsonLdInput): DataCatalogJsonLd {
+  const description = truncateSeoDescription(plainTextForSeo(input.description), DATASET_JSONLD_DESCRIPTION_LIMIT);
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "DataCatalog",
+    name: plainTextForSeo(input.name),
+    url: input.url,
+    isPartOf: {
+      "@type": "DataCatalog",
+      name: CATALOG_NAME,
+    },
+    ...(description ? { description } : {}),
+    ...(input.dateModified ? { dateModified: input.dateModified } : {}),
+  };
 }

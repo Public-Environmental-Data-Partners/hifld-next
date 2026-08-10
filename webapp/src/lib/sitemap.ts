@@ -19,18 +19,21 @@ const collectionSchema = z.object({
   id: z.number(),
   slug: z.string(),
   name: z.string(),
+  updated_at: z.string().optional(),
 });
 
 const datasetSchema = z.object({
   id: z.number(),
   slug: z.string(),
   name: z.string(),
+  updated_at: z.string().optional(),
   files: z
     .array(
       z.object({
         id: z.number(),
         slug: z.string(),
         name: z.string(),
+        updated_at: z.string().optional(),
       }),
     )
     .optional(),
@@ -76,11 +79,30 @@ function toAbsoluteUrl(origin: string, path: string): string {
   return new URL(path, origin).href;
 }
 
-export function buildSitemapXmlFromPaths(origin: string, paths: string[]): string {
-  const urls = paths
-    .map((path) => {
+export interface SitemapEntry {
+  path: string;
+  lastmod?: string;
+}
+
+/**
+ * Normalize an API `updated_at` timestamp to a W3C Datetime `lastmod` value.
+ * Backend timestamps look like "2026-05-19T21:53:21.876276" (date + time, no
+ * timezone); we keep the date portion, which is a valid sitemap `lastmod`.
+ */
+export function toLastmod(value: string | null | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? match[0] : undefined;
+}
+
+export function buildSitemapXmlFromEntries(origin: string, entries: SitemapEntry[]): string {
+  const urls = entries
+    .map(({ path, lastmod }) => {
       const loc = escapeXml(toAbsoluteUrl(origin, path));
-      return `  <url>\n    <loc>${loc}</loc>\n    <changefreq>weekly</changefreq>\n  </url>`;
+      const lastmodTag = lastmod ? `\n    <lastmod>${escapeXml(lastmod)}</lastmod>` : "";
+      return `  <url>\n    <loc>${loc}</loc>${lastmodTag}\n    <changefreq>weekly</changefreq>\n  </url>`;
     })
     .join("\n");
 
@@ -91,27 +113,48 @@ ${urls}
 `;
 }
 
+export function buildSitemapXmlFromPaths(origin: string, paths: string[]): string {
+  return buildSitemapXmlFromEntries(
+    origin,
+    paths.map((path) => ({ path })),
+  );
+}
+
 export function buildStaticSitemapXml(origin: string): string {
   return buildSitemapXmlFromPaths(origin, [...STATIC_SITEMAP_PATHS]);
 }
 
-export function buildCatalogSitemapPaths(groups: SitemapDatasetGroup[]): string[] {
-  const paths: string[] = [...STATIC_SITEMAP_PATHS];
+function makeEntry(path: string, updatedAt: string | null | undefined): SitemapEntry {
+  const lastmod = toLastmod(updatedAt);
+  return lastmod ? { path, lastmod } : { path };
+}
+
+export function buildCatalogSitemapEntries(groups: SitemapDatasetGroup[]): SitemapEntry[] {
+  const entries: SitemapEntry[] = STATIC_SITEMAP_PATHS.map((path) => ({ path }));
 
   for (const group of groups) {
     const collectionSlug = encodeURIComponent(group.collection.slug);
-    paths.push(`/collections/${collectionSlug}`);
+    entries.push(makeEntry(`/collections/${collectionSlug}`, group.collection.updated_at));
 
     for (const dataset of group.datasets) {
       const datasetSlug = encodeURIComponent(dataset.slug);
-      paths.push(`/collections/${collectionSlug}/datasets/${datasetSlug}`);
+      entries.push(makeEntry(`/collections/${collectionSlug}/datasets/${datasetSlug}`, dataset.updated_at));
       for (const file of dataset.files ?? []) {
-        paths.push(`/collections/${collectionSlug}/datasets/${datasetSlug}/files/${encodeURIComponent(file.slug)}`);
+        entries.push(
+          makeEntry(
+            `/collections/${collectionSlug}/datasets/${datasetSlug}/files/${encodeURIComponent(file.slug)}`,
+            file.updated_at ?? dataset.updated_at,
+          ),
+        );
       }
     }
   }
 
-  return paths;
+  return entries;
+}
+
+export function buildCatalogSitemapPaths(groups: SitemapDatasetGroup[]): string[] {
+  return buildCatalogSitemapEntries(groups).map((entry) => entry.path);
 }
 
 async function fetchJson(url: string): Promise<Response> {
@@ -191,10 +234,10 @@ export async function buildCatalogSitemapXml(origin: string): Promise<string> {
   const client = createDatasetApiSitemapClient(env.DATASET_API_URL);
   try {
     const groups = await client.fetchCatalogGroups();
-    return buildSitemapXmlFromPaths(origin, buildCatalogSitemapPaths(groups));
+    return buildSitemapXmlFromEntries(origin, buildCatalogSitemapEntries(groups));
   } catch (error) {
     console.warn("Failed to fetch expanded catalog sitemap data; falling back to catalog walk:", error);
     const groups = await fetchSitemapDatasetGroups(client);
-    return buildSitemapXmlFromPaths(origin, buildCatalogSitemapPaths(groups));
+    return buildSitemapXmlFromEntries(origin, buildCatalogSitemapEntries(groups));
   }
 }

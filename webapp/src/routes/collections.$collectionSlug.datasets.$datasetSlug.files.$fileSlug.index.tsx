@@ -21,7 +21,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Separator } from "@/components/ui/separator";
 import type { DatasetFile } from "@/lib/api-client";
 import { getCollectionBySlug, getDatasetBySlug, getDatasetFileById, getDatasetFileBySlug } from "@/lib/api-client";
-import { pageTitle, plainTextForSeo, seoDescription } from "@/lib/seo";
+import { buildDatasetJsonLd, datasetKeywords, pageTitle, plainTextForSeo, seoDescription } from "@/lib/seo";
 
 type FileFormat = NonNullable<DatasetFile["formats"]>[number];
 type FileSource = FileFormat["sources"][number];
@@ -138,10 +138,25 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
     const file = loaderData?.file;
     const fileName = file?.name ?? params.fileSlug;
     const title = pageTitle(dataset?.name ? `${fileName} | ${dataset.name}` : fileName);
-    const description = seoDescription(file?.description);
+    // Fall back to the parent dataset description so the JSON-LD/meta are not empty
+    // when a file carries no description of its own.
+    const description = seoDescription(file?.description ?? dataset?.description);
     const canonical = `/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
       params.datasetSlug,
     )}/files/${encodeURIComponent(params.fileSlug)}`;
+    const metadataUrl = `/api/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
+      params.datasetSlug,
+    )}/files/${encodeURIComponent(params.fileSlug)}`;
+
+    const jsonLd = buildDatasetJsonLd({
+      name: fileName,
+      description: file?.description ?? dataset?.description,
+      url: canonical,
+      metadataUrl,
+      keywords: datasetKeywords(dataset?.tags),
+      isPartOf: dataset?.name ? { type: "Dataset", name: dataset.name } : undefined,
+      dateModified: file?.updated_at,
+    });
 
     return {
       meta: [
@@ -155,10 +170,14 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
         {
           rel: "alternate",
           type: "application/json",
-          href: `/api/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
-            params.datasetSlug,
-          )}/files/${encodeURIComponent(params.fileSlug)}`,
+          href: metadataUrl,
           title: "File metadata JSON",
+        },
+      ],
+      scripts: [
+        {
+          type: "application/ld+json",
+          children: JSON.stringify(jsonLd),
         },
       ],
     };
