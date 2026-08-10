@@ -11,7 +11,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { trackSearchQuery, trackTagFilter } from "@/lib/analytics";
 import type { DatasetTags, DatasetWithUrls } from "@/lib/api-client";
 import { getCollectionBySlug, getCollectionDatasets, getCollectionTagValues } from "@/lib/api-client";
-import { pageTitle, seoDescription } from "@/lib/seo";
+import { buildDataCatalogJsonLd, pageTitle, seoDescription } from "@/lib/seo";
 
 const SEARCH_DEBOUNCE_MS = 500;
 
@@ -333,7 +333,15 @@ export const Route = createFileRoute("/collections/$slug")({
     const collection = loaderData?.collection;
     const title = pageTitle(collection?.name ?? params.slug);
     const description = seoDescription(collection?.description);
-    const canonical = `/collections/${encodeURIComponent(collection?.slug ?? params.slug)}`;
+    const slug = collection?.slug ?? params.slug;
+    const canonical = `/collections/${encodeURIComponent(slug)}`;
+
+    const jsonLd = buildDataCatalogJsonLd({
+      name: collection?.name ?? params.slug,
+      description: collection?.description,
+      url: canonical,
+      dateModified: collection?.updated_at,
+    });
 
     return {
       meta: [
@@ -347,8 +355,14 @@ export const Route = createFileRoute("/collections/$slug")({
         {
           rel: "alternate",
           type: "application/json",
-          href: `/api/collections/${encodeURIComponent(collection?.slug ?? params.slug)}`,
+          href: `/api/collections/${encodeURIComponent(slug)}`,
           title: "Collection metadata JSON",
+        },
+      ],
+      scripts: [
+        {
+          type: "application/ld+json",
+          children: JSON.stringify(jsonLd),
         },
       ],
     };

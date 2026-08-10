@@ -5,28 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Separator } from "@/components/ui/separator";
-import type { DatasetTags } from "@/lib/api-client";
 import { getCollectionBySlug, getDatasetBySlug } from "@/lib/api-client";
-import { pageTitle, plainTextForSeo, seoDescription } from "@/lib/seo";
-
-function datasetKeywordContent(tags: DatasetTags | undefined): string | undefined {
-  if (!tags) {
-    return undefined;
-  }
-
-  const keywords = new Set<string>();
-  for (const value of Object.values(tags)) {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        keywords.add(item);
-      }
-    } else {
-      keywords.add(value);
-    }
-  }
-
-  return keywords.size > 0 ? [...keywords].join(", ") : undefined;
-}
+import { buildDatasetJsonLd, datasetKeywords, pageTitle, plainTextForSeo, seoDescription } from "@/lib/seo";
 
 export const Route = createFileRoute("/collections/$collectionSlug/datasets/$datasetSlug")({
   loader: async ({ params }) => {
@@ -57,12 +37,27 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
   },
   head: ({ loaderData, params }) => {
     const dataset = loaderData?.dataset;
+    const collection = loaderData?.collection;
     const title = pageTitle(dataset?.name ?? params.datasetSlug);
     const description = seoDescription(dataset?.description);
     const canonical = `/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
       params.datasetSlug,
     )}`;
-    const keywords = datasetKeywordContent(dataset?.tags);
+    const metadataUrl = `/api/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
+      params.datasetSlug,
+    )}`;
+    const keywordList = datasetKeywords(dataset?.tags);
+    const keywords = keywordList.length > 0 ? keywordList.join(", ") : undefined;
+
+    const jsonLd = buildDatasetJsonLd({
+      name: dataset?.name ?? params.datasetSlug,
+      description: dataset?.description,
+      url: canonical,
+      metadataUrl,
+      keywords: keywordList,
+      isPartOf: collection?.name ? { type: "Collection", name: collection.name } : undefined,
+      dateModified: dataset?.updated_at,
+    });
 
     return {
       meta: [
@@ -77,10 +72,14 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
         {
           rel: "alternate",
           type: "application/json",
-          href: `/api/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
-            params.datasetSlug,
-          )}`,
+          href: metadataUrl,
           title: "Dataset metadata JSON",
+        },
+      ],
+      scripts: [
+        {
+          type: "application/ld+json",
+          children: JSON.stringify(jsonLd),
         },
       ],
     };
