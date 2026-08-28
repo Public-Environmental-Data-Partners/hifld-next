@@ -80,6 +80,7 @@ describe("ShapefileZipDownloadButton analytics", () => {
         source_count: 2,
       }),
     );
+    expect(capture).not.toHaveBeenCalledWith("dataset_download_handed_off", expect.anything());
   });
 
   it("tracks empty shapefile source lists as failed downloads", async () => {
