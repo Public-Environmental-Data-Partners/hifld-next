@@ -157,6 +157,35 @@ describe("download analytics", () => {
     });
   });
 
+  it("tracks a dataset map import with only source and layer metadata", async () => {
+    const { trackDatasetImportedIntoMap } = await import("../analytics");
+
+    trackDatasetImportedIntoMap({
+      collection_slug: "hifld",
+      dataset_slug: "hospitals",
+      file_slug: "hospitals",
+      source_id: 15,
+      version: "v1.0.0",
+      import_source: "route",
+      loaded_layer_count: 2,
+    });
+
+    expect(capture).toHaveBeenCalledWith("dataset_imported_into_map", {
+      collection_slug: "hifld",
+      dataset_slug: "hospitals",
+      file_slug: "hospitals",
+      source_id: 15,
+      version: "v1.0.0",
+      import_source: "route",
+      loaded_layer_count: 2,
+    });
+    expect(capture.mock.calls[0]?.[1]).not.toHaveProperty("feature_id");
+    expect(capture.mock.calls[0]?.[1]).not.toHaveProperty("feature_properties");
+    expect(capture.mock.calls[0]?.[1]).not.toHaveProperty("coordinates");
+    expect(capture.mock.calls[0]?.[1]).not.toHaveProperty("source_url");
+    expect(capture.mock.calls[0]?.[1]).not.toHaveProperty("map_viewport");
+  });
+
   it("tracks dataset quality feedback with feature JSON and no geometry", async () => {
     const { trackDatasetQualityFeedbackSubmitted } = await import("../analytics");
 

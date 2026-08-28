@@ -57,6 +57,16 @@ export interface DownloadFailureProperties {
   source_count?: number | undefined;
 }
 
+export interface DatasetMapImportInput {
+  collection_slug: string;
+  dataset_slug: string;
+  file_slug: string;
+  source_id?: number | undefined;
+  version?: string | number | undefined;
+  import_source: "route" | "picker";
+  loaded_layer_count: number;
+}
+
 export interface DatasetQualityFeedbackFeature {
   id: string;
   loadedLayerId: string;
@@ -90,6 +100,7 @@ type AnalyticsEventProperties =
   | DownloadSuccessProperties
   | DownloadHandoffProperties
   | DownloadFailureProperties
+  | DatasetMapImportInput
   | (Omit<DatasetQualityFeedbackInput, "feature"> & { current_url?: string; feature_json?: string });
 
 function compactProperties(properties: AnalyticsEventProperties): PostHogEventProperties {
@@ -273,6 +284,18 @@ export function trackDownloadHandedOff(context: DownloadAnalyticsContext, proper
 
 export function trackDownloadFailed(context: DownloadAnalyticsContext, properties: DownloadFailureProperties) {
   captureDownloadEvent("dataset_download_failed", context, properties);
+}
+
+export function trackDatasetImportedIntoMap(input: DatasetMapImportInput) {
+  if (typeof window === "undefined") return;
+  if (!posthogInitialized) initPostHog();
+  if (!posthogInitialized || typeof posthog.capture !== "function") return;
+
+  try {
+    posthog.capture("dataset_imported_into_map", compactProperties(input));
+  } catch (error) {
+    console.error("Failed to track dataset map import:", error);
+  }
 }
 
 function feedbackFeatureJson(feature: DatasetQualityFeedbackFeature): string {
