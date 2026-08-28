@@ -157,7 +157,7 @@ describe("DownloadButton analytics", () => {
       "dataset_download_failed",
       expect.objectContaining({
         download_method: "fetch_stream",
-        error_message: "Download canceled",
+        error_category: "canceled",
       }),
     );
     expect(capture).not.toHaveBeenCalledWith("dataset_download_succeeded", expect.anything());
@@ -188,7 +188,7 @@ describe("DownloadButton analytics", () => {
         "dataset_download_failed",
         expect.objectContaining({
           download_method: "fetch_stream",
-          error_message: "Download failed: Forbidden",
+          error_category: "http_error",
           duration_ms: expect.any(Number),
         }),
       );
@@ -212,6 +212,25 @@ describe("DownloadButton analytics", () => {
     expect(failedEventIndex).toBeLessThan(handoffEventIndex);
 
     expect(clickSpy).toHaveBeenCalled();
+    clickSpy.mockRestore();
+  });
+
+  it("categorizes arbitrary fetch errors without sending their text to PostHog", async () => {
+    const sensitiveError = "Network failed with authorization=secret-download-token";
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error(sensitiveError)));
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    await executeDownload({
+      url: "/api/collections/hifld/download",
+      filename: "file.zip",
+      useDirectDownload: false,
+    });
+
+    expect(capture).toHaveBeenCalledWith(
+      "dataset_download_failed",
+      expect.objectContaining({ error_category: "network_error" }),
+    );
+    expect(capture.mock.calls.flat().join(" ")).not.toContain(sensitiveError);
     clickSpy.mockRestore();
   });
 });

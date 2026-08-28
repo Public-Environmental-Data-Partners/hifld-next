@@ -2,7 +2,7 @@ import { Download, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { DownloadAnalyticsContext } from "@/lib/analytics";
+import type { DownloadAnalyticsContext, DownloadFailureCategory } from "@/lib/analytics";
 import {
   trackDownloadClicked,
   trackDownloadFailed,
@@ -81,8 +81,20 @@ function triggerAnchorDownload(url: string, filename: string, openInNewTab: bool
   document.body.removeChild(link);
 }
 
-function errorMessage(error: Error | DOMException): string {
-  return error.message || String(error);
+class HttpDownloadError extends Error {
+  constructor() {
+    super("Download request returned an unsuccessful status.");
+  }
+}
+
+function isCanceledDownload(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function downloadFailureCategory(error: unknown): DownloadFailureCategory {
+  if (isCanceledDownload(error)) return "canceled";
+  if (error instanceof HttpDownloadError) return "http_error";
+  return "network_error";
 }
 
 function extensionForLabel(label: string): string {
@@ -207,7 +219,7 @@ export async function executeDownload({ url, filename, analyticsContext, useDire
     }
 
     if (!response.ok) {
-      throw new Error(`Download failed: ${response.statusText}`);
+      throw new HttpDownloadError();
     }
 
     const responseClone = response.clone();
@@ -220,9 +232,9 @@ export async function executeDownload({ url, filename, analyticsContext, useDire
         return;
       }
     } catch (fileSystemError) {
-      if (fileSystemError instanceof DOMException && fileSystemError.name === "AbortError") {
+      if (isCanceledDownload(fileSystemError)) {
         trackDownloadFailed(baseAnalyticsContext, {
-          error_message: "Download canceled",
+          error_category: "canceled",
           received_bytes: state.receivedBytes,
           content_length_bytes: state.contentLengthBytes,
           duration_ms: elapsedMs(startTime),
@@ -244,7 +256,7 @@ export async function executeDownload({ url, filename, analyticsContext, useDire
   } catch (error) {
     console.error("Download error:", error);
     trackDownloadFailed(baseAnalyticsContext, {
-      error_message: error instanceof Error ? errorMessage(error) : String(error),
+      error_category: downloadFailureCategory(error),
       received_bytes: state.receivedBytes || undefined,
       content_length_bytes: state.contentLengthBytes,
       duration_ms: elapsedMs(startTime),

@@ -49,8 +49,10 @@ export interface DownloadHandoffProperties {
   duration_ms: number;
 }
 
+export type DownloadFailureCategory = "http_error" | "network_error" | "canceled" | "zip_error";
+
 export interface DownloadFailureProperties {
-  error_message: string;
+  error_category: DownloadFailureCategory;
   received_bytes?: number | undefined;
   content_length_bytes?: number | undefined;
   duration_ms?: number | undefined;

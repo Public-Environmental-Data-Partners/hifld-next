@@ -11,6 +11,11 @@ interface DiscoveryCaptureClient {
   capture(capture: DiscoveryRouteCapture): void;
 }
 
+type PostHogEnvironment = typeof process.env & {
+  PUBLIC_POSTHOG_KEY?: string | undefined;
+  PUBLIC_POSTHOG_HOST?: string | undefined;
+};
+
 export function registerDiscoveryAnalytics(registrar: ResponseHookRegistrar, client?: DiscoveryCaptureClient): void {
   registrar.hook("response", (response, event) => {
     const capture = buildDiscoveryRouteCapture(event.req, response.status);
@@ -19,12 +24,13 @@ export function registerDiscoveryAnalytics(registrar: ResponseHookRegistrar, cli
 }
 
 function configuredPostHogClient(): PostHog | null {
-  const key = process.env["PUBLIC_POSTHOG_KEY"]?.trim();
+  const environment: PostHogEnvironment = process.env;
+  const key = environment.PUBLIC_POSTHOG_KEY?.trim();
   if (!key) return null;
 
   try {
     return new PostHog(key, {
-      host: process.env["PUBLIC_POSTHOG_HOST"]?.trim() || DEFAULT_POSTHOG_HOST,
+      host: environment.PUBLIC_POSTHOG_HOST?.trim() || DEFAULT_POSTHOG_HOST,
       disableGeoip: true,
     });
   } catch {

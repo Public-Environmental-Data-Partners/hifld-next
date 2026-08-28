@@ -155,7 +155,7 @@ describe("analytics", () => {
     });
   });
 
-  it("tracks download failure with error metadata", async () => {
+  it("tracks download failure with a bounded error category", async () => {
     const { trackDownloadFailed } = await import("../analytics");
 
     trackDownloadFailed(
@@ -167,7 +167,7 @@ describe("analytics", () => {
         download_method: "fetch_stream",
       },
       {
-        error_message: "Download failed: Unauthorized",
+        error_category: "http_error",
         received_bytes: 5,
         content_length_bytes: 10,
         duration_ms: 90,
@@ -180,7 +180,7 @@ describe("analytics", () => {
       file_slug: "runways",
       format: "geoparquet",
       download_method: "fetch_stream",
-      error_message: "Download failed: Unauthorized",
+      error_category: "http_error",
       received_bytes: 5,
       content_length_bytes: 10,
       duration_ms: 90,
