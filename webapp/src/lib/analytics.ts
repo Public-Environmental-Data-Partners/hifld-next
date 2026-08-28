@@ -38,11 +38,15 @@ export interface DownloadAnalyticsContext {
 }
 
 export interface DownloadSuccessProperties {
-  completion_status: "completed" | "handoff";
+  completion_status: "completed";
   received_bytes?: number | undefined;
   content_length_bytes?: number | undefined;
   duration_ms?: number | undefined;
   source_count?: number | undefined;
+}
+
+export interface DownloadHandoffProperties {
+  duration_ms: number;
 }
 
 export interface DownloadFailureProperties {
@@ -84,6 +88,7 @@ type AnalyticsEventProperties =
   | PageViewProperties
   | DownloadAnalyticsContext
   | DownloadSuccessProperties
+  | DownloadHandoffProperties
   | DownloadFailureProperties
   | (Omit<DatasetQualityFeedbackInput, "feature"> & { current_url?: string; feature_json?: string });
 
@@ -92,9 +97,13 @@ function compactProperties(properties: AnalyticsEventProperties): PostHogEventPr
 }
 
 function captureDownloadEvent(
-  eventName: "dataset_download_clicked" | "dataset_download_succeeded" | "dataset_download_failed",
+  eventName:
+    | "dataset_download_clicked"
+    | "dataset_download_succeeded"
+    | "dataset_download_handed_off"
+    | "dataset_download_failed",
   context: DownloadAnalyticsContext,
-  properties?: DownloadSuccessProperties | DownloadFailureProperties,
+  properties?: DownloadSuccessProperties | DownloadHandoffProperties | DownloadFailureProperties,
 ) {
   if (typeof window === "undefined") return;
   if (!posthogInitialized) initPostHog();
@@ -256,6 +265,10 @@ export function trackDownloadClicked(context: DownloadAnalyticsContext) {
 
 export function trackDownloadSucceeded(context: DownloadAnalyticsContext, properties: DownloadSuccessProperties) {
   captureDownloadEvent("dataset_download_succeeded", context, properties);
+}
+
+export function trackDownloadHandedOff(context: DownloadAnalyticsContext, properties: DownloadHandoffProperties) {
+  captureDownloadEvent("dataset_download_handed_off", context, properties);
 }
 
 export function trackDownloadFailed(context: DownloadAnalyticsContext, properties: DownloadFailureProperties) {

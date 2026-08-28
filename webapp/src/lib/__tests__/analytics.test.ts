@@ -101,6 +101,30 @@ describe("download analytics", () => {
     });
   });
 
+  it("tracks a download handoff with duration only", async () => {
+    const { trackDownloadHandedOff } = await import("../analytics");
+
+    trackDownloadHandedOff(
+      {
+        collection_slug: "hifld",
+        dataset_slug: "airport-runways",
+        file_slug: "runways",
+        format: "geoparquet",
+        download_method: "native_link",
+      },
+      { duration_ms: 125 },
+    );
+
+    expect(capture).toHaveBeenCalledWith("dataset_download_handed_off", {
+      collection_slug: "hifld",
+      dataset_slug: "airport-runways",
+      file_slug: "runways",
+      format: "geoparquet",
+      download_method: "native_link",
+      duration_ms: 125,
+    });
+  });
+
   it("tracks download failure with error metadata", async () => {
     const { trackDownloadFailed } = await import("../analytics");
 

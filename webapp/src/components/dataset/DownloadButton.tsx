@@ -3,7 +3,12 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { DownloadAnalyticsContext } from "@/lib/analytics";
-import { trackDownloadClicked, trackDownloadFailed, trackDownloadSucceeded } from "@/lib/analytics";
+import {
+  trackDownloadClicked,
+  trackDownloadFailed,
+  trackDownloadHandedOff,
+  trackDownloadSucceeded,
+} from "@/lib/analytics";
 import { usesNativeBrowserDownload } from "./sourceUrls";
 
 interface DownloadButtonProps {
@@ -163,14 +168,9 @@ async function streamToBlobUrl(response: Response): Promise<{ blobUrl: string; r
   return { blobUrl: URL.createObjectURL(blob), receivedBytes };
 }
 
-function trackCompleted(
-  baseAnalyticsContext: DownloadAnalyticsContext,
-  state: DownloadState,
-  startTime: number,
-  completionStatus: "completed" | "handoff",
-) {
+function trackCompleted(baseAnalyticsContext: DownloadAnalyticsContext, state: DownloadState, startTime: number) {
   trackDownloadSucceeded(baseAnalyticsContext, {
-    completion_status: completionStatus,
+    completion_status: "completed",
     received_bytes: state.receivedBytes || undefined,
     content_length_bytes: state.contentLengthBytes,
     duration_ms: elapsedMs(startTime),
@@ -191,8 +191,7 @@ export async function executeDownload({ url, filename, analyticsContext, useDire
 
   if (useDirectDownload) {
     triggerAnchorDownload(url, filename, true);
-    trackDownloadSucceeded(baseAnalyticsContext, {
-      completion_status: "handoff",
+    trackDownloadHandedOff(baseAnalyticsContext, {
       duration_ms: elapsedMs(startTime),
     });
     return;
@@ -217,7 +216,7 @@ export async function executeDownload({ url, filename, analyticsContext, useDire
       const savedBytes = await streamToFile(response, filename);
       if (savedBytes !== null) {
         state.receivedBytes = savedBytes;
-        trackCompleted(baseAnalyticsContext, state, startTime, "completed");
+        trackCompleted(baseAnalyticsContext, state, startTime);
         return;
       }
     } catch (fileSystemError) {
@@ -237,7 +236,7 @@ export async function executeDownload({ url, filename, analyticsContext, useDire
     const { blobUrl, receivedBytes } = await streamToBlobUrl(responseToUse);
     state.receivedBytes = receivedBytes;
     triggerAnchorDownload(blobUrl, filename, false);
-    trackCompleted(baseAnalyticsContext, state, startTime, "completed");
+    trackCompleted(baseAnalyticsContext, state, startTime);
 
     setTimeout(() => {
       URL.revokeObjectURL(blobUrl);
@@ -251,6 +250,9 @@ export async function executeDownload({ url, filename, analyticsContext, useDire
       duration_ms: elapsedMs(startTime),
     });
     triggerAnchorDownload(url, filename, true);
+    trackDownloadHandedOff(baseAnalyticsContext, {
+      duration_ms: elapsedMs(startTime),
+    });
   }
 }
 

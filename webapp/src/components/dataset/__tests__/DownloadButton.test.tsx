@@ -29,7 +29,7 @@ describe("DownloadButton analytics", () => {
     document.body.innerHTML = "";
   });
 
-  it("tracks native browser download handoff", async () => {
+  it("tracks native browser download handoff without recording success", async () => {
     vi.useFakeTimers();
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
@@ -58,13 +58,13 @@ describe("DownloadButton analytics", () => {
       }),
     );
     expect(capture).toHaveBeenCalledWith(
-      "dataset_download_succeeded",
+      "dataset_download_handed_off",
       expect.objectContaining({
         download_method: "native_link",
-        completion_status: "handoff",
         duration_ms: expect.any(Number),
       }),
     );
+    expect(capture).not.toHaveBeenCalledWith("dataset_download_succeeded", expect.anything());
     expect(clickSpy).toHaveBeenCalled();
 
     clickSpy.mockRestore();
@@ -124,7 +124,7 @@ describe("DownloadButton analytics", () => {
     clickSpy.mockRestore();
   });
 
-  it("tracks failed fetch downloads", async () => {
+  it("tracks failed fetch downloads and hands the URL off to the browser without recording success", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(new Response("nope", { status: 403, statusText: "Forbidden" })),
@@ -153,6 +153,15 @@ describe("DownloadButton analytics", () => {
         }),
       );
     });
+
+    expect(capture).toHaveBeenCalledWith(
+      "dataset_download_handed_off",
+      expect.objectContaining({
+        download_method: "fetch_stream",
+        duration_ms: expect.any(Number),
+      }),
+    );
+    expect(capture).not.toHaveBeenCalledWith("dataset_download_succeeded", expect.anything());
 
     expect(clickSpy).toHaveBeenCalled();
     clickSpy.mockRestore();
