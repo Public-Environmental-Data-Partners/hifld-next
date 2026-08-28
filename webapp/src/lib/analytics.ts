@@ -219,6 +219,7 @@ export function trackTagFilter(
   collectionSlug: string,
   filterKey: string,
   filterValues: string[],
+  resultCount: number,
   searchQuery?: string,
 ) {
   if (typeof window === "undefined") return;
@@ -230,6 +231,8 @@ export function trackTagFilter(
       collection_slug: collectionSlug,
       filter_key: filterKey,
       filter_values: filterValues,
+      result_count: resultCount,
+      is_zero_result: resultCount === 0,
       search_query: searchQuery,
     });
   } catch (error) {

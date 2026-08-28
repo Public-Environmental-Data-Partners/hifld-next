@@ -12,7 +12,7 @@ vi.mock("posthog-js", () => ({
   },
 }));
 
-describe("download analytics", () => {
+describe("analytics", () => {
   beforeEach(async () => {
     capture.mockClear();
     init.mockClear();
@@ -35,6 +35,36 @@ describe("download analytics", () => {
       }),
     );
     expect(capture).toHaveBeenCalledWith("$pageview", expect.objectContaining({ path: "/collections" }));
+  });
+
+  it("tracks a zero-result search query", async () => {
+    const { trackSearchQuery } = await import("../analytics");
+
+    trackSearchQuery("hospital", "hifld", 0);
+
+    expect(capture).toHaveBeenCalledWith("dataset_search", {
+      query: "hospital",
+      query_length: 8,
+      collection_slug: "hifld",
+      result_count: 0,
+      has_tag_filters: false,
+      is_zero_result: true,
+    });
+  });
+
+  it("tracks a zero-result tag filter with its resolved count", async () => {
+    const { trackTagFilter } = await import("../analytics");
+
+    trackTagFilter("hifld", "geometry_type", ["Point"], 0, "hospital");
+
+    expect(capture).toHaveBeenCalledWith("tag_filter_applied", {
+      collection_slug: "hifld",
+      filter_key: "geometry_type",
+      filter_values: ["Point"],
+      result_count: 0,
+      is_zero_result: true,
+      search_query: "hospital",
+    });
   });
 
   it("tracks a download click without full URLs or undefined fields", async () => {

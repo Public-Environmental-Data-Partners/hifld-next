@@ -210,14 +210,16 @@ async function runFilteredDatasetRequest({
   setFilteredDatasets,
   setFilteredTotal,
   setIsLoading,
-}: RunFilteredDatasetRequestArgs): Promise<void> {
+}: RunFilteredDatasetRequestArgs): Promise<FilteredDatasetFetchResult | null> {
   setIsLoading(true);
   try {
     const response = await loadFilteredDatasets(fetchArgs);
     applyFilteredDatasetResult(response, tagFilters, setFilteredDatasets, setFilteredTotal);
+    return response;
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     handleFilteredDatasetError(err, fetchArgs.signal, tagFilters, setFilteredDatasets, setFilteredTotal);
+    return null;
   } finally {
     if (!fetchArgs.signal.aborted) {
       setIsLoading(false);
@@ -323,7 +325,7 @@ export const Route = createFileRoute("/collections/$slug")({
           search: searchQuery || undefined,
         },
       });
-      return { collection, datasetsResponse };
+      return { collection, datasetsResponse, resolvedSearchQuery: searchQuery };
     } catch (error) {
       console.error("Error in collection detail loader:", error);
       throw error;
@@ -372,7 +374,7 @@ export const Route = createFileRoute("/collections/$slug")({
 
 // Component runs on client by default
 function CollectionDetailPage() {
-  const { collection, datasetsResponse: initialResponse } = Route.useLoaderData();
+  const { collection, datasetsResponse: initialResponse, resolvedSearchQuery } = Route.useLoaderData();
   const navigate = useNavigate({ from: Route.fullPath });
   const search = useSearch({ from: Route.fullPath });
 
@@ -442,7 +444,7 @@ function CollectionDetailPage() {
       abortControllerRef.current?.abort();
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
-      await runFilteredDatasetRequest({
+      return runFilteredDatasetRequest({
         fetchArgs: {
           collectionId: collection.id,
           searchQuery,
@@ -477,14 +479,19 @@ function CollectionDetailPage() {
     // Track search when URL query changes (only once per unique query)
     // Use ref to prevent duplicate tracking when loader data updates
     const trimmedQuery = urlQuery.trim();
-    if (trimmedQuery && !hasTagFilters && trimmedQuery !== lastTrackedQueryRef.current) {
+    if (
+      trimmedQuery &&
+      !hasTagFilters &&
+      resolvedSearchQuery === urlQuery &&
+      trimmedQuery !== lastTrackedQueryRef.current
+    ) {
       lastTrackedQueryRef.current = trimmedQuery;
       trackSearchQuery(trimmedQuery, collection.slug, initialTotal, {
         hasTagFilters: false,
         queryLength: trimmedQuery.length,
       });
     }
-  }, [search.query, collection.slug, hasTagFilters, initialTotal, searchQuery]);
+  }, [search.query, collection.slug, hasTagFilters, initialTotal, resolvedSearchQuery, searchQuery]);
 
   // Debounced search handler - wait before updating URL/fetching to avoid
   // firing searches while the user is still typing.
@@ -504,11 +511,11 @@ function CollectionDetailPage() {
 
       // If tag filters are active, we need to fetch manually
       if (hasTagFilters) {
-        await fetchDatasets(searchQuery || undefined, 0, selectedTagFilters);
+        const result = await fetchDatasets(searchQuery || undefined, 0, selectedTagFilters);
 
         // Track search query after results are fetched
-        if (searchQuery.trim()) {
-          trackSearchQuery(searchQuery, collection.slug, filteredTotal ?? 0, {
+        if (searchQuery.trim() && result) {
+          trackSearchQuery(searchQuery, collection.slug, result.total, {
             hasTagFilters: true,
             queryLength: searchQuery.trim().length,
           });
@@ -521,7 +528,7 @@ function CollectionDetailPage() {
         clearTimeout(searchTimeoutRef.current);
       }
     };
-  }, [searchQuery, updateUrlParams, hasTagFilters, fetchDatasets, selectedTagFilters, collection.slug, filteredTotal]);
+  }, [searchQuery, updateUrlParams, hasTagFilters, fetchDatasets, selectedTagFilters, collection.slug]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -566,10 +573,10 @@ function CollectionDetailPage() {
     setSelectedTagFilters(newFilters);
     updateUrlParams({ offset: 0 });
 
-    // Track tag filter application
-    trackTagFilter(collection.slug, key, values, searchQuery || undefined);
-
-    await fetchDatasets(searchQuery, 0, newFilters);
+    const result = await fetchDatasets(searchQuery, 0, newFilters);
+    if (result) {
+      trackTagFilter(collection.slug, key, values, result.total, searchQuery || undefined);
+    }
   };
 
   return (

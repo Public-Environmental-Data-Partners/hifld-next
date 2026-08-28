@@ -1,9 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { waitFor } from '@testing-library/react'
-import { createRouter, createRootRoute, createRoute } from '@tanstack/react-router'
+import { act, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { createRouter, createRootRoute, createRoute, RouterProvider } from '@tanstack/react-router'
 import { collectionPageHref, getSyncedSearchQuery, Route as CollectionsSlugRoute } from '../collections.$slug'
 import * as apiClient from '@/lib/api-client'
 import type { Collection, DatasetWithUrls, PaginatedResponse } from '@/lib/api-client'
+
+const { trackSearchQuery, trackTagFilter } = vi.hoisted(() => ({
+  trackSearchQuery: vi.fn(),
+  trackTagFilter: vi.fn(),
+}))
+
+vi.mock('@/lib/analytics', () => ({
+  trackSearchQuery,
+  trackTagFilter,
+}))
 
 // Mock the API client
 vi.mock('@/lib/api-client', () => ({
@@ -33,7 +44,7 @@ vi.mock('@/components/ui/input', () => ({
 }))
 
 vi.mock('@/components/ui/button', () => ({
-  Button: ({ children, onClick, ...props }: any) => (
+  Button: ({ children, onClick, asChild: _asChild, ...props }: any) => (
     <button onClick={onClick} {...props}>
       {children}
     </button>
@@ -339,6 +350,35 @@ describe('CollectionDetailPage - API Integration Tests', () => {
         )
       })
     })
+
+    it('tracks a URL-driven zero-result search from its matching loader response', async () => {
+      vi.mocked(apiClient.getCollectionDatasets).mockImplementation(({ data }) =>
+        Promise.resolve(
+          data.search === 'hospital'
+            ? createMockResponse([], 0, 100, 0)
+            : createMockResponse(createMockDatasets(14, 0), 14, 100, 0)
+        )
+      )
+
+      const router = createTestRouter()
+      await router.navigate({ to: '/collections/hifld', search: {} })
+      render(<RouterProvider router={router} />)
+
+      await waitFor(() => {
+        expect(apiClient.getCollectionDatasets).toHaveBeenCalledTimes(1)
+      })
+
+      await act(async () => {
+        await router.navigate({ to: '/collections/hifld', search: { query: 'hospital' } })
+      })
+
+      await waitFor(() => {
+        expect(trackSearchQuery).toHaveBeenCalledWith('hospital', 'hifld', 0, {
+          hasTagFilters: false,
+          queryLength: 8,
+        })
+      })
+    })
   })
 
   describe('Tag Filters API calls', () => {
@@ -368,6 +408,50 @@ describe('CollectionDetailPage - API Integration Tests', () => {
       await waitFor(() => {
         expect(apiClient.getCollectionDatasets).toHaveBeenCalled()
       })
+    })
+
+    it('tracks a tag filter only after its response resolves with the result count', async () => {
+      const user = userEvent.setup()
+      let resolveFilteredResponse: ((response: PaginatedResponse<DatasetWithUrls>) => void) | undefined
+      const filteredResponse = new Promise<PaginatedResponse<DatasetWithUrls>>((resolve) => {
+        resolveFilteredResponse = resolve
+      })
+      vi.mocked(apiClient.getCollectionDatasets)
+        .mockResolvedValueOnce(createMockResponse(createMockDatasets(14, 0), 14, 100, 0))
+        .mockReturnValueOnce(filteredResponse)
+
+      const router = createTestRouter()
+      await router.navigate({ to: '/collections/hifld', search: {} })
+      render(<RouterProvider router={router} />)
+
+      const filter = await screen.findByTestId('filter-geometry_type')
+      await user.selectOptions(filter, 'Point')
+
+      expect(trackTagFilter).not.toHaveBeenCalled()
+
+      resolveFilteredResponse?.(createMockResponse(createMockDatasets(3, 0), 3, 100, 0))
+
+      await waitFor(() => {
+        expect(trackTagFilter).toHaveBeenCalledWith('hifld', 'geometry_type', ['Point'], 3, undefined)
+      })
+    })
+
+    it('does not track an aborted tag-filter request', async () => {
+      const user = userEvent.setup()
+      const unresolvedResponse = new Promise<PaginatedResponse<DatasetWithUrls>>(() => {})
+      vi.mocked(apiClient.getCollectionDatasets)
+        .mockResolvedValueOnce(createMockResponse(createMockDatasets(14, 0), 14, 100, 0))
+        .mockReturnValue(unresolvedResponse)
+
+      const router = createTestRouter()
+      await router.navigate({ to: '/collections/hifld', search: {} })
+      render(<RouterProvider router={router} />)
+
+      const filter = await screen.findByTestId('filter-geometry_type')
+      await user.selectOptions(filter, 'Point')
+      await user.selectOptions(filter, 'Polygon')
+
+      expect(trackTagFilter).not.toHaveBeenCalled()
     })
   })
 
