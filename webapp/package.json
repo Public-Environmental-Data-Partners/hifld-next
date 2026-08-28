@@ -58,6 +58,7 @@
     "nodes2ts": "^4.0.2",
     "pmtiles": "^3.2.1",
     "posthog-js": "^1.347.2",
+    "posthog-node": "^5.51.4",
     "radix-ui": "^1.4.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
