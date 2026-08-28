@@ -19,7 +19,13 @@ type PostHogEnvironment = typeof process.env & {
 export function registerDiscoveryAnalytics(registrar: ResponseHookRegistrar, client?: DiscoveryCaptureClient): void {
   registrar.hook("response", (response, event) => {
     const capture = buildDiscoveryRouteCapture(event.req, response.status);
-    if (capture && client) client.capture(capture);
+    if (!capture || !client) return;
+
+    try {
+      client.capture(capture);
+    } catch {
+      console.error("PostHog discovery analytics capture failed");
+    }
   });
 }
 
