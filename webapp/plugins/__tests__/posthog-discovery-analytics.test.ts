@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DiscoveryRouteCapture } from "../../src/lib/server-discovery-analytics";
+import nitroConfig from "../../nitro.config";
 import { registerDiscoveryAnalytics } from "../posthog-discovery-analytics";
 
 type ResponseHook = (response: Response, event: { req: Request }) => void;
@@ -18,6 +19,10 @@ function responseHookRegistrar() {
 }
 
 describe("registerDiscoveryAnalytics", () => {
+  it("explicitly registers the plugin with Nitro", () => {
+    expect(nitroConfig.plugins).toContain("./plugins/posthog-discovery-analytics");
+  });
+
   it("captures an in-scope API response with its actual status", () => {
     const { registrar, responseHooks } = responseHookRegistrar();
     const captures: DiscoveryRouteCapture[] = [];
