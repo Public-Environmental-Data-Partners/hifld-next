@@ -400,9 +400,12 @@ export function newMapImportEvents({
   routeSourceDescriptorIds: ReadonlySet<string>;
   trackedSourceDescriptorIds: ReadonlySet<string>;
 }): MapImportEvent[] {
+  const seenSourceDescriptorIds = new Set(trackedSourceDescriptorIds);
+
   return loadedLayers.flatMap((layer) => {
     const descriptorId = sourceDescriptorId(layer.descriptor);
-    if (trackedSourceDescriptorIds.has(descriptorId)) return [];
+    if (seenSourceDescriptorIds.has(descriptorId)) return [];
+    seenSourceDescriptorIds.add(descriptorId);
     return [
       {
         sourceDescriptorId: descriptorId,
@@ -977,6 +980,9 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   };
 
   const removeLoadedLayer = (layer: LoadedMapLayer) => {
+    const descriptorId = sourceDescriptorId(layer.descriptor);
+    trackedSourceDescriptorIdsRef.current.delete(descriptorId);
+    routeSourceDescriptorIdsRef.current.delete(descriptorId);
     setLoadedLayers((prev) => prev.filter((entry) => entry.id !== layer.id));
     applyLayerPickerSelection(
       layerPickerSelectionAfterLayerRemoval({

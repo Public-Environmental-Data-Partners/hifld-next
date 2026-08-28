@@ -222,4 +222,45 @@ describe("MapWorkspace map-import analytics", () => {
 
     await waitFor(() => expect(trackDatasetImportedIntoMap).toHaveBeenCalledTimes(2));
   });
+
+  it("tracks a route layer again when it is removed and re-added through the picker", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<MapWorkspace collection={collection} initialLayers={[initialLayer]} initialLayerKey="route" />);
+
+    await waitFor(() => {
+      expect(trackDatasetImportedIntoMap).toHaveBeenCalledExactlyOnceWith({
+        collection_slug: "hifld",
+        dataset_slug: "hospitals",
+        file_slug: "hospitals",
+        source_id: 15,
+        version: "v1.0.0",
+        import_source: "route",
+        loaded_layer_count: 1,
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: "Remove Hospitals / v1.0.0" }));
+    await user.click(screen.getByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: /hospitals/i }));
+    await user.click(screen.getAllByRole("combobox")[2]!);
+    await user.click(screen.getByRole("option", { name: "v1.0.0" }));
+    await user.click(screen.getByRole("button", { name: "Add layer" }));
+
+    await waitFor(() => {
+      expect(trackDatasetImportedIntoMap).toHaveBeenLastCalledWith({
+        collection_slug: "hifld",
+        dataset_slug: "hospitals",
+        file_slug: "hospitals",
+        source_id: 15,
+        version: "v1.0.0",
+        import_source: "picker",
+        loaded_layer_count: 1,
+      });
+    });
+    expect(trackDatasetImportedIntoMap).toHaveBeenCalledTimes(2);
+
+    rerender(<MapWorkspace collection={collection} initialLayers={[initialLayer]} initialLayerKey="sources" />);
+
+    await waitFor(() => expect(trackDatasetImportedIntoMap).toHaveBeenCalledTimes(2));
+  });
 });

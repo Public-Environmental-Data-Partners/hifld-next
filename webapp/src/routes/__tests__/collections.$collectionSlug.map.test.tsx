@@ -365,4 +365,31 @@ describe("collection map route", () => {
       }),
     ).toEqual([]);
   });
+
+  it("deduplicates repeated source descriptors in one loaded-layer batch", () => {
+    const initialLayer = resolvedToMapLayer({ descriptor, dataset, file, source });
+    expect(initialLayer).not.toBeNull();
+    if (!initialLayer) return;
+
+    expect(
+      newMapImportEvents({
+        loadedLayers: [initialLayer, initialLayer],
+        routeSourceDescriptorIds: new Set([initialLayer.id]),
+        trackedSourceDescriptorIds: new Set(),
+      }),
+    ).toEqual([
+      {
+        sourceDescriptorId: initialLayer.id,
+        properties: {
+          collection_slug: "hifld",
+          dataset_slug: "hospitals",
+          file_slug: "hospitals",
+          source_id: 15,
+          version: "v1.0.0",
+          import_source: "route",
+          loaded_layer_count: 2,
+        },
+      },
+    ]);
+  });
 });
