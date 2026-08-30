@@ -1,8 +1,9 @@
 import { waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { capture } = vi.hoisted(() => ({
+const { capture, createZipFromUrls } = vi.hoisted(() => ({
   capture: vi.fn(),
+  createZipFromUrls: vi.fn(),
 }));
 
 vi.mock("posthog-js", () => ({
@@ -16,9 +17,7 @@ vi.mock("@/lib/zip-utils", async () => {
   const actual = await vi.importActual<typeof import("@/lib/zip-utils")>("@/lib/zip-utils");
   return {
     ...actual,
-    createZipFromUrls: vi.fn(async (_files, _filename, onProgress) => {
-      onProgress?.(100);
-    }),
+    createZipFromUrls,
   };
 });
 
@@ -27,6 +26,9 @@ import { executeShapefileZipDownload } from "../ShapefileZipDownloadButton";
 describe("ShapefileZipDownloadButton analytics", () => {
   beforeEach(() => {
     capture.mockClear();
+    createZipFromUrls.mockImplementation(async (_files, _filename, onProgress: ((progress: number) => void) | undefined) => {
+      onProgress?.(100);
+    });
   });
 
   it("tracks successful client zip creation", async () => {
@@ -80,9 +82,10 @@ describe("ShapefileZipDownloadButton analytics", () => {
         source_count: 2,
       }),
     );
+    expect(capture).not.toHaveBeenCalledWith("dataset_download_handed_off", expect.anything());
   });
 
-  it("tracks empty shapefile source lists as failed downloads", async () => {
+  it("tracks an empty source-list click before its zip failure", async () => {
     await executeShapefileZipDownload({
       filename: "shape.zip",
       sources: [],
@@ -99,8 +102,29 @@ describe("ShapefileZipDownloadButton analytics", () => {
       expect.objectContaining({
         download_method: "client_zip",
         source_count: 0,
-        error_message: "No shapefile URLs found in sources",
+        error_category: "zip_error",
       }),
     );
+
+    const clickIndex = capture.mock.calls.findIndex(([eventName]) => eventName === "dataset_download_clicked");
+    const failureIndex = capture.mock.calls.findIndex(([eventName]) => eventName === "dataset_download_failed");
+    expect(clickIndex).toBeGreaterThanOrEqual(0);
+    expect(failureIndex).toBeGreaterThan(clickIndex);
+  });
+
+  it("does not send zip error details to PostHog", async () => {
+    const sensitiveError = "Zip source contained secret=shapefile-token";
+    createZipFromUrls.mockRejectedValueOnce(new Error(sensitiveError));
+
+    await executeShapefileZipDownload({
+      filename: "shape.zip",
+      sources: [{ id: 1, url: "https://storage.googleapis.com/hifld/shape.shp", location: { path: "shape.shp" } }],
+    });
+
+    expect(capture).toHaveBeenCalledWith(
+      "dataset_download_failed",
+      expect.objectContaining({ error_category: "zip_error" }),
+    );
+    expect(capture.mock.calls.flat().join(" ")).not.toContain(sensitiveError);
   });
 });

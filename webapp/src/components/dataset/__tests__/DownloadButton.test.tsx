@@ -18,6 +18,7 @@ describe("DownloadButton analytics", () => {
   beforeEach(() => {
     capture.mockClear();
     vi.useRealTimers();
+    Reflect.deleteProperty(window, "showSaveFilePicker");
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
       value: vi.fn(() => "blob:test"),
@@ -29,7 +30,7 @@ describe("DownloadButton analytics", () => {
     document.body.innerHTML = "";
   });
 
-  it("tracks native browser download handoff", async () => {
+  it("tracks native browser download handoff without recording success", async () => {
     vi.useFakeTimers();
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
@@ -58,19 +59,29 @@ describe("DownloadButton analytics", () => {
       }),
     );
     expect(capture).toHaveBeenCalledWith(
-      "dataset_download_succeeded",
+      "dataset_download_handed_off",
       expect.objectContaining({
         download_method: "native_link",
-        completion_status: "handoff",
         duration_ms: expect.any(Number),
       }),
     );
+    expect(capture).not.toHaveBeenCalledWith("dataset_download_succeeded", expect.anything());
     expect(clickSpy).toHaveBeenCalled();
 
     clickSpy.mockRestore();
   });
 
-  it("tracks successful fetch stream downloads with received bytes", async () => {
+  it("tracks a File System Access API download as completed without handing it off", async () => {
+    const writable = {
+      write: vi.fn(),
+      close: vi.fn(),
+    };
+    Object.defineProperty(window, "showSaveFilePicker", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue({
+        createWritable: vi.fn().mockResolvedValue(writable),
+      }),
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -91,8 +102,6 @@ describe("DownloadButton analytics", () => {
         ),
       ),
     );
-    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-
     await executeDownload({
       url: "/api/collections/hifld/datasets/dataset/files/file/sources/1/download-zip",
       filename: "file.zip",
@@ -120,11 +129,42 @@ describe("DownloadButton analytics", () => {
       );
     });
 
-    expect(clickSpy).toHaveBeenCalled();
-    clickSpy.mockRestore();
+    expect(writable.write).toHaveBeenCalledWith(new Uint8Array([1, 2, 3, 4, 5]));
+    expect(writable.close).toHaveBeenCalledOnce();
+    expect(capture).not.toHaveBeenCalledWith("dataset_download_handed_off", expect.anything());
   });
 
-  it("tracks failed fetch downloads", async () => {
+  it("tracks save picker cancellation as a failed download without handing it off", async () => {
+    Object.defineProperty(window, "showSaveFilePicker", {
+      configurable: true,
+      value: vi.fn().mockRejectedValue(new DOMException("The user canceled the download", "AbortError")),
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("content", { status: 200 })));
+
+    await executeDownload({
+      url: "/api/collections/hifld/download",
+      filename: "file.zip",
+      useDirectDownload: false,
+      analyticsContext: {
+        collection_slug: "hifld",
+        dataset_slug: "dataset",
+        file_slug: "file",
+        format: "shapefile",
+      },
+    });
+
+    expect(capture).toHaveBeenCalledWith(
+      "dataset_download_failed",
+      expect.objectContaining({
+        download_method: "fetch_stream",
+        error_category: "canceled",
+      }),
+    );
+    expect(capture).not.toHaveBeenCalledWith("dataset_download_succeeded", expect.anything());
+    expect(capture).not.toHaveBeenCalledWith("dataset_download_handed_off", expect.anything());
+  });
+
+  it("tracks failed fetch downloads and hands the URL off to the browser without recording success", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(new Response("nope", { status: 403, statusText: "Forbidden" })),
@@ -148,13 +188,49 @@ describe("DownloadButton analytics", () => {
         "dataset_download_failed",
         expect.objectContaining({
           download_method: "fetch_stream",
-          error_message: "Download failed: Forbidden",
+          error_category: "http_error",
           duration_ms: expect.any(Number),
         }),
       );
     });
 
+    expect(capture).toHaveBeenCalledWith(
+      "dataset_download_handed_off",
+      expect.objectContaining({
+        download_method: "fetch_stream",
+        duration_ms: expect.any(Number),
+      }),
+    );
+    expect(capture).not.toHaveBeenCalledWith("dataset_download_succeeded", expect.anything());
+
+    const failedEventIndex = capture.mock.calls.findIndex(([eventName]) => eventName === "dataset_download_failed");
+    const handoffEventIndex = capture.mock.calls.findIndex(
+      ([eventName]) => eventName === "dataset_download_handed_off",
+    );
+    expect(failedEventIndex).toBeGreaterThanOrEqual(0);
+    expect(handoffEventIndex).toBeGreaterThanOrEqual(0);
+    expect(failedEventIndex).toBeLessThan(handoffEventIndex);
+
     expect(clickSpy).toHaveBeenCalled();
+    clickSpy.mockRestore();
+  });
+
+  it("categorizes arbitrary fetch errors without sending their text to PostHog", async () => {
+    const sensitiveError = "Network failed with authorization=secret-download-token";
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error(sensitiveError)));
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    await executeDownload({
+      url: "/api/collections/hifld/download",
+      filename: "file.zip",
+      useDirectDownload: false,
+    });
+
+    expect(capture).toHaveBeenCalledWith(
+      "dataset_download_failed",
+      expect.objectContaining({ error_category: "network_error" }),
+    );
+    expect(capture.mock.calls.flat().join(" ")).not.toContain(sensitiveError);
     clickSpy.mockRestore();
   });
 });

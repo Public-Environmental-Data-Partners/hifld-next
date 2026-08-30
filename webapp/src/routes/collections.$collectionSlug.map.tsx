@@ -65,6 +65,7 @@ import {
   getSampledValues,
   parseBreaks,
 } from "@/components/viewer/utils";
+import { type DatasetMapImportInput, trackDatasetImportedIntoMap } from "@/lib/analytics";
 import type {
   Collection,
   Dataset,
@@ -385,6 +386,47 @@ export function resolvedToMapLayer(entry: ResolvedDescriptor): LoadedMapLayer | 
   });
 }
 
+export interface MapImportEvent {
+  sourceDescriptorId: string;
+  properties: DatasetMapImportInput;
+}
+
+export function newMapImportEvents({
+  loadedLayers,
+  routeSourceDescriptorIds,
+  trackedSourceDescriptorIds,
+}: {
+  loadedLayers: LoadedMapLayer[];
+  routeSourceDescriptorIds: ReadonlySet<string>;
+  trackedSourceDescriptorIds: ReadonlySet<string>;
+}): MapImportEvent[] {
+  const seenSourceDescriptorIds = new Set(trackedSourceDescriptorIds);
+
+  return loadedLayers.flatMap((layer) => {
+    const descriptorId = sourceDescriptorId(layer.descriptor);
+    if (seenSourceDescriptorIds.has(descriptorId)) return [];
+    seenSourceDescriptorIds.add(descriptorId);
+    return [
+      {
+        sourceDescriptorId: descriptorId,
+        properties: {
+          collection_slug: layer.descriptor.collectionSlug,
+          dataset_slug: layer.descriptor.datasetSlug,
+          file_slug: layer.descriptor.fileSlug,
+          source_id: layer.descriptor.sourceId,
+          version: layer.descriptor.version,
+          import_source: routeSourceDescriptorIds.has(descriptorId) ? "route" : "picker",
+          loaded_layer_count: loadedLayers.length,
+        },
+      },
+    ];
+  });
+}
+
+function mapLayersFromResolvedDescriptors(entries: ResolvedDescriptor[]): LoadedMapLayer[] {
+  return entries.map(resolvedToMapLayer).filter((entry): entry is LoadedMapLayer => entry !== null);
+}
+
 function pmtilesFormatForFile(file: DatasetFile) {
   return file.formats?.find((formatEntry) => formatEntry.format.format_type === "pmtiles") ?? null;
 }
@@ -592,6 +634,10 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const searchRequestIdRef = useRef(0);
   const datasetDetailsRequestIdRef = useRef(0);
   const initialLayerKeyRef = useRef(initialLayerKey);
+  const routeSourceDescriptorIdsRef = useRef(
+    new Set(mapLayersFromResolvedDescriptors(initialLayers).map((layer) => sourceDescriptorId(layer.descriptor))),
+  );
+  const trackedSourceDescriptorIdsRef = useRef(new Set<string>());
   const selectedDescriptorIdRef = useRef<string | null>(null);
   const [vectorLayers, setVectorLayers] = useState<VectorLayerInfo[]>([]);
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
@@ -618,7 +664,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const [wasSelectionCapped, setWasSelectionCapped] = useState(false);
   const [s2Level, setS2Level] = useState(16);
   const [loadedLayers, setLoadedLayers] = useState<LoadedMapLayer[]>(() =>
-    initialLayers.map(resolvedToMapLayer).filter((entry): entry is LoadedMapLayer => entry !== null),
+    mapLayersFromResolvedDescriptors(initialLayers),
   );
   const isMobileMapLayout = useIsMobileMapLayout();
   const currentDescriptors = loadedLayers.map((layer) => layer.descriptor);
@@ -626,8 +672,24 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   useEffect(() => {
     if (!initialLayerKey || initialLayerKeyRef.current === initialLayerKey) return;
     initialLayerKeyRef.current = initialLayerKey;
-    setLoadedLayers(initialLayers.map(resolvedToMapLayer).filter((entry): entry is LoadedMapLayer => entry !== null));
+    const nextLayers = mapLayersFromResolvedDescriptors(initialLayers);
+    for (const layer of nextLayers) {
+      routeSourceDescriptorIdsRef.current.add(sourceDescriptorId(layer.descriptor));
+    }
+    setLoadedLayers(nextLayers);
   }, [initialLayerKey, initialLayers]);
+
+  useEffect(() => {
+    const events = newMapImportEvents({
+      loadedLayers,
+      routeSourceDescriptorIds: routeSourceDescriptorIdsRef.current,
+      trackedSourceDescriptorIds: trackedSourceDescriptorIdsRef.current,
+    });
+    for (const event of events) {
+      trackedSourceDescriptorIdsRef.current.add(event.sourceDescriptorId);
+      trackDatasetImportedIntoMap(event.properties);
+    }
+  }, [loadedLayers]);
 
   useEffect(() => {
     if (searchTimeoutRef.current) {
@@ -918,6 +980,9 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   };
 
   const removeLoadedLayer = (layer: LoadedMapLayer) => {
+    const descriptorId = sourceDescriptorId(layer.descriptor);
+    trackedSourceDescriptorIdsRef.current.delete(descriptorId);
+    routeSourceDescriptorIdsRef.current.delete(descriptorId);
     setLoadedLayers((prev) => prev.filter((entry) => entry.id !== layer.id));
     applyLayerPickerSelection(
       layerPickerSelectionAfterLayerRemoval({

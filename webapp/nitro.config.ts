@@ -2,6 +2,7 @@ import { defineNitroConfig } from "nitro/config";
 import { discoveryLinkHeaderValue } from "./src/lib/agent-discovery";
 
 export default defineNitroConfig({
+  plugins: ["./plugins/posthog-discovery-analytics"],
   runtimeConfig: {},
   routeRules: {
     "/": {

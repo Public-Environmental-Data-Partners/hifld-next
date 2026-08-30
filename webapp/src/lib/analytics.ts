@@ -38,19 +38,35 @@ export interface DownloadAnalyticsContext {
 }
 
 export interface DownloadSuccessProperties {
-  completion_status: "completed" | "handoff";
+  completion_status: "completed";
   received_bytes?: number | undefined;
   content_length_bytes?: number | undefined;
   duration_ms?: number | undefined;
   source_count?: number | undefined;
 }
 
+export interface DownloadHandoffProperties {
+  duration_ms: number;
+}
+
+export type DownloadFailureCategory = "http_error" | "network_error" | "canceled" | "zip_error";
+
 export interface DownloadFailureProperties {
-  error_message: string;
+  error_category: DownloadFailureCategory;
   received_bytes?: number | undefined;
   content_length_bytes?: number | undefined;
   duration_ms?: number | undefined;
   source_count?: number | undefined;
+}
+
+export interface DatasetMapImportInput {
+  collection_slug: string;
+  dataset_slug: string;
+  file_slug: string;
+  source_id?: number | undefined;
+  version?: string | number | undefined;
+  import_source: "route" | "picker";
+  loaded_layer_count: number;
 }
 
 export interface DatasetQualityFeedbackFeature {
@@ -84,7 +100,9 @@ type AnalyticsEventProperties =
   | PageViewProperties
   | DownloadAnalyticsContext
   | DownloadSuccessProperties
+  | DownloadHandoffProperties
   | DownloadFailureProperties
+  | DatasetMapImportInput
   | (Omit<DatasetQualityFeedbackInput, "feature"> & { current_url?: string; feature_json?: string });
 
 function compactProperties(properties: AnalyticsEventProperties): PostHogEventProperties {
@@ -92,9 +110,13 @@ function compactProperties(properties: AnalyticsEventProperties): PostHogEventPr
 }
 
 function captureDownloadEvent(
-  eventName: "dataset_download_clicked" | "dataset_download_succeeded" | "dataset_download_failed",
+  eventName:
+    | "dataset_download_clicked"
+    | "dataset_download_succeeded"
+    | "dataset_download_handed_off"
+    | "dataset_download_failed",
   context: DownloadAnalyticsContext,
-  properties?: DownloadSuccessProperties | DownloadFailureProperties,
+  properties?: DownloadSuccessProperties | DownloadHandoffProperties | DownloadFailureProperties,
 ) {
   if (typeof window === "undefined") return;
   if (!posthogInitialized) initPostHog();
@@ -199,6 +221,7 @@ export function trackTagFilter(
   collectionSlug: string,
   filterKey: string,
   filterValues: string[],
+  resultCount: number,
   searchQuery?: string,
 ) {
   if (typeof window === "undefined") return;
@@ -210,6 +233,8 @@ export function trackTagFilter(
       collection_slug: collectionSlug,
       filter_key: filterKey,
       filter_values: filterValues,
+      result_count: resultCount,
+      is_zero_result: resultCount === 0,
       search_query: searchQuery,
     });
   } catch (error) {
@@ -258,8 +283,24 @@ export function trackDownloadSucceeded(context: DownloadAnalyticsContext, proper
   captureDownloadEvent("dataset_download_succeeded", context, properties);
 }
 
+export function trackDownloadHandedOff(context: DownloadAnalyticsContext, properties: DownloadHandoffProperties) {
+  captureDownloadEvent("dataset_download_handed_off", context, properties);
+}
+
 export function trackDownloadFailed(context: DownloadAnalyticsContext, properties: DownloadFailureProperties) {
   captureDownloadEvent("dataset_download_failed", context, properties);
+}
+
+export function trackDatasetImportedIntoMap(input: DatasetMapImportInput) {
+  if (typeof window === "undefined") return;
+  if (!posthogInitialized) initPostHog();
+  if (!posthogInitialized || typeof posthog.capture !== "function") return;
+
+  try {
+    posthog.capture("dataset_imported_into_map", compactProperties(input));
+  } catch (error) {
+    console.error("Failed to track dataset map import:", error);
+  }
 }
 
 function feedbackFeatureJson(feature: DatasetQualityFeedbackFeature): string {

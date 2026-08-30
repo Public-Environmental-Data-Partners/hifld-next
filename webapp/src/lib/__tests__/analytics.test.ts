@@ -12,7 +12,7 @@ vi.mock("posthog-js", () => ({
   },
 }));
 
-describe("download analytics", () => {
+describe("analytics", () => {
   beforeEach(async () => {
     capture.mockClear();
     init.mockClear();
@@ -35,6 +35,36 @@ describe("download analytics", () => {
       }),
     );
     expect(capture).toHaveBeenCalledWith("$pageview", expect.objectContaining({ path: "/collections" }));
+  });
+
+  it("tracks a zero-result search query", async () => {
+    const { trackSearchQuery } = await import("../analytics");
+
+    trackSearchQuery("hospital", "hifld", 0);
+
+    expect(capture).toHaveBeenCalledWith("dataset_search", {
+      query: "hospital",
+      query_length: 8,
+      collection_slug: "hifld",
+      result_count: 0,
+      has_tag_filters: false,
+      is_zero_result: true,
+    });
+  });
+
+  it("tracks a zero-result tag filter with its resolved count", async () => {
+    const { trackTagFilter } = await import("../analytics");
+
+    trackTagFilter("hifld", "geometry_type", ["Point"], 0, "hospital");
+
+    expect(capture).toHaveBeenCalledWith("tag_filter_applied", {
+      collection_slug: "hifld",
+      filter_key: "geometry_type",
+      filter_values: ["Point"],
+      result_count: 0,
+      is_zero_result: true,
+      search_query: "hospital",
+    });
   });
 
   it("tracks a download click without full URLs or undefined fields", async () => {
@@ -101,7 +131,31 @@ describe("download analytics", () => {
     });
   });
 
-  it("tracks download failure with error metadata", async () => {
+  it("tracks a download handoff with duration only", async () => {
+    const { trackDownloadHandedOff } = await import("../analytics");
+
+    trackDownloadHandedOff(
+      {
+        collection_slug: "hifld",
+        dataset_slug: "airport-runways",
+        file_slug: "runways",
+        format: "geoparquet",
+        download_method: "native_link",
+      },
+      { duration_ms: 125 },
+    );
+
+    expect(capture).toHaveBeenCalledWith("dataset_download_handed_off", {
+      collection_slug: "hifld",
+      dataset_slug: "airport-runways",
+      file_slug: "runways",
+      format: "geoparquet",
+      download_method: "native_link",
+      duration_ms: 125,
+    });
+  });
+
+  it("tracks download failure with a bounded error category", async () => {
     const { trackDownloadFailed } = await import("../analytics");
 
     trackDownloadFailed(
@@ -113,7 +167,7 @@ describe("download analytics", () => {
         download_method: "fetch_stream",
       },
       {
-        error_message: "Download failed: Unauthorized",
+        error_category: "http_error",
         received_bytes: 5,
         content_length_bytes: 10,
         duration_ms: 90,
@@ -126,11 +180,40 @@ describe("download analytics", () => {
       file_slug: "runways",
       format: "geoparquet",
       download_method: "fetch_stream",
-      error_message: "Download failed: Unauthorized",
+      error_category: "http_error",
       received_bytes: 5,
       content_length_bytes: 10,
       duration_ms: 90,
     });
+  });
+
+  it("tracks a dataset map import with only source and layer metadata", async () => {
+    const { trackDatasetImportedIntoMap } = await import("../analytics");
+
+    trackDatasetImportedIntoMap({
+      collection_slug: "hifld",
+      dataset_slug: "hospitals",
+      file_slug: "hospitals",
+      source_id: 15,
+      version: "v1.0.0",
+      import_source: "route",
+      loaded_layer_count: 2,
+    });
+
+    expect(capture).toHaveBeenCalledWith("dataset_imported_into_map", {
+      collection_slug: "hifld",
+      dataset_slug: "hospitals",
+      file_slug: "hospitals",
+      source_id: 15,
+      version: "v1.0.0",
+      import_source: "route",
+      loaded_layer_count: 2,
+    });
+    expect(capture.mock.calls[0]?.[1]).not.toHaveProperty("feature_id");
+    expect(capture.mock.calls[0]?.[1]).not.toHaveProperty("feature_properties");
+    expect(capture.mock.calls[0]?.[1]).not.toHaveProperty("coordinates");
+    expect(capture.mock.calls[0]?.[1]).not.toHaveProperty("source_url");
+    expect(capture.mock.calls[0]?.[1]).not.toHaveProperty("map_viewport");
   });
 
   it("tracks dataset quality feedback with feature JSON and no geometry", async () => {

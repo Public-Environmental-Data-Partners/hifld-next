@@ -10,6 +10,7 @@ import {
   IMPORT_LAYER_CARD_CLASSNAME,
   IMPORT_SELECT_TRIGGER_CLASSNAME,
   IMPORT_SELECT_VALUE_CLASSNAME,
+  newMapImportEvents,
   MOBILE_SETTINGS_SCROLL_CLASSNAME,
   Route as CollectionMapRoute,
   closeMapPopup,
@@ -302,5 +303,93 @@ describe("collection map route", () => {
       pmtilesUrl: "https://example.test/hospitals.pmtiles",
       visible: true,
     });
+  });
+
+  it("derives one route import and one picker import without duplicates after synchronization", () => {
+    const initialLayer = resolvedToMapLayer({ descriptor, dataset, file, source });
+    const pickerLayer = resolvedToMapLayer({ descriptor: descriptorV2, dataset, file, source: sourceV2 });
+    expect(initialLayer).not.toBeNull();
+    expect(pickerLayer).not.toBeNull();
+    if (!initialLayer || !pickerLayer) return;
+
+    const trackedSourceDescriptorIds = new Set<string>();
+    const routeSourceDescriptorIds = new Set([initialLayer.id]);
+    const routeEvents = newMapImportEvents({
+      loadedLayers: [initialLayer],
+      routeSourceDescriptorIds,
+      trackedSourceDescriptorIds,
+    });
+
+    expect(routeEvents).toEqual([
+      {
+        sourceDescriptorId: initialLayer.id,
+        properties: {
+          collection_slug: "hifld",
+          dataset_slug: "hospitals",
+          file_slug: "hospitals",
+          source_id: 15,
+          version: "v1.0.0",
+          import_source: "route",
+          loaded_layer_count: 1,
+        },
+      },
+    ]);
+    routeEvents.forEach((event) => trackedSourceDescriptorIds.add(event.sourceDescriptorId));
+
+    const pickerEvents = newMapImportEvents({
+      loadedLayers: [initialLayer, pickerLayer],
+      routeSourceDescriptorIds,
+      trackedSourceDescriptorIds,
+    });
+    expect(pickerEvents).toEqual([
+      {
+        sourceDescriptorId: pickerLayer.id,
+        properties: {
+          collection_slug: "hifld",
+          dataset_slug: "hospitals",
+          file_slug: "hospitals",
+          source_id: 16,
+          version: "v1.1.0",
+          import_source: "picker",
+          loaded_layer_count: 2,
+        },
+      },
+    ]);
+    pickerEvents.forEach((event) => trackedSourceDescriptorIds.add(event.sourceDescriptorId));
+
+    expect(
+      newMapImportEvents({
+        loadedLayers: [initialLayer, pickerLayer],
+        routeSourceDescriptorIds,
+        trackedSourceDescriptorIds,
+      }),
+    ).toEqual([]);
+  });
+
+  it("deduplicates repeated source descriptors in one loaded-layer batch", () => {
+    const initialLayer = resolvedToMapLayer({ descriptor, dataset, file, source });
+    expect(initialLayer).not.toBeNull();
+    if (!initialLayer) return;
+
+    expect(
+      newMapImportEvents({
+        loadedLayers: [initialLayer, initialLayer],
+        routeSourceDescriptorIds: new Set([initialLayer.id]),
+        trackedSourceDescriptorIds: new Set(),
+      }),
+    ).toEqual([
+      {
+        sourceDescriptorId: initialLayer.id,
+        properties: {
+          collection_slug: "hifld",
+          dataset_slug: "hospitals",
+          file_slug: "hospitals",
+          source_id: 15,
+          version: "v1.0.0",
+          import_source: "route",
+          loaded_layer_count: 2,
+        },
+      },
+    ]);
   });
 });

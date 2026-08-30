@@ -2,8 +2,13 @@ import { Download, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { DownloadAnalyticsContext } from "@/lib/analytics";
-import { trackDownloadClicked, trackDownloadFailed, trackDownloadSucceeded } from "@/lib/analytics";
+import type { DownloadAnalyticsContext, DownloadFailureCategory } from "@/lib/analytics";
+import {
+  trackDownloadClicked,
+  trackDownloadFailed,
+  trackDownloadHandedOff,
+  trackDownloadSucceeded,
+} from "@/lib/analytics";
 import { usesNativeBrowserDownload } from "./sourceUrls";
 
 interface DownloadButtonProps {
@@ -76,8 +81,20 @@ function triggerAnchorDownload(url: string, filename: string, openInNewTab: bool
   document.body.removeChild(link);
 }
 
-function errorMessage(error: Error | DOMException): string {
-  return error.message || String(error);
+class HttpDownloadError extends Error {
+  constructor() {
+    super("Download request returned an unsuccessful status.");
+  }
+}
+
+function isCanceledDownload(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function downloadFailureCategory(error: unknown): DownloadFailureCategory {
+  if (isCanceledDownload(error)) return "canceled";
+  if (error instanceof HttpDownloadError) return "http_error";
+  return "network_error";
 }
 
 function extensionForLabel(label: string): string {
@@ -163,14 +180,9 @@ async function streamToBlobUrl(response: Response): Promise<{ blobUrl: string; r
   return { blobUrl: URL.createObjectURL(blob), receivedBytes };
 }
 
-function trackCompleted(
-  baseAnalyticsContext: DownloadAnalyticsContext,
-  state: DownloadState,
-  startTime: number,
-  completionStatus: "completed" | "handoff",
-) {
+function trackCompleted(baseAnalyticsContext: DownloadAnalyticsContext, state: DownloadState, startTime: number) {
   trackDownloadSucceeded(baseAnalyticsContext, {
-    completion_status: completionStatus,
+    completion_status: "completed",
     received_bytes: state.receivedBytes || undefined,
     content_length_bytes: state.contentLengthBytes,
     duration_ms: elapsedMs(startTime),
@@ -191,8 +203,7 @@ export async function executeDownload({ url, filename, analyticsContext, useDire
 
   if (useDirectDownload) {
     triggerAnchorDownload(url, filename, true);
-    trackDownloadSucceeded(baseAnalyticsContext, {
-      completion_status: "handoff",
+    trackDownloadHandedOff(baseAnalyticsContext, {
       duration_ms: elapsedMs(startTime),
     });
     return;
@@ -208,7 +219,7 @@ export async function executeDownload({ url, filename, analyticsContext, useDire
     }
 
     if (!response.ok) {
-      throw new Error(`Download failed: ${response.statusText}`);
+      throw new HttpDownloadError();
     }
 
     const responseClone = response.clone();
@@ -217,13 +228,13 @@ export async function executeDownload({ url, filename, analyticsContext, useDire
       const savedBytes = await streamToFile(response, filename);
       if (savedBytes !== null) {
         state.receivedBytes = savedBytes;
-        trackCompleted(baseAnalyticsContext, state, startTime, "completed");
+        trackCompleted(baseAnalyticsContext, state, startTime);
         return;
       }
     } catch (fileSystemError) {
-      if (fileSystemError instanceof DOMException && fileSystemError.name === "AbortError") {
+      if (isCanceledDownload(fileSystemError)) {
         trackDownloadFailed(baseAnalyticsContext, {
-          error_message: "Download canceled",
+          error_category: "canceled",
           received_bytes: state.receivedBytes,
           content_length_bytes: state.contentLengthBytes,
           duration_ms: elapsedMs(startTime),
@@ -237,7 +248,7 @@ export async function executeDownload({ url, filename, analyticsContext, useDire
     const { blobUrl, receivedBytes } = await streamToBlobUrl(responseToUse);
     state.receivedBytes = receivedBytes;
     triggerAnchorDownload(blobUrl, filename, false);
-    trackCompleted(baseAnalyticsContext, state, startTime, "completed");
+    trackCompleted(baseAnalyticsContext, state, startTime);
 
     setTimeout(() => {
       URL.revokeObjectURL(blobUrl);
@@ -245,12 +256,15 @@ export async function executeDownload({ url, filename, analyticsContext, useDire
   } catch (error) {
     console.error("Download error:", error);
     trackDownloadFailed(baseAnalyticsContext, {
-      error_message: error instanceof Error ? errorMessage(error) : String(error),
+      error_category: downloadFailureCategory(error),
       received_bytes: state.receivedBytes || undefined,
       content_length_bytes: state.contentLengthBytes,
       duration_ms: elapsedMs(startTime),
     });
     triggerAnchorDownload(url, filename, true);
+    trackDownloadHandedOff(baseAnalyticsContext, {
+      duration_ms: elapsedMs(startTime),
+    });
   }
 }
 

@@ -74,18 +74,18 @@ export async function executeShapefileZipDownload({
     source_count: sourceCount,
   };
 
+  trackDownloadClicked(baseAnalyticsContext);
+
   if (fileUrls.length === 0) {
     const errorMessage = "No shapefile URLs found in sources";
     console.error(errorMessage);
     trackDownloadFailed(baseAnalyticsContext, {
-      error_message: errorMessage,
+      error_category: "zip_error",
       source_count: sourceCount,
       duration_ms: elapsedMs(startTime),
     });
     return;
   }
-
-  trackDownloadClicked(baseAnalyticsContext);
 
   try {
     await createZipFromUrls(fileUrls, filename, onProgress);
@@ -98,7 +98,7 @@ export async function executeShapefileZipDownload({
   } catch (error) {
     console.error("Error creating zip file:", error);
     trackDownloadFailed(baseAnalyticsContext, {
-      error_message: error instanceof Error ? error.message : String(error),
+      error_category: "zip_error",
       source_count: sourceCount,
       received_bytes: analyticsContext?.expected_size_bytes,
       duration_ms: elapsedMs(startTime),
