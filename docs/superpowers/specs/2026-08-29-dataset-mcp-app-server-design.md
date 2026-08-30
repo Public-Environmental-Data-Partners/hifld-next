@@ -92,6 +92,23 @@ MCP transport and tile/health/asset routes share one deployment and lifespan.
 
 ## Component boundaries
 
+### Spike reuse
+
+Implementation should copy and adapt the proven DuckDB/GeoParquet mechanics in
+`../geoparquet-duckdb-partitioning` rather than re-derive them. In particular,
+reuse the bbox-overlap predicate from `duckdb_parquet_provider.py`, the
+`ST_TileEnvelope`/`ST_AsMVTGeom`/`ST_AsMVT` query shape and tile-coordinate
+validation from `server.py`, and the DuckDB profiling sequence from
+`metrics.py`.
+
+The spike is an algorithmic starting point, not a production boundary. Remove
+its pygeoapi/catalog/admin code, runtime `INSTALL` calls, global cross-request
+views, arbitrary source strings, broad dynamic types, and raw exception/log
+behavior. Add the source-identity checks, request-unique views, exact
+intersection/clipping, dynamic validated CRS handling, limits, worker
+isolation, and safe metrics required below. Tests must prove that the adapted
+code preserves the spike's bbox pruning and MVT behavior.
+
 ### Catalog client
 
 The catalog client wraps the existing dataset API and parses every response
@@ -542,6 +559,8 @@ Errors use stable codes with a short safe message and optional structured
 details:
 
 - `catalog_not_found`
+- `catalog_unavailable`
+- `catalog_contract_invalid`
 - `schema_version_not_found`
 - `source_not_geoparquet`
 - `source_changed`
