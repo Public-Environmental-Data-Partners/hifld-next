@@ -5,9 +5,9 @@ import pytest
 from app.catalog.models import QuerySourceRef
 from app.errors import AppError, ErrorCode
 from app.query.models import ResolvedSource
-from app.query.service import ExecutionSource, QueryService
+from app.query.service import ExecutionSource, QueryService, worker_profiles_from_storage
 from app.query.sql_policy import ValidatedSql
-from app.storage.models import DuckDbSourceSpec
+from app.storage.models import DuckDbSourceSpec, SeaweedProfile, StorageSettings
 from query_worker.protocol import WorkerFailure, WorkerPage, WorkerQuery
 
 
@@ -175,3 +175,21 @@ async def test_service_rejects_limit_and_offset_before_dispatch() -> None:
 
     assert caught.value.code is ErrorCode.QUERY_OFFSET_LIMIT
     assert executor.request is None
+
+
+def test_worker_profile_strips_http_scheme_from_duckdb_endpoint() -> None:
+    settings = StorageSettings(
+        profiles={
+            "local-seaweed": SeaweedProfile(
+                slug="local-seaweed",
+                bucket="datasets",
+                endpoint="http://seaweed-s3:8333",
+                access_key_id="access",
+                secret_access_key="secret",
+            )
+        }
+    )
+
+    (profile,) = worker_profiles_from_storage(settings)
+
+    assert profile.endpoint == "seaweed-s3:8333"

@@ -52,3 +52,29 @@ For local or proxied deployments, `tile_origin` may be supplied with relative
 asset paths, but the UI never resolves `/tiles` or `/assets` against its
 sandboxed iframe origin by default. Tile requests carry the signed query token
 in `X-HIFLD-Query-Token`.
+
+## Opt-in storage acceptance tests
+
+The normal test suite does not require network access. To exercise a real
+public GCS object through the DuckDB worker, set:
+
+```bash
+HIFLD_TEST_GCS_BUCKET=public-datasets \
+HIFLD_TEST_GCS_OBJECT=path/to/data.parquet \
+HIFLD_TEST_DUCKDB_EXTENSION_DIRECTORY=/path/to/duckdb/extensions \
+uv run pytest tests/integration/test_public_gcs.py -q
+```
+
+For a local SeaweedFS S3 endpoint, use:
+
+```bash
+HIFLD_TEST_SEAWEED_ENDPOINT=http://localhost:8333 \
+HIFLD_TEST_SEAWEED_BUCKET=datasets \
+HIFLD_TEST_SEAWEED_OBJECT=path/to/data.parquet \
+HIFLD_TEST_DUCKDB_EXTENSION_DIRECTORY=/path/to/duckdb/extensions \
+uv run pytest tests/integration/test_seaweedfs.py -q
+```
+
+The optional `HIFLD_TEST_SEAWEED_ACCESS_KEY` and
+`HIFLD_TEST_SEAWEED_SECRET_KEY` variables default to the local development
+credentials `access` and `secret`.

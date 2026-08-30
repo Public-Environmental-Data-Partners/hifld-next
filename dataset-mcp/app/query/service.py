@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
+from urllib.parse import urlsplit
 
 from app.errors import AppError, ErrorCode
 from app.query.models import ColumnResult, PageResult, ResolvedSource
@@ -40,6 +41,13 @@ class QueryExecutor(Protocol):
     ) -> WorkerResult: ...
 
 
+def _duckdb_s3_endpoint(endpoint: str) -> str:
+    """Return the authority DuckDB expects for its S3 ENDPOINT setting."""
+    if endpoint.startswith(("http://", "https://")):
+        return urlsplit(endpoint).netloc
+    return endpoint.rstrip("/")
+
+
 def worker_profiles_from_storage(
     settings: StorageSettings,
 ) -> tuple[WorkerCredentialProfile, ...]:
@@ -67,7 +75,7 @@ def worker_profiles_from_storage(
                 type="seaweedfs",
                 bucket=profile.bucket,
                 prefix=profile.prefix,
-                endpoint=profile.endpoint,
+                endpoint=_duckdb_s3_endpoint(profile.endpoint),
                 url_style="path" if profile.use_path_style else "vhost",
                 tls=profile.tls,
                 access_key_id=profile.access_key_id.get_secret_value(),
