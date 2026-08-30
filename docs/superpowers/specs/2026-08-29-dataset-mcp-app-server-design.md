@@ -44,8 +44,8 @@ The first release includes:
 - GeoParquet source selection by catalog identity, not by user-supplied URL.
 - Bounded direct row reads for one GeoParquet source.
 - Bounded SQL queries across as many as eight selected GeoParquet sources.
-- UI-only page fetching from the sandboxed app through the MCP Apps host
-  bridge.
+- Table-page fetching from the sandboxed app through the MCP Apps host bridge,
+  using the same bounded paging tool that agents can call directly.
 - Virtualized interactive result tables.
 - MapLibre maps backed by server-generated MVT tiles.
 - Text and structured-data fallbacks for MCP clients without MCP Apps support.
@@ -95,8 +95,9 @@ MCP transport and tile/health/asset routes share one deployment and lifespan.
 ### Catalog client
 
 The catalog client wraps the existing dataset API and parses every response
-into narrow Pydantic models. It supports collection and dataset search, dataset
-detail, and file detail with formats and expanded sources.
+into narrow Pydantic models. It supports collection listing and detail,
+collection-scoped dataset search, dataset detail, file detail with formats and
+expanded sources, and the focused file-schema/data-dictionary response.
 
 Query sources are never arbitrary paths. A `QuerySourceRef` contains:
 
@@ -213,7 +214,7 @@ Initial configurable execution limits are:
 | Tile timeout | 10 seconds |
 | Selected sources | 8 |
 | Output columns | 200 |
-| Default UI page | 250 rows |
+| Default query/table page | 100 rows |
 | Maximum UI page | 1,000 rows |
 | Maximum offset | 50,000 rows |
 | Maximum serialized tool result | 4 MiB |
@@ -231,12 +232,43 @@ contains a Vite-built React application using the MCP Apps React bridge.
 
 ### Model-visible tools
 
+The discovery surface follows a metadata-parity rule: every public,
+read-only metadata response linked from a webapp `View Metadata` affordance has
+a model-visible MCP tool. The MCP response may normalize or paginate the HTTP
+response for context safety, but it must preserve access to the same metadata
+and canonical catalog identities. A new metadata affordance is not complete
+until its MCP equivalent is added or an existing tool is explicitly documented
+as equivalent.
+
+The current parity mapping is:
+
+| Webapp metadata surface | Model-visible MCP tool |
+| --- | --- |
+| Collections metadata | `list_collections` |
+| Collection metadata | `get_collection` |
+| Dataset metadata | `get_dataset` |
+| Dataset-file metadata | `get_dataset_file` |
+| File schema/data dictionary metadata | `get_dataset_file_schema` |
+
+`Compare versions` is a derived presentation over the formats, sources,
+versions, and source metadata returned by `get_dataset_file`; it is not a
+separate catalog metadata response and therefore does not require a duplicate
+comparison tool in this release.
+
 `list_collections`
 
 - Has no required inputs.
 - Returns the catalog's collection IDs, slugs, names, and descriptions.
 - Is visible to both the model and app and provides the starting point for
   dataset discovery.
+
+`get_collection`
+
+- Inputs: collection ID or slug.
+- Returns the collection's complete descriptive metadata and links, plus a
+  compact dataset-count/search summary rather than embedding a dataset page.
+- Is visible to both the model and app. Dataset enumeration and filtering stay
+  in `search_datasets` so collection metadata remains bounded.
 
 `search_datasets`
 
@@ -248,38 +280,82 @@ contains a Vite-built React application using the MCP Apps React bridge.
 `get_dataset`
 
 - Inputs: collection and dataset identity.
-- Returns dataset metadata plus compact file/format/source summaries.
+- Returns the complete dataset metadata plus compact file/format/source
+  summaries and stable file identities.
 - Is visible to both the model and app.
+
+`get_dataset_file`
+
+- Inputs: collection, dataset, and file identity; slugs are the preferred
+  discovery contract and numeric IDs are accepted where already known.
+- Wraps the existing canonical dataset-file metadata response.
+- Returns file metadata, every format and version, storage-location identity,
+  source lifecycle metadata, spatial and quality summaries, download links,
+  and a ready-to-copy `QuerySourceRef` for each queryable GeoParquet source.
+- Omits the potentially large `source_metadata.columns` arrays from its inline
+  source records and reports their counts, hashes, and availability instead;
+  the complete column dictionaries remain available through
+  `get_dataset_file_schema`.
+- Is visible to both the model and app and is the required source-selection
+  step before row reads or arbitrary SQL.
+
+`get_dataset_file_schema`
+
+- Inputs: collection, dataset, and file identity; optional version; optional
+  column offset and limit.
+- Wraps the existing focused file-schema/data-dictionary metadata response,
+  using the same deterministic source preference and latest-schema-capable
+  version behavior as the webapp when `version` is omitted.
+- If `version` is provided, it must match an advertised schema-capable version;
+  the MCP tool returns `schema_version_not_found` instead of silently falling
+  back to the latest version.
+- Returns available versions, selected version, exact source and storage
+  provenance, schema/quality summary, and a bounded page of typed data
+  dictionary columns with total, offset, limit, and `has_more` metadata.
+- Defaults to 100 columns and allows at most 500 per call, subject to the
+  service-wide serialized-result limit. This pagination is MCP response
+  shaping only; it does not change the canonical catalog schema response.
+- Is visible to both the model and app. An unavailable schema returns
+  `schema=null` with the available versions rather than silently deriving a
+  different schema from an arbitrary source.
 
 `read_geoparquet_rows`
 
-- Inputs: one `QuerySourceRef`, optional projected columns, page size, and
-  offset.
+- Inputs: one `QuerySourceRef`, optional projected columns, `limit`, and
+  offset. `limit` defaults to 100 and may not exceed 1,000.
 - Synthesizes a trusted `SELECT` instead of accepting SQL.
-- Returns schema, at most 20 preview rows for model context, page metadata, and
-  a signed query token.
+- Returns the requested bounded row page, schema, `has_more`, next offset,
+  response-truncation metadata, and a signed query token.
 - Opens the interactive table app when MCP Apps are supported.
 
 `query_geoparquet`
 
-- Inputs: up to eight `QuerySourceRef` values, SQL, page size, optional geometry
-  column, and optional result CRS.
-- Validates and runs the first bounded page.
-- Returns resolved source versions, schema, execution warnings, at most 20
-  preview rows for model context, and a signed query token.
+- Inputs: up to eight `QuerySourceRef` values, SQL, `limit`, optional geometry
+  column, and optional result CRS. `limit` defaults to 100 and may not exceed
+  1,000.
+- Validates the SQL and runs the first page once, wrapping the submitted query
+  with `LIMIT limit + 1` at offset zero.
+- Returns up to `limit` rows as the table's initial page, along with
+  `has_more`, next offset, resolved source versions, schema, execution warnings,
+  response-truncation metadata, and a signed query token.
+- The tool-level `limit` bounds the returned page; a `LIMIT` inside the agent's
+  SQL remains part of the query's relational semantics.
 - Opens the interactive table/map app when MCP Apps are supported.
-
-### App-only tools
 
 `get_query_page`
 
-- Inputs: signed query token, offset, and page size.
+- Inputs: signed query token, offset, and optional page size. Page size defaults
+  to 100 and may not exceed 1,000.
 - Revalidates the token and sources, reruns the canonical query as a subquery,
   and applies `LIMIT page_size + 1 OFFSET offset`.
 - Returns at most `page_size` rows plus `has_more`, offset, elapsed time, and
   bytes-read metrics.
-- Is registered with `visibility=["app"]`, so paging results return through the
-  iframe-to-host MCP bridge without becoming normal agent tools.
+- Is visible to both the model and app. The model can deliberately inspect
+  later pages without resubmitting SQL; the server still re-executes the
+  canonical query for each call. The React table calls the identical tool
+  through the iframe-to-host MCP bridge.
+
+### App-only tools
 
 `get_map_features`
 
@@ -292,10 +368,11 @@ contains a Vite-built React application using the MCP Apps React bridge.
   when the host cannot run the MapLibre worker or cannot make direct tile
   requests.
 
-The initial model-visible response deliberately contains only 20 preview rows.
-After the iframe connects and confirms the host's `serverTools` capability, it
-calls `get_query_page` to load the larger UI page. Hosts without that capability
-render the initial preview and a clear static-mode message.
+The initial query response is already the first table page. The React app
+renders those rows directly and does not call `get_query_page` on mount. The
+model or app calls `get_query_page` only to move beyond the returned rows.
+Hosts without the `serverTools` capability can still render the complete
+initial page and a clear static-mode message, but cannot advance it.
 
 Every model-visible tool also returns concise text content for clients without
 MCP Apps support. Full geometry values are excluded from text previews and
@@ -315,10 +392,10 @@ than as a table cell.
 
 No encoded cell may exceed 64 KiB. Oversized strings or nested values become a
 tagged truncated value with their original byte length. No tool result may
-exceed 4 MiB. If the response-size limit is reached before `page_size`, the
-server returns the rows that fit, sets `response_truncated=true`, and computes
-the next offset from the number of source rows returned. It never silently
-skips a row.
+exceed 4 MiB. If the response-size limit is reached before the requested page
+bound, the server returns the rows that fit, sets `response_truncated=true`,
+and computes the next offset from the number of source rows returned. It never
+silently skips a row.
 
 ## Pagination semantics
 
@@ -410,7 +487,7 @@ it must not relax CSP with `unsafe-eval`.
 The custom UI uses:
 
 - `@modelcontextprotocol/ext-apps/react` for lifecycle, host context, tool
-  results, app-only server calls, theme variables, and display modes.
+  results, app-initiated server calls, theme variables, and display modes.
 - React and Zod for state and boundary validation.
 - TanStack Table plus TanStack Virtual for a virtualized, schema-driven table.
 - MapLibre GL JS for the map, subject to the CSP compatibility gate above.
@@ -421,12 +498,13 @@ the spec does not hardcode versions from memory. The package lock records the
 resolved versions.
 
 The app registers all handlers before connecting. It validates the initial
-tool result and every app-only result with Zod. It applies host theme and font
-variables, respects safe-area insets and container dimensions, requests
+tool result and every app-initiated result with Zod. It applies host theme and
+font variables, respects safe-area insets and container dimensions, requests
 fullscreen only when advertised, and pauses MapLibre rendering when the app is
 not visible.
 
-The table supports column visibility, resizing, local sorting of the loaded
+The table adopts the initial tool result as page zero without another server
+request. It supports column visibility, resizing, local sorting of the loaded
 page, cell inspection, and next/previous page navigation. Local sorting is
 clearly labeled as page-only; changing the server query requires the agent to
 issue a new SQL tool call. Geometry cells show a compact summary rather than
@@ -464,6 +542,7 @@ Errors use stable codes with a short safe message and optional structured
 details:
 
 - `catalog_not_found`
+- `schema_version_not_found`
 - `source_not_geoparquet`
 - `source_changed`
 - `invalid_alias`
@@ -491,8 +570,9 @@ stateless.
 
 ### Server tests
 
-- Catalog-client contract tests for search, dataset detail, file detail, glob
-  expansion, exact version selection, and changed or missing sources.
+- Catalog-client contract tests for collection list/detail, search, dataset
+  detail, file detail, focused schema metadata, glob expansion, exact version
+  selection, and changed or missing sources.
 - Storage-resolver tests for public GCS HTTPS, AWS S3, and SeaweedFS endpoint,
   scope, path-style, and TLS settings.
 - SQL-policy allow tests for joins, CTEs, aggregates, windows, unions, and
@@ -502,8 +582,9 @@ stateless.
   unknown alias.
 - Token tests for deterministic canonicalization, tampering, expiry, oversized
   payloads, version changes, and malformed compression.
-- Query-wrapper tests for projection, `LIMIT + 1`, offset, inner limits,
-  deterministic-order warnings, and omitted exact counts.
+- Query-wrapper tests for projection, configurable initial `limit`, `LIMIT + 1`,
+  offset, inner limits, deterministic-order warnings, omitted exact counts, and
+  reuse of the initial rows without a duplicate page-zero query.
 - Worker tests for timeout interruption, forced replacement, memory/spill
   limits, view cleanup, sequential isolation, and warm metadata caching without
   retained result state.
@@ -511,14 +592,18 @@ stateless.
   property shaping, invalid tile coordinates, feature caps, and dense-tile
   errors.
 - MCP protocol tests for tool schemas, model/app visibility, resource linkage,
-  MIME type, structured content, and text fallbacks.
+  MIME type, structured content, and text fallbacks. A discovery-parity test
+  locks the current webapp metadata-surface mapping to the five
+  metadata-equivalence tools above so a metadata endpoint cannot silently
+  remain UI-only.
 
 ### UI tests
 
 - Zod boundary tests for every tool-result variant.
 - Table paging, page cache, local sort labeling, column visibility, geometry
   summaries, errors, loading, and static-host fallback.
-- MCP bridge tests proving the iframe calls only app-visible tools.
+- MCP bridge tests proving the iframe calls only tools whose visibility includes
+  the app and cannot invoke model-only tools.
 - Host theme, safe-area, container-size, visibility pause, and fullscreen tests.
 - Map initialization, worker startup, tile headers, bounds, CRS errors,
   dense-tile messaging, and GeoJSON fallback tests.
@@ -550,11 +635,14 @@ the repository-wide gates in `AGENTS.md`.
 
 - Claude can connect to the public stateless FastMCP endpoint without sticky
   sessions.
-- An agent can search datasets, inspect one dataset, select exact GeoParquet
-  sources, read rows, and execute a complex multi-source join.
+- An agent can traverse collection, dataset, file, and schema/data-dictionary
+  metadata; select an exact GeoParquet source; read rows; and execute a complex
+  multi-source join.
 - Unsafe SQL and unregistered relations fail before DuckDB execution.
-- The model receives no more than 20 preview rows, while the app can fetch pages
-  of up to 1,000 rows through the host bridge.
+- `query_geoparquet` returns its requested initial page once: 100 rows by
+  default and at most 1,000, subject to the serialized-result cap. The app
+  renders that page without a duplicate query, and both the model and app use
+  `get_query_page` only for later pages.
 - Fetching another page performs a new bounded DuckDB query and no query result
   or server session is stored.
 - A mappable query opens an interactive map and every tile execution applies a
