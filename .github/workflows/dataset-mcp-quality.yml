@@ -1,0 +1,33 @@
+name: dataset-mcp quality
+on:
+  pull_request:
+    paths: ["dataset-mcp/**", "charts/dataset-mcp/**", ".github/workflows/dataset-mcp-quality.yml", "docs/superpowers/specs/2026-08-29-dataset-mcp-app-server-design.md", "docs/superpowers/plans/2026-08-29-dataset-mcp-app-server.md"]
+  push:
+    branches: [main]
+    paths: ["dataset-mcp/**", "charts/dataset-mcp/**", ".github/workflows/dataset-mcp-quality.yml", "docs/superpowers/specs/2026-08-29-dataset-mcp-app-server-design.md", "docs/superpowers/plans/2026-08-29-dataset-mcp-app-server.md"]
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: dataset-mcp}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: {python-version: "3.12", enable-cache: true}
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pyright
+      - run: uv run basedpyright
+      - run: uv run pytest
+  ui:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: dataset-mcp/ui}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm, cache-dependency-path: dataset-mcp/ui/package-lock.json}
+      - run: npm ci
+      - run: npm run check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build

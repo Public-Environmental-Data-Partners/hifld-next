@@ -1,0 +1,28 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: {{ include "dataset-mcp.fullname" . }} }
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: {{ include "dataset-mcp.name" . }}, app.kubernetes.io/instance: {{ .Release.Name }}}}
+  policyTypes: [Ingress, Egress]
+  ingress: [{from: [{namespaceSelector: {}}], ports: [{protocol: TCP, port: {{ .Values.containerPort }}}]}]
+  egress:
+    - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ default .Release.Namespace .Values.networkPolicy.catalogNamespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.catalogSelector | nindent 14 }}
+      ports: [{protocol: TCP, port: 8000}]
+    {{- range .Values.storage.allowedCidrs }}
+    - to: [{ipBlock: {cidr: {{ . | quote }}}}]
+      ports:
+        {{- range $.Values.storage.allowedPorts }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    {{- end }}
+    {{- with .Values.networkPolicy.extraEgress }}{{ toYaml . | nindent 4 }}{{- end }}
+{{- end }}

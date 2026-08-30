@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dataset-mcp.fullname" . }}
+  labels: {{- include "dataset-mcp.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector: {matchLabels: {app.kubernetes.io/name: {{ include "dataset-mcp.name" . }}, app.kubernetes.io/instance: {{ .Release.Name }}}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: {{ include "dataset-mcp.name" . }}, app.kubernetes.io/instance: {{ .Release.Name }}}}
+    spec:
+      serviceAccountName: {{ include "dataset-mcp.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: dataset-mcp
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{name: http, containerPort: {{ .Values.containerPort }}, protocol: TCP}]
+          env:
+            - {name: DATASET_MCP_CATALOG_BASE_URL, value: {{ .Values.catalog.baseUrl | quote }}}
+            - name: DATASET_MCP_QUERY_TOKEN_SECRET
+              valueFrom: {secretKeyRef: {name: {{ .Values.tokenSecret.name }}, key: {{ .Values.tokenSecret.key }}}}
+            - name: DATASET_MCP_STORAGE_SETTINGS
+              valueFrom: {secretKeyRef: {name: {{ .Values.storage.settingsSecret.name }}, key: {{ .Values.storage.settingsSecret.key }}}}
+            - {name: DATASET_MCP_DUCKDB_TEMP_DIRECTORY, value: /var/lib/dataset-mcp/spill}
+            {{- if .Values.publicOrigin }}
+            - {name: DATASET_MCP_PUBLIC_ORIGIN, value: {{ .Values.publicOrigin | quote }}}
+            {{- end }}
+            {{- with .Values.env }}{{ toYaml . | nindent 12 }}{{- end }}
+            {{- range .Values.secretEnv }}
+            - name: {{ .name }}
+              valueFrom: {secretKeyRef: {name: {{ .secretName }}, key: {{ .key }}}}
+            {{- end }}
+          volumeMounts: [{name: spill, mountPath: /var/lib/dataset-mcp/spill}]
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe: {httpGet: {path: {{ .Values.livenessProbe.path }}, port: http}, initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}, periodSeconds: {{ .Values.livenessProbe.periodSeconds }}, timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}, failureThreshold: {{ .Values.livenessProbe.failureThreshold }}}
+          readinessProbe: {httpGet: {path: {{ .Values.readinessProbe.path }}, port: http}, initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}, periodSeconds: {{ .Values.readinessProbe.periodSeconds }}, timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}, failureThreshold: {{ .Values.readinessProbe.failureThreshold }}}
+      volumes: [{name: spill, emptyDir: {sizeLimit: {{ .Values.spill.sizeLimit }}}}]

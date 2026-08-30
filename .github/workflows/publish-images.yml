@@ -8,6 +8,7 @@ on:
     paths:
       - ".github/workflows/publish-images.yml"
       - "dataset-api/**"
+      - "dataset-mcp/**"
       - "webapp/**"
 
 permissions:
@@ -17,6 +18,7 @@ permissions:
 env:
   DATASET_API_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/dataset-api
   WEBAPP_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/webapp
+  DATASET_MCP_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/dataset-mcp
 
 jobs:
   publish:
@@ -42,10 +44,12 @@ jobs:
 
           dataset_tags="${DATASET_API_IMAGE}:${GITHUB_SHA}"
           webapp_tags="${WEBAPP_IMAGE}:${GITHUB_SHA}"
+          mcp_tags="${DATASET_MCP_IMAGE}:${GITHUB_SHA}"
 
           if [ "$GITHUB_REF" = "refs/heads/main" ]; then
             dataset_tags="${dataset_tags}"$'\n'"${DATASET_API_IMAGE}:latest"
             webapp_tags="${webapp_tags}"$'\n'"${WEBAPP_IMAGE}:latest"
+            mcp_tags="${mcp_tags}"$'\n'"${DATASET_MCP_IMAGE}:latest"
           fi
 
           {
@@ -54,6 +58,9 @@ jobs:
             echo "EOF"
             echo "webapp_tags<<EOF"
             echo "$webapp_tags"
+            echo "EOF"
+            echo "mcp_tags<<EOF"
+            echo "$mcp_tags"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -76,3 +83,12 @@ jobs:
           tags: ${{ steps.meta.outputs.webapp_tags }}
           build-args: |
             NODE_ENV=production
+
+      - name: Build and push dataset-mcp
+        uses: docker/build-push-action@v6
+        with:
+          context: dataset-mcp
+          file: dataset-mcp/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.mcp_tags }}
