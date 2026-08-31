@@ -21,6 +21,37 @@ extensions are installed into `/opt/duckdb/extensions` while the image is
 built; the container never downloads extensions at startup. `/healthz` is the
 Kubernetes and container health endpoint; MCP traffic is served at `/mcp/`.
 
+The first-party webapp keeps the MCP transport same-origin by default. Its
+server-only `DATASET_MCP_QUERY_API_URL` points to this internal service, while
+the optional server-only `DATASET_MCP_PUBLIC_ENDPOINT` overrides only the
+public endpoint advertised by the webapp's MCP Server Card. Neither setting is
+exposed as browser client configuration.
+
+## Webapp query HTTP resources
+
+The first-party webapp can proxy two bounded, stateless resources to this
+service:
+
+- `POST /api/queries` starts a query using catalog source identities and
+  returns a signed token plus an opaque, non-secret `query_id`.
+- `POST /api/queries/{query_id}/pages` re-executes a page. It requires the
+  token in `X-HIFLD-Query-Token`; the path `query_id` must match that token.
+  `offset` is non-negative and `page_size` is 1 through 1,000.
+
+Stable problem codes are returned for policy, timeout, capacity, token, and
+geometry failures. They do not expose DuckDB errors, SQL, object paths,
+credentials, or token values. Query MVT is loaded directly from the public
+`GET /api/queries/{query_id}/tiles/{z}/{x}/{y}.mvt` URL, with the same token
+header; the webapp does not proxy tiles. Query IDs do not identify persisted
+results: there is no Valkey, result store, cursor, or query-history registry.
+
+Set `DATASET_MCP_WEBAPP_ORIGINS` to a comma-separated allowlist of deployed
+webapp origins for the public query-tile CORS path. Production entries must be
+HTTPS origins; local `http://localhost` or `http://127.0.0.1` is supported only
+for development. This service continues to support the existing local
+SeaweedFS S3-compatible and public GCS storage configurations; never put
+storage credentials, source paths, or internal service URLs in browser config.
+
 For example, a storage-settings secret can contain:
 
 ```json
