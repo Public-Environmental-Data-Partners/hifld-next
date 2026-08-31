@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { vi } from "vitest";
 import { getVectorLayersForSource } from "@/components/viewer/useMapInitialization";
-import { buildLoadedMapLayer } from "../multiLayerSources";
+import { buildLoadedMapLayer, buildQueryMvtLayer } from "../multiLayerSources";
 import type { SourceDescriptor } from "../sourceDescriptors";
 
 vi.mock("maplibre-gl", () => ({
@@ -23,6 +23,44 @@ const descriptor: SourceDescriptor = {
 };
 
 describe("multi-layer map helpers", () => {
+  it("tags catalog layers and builds query MVT layers with stable query identities", () => {
+    const catalogLayer = buildLoadedMapLayer({
+      descriptor,
+      name: "Hospitals",
+      pmtilesUrl: "https://example.test/hospitals.pmtiles",
+    });
+    const queryLayer = buildQueryMvtLayer({
+      queryId: "q-123",
+      label: "Hospitals query",
+      sourceAliases: ["hospitals"],
+      geometryColumn: "geom",
+      tileTemplate: "https://query.example.test/tiles/{z}/{x}/{y}.mvt",
+      sourceLayerId: "hifld",
+      scalarFields: [
+        { name: "beds", logicalType: "double", nullable: false, min: 1, max: 100 },
+      ],
+      bounds: [-78, 38, -76, 40],
+      status: "ready",
+    });
+
+    expect(catalogLayer.kind).toBe("catalog_pmtiles");
+    expect(queryLayer).toMatchObject({
+      kind: "query_mvt",
+      id: "query:q-123",
+      queryId: "q-123",
+      label: "Hospitals query",
+      sourceAliases: ["hospitals"],
+      geometryColumn: "geom",
+      tileTemplate: "https://query.example.test/tiles/{z}/{x}/{y}.mvt",
+      sourceLayerId: "hifld",
+      scalarFields: [{ name: "beds", logicalType: "double", nullable: false, min: 1, max: 100 }],
+      bounds: [-78, 38, -76, 40],
+      status: "ready",
+    });
+    expect("descriptor" in queryLayer).toBe(false);
+    expect("queryToken" in queryLayer).toBe(false);
+  });
+
   it("keeps stable loaded-layer ids separate from vector layer ids", () => {
     const loadedLayer = buildLoadedMapLayer({
       descriptor,

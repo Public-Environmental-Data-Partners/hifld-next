@@ -1,6 +1,10 @@
 import type maplibregl from "maplibre-gl";
 import { describe, expect, it } from "vitest";
-import { normalizeSelectedFeatures, updateSelectedFeatures } from "../featureSelection";
+import {
+  isComparableFeatureDiffSelection,
+  normalizeSelectedFeatures,
+  updateSelectedFeatures,
+} from "../featureSelection";
 import type { LoadedMapLayer } from "../multiLayerSources";
 import type { SourceDescriptor } from "../sourceDescriptors";
 
@@ -146,5 +150,47 @@ describe("feature selection helpers", () => {
     expect(result.wasCapped).toBe(false);
     expect(result.rows.filter((row) => row.loadedLayerId === layer.id)).toHaveLength(100);
     expect(result.rows.filter((row) => row.loadedLayerId === secondLayer.id)).toHaveLength(100);
+  });
+
+  it("uses query identity without inventing catalog slugs", () => {
+    const queryLayer: LoadedMapLayer = {
+      kind: "query_mvt",
+      id: "query:q-123",
+      name: "Hospitals query",
+      label: "Hospitals query",
+      queryId: "q-123",
+      sourceAliases: ["hospitals"],
+      geometryColumn: "geom",
+      tileTemplate: "https://query.example.test/tiles/{z}/{x}/{y}.mvt",
+      sourceLayerId: "hifld",
+      scalarFields: [],
+      bounds: null,
+      status: "ready",
+      mapSourceId: "source-query-q-123",
+      visible: true,
+      opacity: 0.82,
+    };
+
+    const selected = normalizeSelectedFeatures({
+      features: [
+        feature({
+          source: queryLayer.mapSourceId,
+          sourceLayer: "hifld",
+          id: "row-7",
+        }),
+      ],
+      loadedLayers: [queryLayer],
+    });
+
+    expect(selected[0]).toMatchObject({
+      id: "query:q-123:hifld:row-7",
+      loadedLayerId: "query:q-123",
+      layerName: "Hospitals query",
+      queryId: "q-123",
+      sourceLayerId: "hifld",
+      featureId: "row-7",
+    });
+    expect(selected[0]).not.toHaveProperty("datasetSlug");
+    expect(isComparableFeatureDiffSelection(selected)).toBe(false);
   });
 });

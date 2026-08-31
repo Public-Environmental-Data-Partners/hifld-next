@@ -10,19 +10,48 @@ export interface SelectedFeatureProperties {
   [propertyName: string]: string;
 }
 
-export interface SelectedMapFeature {
+interface SelectedMapFeatureBase {
   id: string;
   loadedLayerId: string;
   layerName: string;
+  sourceLayerId: string;
+  featureId: string;
+  centroid: { lng: number; lat: number } | null;
+  properties: SelectedFeatureProperties;
+}
+
+export interface CatalogSelectedMapFeature extends SelectedMapFeatureBase {
+  /** Omitted for legacy catalog selections created before the discriminant existed. */
+  sourceKind?: "catalog_pmtiles" | undefined;
   collectionSlug: string;
   datasetSlug: string;
   fileSlug: string;
   version: string;
   sourceId?: number | undefined;
-  sourceLayerId: string;
-  featureId: string;
-  centroid: { lng: number; lat: number } | null;
-  properties: SelectedFeatureProperties;
+}
+
+export interface QuerySelectedMapFeature extends SelectedMapFeatureBase {
+  sourceKind: "query_mvt";
+  queryId: string;
+}
+
+export type SelectedMapFeature = CatalogSelectedMapFeature | QuerySelectedMapFeature;
+
+export function isCatalogSelectedMapFeature(feature: SelectedMapFeature): feature is CatalogSelectedMapFeature {
+  return feature.sourceKind === undefined || feature.sourceKind === "catalog_pmtiles";
+}
+
+/** Version diff is intentionally limited to catalog selections. */
+export function isComparableFeatureDiffSelection(features: SelectedMapFeature[]): boolean {
+  if (features.length === 0 || features.some((feature) => !isCatalogSelectedMapFeature(feature))) {
+    return false;
+  }
+  const catalogFeatures = features.filter(isCatalogSelectedMapFeature);
+  const scopes = new Set(
+    catalogFeatures.map((feature) => [feature.collectionSlug, feature.datasetSlug, feature.fileSlug].join(":")),
+  );
+  const versions = new Set(catalogFeatures.map((feature) => feature.version));
+  return scopes.size === 1 && versions.size === 2;
 }
 
 export interface FeatureSelectionUpdate {
@@ -146,19 +175,34 @@ export function normalizeSelectedFeatures({
     }
     const sourceLayerId = sourceLayerForFeature(feature);
     const featureId = featureKey(feature, sourceLayerId);
-    selected.push({
-      id: `${loadedLayer.id}:${sourceLayerId}:${featureId}`,
+    const common = {
+      id:
+        loadedLayer.kind === "query_mvt"
+          ? `query:${loadedLayer.queryId}:${sourceLayerId}:${featureId}`
+          : `${loadedLayer.id}:${sourceLayerId}:${featureId}`,
       loadedLayerId: loadedLayer.id,
       layerName: loadedLayer.name,
+      sourceLayerId,
+      featureId,
+      centroid: centroidForGeometry(feature.geometry),
+      properties: normalizeProperties(feature.properties),
+    };
+    if (loadedLayer.kind === "query_mvt") {
+      // Query results deliberately do not masquerade as catalog datasets.
+      selected.push({
+        ...common,
+        sourceKind: "query_mvt",
+        queryId: loadedLayer.queryId,
+      });
+      continue;
+    }
+    selected.push({
+      ...common,
       collectionSlug: loadedLayer.descriptor.collectionSlug,
       datasetSlug: loadedLayer.descriptor.datasetSlug,
       fileSlug: loadedLayer.descriptor.fileSlug,
       version: String(loadedLayer.descriptor.version),
       sourceId: loadedLayer.descriptor.sourceId,
-      sourceLayerId,
-      featureId,
-      centroid: centroidForGeometry(feature.geometry),
-      properties: normalizeProperties(feature.properties),
     });
   }
 
