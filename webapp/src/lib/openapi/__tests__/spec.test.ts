@@ -48,6 +48,9 @@ describe("buildOpenApiDocument", () => {
         }),
       ]),
     );
+    expect(operation?.responses?.[400]).toMatchObject({
+      content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } },
+    });
     expect(doc.components?.schemas?.DatasetByIdResponse).toMatchObject({
       type: "object",
       properties: {
@@ -87,6 +90,27 @@ describe("buildOpenApiDocument", () => {
       properties: {
         description: { type: ["string", "null"] },
         size_bytes: { type: ["number", "null"] },
+      },
+    });
+  });
+
+  it("documents bounded schema paging and response fields", () => {
+    const doc = buildOpenApiDocument();
+    const path = doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema"];
+    const operation = path?.get;
+
+    expect(operation?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "column_offset", in: "query", required: false }),
+        expect.objectContaining({ name: "column_limit", in: "query", required: false }),
+      ]),
+    );
+    expect(doc.components?.schemas?.DatasetFileSchemaResponse).toMatchObject({
+      properties: {
+        total_columns: { type: "integer" },
+        column_offset: { type: "integer" },
+        column_limit: { type: "integer", maximum: 50 },
+        has_more: { type: "boolean" },
       },
     });
   });

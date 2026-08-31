@@ -251,6 +251,10 @@ const DatasetFileSchemaResponse = z
       .passthrough(),
     versions: z.array(z.union([z.string(), z.number()])),
     selected_version: z.union([z.string(), z.number()]).nullable(),
+    total_columns: z.number().int().nonnegative().optional(),
+    column_offset: z.number().int().nonnegative().optional(),
+    column_limit: z.number().int().positive().max(50).optional(),
+    has_more: z.boolean().optional(),
     schema: z
       .object({
         version: z.union([z.string(), z.number()]).nullable(),
@@ -271,6 +275,10 @@ const DatasetFileSchemaResponse = z
           })
           .passthrough(),
         columns: z.array(ColumnSchema),
+        total_columns: z.number().int().nonnegative().optional(),
+        column_offset: z.number().int().nonnegative().optional(),
+        column_limit: z.number().int().positive().max(50).optional(),
+        has_more: z.boolean().optional(),
       })
       .nullable(),
   })
@@ -502,7 +510,7 @@ registry.registerPath({
   path: "/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema",
   summary: "Dataset file schema and data dictionary",
   description:
-    "Focused schema metadata for a dataset file. Returns the best schema-capable source for the requested version, including data dictionary columns. Omit version to use the latest schema-capable version.",
+    "Focused schema metadata for a dataset file. Returns the best schema-capable source for the requested version, including data dictionary columns. Omit version to use the latest schema-capable version. Omit both column paging parameters to preserve the legacy full-column response; supplying either enables paging with a default limit of 25 and a maximum limit of 50.",
   request: {
     params: z.object({
       collectionSlug: z.string(),
@@ -511,6 +519,19 @@ registry.registerPath({
     }),
     query: z.object({
       version: z.string().optional(),
+      column_offset: z.coerce
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe("Column offset when bounded paging is requested"),
+      column_limit: z.coerce
+        .number()
+        .int()
+        .positive()
+        .max(50)
+        .optional()
+        .describe("Column page size; defaults to 25 when either paging parameter is supplied"),
     }),
   },
   responses: {
@@ -522,6 +543,7 @@ registry.registerPath({
         },
       },
     },
+    400: { description: "Invalid schema column paging", content: { "application/problem+json": { schema: Problem } } },
     404: { description: "Not found", content: { "application/problem+json": { schema: Problem } } },
   },
 });
