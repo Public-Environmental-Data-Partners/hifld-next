@@ -1,19 +1,7 @@
 import { createFileRoute, Link, notFound, useSearch } from "@tanstack/react-router";
-import {
-  ArrowLeft,
-  Check,
-  ChevronDown,
-  ChevronsUpDown,
-  Eye,
-  EyeOff,
-  FileText,
-  Layers,
-  PanelLeft,
-  Plus,
-  Trash2,
-} from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, ChevronsUpDown, Layers, PanelLeft, Plus } from "lucide-react";
 import type maplibregl from "maplibre-gl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { z } from "zod";
 import { buildSourceFileUrl } from "@/components/dataset/sourceUrls";
@@ -25,8 +13,18 @@ import {
   type SelectedMapFeature,
   updateSelectedFeatures,
 } from "@/components/map/featureSelection";
+import { MapLayerListItem } from "@/components/map/MapLayerListItem";
+import { type DatasetLayerInput, MapWorkspaceCommandError } from "@/components/map/mapWorkspaceCommands";
 import { clearedLayerPickerSelection, layerPickerSelectionAfterLayerRemoval } from "@/components/map/mapWorkspaceState";
 import { buildLoadedMapLayer, type LoadedMapLayer } from "@/components/map/multiLayerSources";
+import { QueryResultPanel } from "@/components/map/QueryResultPanel";
+import {
+  canSetQueryResultPage,
+  publicQueryPage,
+  type QueryResultState,
+  queryLayerFromResult,
+  queryResultState,
+} from "@/components/map/queryResults";
 import {
   decodeSourceDescriptor,
   decodeSourceDescriptorList,
@@ -35,6 +33,7 @@ import {
   type SourceDescriptor,
   sourceDescriptorId,
 } from "@/components/map/sourceDescriptors";
+import { useMapWorkspaceCommands } from "@/components/map/useMapWorkspaceCommands";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -65,6 +64,7 @@ import {
   getSampledValues,
   parseBreaks,
 } from "@/components/viewer/utils";
+import { WebMcpRuntimeConfigContext } from "@/components/WebMcpProvider";
 import { type DatasetMapImportInput, trackDatasetImportedIntoMap } from "@/lib/analytics";
 import type {
   Collection,
@@ -74,7 +74,16 @@ import type {
   DatasetWithUrls,
   PaginatedResponse,
 } from "@/lib/api-client";
-import { getCollectionBySlug, getDatasetBySlug, getDatasetFileBySlug } from "@/lib/api-client";
+import {
+  getCollectionById,
+  getCollectionBySlug,
+  getDatasetBySlug,
+  getDatasetFileById,
+  getDatasetFileBySlug,
+} from "@/lib/api-client";
+import { createQuery, getQueryPage, QueryApiError, type QueryRequest } from "@/lib/query-api";
+import { type MapCatalogLayerInput, useMapWebMcpTools } from "@/lib/webmcp/mapTools";
+import { type PublicToolQueryPage, type QueryMapPresentation, useQueryWebMcpTools } from "@/lib/webmcp/queryTools";
 
 type MapSearch = {
   source?: string;
@@ -125,53 +134,6 @@ interface MapWorkspaceProps {
 
 interface LayerStyleUpdates {
   [layerId: string]: LayerStylesById[string];
-}
-
-interface LoadedLayerItemProps {
-  layer: LoadedMapLayer;
-  vectorLayerCount: number;
-  onVisibleChange: (visible: boolean) => void;
-  onRemove: () => void;
-}
-
-function LoadedLayerItem({ layer, vectorLayerCount, onVisibleChange, onRemove }: LoadedLayerItemProps) {
-  return (
-    <div className="rounded-md border p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{layer.name}</div>
-          <div className="text-xs text-muted-foreground">{vectorLayerCount} vector layers</div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label={`${layer.visible ? "Hide" : "Show"} ${layer.name}`}
-            title={layer.visible ? "Hide layer" : "Show layer"}
-            onClick={() => onVisibleChange(!layer.visible)}
-          >
-            {layer.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-          </Button>
-          <Button size="icon" variant="ghost" aria-label={`Remove ${layer.name}`} onClick={onRemove}>
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-      <Button asChild type="button" variant="outline" size="sm" className="mt-3 w-full">
-        <Link
-          to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug"
-          params={{
-            collectionSlug: layer.descriptor.collectionSlug,
-            datasetSlug: layer.descriptor.datasetSlug,
-            fileSlug: layer.descriptor.fileSlug,
-          }}
-        >
-          <FileText className="h-4 w-4" />
-          Open file
-        </Link>
-      </Button>
-    </div>
-  );
 }
 
 function datasetHasLoadedLayer(
@@ -403,6 +365,7 @@ export function newMapImportEvents({
   const seenSourceDescriptorIds = new Set(trackedSourceDescriptorIds);
 
   return loadedLayers.flatMap((layer) => {
+    if (layer.kind !== "catalog_pmtiles") return [];
     const descriptorId = sourceDescriptorId(layer.descriptor);
     if (seenSourceDescriptorIds.has(descriptorId)) return [];
     seenSourceDescriptorIds.add(descriptorId);
@@ -425,6 +388,15 @@ export function newMapImportEvents({
 
 function mapLayersFromResolvedDescriptors(entries: ResolvedDescriptor[]): LoadedMapLayer[] {
   return entries.map(resolvedToMapLayer).filter((entry): entry is LoadedMapLayer => entry !== null);
+}
+
+function publicSelectedProperties(properties: SelectedMapFeature["properties"]): SelectedMapFeature["properties"] {
+  const publicProperties: SelectedMapFeature["properties"] = {};
+  for (const [key, value] of Object.entries(properties)) {
+    if (value.startsWith("gs://") || value.startsWith("s3://")) continue;
+    publicProperties[key] = value;
+  }
+  return publicProperties;
 }
 
 function pmtilesFormatForFile(file: DatasetFile) {
@@ -627,6 +599,7 @@ function StyleLayerCard({
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The workspace coordinates map state, source selection, and styling controls.
 export function MapWorkspace({ collection, initialLayers, initialLayerKey }: MapWorkspaceProps) {
+  const runtimeConfig = useContext(WebMcpRuntimeConfigContext);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const pinnedPopupElementRef = useRef<HTMLDivElement>(null);
   const settingsPanelRef = useRef<PanelImperativeHandle | null>(null);
@@ -635,10 +608,20 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const datasetDetailsRequestIdRef = useRef(0);
   const initialLayerKeyRef = useRef(initialLayerKey);
   const routeSourceDescriptorIdsRef = useRef(
-    new Set(mapLayersFromResolvedDescriptors(initialLayers).map((layer) => sourceDescriptorId(layer.descriptor))),
+    new Set(
+      mapLayersFromResolvedDescriptors(initialLayers)
+        .filter(
+          (layer): layer is Extract<LoadedMapLayer, { kind: "catalog_pmtiles" }> => layer.kind === "catalog_pmtiles",
+        )
+        .map((layer) => sourceDescriptorId(layer.descriptor)),
+    ),
   );
   const trackedSourceDescriptorIdsRef = useRef(new Set<string>());
   const selectedDescriptorIdRef = useRef<string | null>(null);
+  const queryTokensRef = useRef(new Map<string, string>());
+  const queryLayerLabelCounterRef = useRef(0);
+  const preparedCatalogLayersRef = useRef(new Map<string, LoadedMapLayer>());
+  const queryResultsPanelRef = useRef<HTMLDivElement>(null);
   const [vectorLayers, setVectorLayers] = useState<VectorLayerInfo[]>([]);
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
   const [pinnedPopupInfo, setPinnedPopupInfo] = useState<HoverInfo | null>(null);
@@ -662,19 +645,31 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const [addingLayerDescriptorId, setAddingLayerDescriptorId] = useState<string | null>(null);
   const [selectedFeatures, setSelectedFeatures] = useState<SelectedMapFeature[]>([]);
   const [wasSelectionCapped, setWasSelectionCapped] = useState(false);
+  const [queryResult, setQueryResult] = useState<QueryResultState | null>(null);
+  const [isLoadingQueryPage, setIsLoadingQueryPage] = useState(false);
   const [s2Level, setS2Level] = useState(16);
   const [loadedLayers, setLoadedLayers] = useState<LoadedMapLayer[]>(() =>
     mapLayersFromResolvedDescriptors(initialLayers),
   );
   const isMobileMapLayout = useIsMobileMapLayout();
-  const currentDescriptors = loadedLayers.map((layer) => layer.descriptor);
+  const currentDescriptors = loadedLayers.flatMap((layer) =>
+    layer.kind === "catalog_pmtiles" ? [layer.descriptor] : [],
+  );
+
+  useEffect(() => {
+    return () => {
+      queryTokensRef.current.clear();
+    };
+  }, []);
 
   useEffect(() => {
     if (!initialLayerKey || initialLayerKeyRef.current === initialLayerKey) return;
     initialLayerKeyRef.current = initialLayerKey;
     const nextLayers = mapLayersFromResolvedDescriptors(initialLayers);
     for (const layer of nextLayers) {
-      routeSourceDescriptorIdsRef.current.add(sourceDescriptorId(layer.descriptor));
+      if (layer.kind === "catalog_pmtiles") {
+        routeSourceDescriptorIdsRef.current.add(sourceDescriptorId(layer.descriptor));
+      }
     }
     setLoadedLayers(nextLayers);
   }, [initialLayerKey, initialLayers]);
@@ -755,6 +750,19 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     [loadedLayers],
   );
 
+  const handleQueryLayerError = useCallback(({ queryId }: { queryId: string; message: string }) => {
+    setLoadedLayers((current) =>
+      current.map((layer) =>
+        layer.kind === "query_mvt" && layer.queryId === queryId ? { ...layer, status: "error" } : layer,
+      ),
+    );
+    setQueryResult((current) =>
+      current?.page.query_id === queryId
+        ? { ...current, status: "error", errorMessage: "The query layer could not be loaded." }
+        : current,
+    );
+  }, []);
+
   const { mapRef, setHoverFeature, clearHoverFeature, clearSelectionBox } = useMultiLayerMapInitialization(
     mapContainerRef,
     loadedLayers,
@@ -766,6 +774,8 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     basemapMode,
     pinnedPopupInfo?.lngLat ?? null,
     pinnedPopupElementRef,
+    queryTokensRef.current,
+    handleQueryLayerError,
   );
 
   useLayerStyling(mapRef, vectorLayers, layerStyles, setLayerStyles);
@@ -780,6 +790,238 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     setSelectedFeatures([]);
     setWasSelectionCapped(false);
   }, [clearSelectionBox]);
+
+  const resolveDatasetLayer = useCallback(async (input: DatasetLayerInput): Promise<LoadedMapLayer | null> => {
+    const prepared = preparedCatalogLayersRef.current.get(input.layerId);
+    if (prepared) {
+      preparedCatalogLayersRef.current.delete(input.layerId);
+      return { ...prepared, name: input.label, label: input.label };
+    }
+    const values = input.layerId.split(":");
+    if (values.length !== 7) return null;
+    const [collectionSlug, datasetSlug, fileSlug, formatType, storageLocationId, version, sourceId] = values;
+    const parsedStorageLocationId = Number(storageLocationId);
+    const parsedSourceId = Number(sourceId);
+    if (
+      !collectionSlug ||
+      !datasetSlug ||
+      !fileSlug ||
+      formatType !== "pmtiles" ||
+      !Number.isSafeInteger(parsedStorageLocationId) ||
+      parsedStorageLocationId < 1 ||
+      !Number.isSafeInteger(parsedSourceId) ||
+      parsedSourceId < 1
+    ) {
+      return null;
+    }
+    const resolved = await resolveDescriptor({
+      collectionSlug,
+      datasetSlug,
+      fileSlug,
+      formatType,
+      storageLocationId: parsedStorageLocationId,
+      version: version ?? "1",
+      sourceId: parsedSourceId,
+    });
+    return resolved ? resolvedToMapLayer(resolved) : null;
+  }, []);
+
+  const resolveCatalogLayer = useCallback(
+    async (input: MapCatalogLayerInput): Promise<DatasetLayerInput> => {
+      const resolvedCollection =
+        input.collection_id === collection.id
+          ? collection
+          : await getCollectionById({ data: { id: input.collection_id } });
+      if (!resolvedCollection || resolvedCollection.id !== input.collection_id) {
+        throw new MapWorkspaceCommandError("The requested catalog collection could not be verified.");
+      }
+      const response = await getDatasetFileById({
+        data: {
+          collectionId: input.collection_id,
+          datasetId: input.dataset_id,
+          fileId: input.file_id,
+        },
+      });
+      if (response.dataset.id !== input.dataset_id || response.file.id !== input.file_id) {
+        throw new MapWorkspaceCommandError("The requested catalog file could not be verified.");
+      }
+      const pmtiles = response.file.formats?.find((entry) => entry.format.format_type === "pmtiles");
+      const source = pmtiles?.sources.find((entry) => entry.id === input.file_source_id);
+      if (!source) {
+        throw new MapWorkspaceCommandError("The requested PMTiles source is not available.");
+      }
+      const descriptor = descriptorForSource({
+        collectionSlug: resolvedCollection.slug,
+        datasetSlug: response.dataset.slug,
+        fileSlug: response.file.slug,
+        formatType: "pmtiles",
+        source,
+      });
+      if (!descriptor) {
+        throw new MapWorkspaceCommandError("The requested PMTiles source could not be verified.");
+      }
+      const layer = resolvedToMapLayer({ descriptor, dataset: response.dataset, file: response.file, source });
+      if (!layer) {
+        throw new MapWorkspaceCommandError("The requested PMTiles layer could not be prepared.");
+      }
+      preparedCatalogLayersRef.current.set(layer.id, layer);
+      return { layerId: layer.id, label: input.label ?? layer.label, kind: layer.kind };
+    },
+    [collection],
+  );
+
+  const commands = useMapWorkspaceCommands({
+    mapRef,
+    loadedLayers,
+    setLoadedLayers,
+    vectorLayers,
+    layerStyles,
+    setLayerStyles,
+    selectedFeatures,
+    clearSelection: clearSelectedFeatures,
+    basemapMode,
+    setBasemapMode,
+    resolveDatasetLayer,
+  });
+
+  const executeQuery = useCallback(
+    async (
+      input: QueryRequest,
+      presentation: QueryMapPresentation,
+      signal: AbortSignal,
+    ): Promise<PublicToolQueryPage> => {
+      const result = await createQuery(input, { signal });
+      queryTokensRef.current.set(result.query_id, result.query_token);
+      const layer = presentation.showOnMap
+        ? queryLayerFromResult(
+            result,
+            input.sources.map((source) => source.alias),
+          )
+        : null;
+      if (layer) {
+        const label = presentation.layerLabel ?? `Query result ${queryLayerLabelCounterRef.current + 1}`;
+        if (!presentation.layerLabel) queryLayerLabelCounterRef.current += 1;
+        const labeledLayer = { ...layer, name: label, label };
+        setLoadedLayers((current) => [...current.filter((entry) => entry.id !== labeledLayer.id), labeledLayer]);
+      }
+      const state = queryResultState(
+        result,
+        input.sources.map((source) => source.alias),
+        layer?.id ?? null,
+      );
+      setQueryResult(state);
+      return state.page;
+    },
+    [],
+  );
+
+  const executeQueryPage = useCallback(
+    async (
+      queryId: string,
+      input: { offset: number; page_size?: number | undefined },
+      signal: AbortSignal,
+    ): Promise<PublicToolQueryPage> => {
+      const token = queryTokensRef.current.get(queryId);
+      if (!token) throw new QueryApiError(404, "not_found", "The requested query was not found.");
+      const page = await getQueryPage(queryId, input, { queryToken: token, signal });
+      queryTokensRef.current.set(queryId, page.query_token);
+      const publicPage = publicQueryPage(page);
+      setQueryResult((current) =>
+        current?.page.query_id === queryId
+          ? { ...current, page: publicPage, status: "ready", errorMessage: null }
+          : current,
+      );
+      return publicPage;
+    },
+    [],
+  );
+
+  const mapWebMcpState = useCallback(
+    () => ({
+      layers: loadedLayers.map((layer) => ({
+        map_layer_id: layer.id,
+        label: layer.label,
+        kind: layer.kind,
+        visible: layer.visible,
+        ...(layer.kind === "query_mvt" ? { status: layer.status, query_id: layer.queryId } : {}),
+        style_layers: vectorLayers
+          .filter((vectorLayer) => vectorLayer.loadedLayerId === layer.id)
+          .map((vectorLayer) => {
+            const style = layerStyles[vectorLayer.id];
+            return {
+              style_layer_id: vectorLayer.id,
+              ...(vectorLayer.sourceLayerId === undefined ? {} : { source_layer_id: vectorLayer.sourceLayerId }),
+              fields: [...vectorLayer.fields],
+              numeric_fields: vectorLayer.numericFields.map((field) => ({
+                name: field.name,
+                ...(field.min === undefined ? {} : { min: field.min }),
+                ...(field.max === undefined ? {} : { max: field.max }),
+              })),
+              ...(style === undefined
+                ? {}
+                : {
+                    style: {
+                      color_property: style.colorProperty,
+                      color_scheme: style.colorScheme,
+                      breaks: parseBreaks(style.breaksText),
+                      break_mode: style.breakMode,
+                      opacity: style.opacity,
+                      radius: style.radius,
+                      line_width: style.lineWidth,
+                      radius_property: style.radiusProperty,
+                      line_width_property: style.lineWidthProperty,
+                      radius_scale: style.radiusScale,
+                      line_width_scale: style.lineWidthScale,
+                    },
+                  }),
+            };
+          }),
+      })),
+      basemap: basemapMode,
+      selected_feature_count: selectedFeatures.length,
+      camera: mapRef.current
+        ? {
+            center: [mapRef.current.getCenter().lng, mapRef.current.getCenter().lat] as const,
+            zoom: mapRef.current.getZoom(),
+            bearing: mapRef.current.getBearing(),
+            pitch: mapRef.current.getPitch(),
+          }
+        : null,
+      selected_features: selectedFeatures.map((feature) => ({
+        id: feature.id,
+        loadedLayerId: feature.loadedLayerId,
+        sourceLayerId: feature.sourceLayerId,
+        featureId: feature.featureId,
+        properties: publicSelectedProperties(feature.properties),
+        ...(feature.sourceKind === undefined ? {} : { sourceKind: feature.sourceKind }),
+        ...(feature.sourceKind === "query_mvt" ? { queryId: feature.queryId } : {}),
+      })),
+      current_result: queryResult
+        ? {
+            query_id: queryResult.page.query_id,
+            offset: queryResult.page.offset,
+            limit: queryResult.page.limit,
+            returned_count: queryResult.page.returned_count,
+            has_more: queryResult.page.has_more,
+            map_layer_id: queryResult.layerId,
+          }
+        : null,
+    }),
+    [basemapMode, layerStyles, loadedLayers, mapRef, queryResult, selectedFeatures, vectorLayers],
+  );
+
+  useMapWebMcpTools({
+    enabled: runtimeConfig?.webMcpEnabled === true,
+    commands,
+    getState: mapWebMcpState,
+    resolveCatalogLayer,
+  });
+  useQueryWebMcpTools({
+    enabled: runtimeConfig?.queryToolsEnabled === true,
+    pageEnabled: queryResult !== null && canSetQueryResultPage(queryResult.page),
+    executeQuery,
+    executePage: executeQueryPage,
+  });
 
   useEffect(() => {
     const updates = computeMissingBreakUpdates(mapRef.current, vectorLayers, layerStyles);
@@ -865,7 +1107,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     [layerStyles, loadedLayers, vectorLayers],
   );
   const legendTitle = legendGroups.length === 1 ? legendGroups[0]?.field : undefined;
-  const headerLayer = loadedLayers.length === 1 ? loadedLayers[0] : null;
+  const headerLayer = loadedLayers.length === 1 && loadedLayers[0]?.kind === "catalog_pmtiles" ? loadedLayers[0] : null;
   const headerPrimary =
     headerLayer?.datasetName ?? (loadedLayers.length > 1 ? `${loadedLayers.length} map layers` : collection.name);
   const headerSecondary = headerLayer?.descriptor.fileSlug ?? (loadedLayers.length > 1 ? collection.name : null);
@@ -963,15 +1205,10 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     const descriptorToAddId = selectedDescriptorId;
     setAddingLayerDescriptorId(descriptorToAddId);
     try {
-      const resolved = await resolveDescriptor(descriptorToAdd);
-      const layer = resolved ? resolvedToMapLayer(resolved) : null;
-      if (!layer) return;
       if (selectedDescriptorIdRef.current !== descriptorToAddId) return;
-      setLoadedLayers((prev) => {
-        if (prev.some((entry) => entry.id === descriptorToAddId)) {
-          return prev;
-        }
-        return [...prev, layer];
+      await commands.addDatasetLayer({
+        layerId: descriptorToAddId,
+        label: selectedFile?.name ?? descriptorToAdd.fileSlug,
       });
       applyLayerPickerSelection(clearedLayerPickerSelection());
     } finally {
@@ -980,21 +1217,24 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   };
 
   const removeLoadedLayer = (layer: LoadedMapLayer) => {
-    const descriptorId = sourceDescriptorId(layer.descriptor);
-    trackedSourceDescriptorIdsRef.current.delete(descriptorId);
-    routeSourceDescriptorIdsRef.current.delete(descriptorId);
-    setLoadedLayers((prev) => prev.filter((entry) => entry.id !== layer.id));
-    applyLayerPickerSelection(
-      layerPickerSelectionAfterLayerRemoval({
-        selection: {
-          selectedDataset,
-          selectedFileSlug,
-          selectedVersion,
-          selectedSourceId,
-        },
-        removedLayerDescriptor: layer.descriptor,
-      }),
-    );
+    commands.removeLayer(layer.id);
+    if (layer.kind === "catalog_pmtiles") {
+      const descriptorId = sourceDescriptorId(layer.descriptor);
+      trackedSourceDescriptorIdsRef.current.delete(descriptorId);
+      routeSourceDescriptorIdsRef.current.delete(descriptorId);
+      applyLayerPickerSelection(
+        layerPickerSelectionAfterLayerRemoval({
+          selection: {
+            selectedDataset,
+            selectedFileSlug,
+            selectedVersion,
+            selectedSourceId,
+          },
+          removedLayerDescriptor: layer.descriptor,
+        }),
+      );
+      return;
+    }
   };
 
   const toggleSettingsPanel = () => {
@@ -1005,6 +1245,23 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     }
     settingsPanelRef.current.collapse();
   };
+
+  const loadNextQueryPage = useCallback(() => {
+    const nextOffset = queryResult?.page.next_offset;
+    if (!queryResult || nextOffset === undefined || isLoadingQueryPage) return;
+    setIsLoadingQueryPage(true);
+    void executeQueryPage(
+      queryResult.page.query_id,
+      { offset: nextOffset, page_size: queryResult.page.limit },
+      new AbortController().signal,
+    )
+      .catch(() => {
+        setQueryResult((current) =>
+          current ? { ...current, status: "error", errorMessage: "The next query page could not be loaded." } : current,
+        );
+      })
+      .finally(() => setIsLoadingQueryPage(false));
+  }, [executeQueryPage, isLoadingQueryPage, queryResult]);
 
   const settingsPanelContent = (
     <div className="box-border w-full max-w-full min-w-0 overflow-hidden p-3 sm:p-4">
@@ -1041,17 +1298,51 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
               loadedLayers.map((layer) => {
                 const layerVectorLayers = vectorLayers.filter((entry) => entry.loadedLayerId === layer.id);
                 return (
-                  <LoadedLayerItem
+                  <MapLayerListItem
                     key={layer.id}
                     layer={layer}
                     vectorLayerCount={layerVectorLayers.length}
-                    onVisibleChange={(visible) =>
-                      setLoadedLayers((prev) =>
-                        prev.map((entry) => (entry.id === layer.id ? { ...entry, visible } : entry)),
-                      )
-                    }
+                    onVisibleChange={(visible) => commands.setLayerVisibility(layer.id, visible)}
                     onRemove={() => removeLoadedLayer(layer)}
-                  />
+                  >
+                    {layer.kind === "catalog_pmtiles" && (
+                      <Button asChild type="button" variant="outline" size="sm" className="mt-3 w-full">
+                        <Link
+                          to="/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug"
+                          params={{
+                            collectionSlug: layer.descriptor.collectionSlug,
+                            datasetSlug: layer.descriptor.datasetSlug,
+                            fileSlug: layer.descriptor.fileSlug,
+                          }}
+                        >
+                          Open file
+                        </Link>
+                      </Button>
+                    )}
+                    {layer.kind === "query_mvt" && (
+                      <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+                        <div>
+                          Status:{" "}
+                          {layer.status === "ready" ? "Ready" : layer.status === "loading" ? "Loading" : "Unavailable"}
+                        </div>
+                        <div>
+                          Sources: {layer.sourceAliases.length > 0 ? layer.sourceAliases.join(", ") : "Query result"}
+                        </div>
+                        <div>Geometry: {layer.geometryColumn}</div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() =>
+                            queryResultsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
+                          }
+                        >
+                          View results
+                        </Button>
+                      </div>
+                    )}
+                  </MapLayerListItem>
                 );
               })
             )}
@@ -1245,6 +1536,20 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
                 clearSelectedFeatures();
               }}
             />
+          </ResizablePanel>
+        </>
+      )}
+      {queryResult && (
+        <>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize="32%" minSize="18%" className="min-h-0 overflow-hidden">
+            <div ref={queryResultsPanelRef} className="h-full">
+              <QueryResultPanel
+                result={queryResult}
+                onLoadMore={loadNextQueryPage}
+                isLoadingMore={isLoadingQueryPage}
+              />
+            </div>
           </ResizablePanel>
         </>
       )}

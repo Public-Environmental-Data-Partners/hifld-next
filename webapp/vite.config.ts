@@ -36,6 +36,7 @@ const config = defineConfig(({ mode }) => ({
     globals: true,
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "plugins/**/*.test.ts"],
   },
 }));
 
