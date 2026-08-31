@@ -2,6 +2,7 @@ import { MarkdownDescription } from "@/components/dataset/MarkdownDescription";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { ColumnSchema, DatasetSource, SpatialDatasetFileMetadata } from "@/lib/api-client";
+import { compareFileVersions } from "@/lib/webmcp/versionComparisonTool";
 
 type MetadataKey =
   | "description"
@@ -45,21 +46,6 @@ function MetadataCellValue({ field, value }: { field: MetadataKey; value: Metada
   return normalizeValue(value);
 }
 
-function isDifferent(
-  a: MetadataValue | ColumnSchema | undefined,
-  b: MetadataValue | ColumnSchema | undefined,
-): boolean {
-  return JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
-}
-
-function isColumnSchemaDifferent(left: ColumnSchema | undefined, right: ColumnSchema | undefined): boolean {
-  if (!left || !right) {
-    return left !== right;
-  }
-
-  return left.type !== right.type;
-}
-
 function getColumns(metadata?: SpatialDatasetFileMetadata): ColumnSchema[] {
   return metadata?.columns ?? [];
 }
@@ -85,30 +71,29 @@ export function VersionCompare({
   const metadataB = rightSource.source_metadata;
   const columnsA = getColumns(metadataA);
   const columnsB = getColumns(metadataB);
+  const comparison = compareFileVersions(leftSource, rightSource);
+  const changedMetadataFields = new Set(comparison.changed_metadata.map((change) => change.field));
   const versionA = leftLabel ?? sourceLabel(leftSource, "Left source");
   const versionB = rightLabel ?? sourceLabel(rightSource, "Right source");
 
-  const columnNames = Array.from(
-    new Set([...columnsA.map((column) => column.name), ...columnsB.map((column) => column.name)]),
-  ).sort();
+  const columnNames = [
+    ...new Set([...comparison.added_columns, ...comparison.removed_columns, ...comparison.changed_columns]),
+  ];
 
   const schemaRows = columnNames.map((name) => {
     const left = columnsA.find((column) => column.name === name);
     const right = columnsB.find((column) => column.name === name);
 
-    let changeType: "Added" | "Removed" | "Changed" | "Unchanged" = "Unchanged";
-    if (!left && right) {
-      changeType = "Added";
-    } else if (left && !right) {
-      changeType = "Removed";
-    } else if (left && right && isColumnSchemaDifferent(left, right)) {
-      changeType = "Changed";
-    }
+    const changeType: "Added" | "Removed" | "Changed" = comparison.added_columns.includes(name)
+      ? "Added"
+      : comparison.removed_columns.includes(name)
+        ? "Removed"
+        : "Changed";
 
     return { name, left, right, changeType };
   });
 
-  const changedSchemaRows = schemaRows.filter((row) => row.changeType !== "Unchanged");
+  const changedSchemaRows = schemaRows;
   const addedColumns = changedSchemaRows.filter((row) => row.changeType === "Added").length;
   const removedColumns = changedSchemaRows.filter((row) => row.changeType === "Removed").length;
 
@@ -133,7 +118,7 @@ export function VersionCompare({
             {METADATA_KEYS.map((key) => {
               const left = metadataA?.[key];
               const right = metadataB?.[key];
-              const changed = isDifferent(left, right);
+              const changed = changedMetadataFields.has(key);
 
               return (
                 <TableRow key={key}>
