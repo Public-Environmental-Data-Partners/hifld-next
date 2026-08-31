@@ -37,7 +37,11 @@ import {
   GEOMETRY_MATCH_COLUMN,
   isComparableFeatureDiffSelection,
 } from "./featureDiff";
-import type { SelectedMapFeature } from "./featureSelection";
+import {
+  type CatalogSelectedMapFeature,
+  isCatalogSelectedMapFeature,
+  type SelectedMapFeature,
+} from "./featureSelection";
 
 interface FeatureTablePanelProps {
   features: SelectedMapFeature[];
@@ -72,7 +76,7 @@ function featureMatchesQuery(feature: SelectedMapFeature, query: string): boolea
   }
   const haystack = [
     feature.layerName,
-    feature.version,
+    isCatalogSelectedMapFeature(feature) ? feature.version : feature.queryId,
     feature.sourceLayerId,
     feature.featureId,
     ...Object.entries(feature.properties).flat(),
@@ -90,10 +94,16 @@ interface FeatureGroupOption {
 }
 
 function layerKeyForFeature(feature: SelectedMapFeature): string {
+  if (!isCatalogSelectedMapFeature(feature)) {
+    return [feature.loadedLayerId, feature.sourceLayerId].join(":");
+  }
   return [feature.collectionSlug, feature.datasetSlug, feature.fileSlug, feature.sourceLayerId].join(":");
 }
 
 function layerLabelForFeature(feature: SelectedMapFeature): string {
+  if (!isCatalogSelectedMapFeature(feature)) {
+    return feature.layerName;
+  }
   if (feature.datasetSlug === feature.fileSlug) {
     return feature.datasetSlug;
   }
@@ -107,7 +117,8 @@ function buildFeatureGroupOptions(features: SelectedMapFeature[]): FeatureGroupO
     const key = layerKeyForFeature(feature);
     const existing = groups.get(key);
     if (existing) {
-      existing.countByVersion.set(feature.version, (existing.countByVersion.get(feature.version) ?? 0) + 1);
+      const version = isCatalogSelectedMapFeature(feature) ? feature.version : "query";
+      existing.countByVersion.set(version, (existing.countByVersion.get(version) ?? 0) + 1);
       continue;
     }
 
@@ -115,7 +126,7 @@ function buildFeatureGroupOptions(features: SelectedMapFeature[]): FeatureGroupO
       key,
       label: layerLabelForFeature(feature),
       versions: [],
-      countByVersion: new Map([[feature.version, 1]]),
+      countByVersion: new Map([[isCatalogSelectedMapFeature(feature) ? feature.version : "query", 1]]),
     });
   }
 
@@ -137,7 +148,9 @@ function selectedFeatureSubset({
   selectedVersion: string;
 }): SelectedMapFeature[] {
   return features.filter(
-    (feature) => layerKeyForFeature(feature) === selectedLayerKey && feature.version === selectedVersion,
+    (feature) =>
+      layerKeyForFeature(feature) === selectedLayerKey &&
+      (isCatalogSelectedMapFeature(feature) ? feature.version : "query") === selectedVersion,
   );
 }
 
@@ -316,6 +329,7 @@ function SelectedFeaturesTable({
 }
 
 function SelectedFeatureActions({ feature }: { feature: SelectedMapFeature }) {
+  const catalogFeature: CatalogSelectedMapFeature | null = isCatalogSelectedMapFeature(feature) ? feature : null;
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -340,22 +354,24 @@ function SelectedFeatureActions({ feature }: { feature: SelectedMapFeature }) {
               </a>
             </Button>
           ) : null}
-          <DataQualityFeedbackDialog
-            context={{
-              collectionSlug: feature.collectionSlug,
-              datasetSlug: feature.datasetSlug,
-              fileSlug: feature.fileSlug,
-              version: feature.version,
-              sourceId: feature.sourceId,
-              feature,
-            }}
-            trigger={
-              <Button type="button" variant="ghost" size="sm" className="justify-start">
-                <MessageSquareWarning className="mr-2 h-4 w-4" />
-                Report issue
-              </Button>
-            }
-          />
+          {catalogFeature ? (
+            <DataQualityFeedbackDialog
+              context={{
+                collectionSlug: catalogFeature.collectionSlug,
+                datasetSlug: catalogFeature.datasetSlug,
+                fileSlug: catalogFeature.fileSlug,
+                version: catalogFeature.version,
+                sourceId: catalogFeature.sourceId,
+                feature: catalogFeature,
+              }}
+              trigger={
+                <Button type="button" variant="ghost" size="sm" className="justify-start">
+                  <MessageSquareWarning className="mr-2 h-4 w-4" />
+                  Report issue
+                </Button>
+              }
+            />
+          ) : null}
         </div>
       </PopoverContent>
     </Popover>

@@ -11,7 +11,12 @@ import {
   syncBasemapVisibility,
   syncExistingRenderedLayers,
   syncBasemapVisibilityAfterStyleLoad,
+  queryVectorSourceSpecification,
+  transformQueryTileRequest,
+  getVectorLayersForSource,
+  syncRenderedLayerOrder,
 } from "../useMapInitialization";
+import type { QueryMvtLayer } from "@/components/map/multiLayerSources";
 
 vi.mock("maplibre-gl", () => ({
   default: {
@@ -79,6 +84,93 @@ function createMockMap(): MockMap {
 }
 
 describe("useMapInitialization helpers", () => {
+  it("reorders all rendered style layers in source order without moving the basemap", () => {
+    const map = {
+      getLayer: vi.fn((id: string) => ({
+        "source-query-b-one-fill": true,
+        "source-query-b-one-line": true,
+        "source-query-a-one-fill": true,
+        "source-query-a-one-line": true,
+      })[id]),
+      moveLayer: vi.fn(),
+    };
+    const sources = [
+      { id: "query:b", mapSourceId: "source-query-b", kind: "query_mvt" },
+      { id: "query:a", mapSourceId: "source-query-a", kind: "query_mvt" },
+    ];
+    const vectorLayersBySource = {
+      "query:b": [
+        { id: "query-b:one", mapLayerBaseId: "source-query-b-one", fields: [], numericFields: [] },
+      ],
+      "query:a": [
+        { id: "query-a:one", mapLayerBaseId: "source-query-a-one", fields: [], numericFields: [] },
+      ],
+    };
+
+    syncRenderedLayerOrder(map, sources, vectorLayersBySource);
+
+    expect(map.moveLayer).toHaveBeenCalledWith("source-query-b-one-fill");
+    expect(map.moveLayer).toHaveBeenCalledWith("source-query-b-one-line");
+    expect(map.moveLayer).toHaveBeenCalledWith("source-query-a-one-fill");
+    expect(map.moveLayer).toHaveBeenCalledWith("source-query-a-one-line");
+    expect(map.moveLayer).not.toHaveBeenCalledWith("osm-base");
+  });
+  it("describes query MVT sources from server metadata without exposing tokens", () => {
+    const queryLayer: QueryMvtLayer = {
+      kind: "query_mvt",
+      id: "query:q-123",
+      name: "Query result",
+      label: "Query result",
+      queryId: "q-123",
+      sourceAliases: ["hospitals"],
+      geometryColumn: "geom",
+      tileTemplate: "https://query.example.test/api/queries/q-123/tiles/{z}/{x}/{y}.mvt",
+      sourceLayerId: "hifld",
+      scalarFields: [{ name: "beds", logicalType: "double", nullable: false, min: 1, max: 100 }],
+      bounds: null,
+      status: "ready",
+      mapSourceId: "source-query-q-123",
+      visible: true,
+      opacity: 0.82,
+    };
+
+    expect(queryVectorSourceSpecification(queryLayer)).toEqual({
+      type: "vector",
+      tiles: [queryLayer.tileTemplate],
+    });
+    expect(getVectorLayersForSource({}, queryLayer)).toEqual([
+      expect.objectContaining({
+        id: "query:q-123:hifld",
+        sourceLayerId: "hifld",
+        fields: ["beds"],
+        numericFields: [{ name: "beds", min: 1, max: 100 }],
+      }),
+    ]);
+  });
+
+  it("attaches only the private token for known query tile paths", () => {
+    const tokens = new Map([["q-123", "signed-token"]]);
+    expect(
+      transformQueryTileRequest(
+        "https://query.example.test/api/queries/q-123/tiles/4/5/6.mvt",
+        tokens,
+      ),
+    ).toEqual({
+      url: "https://query.example.test/api/queries/q-123/tiles/4/5/6.mvt",
+      headers: { "X-HIFLD-Query-Token": "signed-token" },
+    });
+    expect(transformQueryTileRequest("https://query.example.test/api/queries/q-999/tiles/4/5/6.mvt", tokens)).toEqual({
+      blocked: true,
+      queryId: "q-999",
+      reason: "unknown_query",
+    });
+    expect(transformQueryTileRequest("https://query.example.test/api/queries/q-123/pages", tokens)).toBeNull();
+    expect(transformQueryTileRequest("https://query.example.test/api/queries/q-123/tiles/4/5/6.mvt?token=secret", tokens)).toEqual({
+      url: "https://query.example.test/api/queries/q-123/tiles/4/5/6.mvt",
+      headers: { "X-HIFLD-Query-Token": "signed-token" },
+    });
+  });
+
   it("extracts vector layer metadata", () => {
     expect(
       getVectorLayers({

@@ -2,7 +2,7 @@ import maplibregl from "maplibre-gl";
 import { type RefObject, useCallback, useEffect, useRef } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { PMTiles, Protocol } from "pmtiles";
-import type { LoadedMapLayer } from "@/components/map/multiLayerSources";
+import type { LoadedMapLayer, QueryMvtLayer } from "@/components/map/multiLayerSources";
 import type { ColumnSchema } from "@/lib/api-client";
 import type { HoverInfo, NumericFieldSummary, VectorLayerInfo } from "./types";
 import { DEFAULT_STYLE } from "./utils";
@@ -162,6 +162,9 @@ export function getVectorLayers(metadata: PMTilesMetadata): VectorLayerInfo[] {
 }
 
 export function getVectorLayersForSource(metadata: PMTilesMetadata, source: LoadedMapLayer): VectorLayerInfo[] {
+  if (source.kind === "query_mvt") {
+    return getVectorLayersForQuerySource(source);
+  }
   return getVectorLayers(metadata).map((layer) => ({
     ...layer,
     id: `${source.id}:${layer.id}`,
@@ -175,6 +178,70 @@ export function getVectorLayersForSource(metadata: PMTilesMetadata, source: Load
     }),
     geometryType: source.sourceMetadata?.geometry_type,
   }));
+}
+
+export function getVectorLayersForQuerySource(source: QueryMvtLayer): VectorLayerInfo[] {
+  return [
+    {
+      id: `${source.id}:${source.sourceLayerId}`,
+      sourceLayerId: source.sourceLayerId,
+      loadedLayerId: source.id,
+      mapSourceId: source.mapSourceId,
+      mapLayerBaseId: `${source.mapSourceId}-${source.sourceLayerId}`,
+      fields: source.scalarFields.map((field) => field.name),
+      numericFields: source.scalarFields
+        .filter((field) => isNumericFieldType(field.logicalType) || field.min !== undefined || field.max !== undefined)
+        .map((field) => ({ name: field.name, min: field.min, max: field.max })),
+    },
+  ];
+}
+
+export function queryVectorSourceSpecification(source: QueryMvtLayer): { type: "vector"; tiles: [string] } {
+  return {
+    type: "vector",
+    tiles: [source.tileTemplate],
+  };
+}
+
+export type QueryTileRequest =
+  | { url: string; headers: { "X-HIFLD-Query-Token": string } }
+  | { blocked: true; queryId: string; reason: "unknown_query" };
+
+const QUERY_TILE_PATH = /^\/api\/queries\/([^/]+)\/tiles\/[^/]+\/[^/]+\/[^/]+\.mvt$/;
+
+export function transformQueryTileRequest(
+  requestUrl: string,
+  queryTokens: ReadonlyMap<string, string>,
+): QueryTileRequest | null {
+  let pathname: string;
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(requestUrl, "http://localhost");
+    pathname = parsedUrl.pathname;
+  } catch {
+    return null;
+  }
+  const match = QUERY_TILE_PATH.exec(pathname);
+  if (!match) {
+    return null;
+  }
+  const queryId = match[1];
+  if (!queryId) {
+    return { blocked: true, queryId: "", reason: "unknown_query" };
+  }
+  const token = queryTokens.get(decodeURIComponent(queryId));
+  if (!token) {
+    return { blocked: true, queryId: decodeURIComponent(queryId), reason: "unknown_query" };
+  }
+  parsedUrl.searchParams.delete("token");
+  parsedUrl.searchParams.delete("query_token");
+  parsedUrl.searchParams.delete("queryToken");
+  const isAbsoluteUrl = /^[a-z][a-z\d+.-]*:/i.test(requestUrl);
+  const safeUrl = isAbsoluteUrl ? parsedUrl.toString() : `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`;
+  return {
+    url: safeUrl,
+    headers: { "X-HIFLD-Query-Token": token },
+  };
 }
 
 function sourceLayerForFeature(feature: maplibregl.MapGeoJSONFeature): string | undefined {
@@ -450,6 +517,23 @@ export function syncExistingRenderedLayers(map: maplibregl.Map, source: LoadedMa
   return layerIds;
 }
 
+export function syncRenderedLayerOrder(
+  map: Pick<maplibregl.Map, "getLayer" | "moveLayer">,
+  sources: readonly Pick<LoadedMapLayer, "id">[],
+  vectorLayersBySource: Readonly<VectorLayersBySource>,
+): void {
+  for (const source of sources) {
+    for (const layer of vectorLayersBySource[source.id] ?? []) {
+      const baseId = layer.mapLayerBaseId ?? `${source.id}-${layer.sourceLayerId ?? layer.id}`;
+      for (const styleLayerId of [`${baseId}-fill`, `${baseId}-line`, `${baseId}-circle`]) {
+        if (map.getLayer(styleLayerId)) {
+          map.moveLayer(styleLayerId);
+        }
+      }
+    }
+  }
+}
+
 export function syncBasemapVisibility(map: maplibregl.Map, mode: BasemapMode): void {
   const style = map.getStyle();
   for (const styleLayer of style?.layers ?? []) {
@@ -571,6 +655,18 @@ async function loadMapSource(
     };
   }
 
+  if (source.kind === "query_mvt") {
+    const vectorLayers = getVectorLayersForQuerySource(source);
+    if (!shouldContinue()) {
+      return null;
+    }
+    map.addSource(source.mapSourceId, queryVectorSourceSpecification(source));
+    return {
+      vectorLayers,
+      interactiveLayerIds: vectorLayers.flatMap((layer) => addRenderedLayersForVectorLayer(map, source, layer)),
+    };
+  }
+
   const pmtiles = new PMTiles(source.pmtilesUrl);
   protocol?.add(pmtiles);
   const metadata = (await pmtiles.getMetadata()) as PMTilesMetadata;
@@ -629,6 +725,7 @@ async function syncLoadedMapSources({
       delete vectorLayersBySource[loadedLayerId];
     }
   }
+  syncRenderedLayerOrder(map, sources, vectorLayersBySource);
 
   return {
     layers: nextLayers,
@@ -647,6 +744,8 @@ export function useMultiLayerMapInitialization(
   basemapMode: BasemapMode = "street",
   pinnedPopupLngLat?: PopupLngLat | null,
   pinnedPopupElementRef?: React.RefObject<HTMLDivElement | null>,
+  queryTokens: ReadonlyMap<string, string> = new Map(),
+  onQueryLayerError?: ((error: { queryId: string; message: string }) => void) | undefined,
 ) {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const currentBasemapModeRef = useRef(basemapMode);
@@ -658,6 +757,8 @@ export function useMultiLayerMapInitialization(
   const onPinnedPopupRef = useRef(onPinnedPopup);
   const pinnedPopupLngLatRef = useRef(pinnedPopupLngLat);
   const pinnedPopupElementRefRef = useRef(pinnedPopupElementRef);
+  const queryTokensRef = useRef(queryTokens);
+  const onQueryLayerErrorRef = useRef(onQueryLayerError);
   const isSelectionActiveRef = useRef(isSelectionActive);
   const boxSelectionStartRef = useRef<{ x: number; y: number } | null>(null);
   const boxSelectionStartLngLatRef = useRef<SelectionLngLat | null>(null);
@@ -695,6 +796,14 @@ export function useMultiLayerMapInitialization(
   useEffect(() => {
     pinnedPopupElementRefRef.current = pinnedPopupElementRef;
   }, [pinnedPopupElementRef]);
+
+  useEffect(() => {
+    queryTokensRef.current = queryTokens;
+  }, [queryTokens]);
+
+  useEffect(() => {
+    onQueryLayerErrorRef.current = onQueryLayerError;
+  }, [onQueryLayerError]);
 
   useEffect(() => {
     isSelectionActiveRef.current = isSelectionActive;
@@ -767,6 +876,20 @@ export function useMultiLayerMapInitialization(
       style: OPENMAPTILES_STYLE_URL,
       center: [-98.5795, 39.8283],
       zoom: 4,
+      transformRequest: (url) => {
+        const transformed = transformQueryTileRequest(url, queryTokensRef.current);
+        if (!transformed) {
+          return undefined;
+        }
+        if ("blocked" in transformed) {
+          onQueryLayerErrorRef.current?.({
+            queryId: transformed.queryId,
+            message: "Query map layer is unavailable.",
+          });
+          return { url: "data:," };
+        }
+        return transformed;
+      },
     });
 
     mapRef.current = map;

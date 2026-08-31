@@ -3,7 +3,7 @@ import type { Dataset, DatasetFile, DatasetSource, SpatialDatasetFileMetadata } 
 import type { SourceDescriptor } from "./sourceDescriptors";
 import { sourceDescriptorId } from "./sourceDescriptors";
 
-export type MapBounds = readonly [minX: number, minY: number, maxX: number, maxY: number];
+export type MapBounds = [minX: number, minY: number, maxX: number, maxY: number];
 
 interface MapLayerBase {
   id: string;

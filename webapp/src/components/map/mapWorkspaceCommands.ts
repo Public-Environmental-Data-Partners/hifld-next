@@ -22,7 +22,7 @@ export type StyleLayerTarget = Pick<VectorLayerInfo, "id" | "fields" | "numericF
 
 export interface MapCameraTarget {
   bounds?: MapBounds | undefined;
-  center?: readonly [number, number] | undefined;
+  center?: [number, number] | undefined;
   layerIds?: readonly string[] | undefined;
   featureId?: string | undefined;
   zoom?: number | undefined;
@@ -31,7 +31,7 @@ export interface MapCameraTarget {
 export interface MapCameraInput {
   target?: MapCameraTarget | undefined;
   bounds?: MapBounds | undefined;
-  center?: readonly [number, number] | undefined;
+  center?: [number, number] | undefined;
   layerIds?: readonly string[] | undefined;
   featureId?: string | undefined;
   zoom?: number | undefined;
