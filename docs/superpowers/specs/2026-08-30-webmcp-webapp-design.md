@@ -43,8 +43,6 @@ currently open HIFLD webapp.
 
 The first release includes:
 
-- Current-page context for collection, dataset, file, schema, comparison, and
-  map routes.
 - Collection listing and detail.
 - Collection-scoped dataset search with text, tag filters, and offset paging.
 - Discovery of valid collection tag keys and values.
@@ -175,7 +173,6 @@ webapp/src/lib/webmcp/
   result.ts              bounded success and error envelopes
   useWebMcpTool.ts       registration and cleanup lifecycle
   catalog-tools.ts       global catalog tool definitions
-  page-context.ts        route context model
 ```
 
 Map and query registrations live next to their application command hooks under
@@ -205,20 +202,25 @@ assertions, or TypeScript suppression comments as escape hatches.
 ## Registration lifecycle
 
 Global catalog tools are registered once from a provider mounted inside the
-root client layout. The provider consumes a compact route context published by
-the active route.
+root client layout. Contextual route components register only the additional
+tools they can execute.
 
 Contextual tools are registered only while usable:
 
-- File-version comparison tools exist on file detail and comparison routes.
+- File-version comparison exists only on the file comparison route.
 - Core map tools exist while `MapWorkspace` is mounted.
 - Layer mutation tools exist when at least one compatible layer is loaded.
 - Selection tools exist only when the selection state makes them meaningful.
-- Query paging and query-layer tools exist only when a query result exists.
+- Query paging exists only when an active query has a valid paging token.
 
 Dynamic registration must be state-based, not per selected dataset or per
 individual layer. A tool accepts a validated layer or source identifier rather
 than registering one tool per entity.
+
+The first release defines 19 tool names: six global catalog tools, one
+comparison-route tool, ten map tools, and two query tools. They are never all
+registered together. An empty map exposes 11 tools; layer, selection, and paging
+tools appear only as those capabilities become usable.
 
 Tools are same-origin only. Do not pass `exposedTo`. Tool descriptions stay
 under 500 characters, parameter descriptions under 150 characters, names and
@@ -275,18 +277,23 @@ The following tools are available throughout the hydrated webapp:
 
 | Tool | Inputs | Behavior | Annotations |
 |---|---|---|---|
-| `get_page_context` | none | Return route kind, current catalog identities, active filters, and available workspace summary | read-only; untrusted |
 | `list_collections` | none | Return compact collection identities, names, and canonical links | read-only; untrusted |
-| `get_collection` | `collection` | Return one collection's compact metadata without dataset rows | read-only; untrusted |
-| `get_dataset_filters` | `collection`, optional `tag_key` | Return valid tag keys or values for the collection | read-only; untrusted |
+| `get_collection` | `collection`, optional `tag_key`, `filter_offset`, `filter_limit` | Return compact collection metadata and bounded valid dataset filter keys/values | read-only; untrusted |
 | `search_datasets` | `collection`, optional `search`, `tags`, `limit`, `offset` | Navigate to the collection search state, render the result page, and return compact matches | changes UI state; untrusted |
-| `get_dataset` | `collection`, `dataset` | Return metadata and compact file summaries | read-only; untrusted |
-| `get_dataset_file` | `collection`, `dataset`, `file` | Return file metadata, formats, versions, spatial summary, storage labels, query-source identities, and canonical links | read-only; untrusted |
+| `get_dataset` | `collection`, `dataset` | Return complete bounded dataset metadata, its tags, and compact file summaries | read-only; untrusted |
+| `get_dataset_file` | `collection`, `dataset`, `file` | Return complete bounded file metadata, formats, all version/source choices, spatial/schema summaries, query-source identities, and canonical links | read-only; untrusted |
 | `get_dataset_file_schema` | catalog identities, optional `version`, `column_offset`, `column_limit` | Return one bounded schema page and provenance | read-only; untrusted |
-| `open_catalog_item` | typed catalog identity and `view` | Navigate to the selected collection, dataset, file, schema, compare, viewer, or map route | changes UI state; untrusted |
 
 Catalog identity inputs use slugs as displayed by the webapp. Numeric IDs may
 be returned as metadata but are not accepted as ambiguous path substitutes.
+
+`get_collection` folds filter discovery into collection metadata. It includes
+valid tag keys and bounded value lists from the existing tags endpoint, with
+per-list truncation markers when the output budget is reached. Supplying
+`tag_key` returns a bounded value page for that key, so the merged tool does not
+make uncommon filter values unreachable. A separate filter-discovery tool is
+unnecessary. `get_dataset` includes that dataset's actual tags; it does not
+repeat every value available across the collection.
 
 `search_datasets` requires `collection`. `limit` defaults to 10 and is capped at
 20; `offset` is non-negative. Tags are a typed record of string keys to a
@@ -294,8 +301,8 @@ string or string list. The callback serializes them for the existing API rather
 than requiring the agent to construct JSON in a query string. Search results
 omit long descriptions and source URLs.
 
-`get_dataset_file` returns the stable logical source reference required by
-`run_dataset_query`:
+`get_dataset_file` includes every published file version and storage choice,
+plus the stable logical source reference required by `run_dataset_query`:
 
 ```ts
 type QuerySourceRef = {
@@ -310,6 +317,13 @@ type QuerySourceRef = {
 The returned alias is a suggestion derived from catalog metadata. The query
 tool revalidates aliases and all catalog identities server-side.
 
+Returning richer dataset and file objects removes separate tools for file lists,
+formats, sources, and versions. `get_dataset_file_schema` remains separate
+because schemas can contain hundreds of columns, require independent paging,
+and may be requested for a version other than the default. Folding schema pages
+into every file response would make the common response larger and repeat file
+metadata on every schema page.
+
 `get_dataset_file_schema` defaults to 25 columns and caps `column_limit` at 50.
 The response includes `total_columns`, `column_offset`, `column_limit`, and
 `has_more`. The existing webapp schema API gains compatible optional paging
@@ -318,17 +332,21 @@ them.
 
 ## Version comparison tools
 
-The following tools are registered on file detail and comparison routes:
+The following tool is registered on the file comparison route:
 
 | Tool | Inputs | Behavior | Annotations |
 |---|---|---|---|
-| `get_file_versions` | optional catalog identities, defaulting to current file | Return compact version, format, storage, and source choices | read-only; untrusted |
-| `compare_file_versions` | file identity, `left_version`, `right_version` | Update the visible comparison and return bounded metadata/schema changes | changes UI state; untrusted |
+| `compare_file_versions` | `left_version`, `right_version` | Compare versions of the current file, update the visible comparison, and return bounded metadata/schema changes | changes UI state; untrusted |
+
+Version and source discovery comes from `get_dataset_file`; it is not repeated
+as a contextual tool. `compare_file_versions` remains separate because it
+computes a diff and synchronizes the visible comparison rather than reading one
+catalog object.
 
 The comparison result includes changed file-level metadata and bounded lists of
 added, removed, or changed columns. It does not compare data rows. When both
 versions have PMTiles, the result identifies that they can be opened together
-on the map through `open_catalog_item` followed by the map layer tools.
+on the map through their returned canonical map link and the map layer tools.
 
 ## Map workspace boundary
 
@@ -343,10 +361,8 @@ interface MapWorkspaceCommands {
   setLayerStyle(layerId: string, style: LayerStyleUpdate): void;
   reorderLayers(layerIds: string[]): void;
   setCamera(camera: MapCameraInput): Promise<MapCameraState>;
-  fitToLayers(layerIds: string[]): Promise<MapCameraState>;
   setBasemap(mode: BasemapMode): void;
   clearSelection(): void;
-  zoomToFeature(featureId: string): Promise<MapCameraState>;
 }
 ```
 
@@ -397,17 +413,15 @@ The following tools are registered by `MapWorkspace`:
 | Tool | Inputs | Behavior | Registration |
 |---|---|---|---|
 | `get_map_state` | none | Return camera, basemap, layer order, visibility, style summaries, valid style fields, and selection count | map mounted |
-| `add_dataset_layer` | catalog/source identities | Resolve and add one PMTiles source, leaving existing layers intact | map mounted |
+| `add_dataset_layer` | catalog/source identities, optional initial visibility/style | Resolve and add one PMTiles source, leaving existing layers intact | map mounted |
 | `remove_map_layer` | `map_layer_id` | Remove one catalog or query layer | at least one layer |
 | `set_layer_visibility` | `map_layer_id`, `visible` | Show or hide the selected layer | at least one layer |
 | `set_layer_style` | `style_layer_id`, constrained partial style | Update field, palette, breaks, opacity, radius, or line width | compatible vector layer loaded |
 | `reorder_map_layers` | complete ordered `map_layer_ids` | Set dataset layer stacking while preserving basemap placement | at least two layers |
-| `set_map_camera` | bounds or center/zoom with optional bearing/pitch | Move the map and return the settled camera state | map ready |
-| `fit_map_to_layers` | one or more `map_layer_ids`, optional padding | Fit known layer bounds | layer bounds available |
+| `set_map_camera` | explicit bounds, center/zoom, `map_layer_ids`, or selected `feature_id`; optional bearing/pitch/padding | Resolve the target, move the map, and return the settled camera state | map ready |
 | `set_basemap` | `street` or `satellite` | Change the visible basemap | map ready |
 | `get_map_selection` | optional `offset`, `limit` | Return a bounded page of normalized selected feature properties | selection exists |
 | `clear_map_selection` | none | Clear selected features and the selection box | selection exists |
-| `zoom_to_feature` | `feature_id` | Center on a currently selected feature with a known centroid | eligible selection exists |
 
 All map mutation tools set `readOnlyHint: false` because they change visible
 application state. Map state containing dataset labels, field names, or feature
@@ -422,6 +436,19 @@ MapLibre expressions or arbitrary JSON style fragments.
 
 `reorder_map_layers` requires every currently loaded map layer exactly once.
 This avoids accidental deletion, duplication, or partial ordering ambiguity.
+
+`set_map_camera` accepts exactly one target form. Layer IDs resolve to the union
+of their known bounds; a feature ID resolves only from the current bounded
+selection. This single camera tool replaces separate fit-to-layer and
+zoom-to-feature tools without forcing the agent to copy coordinates from a
+previous response.
+
+The current webapp does not fit a source when it is loaded. This feature changes
+that behavior deliberately: the initial route layers fit to their union once
+the map is ready, and the first layer added to an empty workspace fits when its
+bounds are known. Adding later layers does not move the camera, preserving the
+user's comparison context. An explicit `set_map_camera` call can fit any later
+layer or selected feature.
 
 Overlay comparison is achieved by adding multiple sources, ordering them, and
 using style and visibility tools. The tool descriptions explicitly call out
@@ -465,34 +492,40 @@ and does not survive reload.
 
 The collection map route gains a query-results workspace integrated with its
 existing bottom/table panel. It can show the first bounded result page, switch
-pages, choose visible columns, and add a spatial result as a query MVT layer.
-It does not use `ParquetViewerPanel` or Hyparquet for query results.
+pages, let the human choose visible columns, and show a spatial result as a
+query MVT layer. It does not use `ParquetViewerPanel` or Hyparquet for query
+results.
 
 `run_dataset_query` is registered while the collection map workspace is
-mounted. Agents arriving elsewhere use `open_catalog_item` with `view: "map"`
-before executing a query. Sources may belong to other collections even though
-the current collection controls the map's catalog picker.
+mounted. Agents arriving elsewhere follow the canonical map link returned by
+the catalog tools before executing a query. Sources may belong to other
+collections even though the current collection controls the map's catalog
+picker.
 
 | Tool | Inputs | Behavior | Registration |
 |---|---|---|---|
-| `run_dataset_query` | source refs, SQL, result limit, optional geometry settings | Execute server-side, render the first page, focus the result panel, and return a compact preview | map workspace mounted |
-| `get_query_state` | optional `query_id` | Return aliases, columns, page state, warnings, geometry status, and map-layer status | a query exists |
+| `run_dataset_query` | source refs, SQL, result limit, optional geometry settings and `show_on_map` | Execute server-side, render the first page, optionally add its spatial MVT layer, focus the result panel, and return a compact preview | map workspace mounted |
 | `set_result_page` | `query_id`, `offset`, optional `page_size` | Re-execute the signed query page and render it | pageable query exists |
-| `set_table_columns` | `query_id`, ordered visible column names | Change the visible result columns | a query exists |
-| `add_query_layer` | `query_id`, optional label and constrained initial style | Add the query MVT source to the map without removing catalog layers | spatial query exists |
 
 `run_dataset_query` defaults to 100 returned rows and uses the existing server
 maximum. It returns column summaries, warnings, paging state, and a preview of
 at most five rows after applying the 1,500-character output limit. The complete
-first page remains visible in the table.
+first page remains visible in the table. `show_on_map` defaults to `true`; it is
+ignored with an explicit warning when the result has no usable geometry. A
+spatial query layer is added without removing existing catalog or query layers.
 
 `set_result_page` changes the displayed UI but returns only the new offset,
 page size, `has_more`, row count on the page, and at most a two-row preview.
 
-`get_query_state` sets `readOnlyHint: true`. All other query tools set it to
-`false` because they change visible application state. Every query tool sets
-`untrustedContentHint: true` because its success or error output may contain
-catalog-controlled names or query-derived values.
+Both query tools set `readOnlyHint: false` because they change visible
+application state and `untrustedContentHint: true` because their success or
+error output may contain catalog-controlled names or query-derived values.
+
+`get_map_state` includes compact active-query summaries: query ID, aliases,
+columns, current page, paging availability, geometry status, and associated map
+layer. This removes a separate query-state tool. Human-only column visibility
+controls remain in the table; an agent that needs a different projection writes
+that projection in SQL rather than invoking a display-only column tool.
 
 Sorting arbitrary query results is expressed in SQL with `ORDER BY`; the first
 release does not expose client-only page sorting as a tool because that would
@@ -504,9 +537,11 @@ and does not introduce cross-request cancel IDs.
 
 ## Navigation and UI synchronization
 
-`open_catalog_item` uses TanStack Router and waits for navigation to settle.
-Valid destinations are a closed enum backed by existing routes. It never
-accepts an arbitrary URL.
+Catalog read tools return canonical same-origin links for relevant detail,
+schema, comparison, viewer, and map routes. Browser agents already observe and
+navigate links, so WebMCP does not duplicate generic navigation as a tool.
+`search_datasets` remains an action because applying filters and rendering the
+result set are one domain operation, not generic navigation.
 
 Action tools update the interface before resolving:
 
@@ -582,7 +617,7 @@ changes.
 
 ## Error handling
 
-Catalog and navigation tools return:
+Catalog and workspace action tools return:
 
 - `invalid_request` for malformed identities, filters, or pagination.
 - `not_found` for a missing collection, dataset, file, source, version, layer,
@@ -693,10 +728,9 @@ In a supported Chrome origin-trial environment, use
 2. Compare two file versions and open both PMTiles sources on the map.
 3. Add two datasets, style and reorder them, fit the camera, hide one, and
    inspect map state.
-4. Execute a one-source query, render the first page, fetch another page, and
-   change visible table columns.
-5. Execute a two-source join, add its spatial result as an MVT layer, and retain
-   the existing catalog layers.
+4. Execute a one-source query, render the first page, and fetch another page.
+5. Execute a two-source spatial join, automatically add its MVT layer, and
+   retain the existing catalog layers.
 6. Cancel a query request and verify that the UI returns to a usable state.
 7. Load the site in an unsupported browser and verify that all ordinary user
    workflows still work.
@@ -726,8 +760,8 @@ Implementation should proceed in dependency order:
 
 1. WebMCP feature detection, typed registration adapter, result envelopes, and
    test fake.
-2. Global catalog/page-context tools and bounded schema API behavior.
-3. File-version tools and navigation synchronization.
+2. Global catalog tools and bounded schema API behavior.
+3. File-version comparison and search-state synchronization.
 4. Map workspace command extraction and map tools for existing PMTiles layers.
 5. Dataset-mcp HTTP query handlers and same-origin webapp proxy.
 6. Query result workspace, query tools, and MVT layer union.
