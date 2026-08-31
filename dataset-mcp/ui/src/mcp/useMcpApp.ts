@@ -2,9 +2,8 @@ import type { App as McpApp } from "@modelcontextprotocol/ext-apps";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ErrorPayloadSchema,
+  ErrorResultSchema,
   type MapConfiguration,
-  MapConfigurationSchema,
   type QueryResult,
   QueryResultSchema,
 } from "./contracts";
@@ -40,18 +39,24 @@ export function useMcpApp(): McpAppState {
         const value = parsed.success ? parsed.data : null;
         if (value) {
           setResult(value);
-          const map = MapConfigurationSchema.safeParse(value.map_configuration);
-          setMapConfiguration(map.success ? map.data : null);
+          setMapConfiguration(value.map_configuration ?? null);
+          setBridgeError(null);
         } else {
-          const stable = ErrorPayloadSchema.safeParse(params);
+          const stable = ErrorResultSchema.safeParse(params.structuredContent);
+          setResult(null);
+          setMapConfiguration(null);
           setBridgeError(
             stable.success
-              ? stable.data.message
+              ? stable.data.error.message
               : "The host returned an invalid dataset result.",
           );
         }
       };
-      created.onerror = (event) => setBridgeError(event.message);
+      created.onerror = (event) => {
+        setResult(null);
+        setMapConfiguration(null);
+        setBridgeError(event.message);
+      };
       created.onhostcontextchanged = (context) => {
         if (context.theme)
           document.documentElement.dataset.theme = context.theme;

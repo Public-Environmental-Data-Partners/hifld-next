@@ -2,7 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../src/App";
-import type { QueryResult } from "../src/mcp/contracts";
+import type { MapConfiguration, QueryResult } from "../src/mcp/contracts";
 
 const useMcpApp = vi.hoisted(() => vi.fn());
 vi.mock("../src/mcp/useMcpApp", () => ({ useMcpApp }));
@@ -18,13 +18,20 @@ const result: QueryResult = {
   has_more: false,
   query_token: "token",
 };
+const mapConfiguration: MapConfiguration = {
+  tile_url: "https://maps.example.test/tiles/{z}/{x}/{y}.mvt",
+  worker_url: "https://maps.example.test/assets/maplibre-gl-worker.mjs",
+  source_layer: "hifld",
+  geometry_column: "geometry",
+  result_crs: "EPSG:4326",
+};
 
 function state(
   overrides: {
     result?: QueryResult | null;
     staticMode?: boolean;
     connected?: boolean;
-    mapConfiguration?: { geometryType?: string };
+    mapConfiguration?: MapConfiguration | null;
   } = {},
 ) {
   return {
@@ -32,6 +39,7 @@ function state(
     connected: false,
     error: null,
     result: null,
+    mapConfiguration: null,
     staticMode: true,
     canCallServerTools: false,
     getQueryPage: vi.fn(),
@@ -68,7 +76,7 @@ describe("Dataset explorer shell", () => {
         result,
         staticMode: false,
         connected: true,
-        mapConfiguration: { geometryType: "Point" },
+        mapConfiguration,
       }),
     );
     render(<App />);
@@ -78,13 +86,13 @@ describe("Dataset explorer shell", () => {
     ).toBeInTheDocument();
   });
 
-  it("exposes the map tab when geometry type is omitted", () => {
+  it("exposes the map tab without a geometry-type hint", () => {
     useMcpApp.mockReturnValue(
       state({
         result,
         staticMode: false,
         connected: true,
-        mapConfiguration: {},
+        mapConfiguration,
       }),
     );
     render(<App />);
@@ -93,18 +101,6 @@ describe("Dataset explorer shell", () => {
 
   it("keeps absent map configuration out of the tab list", () => {
     useMcpApp.mockReturnValue(state({ result, staticMode: false }));
-    render(<App />);
-    expect(screen.queryByRole("tab", { name: "Map" })).not.toBeInTheDocument();
-  });
-
-  it("keeps ambiguous map configuration out of the tab list", () => {
-    useMcpApp.mockReturnValue(
-      state({
-        result,
-        staticMode: false,
-        mapConfiguration: { geometryType: "Bogus" },
-      }),
-    );
     render(<App />);
     expect(screen.queryByRole("tab", { name: "Map" })).not.toBeInTheDocument();
   });

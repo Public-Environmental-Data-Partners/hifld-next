@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from pathlib import Path
 
 import httpx
+import pytest
 from fastmcp import Client
 
+import app.mcp_server as mcp_server_module
+from app.catalog.client import CatalogClientError
 from app.http_app import create_http_app
 from app.mcp_server import (
     AppDependencies,
     UIResourceConfig,
+    _error_result,
     create_mcp_server,
 )
 from app.observability import InMemoryMetricSink, InMemoryStructuredLogSink, QueryObservability
@@ -67,19 +72,8 @@ class QueryStub:
         return {"offset": offset, "limit": limit}
 
 
-class MapStub:
-    async def get_map_features(
-        self,
-        query_token: str,
-        bbox: tuple[float, float, float, float],
-        zoom: int,
-        feature_cap: int,
-    ) -> dict[str, int]:
-        return {"feature_count": 0}
-
-
 def _dependencies() -> AppDependencies:
-    return AppDependencies(catalog=CatalogStub(), query=QueryStub(), map_features=MapStub())
+    return AppDependencies(catalog=CatalogStub(), query=QueryStub())
 
 
 def test_mcp_tools_link_the_app_resource_and_return_text_and_structured_content() -> None:
@@ -107,7 +101,7 @@ def test_mcp_tools_link_the_app_resource_and_return_text_and_structured_content(
                 "query_geoparquet",
                 "get_query_page",
             }
-            assert expected_model_tools <= set(by_name)
+            assert set(by_name) == expected_model_tools
             for name in expected_model_tools:
                 assert by_name[name].description
                 assert by_name[name].meta is not None
@@ -115,12 +109,6 @@ def test_mcp_tools_link_the_app_resource_and_return_text_and_structured_content(
                     "resourceUri": "ui://hifld/dataset-explorer.html",
                     "visibility": ["model", "app"],
                 }
-            assert by_name["get_map_features"].meta is not None
-            assert by_name["get_map_features"].meta["ui"] == {
-                "resourceUri": "ui://hifld/dataset-explorer.html",
-                "visibility": ["app"],
-            }
-
             result = await client.call_tool("search_datasets", {"collection": "public", "limit": 5})
             assert result.structured_content == {"kind": "dataset_page", "limit": 5}
             assert result.content[0].text.startswith("Datasets:")
@@ -130,7 +118,7 @@ def test_mcp_tools_link_the_app_resource_and_return_text_and_structured_content(
             assert resources[0].meta is not None
             assert resources[0].meta["ui"]["csp"] == {
                 "connectDomains": ["https://tiles.example.test", "https://basemap.example.test"],
-                "resourceDomains": ["https://assets.example.test"],
+                "resourceDomains": ["https://assets.example.test", "blob:"],
             }
 
     asyncio.run(assert_protocol())
@@ -154,6 +142,77 @@ def test_http_routes_share_lifespan_and_bound_concurrency() -> None:
                 assert (await client.get("/mcp/")).status_code in {200, 405}
 
     asyncio.run(assert_routes())
+
+
+def test_worker_asset_allows_cross_origin_module_loading(tmp_path: Path) -> None:
+    async def assert_asset_headers() -> None:
+        (tmp_path / "maplibre-gl-worker.mjs").write_text("export {};", encoding="utf-8")
+        app = create_http_app(
+            _dependencies(),
+            ui_html="<html><body>dataset explorer</body></html>",
+            assets_directory=tmp_path,
+        )
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.get(
+                    "/assets/maplibre-gl-worker.mjs",
+                    headers={"Origin": "https://sandbox.example.test"},
+                )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "*"
+        assert response.headers["cross-origin-resource-policy"] == "cross-origin"
+
+    asyncio.run(assert_asset_headers())
+
+
+def test_missing_built_ui_is_a_startup_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(mcp_server_module, "__file__", str(tmp_path / "app" / "mcp_server.py"))
+
+    with pytest.raises(FileNotFoundError):
+        mcp_server_module.default_ui_html()
+
+
+def test_missing_built_assets_are_a_startup_error(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        create_http_app(
+            _dependencies(),
+            ui_html="<html><body>dataset explorer</body></html>",
+            assets_directory=tmp_path / "missing-assets",
+        )
+
+
+@pytest.mark.parametrize(
+    ("error_code", "expected_code", "expected_message"),
+    [
+        (
+            "catalog_unavailable",
+            "catalog_unavailable",
+            "The catalog request could not be completed",
+        ),
+        (
+            "catalog_contract_invalid",
+            "catalog_contract_invalid",
+            "The catalog response did not match its contract",
+        ),
+        (
+            "future_catalog_code",
+            "internal_error",
+            "The request could not be completed",
+        ),
+    ],
+)
+def test_catalog_error_result_preserves_known_codes_and_fails_closed(
+    error_code: str, expected_code: str, expected_message: str
+) -> None:
+    result = _error_result(CatalogClientError(error_code, "internal detail"))
+
+    assert result.structured_content == {
+        "error": {"code": expected_code, "message": expected_message}
+    }
 
 
 def test_observability_logs_only_allowlisted_fields() -> None:

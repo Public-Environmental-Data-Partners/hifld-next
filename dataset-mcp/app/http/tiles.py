@@ -2,22 +2,14 @@
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
 from typing import Protocol
 
 from fastapi import APIRouter, Header, Response
 from starlette.responses import JSONResponse
 
 from app.errors import AppError, ErrorCode
-from app.query.models import JsonValue
 from query_worker.protocol import WorkerFailure, WorkerTile
-from query_worker.tiles import (
-    MAX_MAP_BYTES,
-    MAX_MAP_FEATURES,
-    MapFeatureCollection,
-    validate_tile_coordinates,
-)
+from query_worker.tiles import validate_tile_coordinates
 
 QUERY_TOKEN_HEADER = "X-HIFLD-Query-Token"
 MVT_MEDIA_TYPE = "application/vnd.mapbox-vector-tile"
@@ -36,24 +28,6 @@ class TileService(Protocol):
         *,
         timeout_seconds: float,
     ) -> WorkerTile | WorkerFailure: ...
-
-    async def render_map_features(
-        self,
-        token: str,
-        bbox: tuple[float, float, float, float],
-        zoom: int,
-        feature_cap: int,
-        *,
-        max_result_bytes: int,
-    ) -> MapFeatureCollection | WorkerFailure: ...
-
-
-@dataclass(frozen=True, slots=True)
-class MapToolResult:
-    text: str
-    structured_content: dict[str, JsonValue]
-    visibility: tuple[str, ...] = ("app",)
-    resource_uri: str = "ui://hifld/dataset-explorer.html"
 
 
 def _cors_headers() -> dict[str, str]:
@@ -148,47 +122,3 @@ def create_tile_router(
     router.add_api_route("/tiles/{z}/{x}/{y}.mvt", tile_preflight, methods=["OPTIONS"])
     router.add_api_route("/tiles/{z}/{x}/{y}.mvt", tile, methods=["GET"])
     return router
-
-
-def _failure_code(code: str) -> ErrorCode:
-    try:
-        return ErrorCode(code)
-    except ValueError:
-        return ErrorCode.MAP_NOT_SUPPORTED
-
-
-async def get_map_features(
-    service: TileService,
-    query_token: str,
-    bbox: tuple[float, float, float, float],
-    zoom: int,
-    *,
-    feature_cap: int = MAX_MAP_FEATURES,
-) -> MapToolResult:
-    """Return the app-only, bounded GeoJSON compatibility response."""
-
-    if not query_token.strip():
-        raise AppError(ErrorCode.QUERY_TOKEN_INVALID, "A valid query token is required.")
-    if not 0 <= zoom <= 24:
-        raise ValueError("zoom must be between 0 and 24")
-    if not 1 <= feature_cap <= MAX_MAP_FEATURES:
-        raise ValueError("feature cap must be between 1 and 2,000")
-    result = await service.render_map_features(
-        query_token,
-        bbox,
-        zoom,
-        feature_cap,
-        max_result_bytes=MAX_MAP_BYTES,
-    )
-    if isinstance(result, WorkerFailure):
-        raise AppError(_failure_code(result.code), result.message)
-    payload = result.as_json()
-    if len(json.dumps(payload, separators=(",", ":")).encode("utf-8")) > MAX_MAP_BYTES:
-        raise AppError(
-            ErrorCode.TILE_TOO_DENSE,
-            "Map features exceed the feature or byte limit.",
-        )
-    return MapToolResult(
-        text=f"GeoJSON map features: {len(result.features)} returned",
-        structured_content=payload,
-    )

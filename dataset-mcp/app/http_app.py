@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.http.tiles import TileService, create_tile_router
@@ -41,6 +42,15 @@ class ConcurrencyLimiter:
                 await self._app(scope, receive, send)
             return
         await self._app(scope, receive, send)
+
+
+class AssetHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await call_next(request)
+        if request.url.path.startswith("/assets/"):
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+        return response
 
 
 class LazyProductionApplication:
@@ -94,6 +104,7 @@ def create_http_app(
 
     app = FastAPI(lifespan=lifespan)
     app.add_middleware(ConcurrencyLimiter, maximum=max_concurrency)
+    app.add_middleware(AssetHeadersMiddleware)
 
     async def invalid_request(_: Request, __: Exception) -> JSONResponse:
         return JSONResponse(
@@ -122,15 +133,9 @@ def create_http_app(
         )
 
     static_root = assets_directory or Path(__file__).parent.parent / "ui" / "dist"
-    if static_root.is_dir():
-        app.mount("/assets", StaticFiles(directory=static_root), name="assets")
-    else:
-
-        async def missing_asset(asset_path: str) -> Response:
-            del asset_path
-            return Response(status_code=404)
-
-        app.add_api_route("/assets/{asset_path:path}", missing_asset, methods=["GET"])
+    if not static_root.is_dir():
+        raise FileNotFoundError(f"built UI assets directory does not exist: {static_root}")
+    app.mount("/assets", StaticFiles(directory=static_root), name="assets")
 
     app.mount("/mcp", mcp_asgi, name="mcp")
     return app

@@ -11,7 +11,6 @@ from app.storage.models import PublicGcsProfile, StorageSettings
 from app.storage.resolver import StorageResolver
 from query_worker.protocol import (
     WorkerFailure,
-    WorkerMapQuery,
     WorkerPage,
     WorkerQuery,
     WorkerResult,
@@ -21,8 +20,11 @@ from query_worker.protocol import (
 
 class Resolver:
     changed = False
+    failure_code: str | None = None
 
     async def resolve(self, ref: QuerySourceRef) -> ResolvedSource:
+        if self.failure_code is not None:
+            raise CatalogClientError(self.failure_code, "catalog failure")
         if self.changed:
             raise CatalogClientError("source_not_found", "source was removed")
         return ResolvedSource(
@@ -37,14 +39,14 @@ class Resolver:
 
 
 class Executor:
-    calls: list[WorkerQuery | WorkerTileQuery | WorkerMapQuery]
+    calls: list[WorkerQuery | WorkerTileQuery]
 
     def __init__(self) -> None:
         self.calls = []
 
     async def execute(
         self,
-        request: WorkerQuery | WorkerTileQuery | WorkerMapQuery,
+        request: WorkerQuery | WorkerTileQuery,
         *,
         timeout_seconds: float | None = None,
     ) -> WorkerResult:
@@ -68,6 +70,29 @@ class Executor:
             files_read=1,
             deterministic_order=True,
         )
+
+
+class UnexpectedTileExecutor(Executor):
+    async def execute(
+        self,
+        request: WorkerQuery | WorkerTileQuery,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> WorkerResult:
+        if isinstance(request, WorkerTileQuery):
+            return WorkerPage(
+                columns=(("id", "INTEGER", False),),
+                rows=({"id": 1},),
+                offset=0,
+                returned_count=1,
+                has_more=False,
+                next_offset=None,
+                elapsed_ms=1,
+                bytes_read=0,
+                files_read=1,
+                deterministic_order=True,
+            )
+        return await super().execute(request, timeout_seconds=timeout_seconds)
 
 
 def _source(alias: str = "roads") -> dict[str, JsonValue]:
@@ -99,7 +124,7 @@ def _service(resolver: Resolver, executor: Executor) -> QueryApplicationService:
 
 
 @pytest.mark.asyncio
-async def test_query_infers_map_contract_and_preserves_token_across_three_pages() -> None:
+async def test_query_builds_map_contract_with_explicit_crs_and_preserves_token() -> None:
     resolver = Resolver()
     executor = Executor()
     service = _service(resolver, executor)
@@ -109,7 +134,7 @@ async def test_query_infers_map_contract_and_preserves_token_across_three_pages(
         "SELECT id, geometry FROM roads ORDER BY id",
         1,
         None,
-        None,
+        "EPSG:4326",
     )
     token = first["query_token"]
     assert isinstance(token, str)
@@ -132,6 +157,21 @@ async def test_query_infers_map_contract_and_preserves_token_across_three_pages(
         1,
         2,
     ]
+
+
+@pytest.mark.asyncio
+async def test_arbitrary_query_does_not_guess_result_crs_from_its_sources() -> None:
+    service = _service(Resolver(), Executor())
+
+    result = await service.query(
+        (_source(),),
+        "SELECT ST_Transform(geometry, 'EPSG:4326', 'EPSG:3857') AS geometry FROM roads",
+        1,
+        None,
+        None,
+    )
+
+    assert "map_configuration" not in result
 
 
 @pytest.mark.asyncio
@@ -166,3 +206,71 @@ async def test_page_maps_catalog_revalidation_failure_to_source_changed() -> Non
         await service.page(token, 1, 1)
 
     assert caught.value.code is ErrorCode.SOURCE_CHANGED
+
+
+@pytest.mark.asyncio
+async def test_page_preserves_catalog_outage_during_token_revalidation() -> None:
+    resolver = Resolver()
+    executor = Executor()
+    service = _service(resolver, executor)
+    initial = await service.query((_source(),), "SELECT id FROM roads", 1, None, None)
+    token = initial["query_token"]
+    assert isinstance(token, str)
+    resolver.failure_code = "catalog_unavailable"
+
+    with pytest.raises(AppError) as caught:
+        await service.page(token, 1, 1)
+
+    assert caught.value.code is ErrorCode.CATALOG_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_initial_catalog_outage_is_not_reported_as_not_found() -> None:
+    resolver = Resolver()
+    resolver.failure_code = "catalog_unavailable"
+    service = _service(resolver, Executor())
+
+    with pytest.raises(AppError) as caught:
+        await service.query((_source(),), "SELECT id FROM roads", 1, None, None)
+
+    assert caught.value.code is ErrorCode.CATALOG_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("catalog_code", "expected_code"),
+    [
+        ("source_not_found", ErrorCode.CATALOG_NOT_FOUND),
+        ("source_not_queryable", ErrorCode.SOURCE_NOT_GEOPARQUET),
+        ("future_catalog_code", ErrorCode.INTERNAL_ERROR),
+    ],
+)
+async def test_initial_source_resolution_preserves_failure_category(
+    catalog_code: str, expected_code: ErrorCode
+) -> None:
+    resolver = Resolver()
+    resolver.failure_code = catalog_code
+    service = _service(resolver, Executor())
+
+    with pytest.raises(AppError) as caught:
+        await service.query((_source(),), "SELECT id FROM roads", 1, None, None)
+
+    assert caught.value.code is expected_code
+
+
+@pytest.mark.asyncio
+async def test_render_tile_reports_unexpected_worker_result_as_protocol_error() -> None:
+    resolver = Resolver()
+    executor = UnexpectedTileExecutor()
+    service = _service(resolver, executor)
+    initial = await service.query(
+        (_source(),), "SELECT id, geometry FROM roads ORDER BY id", 1, None, None
+    )
+    token = initial["query_token"]
+    assert isinstance(token, str)
+
+    result = await service.render_tile(token, 0, 0, 0, timeout_seconds=5)
+
+    assert result == WorkerFailure(
+        "worker_protocol_invalid", "The query worker returned an unexpected result"
+    )

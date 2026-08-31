@@ -90,7 +90,12 @@ _FAILURE_CODES: dict[str, ErrorCode] = {
     "query_memory_limit": ErrorCode.QUERY_MEMORY_LIMIT,
     "query_spill_limit": ErrorCode.QUERY_SPILL_LIMIT,
     "query_offset_limit": ErrorCode.QUERY_OFFSET_LIMIT,
+    "query_execution_failed": ErrorCode.QUERY_EXECUTION_FAILED,
+    "query_result_too_wide": ErrorCode.QUERY_RESULT_TOO_WIDE,
     "storage_unavailable": ErrorCode.STORAGE_UNAVAILABLE,
+    "worker_failed": ErrorCode.WORKER_FAILED,
+    "worker_protocol_invalid": ErrorCode.WORKER_PROTOCOL_INVALID,
+    "worker_unavailable": ErrorCode.WORKER_UNAVAILABLE,
 }
 
 
@@ -131,12 +136,13 @@ class QueryService:
 
     @staticmethod
     def _raise_failure(failure: WorkerFailure) -> None:
-        code = _FAILURE_CODES.get(failure.code, ErrorCode.STORAGE_UNAVAILABLE)
-        message = (
-            failure.message
-            if failure.code in _FAILURE_CODES
-            else "The query worker could not complete the request"
-        )
+        code = _FAILURE_CODES.get(failure.code)
+        if code is None:
+            raise AppError(
+                code=ErrorCode.INTERNAL_ERROR,
+                message="The query worker returned an unknown failure",
+            )
+        message = failure.message
         raise AppError(code=code, message=message)
 
     async def execute_page(
@@ -170,7 +176,7 @@ class QueryService:
             self._raise_failure(response)
         if not isinstance(response, WorkerPage):
             raise AppError(
-                code=ErrorCode.STORAGE_UNAVAILABLE,
+                code=ErrorCode.WORKER_PROTOCOL_INVALID,
                 message="The query worker returned an unexpected result",
             )
 

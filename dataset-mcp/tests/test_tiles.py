@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from datetime import UTC, datetime, timedelta
 
@@ -9,15 +8,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.http.tiles import create_tile_router, get_map_features
+from app.http.tiles import create_tile_router
 from query_worker.protocol import WorkerFailure, WorkerTile, WorkerTileQuery
 from query_worker.tiles import (
     MAX_TILE_BYTES,
-    MapFeatureCollection,
-    _bbox_predicate,
-    build_geojson_sql,
     build_tile_sql,
-    execute_map_features,
     execute_tile,
     validate_tile_coordinates,
 )
@@ -54,14 +49,6 @@ def tile_request(**changes: int | str | None) -> WorkerTileQuery:
 )
 def test_tile_coordinate_validation_matches_spike(z: int, x: int, y: int) -> None:
     assert not validate_tile_coordinates(z, x, y)
-
-
-def test_bbox_predicate_preserves_spike_comparison_and_parameter_order() -> None:
-    sql, parameters = _bbox_predicate("bbox", (1.0, 2.0, 3.0, 4.0))
-    assert sql == (
-        '"bbox".xmax >= ? AND "bbox".xmin <= ? AND "bbox".ymax >= ? AND "bbox".ymin <= ?'
-    )
-    assert parameters == (1.0, 3.0, 2.0, 4.0)
 
 
 def test_tile_sql_preserves_bbox_order_and_exact_clipping_shape() -> None:
@@ -171,58 +158,6 @@ def test_tile_sql_executes_against_inside_outside_and_exact_filter_fixtures() ->
     assert isinstance(worker_result, WorkerTile)
     assert worker_result.content
 
-    geojson_sql = build_geojson_sql(
-        "SELECT * FROM roads",
-        geometry_column="geometry",
-        result_crs="EPSG:4326",
-        bbox=(0.0, -20.0, 20.0, 0.0),
-        zoom=8,
-        feature_cap=2_000,
-        columns=columns,
-    )
-    geojson_rows = connection.execute(geojson_sql).fetchall()
-    assert len(geojson_rows) == 1
-    assert json.loads(geojson_rows[0][0]) == {"type": "Point", "coordinates": [10.0, -10.0]}
-    assert json.loads(geojson_rows[0][1]) == {"name": "inside"}
-    map_result = execute_map_features(
-        connection,
-        "SELECT * FROM roads",
-        geometry_column="geometry",
-        result_crs="EPSG:4326",
-        bbox=(0.0, -20.0, 20.0, 0.0),
-        zoom=8,
-        feature_cap=2_000,
-    )
-    assert isinstance(map_result, MapFeatureCollection)
-    assert map_result.as_json()["features"] == [
-        {
-            "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [10.0, -10.0]},
-            "properties": {"name": "inside"},
-        }
-    ]
-
-
-def test_geojson_uses_same_viewport_predicate_and_caps_features() -> None:
-    sql = build_geojson_sql(
-        "SELECT geometry, bbox, name FROM roads",
-        geometry_column="geometry",
-        result_crs="EPSG:4326",
-        bbox=(-80.0, 30.0, -70.0, 40.0),
-        zoom=8,
-        feature_cap=2_000,
-        columns=(("geometry", "GEOMETRY"), ("bbox", "STRUCT"), ("name", "VARCHAR")),
-    )
-
-    assert '"bbox".xmax >= b.xmin AND "bbox".xmin <= b.xmax' in sql
-    assert '"bbox".ymax >= b.ymin AND "bbox".ymin <= b.ymax' in sql
-    assert 'ST_Intersects("geometry", b.env)' in sql
-    assert "ST_AsGeoJSON" in sql
-    assert "ST_SimplifyPreserveTopology" in sql
-    assert "LIMIT 2001" in sql
-    assert '"geometry"' not in sql.split("properties", maxsplit=1)[0]
-    assert '"bbox"' not in sql.split("properties", maxsplit=1)[0]
-
 
 class FakeRows:
     def __init__(self, rows: list[tuple[bytes | int | None, ...]]) -> None:
@@ -279,29 +214,30 @@ def test_execute_tile_returns_mvt_and_empty_content() -> None:
     assert empty.content == b""
 
 
+def test_execute_tile_propagates_storage_errors_to_worker_runtime() -> None:
+    class StorageFailureConnection(FakeConnection):
+        def execute(self, sql: str) -> FakeRows:
+            del sql
+            raise duckdb.IOException("storage read failed")
+
+    with pytest.raises(duckdb.IOException, match="storage read failed"):
+        execute_tile(
+            StorageFailureConnection([], []),
+            "SELECT * FROM roads",
+            tile_request(),
+        )
+
+
 class TileService:
     def __init__(self, result: WorkerTile | WorkerFailure) -> None:
         self.result = result
         self.calls: list[tuple[str, int, int, int, float]] = []
-        self.map_calls: list[tuple[str, tuple[float, float, float, float], int, int, int]] = []
 
     async def render_tile(
         self, token: str, z: int, x: int, y: int, *, timeout_seconds: float
     ) -> WorkerTile | WorkerFailure:
         self.calls.append((token, z, x, y, timeout_seconds))
         return self.result
-
-    async def render_map_features(
-        self,
-        token: str,
-        bbox: tuple[float, float, float, float],
-        zoom: int,
-        feature_cap: int,
-        *,
-        max_result_bytes: int,
-    ) -> MapFeatureCollection | WorkerFailure:
-        self.map_calls.append((token, bbox, zoom, feature_cap, max_result_bytes))
-        return MapFeatureCollection(features=())
 
 
 def make_client(service: TileService) -> TestClient:
@@ -361,22 +297,3 @@ def test_http_tile_requires_query_token_and_preflight_allows_only_token_header()
     assert options.status_code == 204
     assert options.headers["access-control-allow-methods"] == "GET, OPTIONS"
     assert options.headers["access-control-allow-headers"] == "X-HIFLD-Query-Token"
-
-
-@pytest.mark.asyncio
-async def test_get_map_features_is_app_only_and_enforces_caps() -> None:
-    service = TileService(WorkerTile(b"", 0.0, 0, 0))
-    result = await get_map_features(
-        service,
-        "signed",
-        (-80.0, 30.0, -70.0, 40.0),
-        8,
-        feature_cap=2_000,
-    )
-    assert result.visibility == ("app",)
-    assert result.structured_content == {"type": "FeatureCollection", "features": []}
-    assert service.map_calls == [("signed", (-80.0, 30.0, -70.0, 40.0), 8, 2_000, 4 * 1024 * 1024)]
-    assert len(json.dumps(result.structured_content).encode()) < 4 * 1024 * 1024
-
-    with pytest.raises(ValueError, match="2,000"):
-        await get_map_features(service, "signed", (-1.0, -1.0, 1.0, 1.0), 1, feature_cap=2_001)

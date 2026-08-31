@@ -6,64 +6,14 @@ import type {
   RequestParameters,
 } from "maplibre-gl";
 import * as maplibregl from "maplibre-gl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { z } from "zod";
-import type { JsonValue } from "../mcp/contracts";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type JsonValue,
+  type MapConfiguration,
+  MapConfigurationSchema,
+} from "../mcp/contracts";
 
-const GeometryTypeSchema = z.enum([
-  "Point",
-  "MultiPoint",
-  "LineString",
-  "MultiLineString",
-  "Polygon",
-  "MultiPolygon",
-]);
-const BoundsSchema = z.tuple([z.number(), z.number(), z.number(), z.number()]);
-const MapConfigurationSchema = z
-  .object({
-    tileUrl: z.string().optional(),
-    tile_url: z.string().optional(),
-    tileOrigin: z.string().optional(),
-    tile_origin: z.string().optional(),
-    workerUrl: z.string().optional(),
-    worker_url: z.string().optional(),
-    geometryType: GeometryTypeSchema.optional(),
-    geometry_type: GeometryTypeSchema.optional(),
-    bounds: BoundsSchema.optional(),
-    initial_bounds: BoundsSchema.optional(),
-    sourceLayer: z.string().optional(),
-    source_layer: z.string().optional(),
-  })
-  .transform((value) => ({
-    tileUrl: resolveServerUrl(
-      value.tileUrl ?? value.tile_url,
-      value.tileOrigin ?? value.tile_origin,
-    ),
-    workerUrl: resolveServerUrl(
-      value.workerUrl ?? value.worker_url,
-      value.tileOrigin ?? value.tile_origin,
-    ),
-    geometryType: value.geometryType ?? value.geometry_type,
-    bounds: value.bounds ?? value.initial_bounds,
-    sourceLayer: value.sourceLayer ?? value.source_layer ?? "hifld",
-  }))
-  .refine(
-    (value) => value.tileUrl !== undefined && value.workerUrl !== undefined,
-    "absolute tile_url and worker_url are required",
-  );
-const GeoJsonSchema = z.object({
-  type: z.literal("FeatureCollection"),
-  features: z.array(
-    z.object({
-      type: z.literal("Feature"),
-      geometry: z.record(z.string(), z.json()).nullable(),
-      properties: z.record(z.string(), z.json()).default({}),
-    }),
-  ),
-  warnings: z.array(z.string()).optional(),
-});
-export type MapConfiguration = z.input<typeof MapConfigurationSchema>;
-export type GeoJsonFeatureCollection = z.infer<typeof GeoJsonSchema>;
+export type { MapConfiguration } from "../mcp/contracts";
 
 export interface MapViewProps {
   configuration: MapConfiguration | null;
@@ -89,22 +39,14 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-function resolveServerUrl(
-  value: string | undefined,
-  origin: string | undefined,
-) {
-  if (value && isHttpUrl(value)) return value;
-  if (!value || !origin || !isHttpUrl(origin)) return undefined;
-  if (!value.startsWith("/")) return undefined;
-  const parsedOrigin = new URL(origin);
-  return `${parsedOrigin.origin}${value}`;
-}
-
 export function normalizeMapConfiguration(
   configuration: MapConfiguration,
-): z.output<typeof MapConfigurationSchema> | null {
+): MapConfiguration | null {
   const parsed = MapConfigurationSchema.safeParse(configuration);
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) return null;
+  if (!isHttpUrl(parsed.data.tile_url) || !isHttpUrl(parsed.data.worker_url))
+    return null;
+  return parsed.data;
 }
 
 export function mapTileRequest(
@@ -138,16 +80,6 @@ function layersForSource(sourceLayer: string) {
   ];
 }
 
-function boundsFromMap(map: MapLibreMap): [number, number, number, number] {
-  const bounds = map.getBounds();
-  return [
-    bounds.getWest(),
-    bounds.getSouth(),
-    bounds.getEast(),
-    bounds.getNorth(),
-  ];
-}
-
 export function MapView({ configuration, queryToken, app }: MapViewProps) {
   const parsed = useMemo(
     () =>
@@ -164,50 +96,8 @@ export function MapView({ configuration, queryToken, app }: MapViewProps) {
   const mapNode = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [features, setFeatures] = useState<GeoJsonFeatureCollection | null>(
-    null,
-  );
   const [selected, setSelected] = useState<Record<string, JsonValue> | null>(
     null,
-  );
-
-  const fallback = useCallback(
-    async (map: MapLibreMap | null, reason: string) => {
-      if (!app || !queryToken) {
-        setMessage(reason);
-        return;
-      }
-      const bbox = map
-        ? boundsFromMap(map)
-        : parsed.success && parsed.data.bounds
-          ? parsed.data.bounds
-          : [-180, -85, 180, 85];
-      try {
-        const result = await app.callServerTool({
-          name: "get_map_features",
-          arguments: {
-            query_token: queryToken,
-            bbox,
-            zoom: Math.min(map?.getZoom() ?? 0, 24),
-            feature_cap: 2000,
-          },
-        });
-        const payload = GeoJsonSchema.safeParse(result.structuredContent);
-        if (!payload.success)
-          throw new Error("The map fallback returned invalid GeoJSON.");
-        setFeatures(payload.data);
-        setMessage(
-          "Map compatibility mode: showing a bounded text and feature view.",
-        );
-      } catch (error) {
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : "Map data could not be loaded.",
-        );
-      }
-    },
-    [app, parsed, queryToken],
   );
 
   useEffect(() => {
@@ -215,46 +105,42 @@ export function MapView({ configuration, queryToken, app }: MapViewProps) {
       setMessage("Map configuration is missing absolute tile or worker URLs.");
       return;
     }
-    if (!parsed.data.tileUrl || !parsed.data.workerUrl) {
-      setMessage("Map configuration is missing absolute tile or worker URLs.");
-      return;
-    }
     if (!mapNode.current) return;
-    if (maplibregl && typeof maplibregl.setWorkerUrl === "function") {
-      maplibregl.setWorkerUrl(parsed.data.workerUrl);
-    }
     let map: MapLibreMap;
     try {
+      setMessage("Loading map…");
+      maplibregl.setWorkerUrl(parsed.data.worker_url);
+      const initialView = parsed.data.initial_bounds
+        ? {
+            bounds: parsed.data.initial_bounds,
+            fitBoundsOptions: { padding: 24 },
+          }
+        : { center: [0, 0] as [number, number], zoom: 1 };
       map = new maplibregl.Map({
         container: mapNode.current,
-        center: [0, 0],
-        zoom: 1,
+        ...initialView,
         style: {
           version: 8,
           sources: {
             hifld: {
               type: "vector",
-              tiles: [parsed.data.tileUrl],
+              tiles: [parsed.data.tile_url],
               minzoom: 0,
               maxzoom: 22,
             },
           },
-          layers: layersForSource(parsed.data.sourceLayer),
+          layers: layersForSource(parsed.data.source_layer),
         },
         transformRequest: (url) => mapTileRequest(url, queryToken),
       });
       mapRef.current = map;
-      map.once("load", () => {
-        if (parsed.data.bounds)
-          map.fitBounds(parsed.data.bounds, { padding: 24, animate: false });
-      });
+      map.once("load", () => setMessage(null));
       map.on("error", (event) => {
         const errorText =
           event.error instanceof Error
             ? event.error.message
             : "Map rendering is unavailable.";
-        void fallback(
-          map,
+        setMessage(
           /dense/i.test(errorText)
             ? "This tile is too dense. Filter, aggregate, or zoom in."
             : errorText,
@@ -267,10 +153,11 @@ export function MapView({ configuration, queryToken, app }: MapViewProps) {
         const properties = rendered[0]?.properties;
         if (properties) setSelected(properties as Record<string, JsonValue>);
       });
-    } catch {
-      void fallback(
-        null,
-        "Map rendering is unavailable; showing bounded feature details.",
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Map rendering is unavailable.",
       );
     }
     return () => {
@@ -281,7 +168,7 @@ export function MapView({ configuration, queryToken, app }: MapViewProps) {
         // MapLibre can fail to tear down an uninitialized WebGL context.
       }
     };
-  }, [fallback, parsed, queryToken]);
+  }, [parsed, queryToken]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -299,7 +186,6 @@ export function MapView({ configuration, queryToken, app }: MapViewProps) {
       void app.requestDisplayMode({ mode: "fullscreen" });
     }
   };
-  const rows = features?.features ?? [];
   return (
     <section className="map-view" aria-label="Dataset map">
       <div className="map-toolbar">
@@ -314,26 +200,7 @@ export function MapView({ configuration, queryToken, app }: MapViewProps) {
         role="application"
         aria-label="Interactive dataset map"
       />
-      <section className="map-alternative" aria-label="Map feature table">
-        <h2>Text alternative</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Feature</th>
-              <th>Properties</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((feature, index) => (
-              <tr key={JSON.stringify(feature)}>
-                <td>{index + 1}</td>
-                <td>{JSON.stringify(feature.properties)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {selected ? <pre>{JSON.stringify(selected, null, 2)}</pre> : null}
-      </section>
+      {selected ? <pre>{JSON.stringify(selected, null, 2)}</pre> : null}
     </section>
   );
 }

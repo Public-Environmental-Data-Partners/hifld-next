@@ -8,18 +8,18 @@ from app.query.models import ResolvedSource
 from app.query.service import ExecutionSource, QueryService, worker_profiles_from_storage
 from app.query.sql_policy import ValidatedSql
 from app.storage.models import DuckDbSourceSpec, SeaweedProfile, StorageSettings
-from query_worker.protocol import WorkerFailure, WorkerPage, WorkerQuery
+from query_worker.protocol import WorkerFailure, WorkerPage, WorkerQuery, WorkerTile
 
 
 class Executor:
-    def __init__(self, result: WorkerPage | WorkerFailure) -> None:
+    def __init__(self, result: WorkerPage | WorkerTile | WorkerFailure) -> None:
         self.result = result
         self.request: WorkerQuery | None = None
         self.timeout: float | None = None
 
     async def execute(
         self, request: WorkerQuery, *, timeout_seconds: float | None = None
-    ) -> WorkerPage | WorkerFailure:
+    ) -> WorkerPage | WorkerTile | WorkerFailure:
         self.request = request
         self.timeout = timeout_seconds
         return self.result
@@ -151,6 +151,65 @@ async def test_service_maps_worker_failure_to_safe_app_error() -> None:
 
     assert caught.value.code is ErrorCode.QUERY_TIMEOUT
     assert "execution timeout" in caught.value.message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("worker_code", "expected_code"),
+    [
+        ("query_execution_failed", "query_execution_failed"),
+        ("query_result_too_wide", "query_result_too_wide"),
+        ("worker_failed", "worker_failed"),
+        ("worker_protocol_invalid", "worker_protocol_invalid"),
+        ("worker_unavailable", "worker_unavailable"),
+    ],
+)
+async def test_service_preserves_known_worker_failure_codes(
+    worker_code: str, expected_code: str
+) -> None:
+    service = QueryService(Executor(WorkerFailure(code=worker_code, message="worker detail")))
+
+    with pytest.raises(AppError) as caught:
+        await service.execute_page(
+            validated_sql=ValidatedSql(canonical_sql="SELECT 1", deterministic_order=True),
+            sources=(_source(),),
+            limit=1,
+            offset=0,
+        )
+
+    assert caught.value.code.value == expected_code
+    assert caught.value.message == "worker detail"
+
+
+@pytest.mark.asyncio
+async def test_service_does_not_treat_unknown_worker_failure_as_storage_error() -> None:
+    service = QueryService(Executor(WorkerFailure(code="future_failure", message="secret")))
+
+    with pytest.raises(AppError) as caught:
+        await service.execute_page(
+            validated_sql=ValidatedSql(canonical_sql="SELECT 1", deterministic_order=True),
+            sources=(_source(),),
+            limit=1,
+            offset=0,
+        )
+
+    assert caught.value.code.value == "internal_error"
+    assert caught.value.message == "The query worker returned an unknown failure"
+
+
+@pytest.mark.asyncio
+async def test_service_reports_unexpected_worker_result_as_protocol_error() -> None:
+    service = QueryService(Executor(WorkerTile(b"mvt", 1.0, 0, 0)))
+
+    with pytest.raises(AppError) as caught:
+        await service.execute_page(
+            validated_sql=ValidatedSql(canonical_sql="SELECT 1", deterministic_order=True),
+            sources=(_source(),),
+            limit=1,
+            offset=0,
+        )
+
+    assert caught.value.code.value == "worker_protocol_invalid"
 
 
 @pytest.mark.asyncio

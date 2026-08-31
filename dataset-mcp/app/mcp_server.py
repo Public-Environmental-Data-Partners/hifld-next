@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal
 
 from fastmcp import FastMCP
 from fastmcp.apps import AppConfig, ResourceCSP
@@ -17,27 +16,15 @@ from app.errors import AppError
 from app.tools import discovery, query
 
 type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
-type JSONMapping = Mapping[str, JSONValue]
 
 UI_RESOURCE_URI = "ui://hifld/dataset-explorer.html"
 UI_MIME_TYPE = "text/html;profile=mcp-app"
-
-
-class MapFeaturesService(Protocol):
-    async def get_map_features(
-        self,
-        query_token: str,
-        bbox: tuple[float, float, float, float],
-        zoom: int,
-        feature_cap: int,
-    ) -> JSONMapping: ...
 
 
 @dataclass(frozen=True, slots=True)
 class AppDependencies:
     catalog: discovery.CatalogClient
     query: query.QueryService
-    map_features: MapFeaturesService
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,17 +36,14 @@ class UIResourceConfig:
     def csp(self) -> ResourceCSP:
         return ResourceCSP(
             connect_domains=[self.tile_origin, *self.basemap_origins],
-            resource_domains=[self.worker_asset_origin],
+            resource_domains=[self.worker_asset_origin, "blob:"],
         )
 
 
 def default_ui_html() -> str:
     """Read the immutable, build-time UI bundle supplied by the image."""
     path = Path(__file__).parent.parent / "ui" / "dist" / "index.html"
-    try:
-        return path.read_text(encoding="utf-8")
-    except OSError:
-        return "<!doctype html><title>HIFLD Dataset Explorer</title>"
+    return path.read_text(encoding="utf-8")
 
 
 def _app_config(*, visibility: list[Literal["app", "model"]]) -> AppConfig:
@@ -83,8 +67,16 @@ def _error_result(error: Exception) -> FastMCPToolResult:
             "catalog_contract_invalid",
             "schema_version_not_found",
         }
-        code = error.code if error.code in known_codes else "catalog_unavailable"
-        message = "The catalog request could not be completed"
+        code = error.code if error.code in known_codes else "internal_error"
+        message = (
+            "The catalog request could not be completed"
+            if code == "catalog_unavailable"
+            else "The catalog response did not match its contract"
+            if code == "catalog_contract_invalid"
+            else "The catalog resource was not found"
+            if code in {"catalog_not_found", "schema_version_not_found"}
+            else "The request could not be completed"
+        )
     elif isinstance(error, ValueError):
         code, message = "invalid_request", "request validation failed"
     else:
@@ -110,7 +102,6 @@ def create_mcp_server(
     """
     mcp = FastMCP("HIFLD Dataset Explorer")
     model_and_app = _app_config(visibility=["model", "app"])
-    app_only = _app_config(visibility=["app"])
 
     async def list_collections() -> FastMCPToolResult:
         """List catalog collections as the starting point for dataset discovery."""
@@ -267,26 +258,6 @@ def create_mcp_server(
             return _error_result(error)
 
     mcp.tool(app=model_and_app)(get_query_page)
-
-    async def get_map_features(
-        query_token: str,
-        bbox: tuple[float, float, float, float],
-        zoom: int,
-        feature_cap: int = 1_000,
-    ) -> FastMCPToolResult:
-        """Return bbox-bounded GeoJSON for the interactive app's map fallback."""
-        try:
-            payload = await dependencies.map_features.get_map_features(
-                query_token, bbox, zoom, feature_cap
-            )
-            result = query.ToolResult(
-                text=f"Map features: {len(payload)} result fields", structured_content=payload
-            )
-            return _result(result)
-        except Exception as error:
-            return _error_result(error)
-
-    mcp.tool(app=app_only)(get_map_features)
 
     config = resource_config or UIResourceConfig(tile_origin="self")
 

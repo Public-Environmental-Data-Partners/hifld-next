@@ -36,13 +36,6 @@ class QueryPageRequest(QueryModel):
     page_size: int = Field(default=100, ge=1)
 
 
-class MapFeaturesRequest(QueryModel):
-    query_token: str
-    bbox: tuple[float, float, float, float]
-    zoom: int = Field(ge=0, le=24)
-    feature_cap: int = Field(ge=1)
-
-
 class ResolvedSource(QueryModel):
     source: QuerySourceRef
     version: str

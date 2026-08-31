@@ -63,7 +63,6 @@ def create_production_app(settings: Settings | None = None) -> ASGIApp:
     tools = AppDependencies(
         catalog=CatalogToolAdapter(catalog),
         query=query,
-        map_features=query,
     )
     return create_http_app(
         HttpDependencies(

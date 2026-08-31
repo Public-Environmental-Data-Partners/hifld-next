@@ -54,6 +54,33 @@ describe("ResultTable paging", () => {
     expect(screen.getByText("second")).toBeInTheDocument();
   });
 
+  it("rejects text content when structured page content is invalid", async () => {
+    const user = userEvent.setup();
+    const callServerTool = vi.fn().mockResolvedValue({
+      content: [
+        { type: "text", text: JSON.stringify(page(100, "second", false)) },
+      ],
+      structuredContent: null,
+    });
+    render(<ResultTable result={page(0, "first")} app={{ callServerTool }} />);
+
+    await user.click(screen.getByRole("button", { name: /next page/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/invalid page/i);
+    expect(screen.queryByText("second")).not.toBeInTheDocument();
+  });
+
+  it("reports unavailable paging instead of silently doing nothing", async () => {
+    const user = userEvent.setup();
+    render(<ResultTable result={page(0, "first")} />);
+
+    await user.click(screen.getByRole("button", { name: /next page/i }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /cannot load another page/i,
+    );
+  });
+
   it("displays DuckDB tagged geometry, binary, and truncated summaries", () => {
     const result: QueryResult = {
       columns: [

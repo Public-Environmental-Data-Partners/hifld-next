@@ -2,10 +2,12 @@ import type { App as McpApp } from "@modelcontextprotocol/ext-apps";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  type JsonValue,
+  BinarySummarySchema,
+  GeometrySummarySchema,
   type QueryPage,
   QueryPageSchema,
   type QueryResult,
+  TruncatedValueSchema,
 } from "../mcp/contracts";
 
 type ResultTableProps = {
@@ -17,7 +19,12 @@ type PageCache = Map<number, QueryPage>;
 type Sort = { id: string; desc: boolean };
 
 function cellAt(row: QueryPage["rows"][number], name: string): Cell {
-  return row[name] ?? null;
+  if (!(name in row))
+    throw new Error(`Row is missing declared column ${name}.`);
+  const value = row[name];
+  if (value === undefined)
+    throw new Error(`Row has an invalid value for declared column ${name}.`);
+  return value;
 }
 
 function displayCell(value: Cell): string {
@@ -29,12 +36,15 @@ function displayCell(value: Cell): string {
   )
     return String(value);
   if (Array.isArray(value)) return JSON.stringify(value);
-  if ("$type" in value && value.$type === "geometry")
-    return `Geometry${value.geometry_type ? ` · ${value.geometry_type}` : ""}`;
-  if ("$type" in value && value.$type === "binary")
-    return `Binary · ${String(value.byte_length ?? 0).toLocaleString()} bytes`;
-  if ("$type" in value && value.$type === "truncated")
-    return `Truncated · ${String(value.byte_length ?? 0).toLocaleString()} bytes`;
+  const geometry = GeometrySummarySchema.safeParse(value);
+  if (geometry.success)
+    return `Geometry${geometry.data.geometry_type ? ` · ${geometry.data.geometry_type}` : ""}`;
+  const binary = BinarySummarySchema.safeParse(value);
+  if (binary.success)
+    return `Binary · ${binary.data.byte_length.toLocaleString()} bytes`;
+  const truncated = TruncatedValueSchema.safeParse(value);
+  if (truncated.success)
+    return `Truncated · ${truncated.data.byte_length.toLocaleString()} bytes`;
   return JSON.stringify(value);
 }
 
@@ -47,17 +57,7 @@ function parsePage(
 ): QueryPage {
   const structured = QueryPageSchema.safeParse(response.structuredContent);
   if (structured.success) return structured.data;
-
-  const text = response.content.find((item) => item.type === "text");
-  if (text?.type !== "text")
-    throw new Error("The host returned an empty page.");
-  let parsed: JsonValue;
-  try {
-    parsed = JSON.parse(text.text) as JsonValue;
-  } catch {
-    throw new Error("The host returned an invalid page.");
-  }
-  return QueryPageSchema.parse(parsed);
+  throw new Error("The host returned an invalid page.");
 }
 
 export function ResultTable({ result, app }: ResultTableProps) {
@@ -123,7 +123,10 @@ export function ResultTable({ result, app }: ResultTableProps) {
       setOffset(nextOffset);
       return;
     }
-    if (!app || !current?.query_token) return;
+    if (!app || !current?.query_token) {
+      setError("Cannot load another page because paging is unavailable.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -166,7 +169,9 @@ export function ResultTable({ result, app }: ResultTableProps) {
       </section>
     );
 
-  const canNext = current.has_more && current.next_offset !== undefined;
+  const canNext = current.has_more;
+  const nextOffset = current.next_offset;
+  const nextPage = nextOffset === undefined ? undefined : () => go(nextOffset);
   return (
     <section aria-label="Query results" className="result-table-panel">
       <div className="result-table-toolbar">
@@ -322,7 +327,7 @@ export function ResultTable({ result, app }: ResultTableProps) {
           type="button"
           aria-label="Next page"
           disabled={!canNext || loading}
-          onClick={() => go(current.next_offset ?? offset)}
+          onClick={nextPage}
         >
           Next
         </button>

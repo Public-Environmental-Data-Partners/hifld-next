@@ -5,7 +5,7 @@ from dataclasses import field as dataclass_field
 from datetime import datetime
 from typing import Literal
 
-from app.query.models import EncodedRow, JsonValue
+from app.query.models import EncodedRow
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,19 +71,6 @@ class WorkerTileQuery:
 
 
 @dataclass(frozen=True, slots=True)
-class WorkerMapQuery:
-    canonical_sql: str
-    sources: tuple[WorkerSourceSpec, ...]
-    geometry_column: str
-    result_crs: str | None
-    bbox: tuple[float, float, float, float]
-    zoom: int
-    feature_cap: int
-    max_result_bytes: int
-    deadline: datetime
-
-
-@dataclass(frozen=True, slots=True)
 class WorkerPage:
     columns: tuple[tuple[str, str, bool], ...]
     rows: tuple[EncodedRow, ...]
@@ -107,23 +94,9 @@ class WorkerTile:
 
 
 @dataclass(frozen=True, slots=True)
-class WorkerMapFeature:
-    geometry: JsonValue
-    properties: dict[str, JsonValue]
-
-
-@dataclass(frozen=True, slots=True)
-class WorkerMap:
-    features: tuple[WorkerMapFeature, ...]
-    elapsed_ms: float
-    bytes_read: int
-    files_read: int
-
-
-@dataclass(frozen=True, slots=True)
 class WorkerFailure:
     code: str
     message: str
 
 
-WorkerResult = WorkerPage | WorkerTile | WorkerMap | WorkerFailure
+WorkerResult = WorkerPage | WorkerTile | WorkerFailure

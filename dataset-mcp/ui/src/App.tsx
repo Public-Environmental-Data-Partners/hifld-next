@@ -1,37 +1,14 @@
 import { useEffect, useState } from "react";
 import { DatasetExplorer } from "./components/DatasetExplorer";
 import { ErrorPanel } from "./components/ErrorPanel";
-import { type MapConfiguration, MapView } from "./components/MapView";
+import { MapView } from "./components/MapView";
 import { ResultTable } from "./components/ResultTable";
-import type { McpAppState } from "./mcp/useMcpApp";
 import { useMcpApp } from "./mcp/useMcpApp";
 import "./styles.css";
 
-type AppStateWithMap = McpAppState & {
-  mapConfiguration?: MapConfiguration | null;
-};
-
-function mapConfigurationFrom(state: McpAppState): MapConfiguration | null {
-  if (!("mapConfiguration" in state)) return null;
-  const candidate = (state as AppStateWithMap).mapConfiguration;
-  if (!candidate) return null;
-  const geometryType = candidate.geometryType ?? candidate.geometry_type;
-  const geometryTypes = [
-    "Point",
-    "MultiPoint",
-    "LineString",
-    "MultiLineString",
-    "Polygon",
-    "MultiPolygon",
-  ] as const;
-  return geometryType === undefined || geometryTypes.includes(geometryType)
-    ? candidate
-    : null;
-}
-
 export default function App() {
   const state = useMcpApp();
-  const mapConfiguration = mapConfigurationFrom(state);
+  const mapConfiguration = state.mapConfiguration;
   const hasMap = mapConfiguration !== null;
   const [view, setView] = useState<"table" | "map">("table");
 

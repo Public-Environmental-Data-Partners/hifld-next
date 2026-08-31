@@ -10,8 +10,6 @@ from typing import Protocol
 
 from query_worker.protocol import (
     WorkerFailure,
-    WorkerMap,
-    WorkerMapQuery,
     WorkerPage,
     WorkerQuery,
     WorkerResult,
@@ -74,7 +72,7 @@ def _worker_main(
             message: object = connection.recv()
             if message is None:
                 return
-            if not isinstance(message, (WorkerQuery, WorkerTileQuery, WorkerMapQuery)):
+            if not isinstance(message, (WorkerQuery, WorkerTileQuery)):
                 connection.send(
                     WorkerFailure(
                         code="worker_protocol_invalid",
@@ -180,7 +178,7 @@ class WorkerPool:
 
     async def execute(
         self,
-        request: WorkerQuery | WorkerTileQuery | WorkerMapQuery,
+        request: WorkerQuery | WorkerTileQuery,
         *,
         timeout_seconds: float | None = None,
     ) -> WorkerResult:
@@ -211,7 +209,7 @@ class WorkerPool:
                 message="The query worker stopped unexpectedly",
             )
 
-        if not isinstance(response, (WorkerPage, WorkerTile, WorkerMap, WorkerFailure)):
+        if not isinstance(response, (WorkerPage, WorkerTile, WorkerFailure)):
             await self._replace(slot)
             return WorkerFailure(
                 code="worker_protocol_invalid",

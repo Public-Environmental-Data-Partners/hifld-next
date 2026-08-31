@@ -12,7 +12,6 @@ from pydantic import RootModel, ValidationError
 from app.catalog.client import CatalogClientError
 from app.catalog.models import QuerySourceRef
 from app.errors import AppError, ErrorCode
-from app.http.tiles import get_map_features
 from app.query.models import JsonValue, PageResult, QueryTokenPayload, ResolvedSource
 from app.query.service import ExecutionSource, QueryService
 from app.query.sql_policy import SqlPolicy, SqlPolicyError, ValidatedSql
@@ -20,15 +19,12 @@ from app.query.token_codec import QueryTokenCodec, QueryTokenError
 from app.storage.resolver import StorageResolutionError, StorageResolver
 from query_worker.protocol import (
     WorkerFailure,
-    WorkerMap,
-    WorkerMapQuery,
     WorkerQuery,
     WorkerResult,
     WorkerSourceSpec,
     WorkerTile,
     WorkerTileQuery,
 )
-from query_worker.tiles import MapFeature, MapFeatureCollection
 
 type JSONMapping = Mapping[str, JsonValue]
 
@@ -39,6 +35,19 @@ class _JsonMapping(RootModel[dict[str, JsonValue]]):
     pass
 
 
+_SOURCE_CHANGED_CODES = frozenset(
+    {"source_not_found", "source_identity_mismatch", "source_not_queryable"}
+)
+_SOURCE_NOT_GEOPARQUET_CODES = frozenset({"source_not_queryable"})
+_CATALOG_ERROR_CODES: dict[str, ErrorCode] = {
+    "catalog_not_found": ErrorCode.CATALOG_NOT_FOUND,
+    "source_not_found": ErrorCode.CATALOG_NOT_FOUND,
+    "catalog_unavailable": ErrorCode.CATALOG_UNAVAILABLE,
+    "catalog_contract_invalid": ErrorCode.CATALOG_CONTRACT_INVALID,
+    "schema_version_not_found": ErrorCode.SCHEMA_VERSION_NOT_FOUND,
+}
+
+
 class SourceResolver(Protocol):
     async def resolve(self, ref: QuerySourceRef) -> ResolvedSource: ...
 
@@ -46,7 +55,7 @@ class SourceResolver(Protocol):
 class WorkerExecutor(Protocol):
     async def execute(
         self,
-        request: WorkerQuery | WorkerTileQuery | WorkerMapQuery,
+        request: WorkerQuery | WorkerTileQuery,
         *,
         timeout_seconds: float | None = None,
     ) -> WorkerResult: ...
@@ -105,15 +114,23 @@ class QueryApplicationService:
                 resolved = await self._source_resolver.resolve(ref)
                 duckdb_source = self._storage_resolver.resolve(resolved)
             except CatalogClientError as error:
-                if token_revalidation:
+                if token_revalidation and error.code in _SOURCE_CHANGED_CODES:
                     code = ErrorCode.SOURCE_CHANGED
                     message = "A query source changed after the token was issued"
-                elif error.code in {"source_not_found", "source_not_queryable"}:
+                elif not token_revalidation and error.code in _SOURCE_NOT_GEOPARQUET_CODES:
                     code = ErrorCode.SOURCE_NOT_GEOPARQUET
                     message = "The selected source is not queryable GeoParquet"
                 else:
-                    code = ErrorCode.CATALOG_NOT_FOUND
-                    message = "The selected catalog source was not found"
+                    code = _CATALOG_ERROR_CODES.get(error.code, ErrorCode.INTERNAL_ERROR)
+                    message = (
+                        "The catalog request could not be completed"
+                        if code is ErrorCode.CATALOG_UNAVAILABLE
+                        else "The catalog response did not match its contract"
+                        if code is ErrorCode.CATALOG_CONTRACT_INVALID
+                        else "The catalog request failed unexpectedly"
+                        if code is ErrorCode.INTERNAL_ERROR
+                        else "The selected catalog source was not found"
+                    )
                 raise AppError(code, message) from error
             except StorageResolutionError as error:
                 raise AppError(
@@ -231,6 +248,7 @@ class QueryApplicationService:
         *,
         geometry_column: str | None,
         result_crs: str | None,
+        infer_source_crs: bool,
     ) -> tuple[str | None, str | None]:
         geometry_columns = tuple(
             column.name
@@ -251,7 +269,7 @@ class QueryApplicationService:
             resolved_geometry = None
 
         resolved_crs = result_crs
-        if resolved_geometry is not None and resolved_crs is None:
+        if infer_source_crs and resolved_geometry is not None and resolved_crs is None:
             source_crs = {
                 source.resolved.crs for source in sources if source.resolved.crs is not None
             }
@@ -306,7 +324,11 @@ class QueryApplicationService:
             offset=offset,
         )
         resolved_geometry, resolved_crs = self._resolve_map_columns(
-            page, sources, geometry_column=None, result_crs=None
+            page,
+            sources,
+            geometry_column=None,
+            result_crs=None,
+            infer_source_crs=True,
         )
         token = self._encode_token(
             validated,
@@ -347,6 +369,7 @@ class QueryApplicationService:
             execution_sources,
             geometry_column=geometry_column,
             result_crs=result_crs,
+            infer_source_crs=False,
         )
         token = self._encode_token(
             validated,
@@ -420,63 +443,6 @@ class QueryApplicationService:
         result = await self._worker_executor.execute(request, timeout_seconds=timeout_seconds)
         if isinstance(result, (WorkerTile, WorkerFailure)):
             return result
-        return WorkerFailure("map_not_supported", "The query result cannot be rendered as a map")
-
-    async def render_map_features(
-        self,
-        token: str,
-        bbox: tuple[float, float, float, float],
-        zoom: int,
-        feature_cap: int,
-        *,
-        max_result_bytes: int,
-    ) -> MapFeatureCollection | WorkerFailure:
-        payload = self._decode_token(token)
-        if payload.geometry_column is None:
-            raise AppError(
-                ErrorCode.GEOMETRY_AMBIGUOUS,
-                "A geometry column is required for map rendering",
-            )
-        sources = await self._execution_sources(payload.sources, token_revalidation=True)
-        request = WorkerMapQuery(
-            canonical_sql=payload.canonical_sql,
-            sources=self._worker_sources(sources),
-            geometry_column=payload.geometry_column,
-            result_crs=payload.result_crs,
-            bbox=bbox,
-            zoom=zoom,
-            feature_cap=feature_cap,
-            max_result_bytes=max_result_bytes,
-            deadline=datetime.now(tz=UTC) + timedelta(seconds=self._tile_timeout_seconds),
+        return WorkerFailure(
+            "worker_protocol_invalid", "The query worker returned an unexpected result"
         )
-        result = await self._worker_executor.execute(
-            request, timeout_seconds=self._tile_timeout_seconds
-        )
-        if isinstance(result, WorkerFailure):
-            return result
-        if not isinstance(result, WorkerMap):
-            return WorkerFailure(
-                "map_not_supported", "The query result cannot be rendered as a map"
-            )
-        return MapFeatureCollection(
-            features=tuple(
-                MapFeature(geometry=feature.geometry, properties=feature.properties)
-                for feature in result.features
-            )
-        )
-
-    async def get_map_features(
-        self,
-        query_token: str,
-        bbox: tuple[float, float, float, float],
-        zoom: int,
-        feature_cap: int,
-    ) -> JSONMapping:
-        result = await get_map_features(
-            self,
-            query_token,
-            bbox,
-            zoom,
-            feature_cap=feature_cap,
-        )
-        return result.structured_content

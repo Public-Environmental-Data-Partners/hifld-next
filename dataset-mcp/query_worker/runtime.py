@@ -17,9 +17,6 @@ from query_worker.metrics import init_connection, measure
 from query_worker.protocol import (
     WorkerCredentialProfile,
     WorkerFailure,
-    WorkerMap,
-    WorkerMapFeature,
-    WorkerMapQuery,
     WorkerPage,
     WorkerQuery,
     WorkerRuntimeConfig,
@@ -105,9 +102,7 @@ class WorkerRuntime:
     def close(self) -> None:
         self.connection.close()
 
-    def _create_request_secrets(
-        self, request: WorkerQuery | WorkerTileQuery | WorkerMapQuery
-    ) -> tuple[str, ...]:
+    def _create_request_secrets(self, request: WorkerQuery | WorkerTileQuery) -> tuple[str, ...]:
         secret_names: list[str] = []
         for source in request.sources:
             if source.profile_slug is None:
@@ -142,9 +137,7 @@ class WorkerRuntime:
         for secret_name in secret_names:
             self.connection.execute(f"DROP SECRET IF EXISTS {_quoted_identifier(secret_name)}")
 
-    def _create_source_views(
-        self, request: WorkerQuery | WorkerTileQuery | WorkerMapQuery
-    ) -> dict[str, str]:
+    def _create_source_views(self, request: WorkerQuery | WorkerTileQuery) -> dict[str, str]:
         aliases: dict[str, str] = {}
         for source in request.sources:
             if source.alias in aliases:
@@ -164,8 +157,8 @@ class WorkerRuntime:
             self.connection.execute(f"DROP VIEW IF EXISTS {_quoted_identifier(view_name)}")
 
     def execute(
-        self, request: WorkerQuery | WorkerTileQuery | WorkerMapQuery
-    ) -> WorkerPage | WorkerTile | WorkerMap | WorkerFailure:
+        self, request: WorkerQuery | WorkerTileQuery
+    ) -> WorkerPage | WorkerTile | WorkerFailure:
         if request.deadline <= datetime.now(tz=UTC):
             return WorkerFailure(code="query_timeout", message="The query deadline expired")
 
@@ -179,33 +172,6 @@ class WorkerRuntime:
                 from query_worker.tiles import execute_tile
 
                 return execute_tile(self.connection, rewritten_sql, request)
-            if isinstance(request, WorkerMapQuery):
-                from query_worker.tiles import execute_map_features
-
-                map_result = execute_map_features(
-                    self.connection,
-                    rewritten_sql,
-                    geometry_column=request.geometry_column,
-                    result_crs=request.result_crs,
-                    bbox=request.bbox,
-                    zoom=request.zoom,
-                    feature_cap=request.feature_cap,
-                    max_result_bytes=request.max_result_bytes,
-                )
-                if isinstance(map_result, WorkerFailure):
-                    return map_result
-                return WorkerMap(
-                    features=tuple(
-                        WorkerMapFeature(
-                            geometry=feature.geometry,
-                            properties=feature.properties,
-                        )
-                        for feature in map_result.features
-                    ),
-                    elapsed_ms=0,
-                    bytes_read=0,
-                    files_read=sum(len(source.object_uris) for source in request.sources),
-                )
             # The inner SQL has already passed SqlPolicy. LIMIT and OFFSET stay
             # outside it so an inner LIMIT remains part of relational semantics.
             bounded_sql = f"SELECT * FROM ({rewritten_sql}) AS _mcp_result LIMIT ? OFFSET ?"

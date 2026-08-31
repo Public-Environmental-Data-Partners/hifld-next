@@ -109,8 +109,10 @@ async def get_dataset_file_schema(
         advertised = payload.get("available_versions")
         if isinstance(advertised, list) and version not in advertised:
             raise ValueError("schema_version_not_found")
-    raw_columns = payload.get("columns", [])
-    columns: list[JSONValue] = list(raw_columns) if isinstance(raw_columns, list) else []
+    raw_columns = payload.get("columns")
+    if not isinstance(raw_columns, list):
+        raise TypeError("catalog schema columns must be a list")
+    columns: list[JSONValue] = list(raw_columns)
     page = columns[column_offset : column_offset + column_limit]
     payload["columns"] = page
     payload["total"] = len(columns)
