@@ -4,11 +4,24 @@
 
 import posthog from "posthog-js";
 import { runtimeClientConfigFromWindow } from "./runtime-client-config";
+import type { WebMcpErrorCode } from "./webmcp/result";
 
 // Initialize PostHog on the client side
 let posthogInitialized = false;
 
 export type DownloadMethod = "native_link" | "fetch_stream" | "client_zip";
+
+export type WebMcpRouteKind = "catalog" | "schema" | "query" | "map" | "comparison" | "workspace" | "unknown";
+export type WebMcpDurationBucket = "0_99ms" | "100_499ms" | "500_1999ms" | "2000ms_plus";
+export type WebMcpResultCountBucket = "0" | "1_9" | "10_49" | "50_plus";
+
+export interface WebMcpAnalyticsProperties {
+  tool_name: string;
+  route_kind: WebMcpRouteKind;
+  duration_bucket?: WebMcpDurationBucket | undefined;
+  error_code?: WebMcpErrorCode | undefined;
+  result_count_bucket?: WebMcpResultCountBucket | undefined;
+}
 
 type AnalyticsPropertyValue = string | number | boolean | null | readonly string[] | readonly number[];
 
@@ -107,6 +120,102 @@ type AnalyticsEventProperties =
 
 function compactProperties(properties: AnalyticsEventProperties): PostHogEventProperties {
   return Object.fromEntries(Object.entries(properties).filter(([, value]) => value !== undefined));
+}
+
+const WEBMCP_ROUTE_KINDS: ReadonlySet<string> = new Set([
+  "catalog",
+  "schema",
+  "query",
+  "map",
+  "comparison",
+  "workspace",
+  "unknown",
+]);
+const WEBMCP_ERROR_CODES: ReadonlySet<string> = new Set([
+  "invalid_request",
+  "not_found",
+  "unsupported_state",
+  "query_rejected",
+  "query_timeout",
+  "query_capacity",
+  "rate_limited",
+  "upstream_unavailable",
+  "internal_error",
+]);
+
+function durationBucket(durationMs: number): WebMcpDurationBucket {
+  if (!Number.isFinite(durationMs) || durationMs < 100) return "0_99ms";
+  if (durationMs < 500) return "100_499ms";
+  if (durationMs < 2_000) return "500_1999ms";
+  return "2000ms_plus";
+}
+
+function resultCountBucket(resultCount: number): WebMcpResultCountBucket {
+  if (resultCount <= 0) return "0";
+  if (resultCount < 10) return "1_9";
+  if (resultCount < 50) return "10_49";
+  return "50_plus";
+}
+
+/** Build an allowlisted WebMCP analytics payload; all other input fields are discarded. */
+export function webMcpAnalyticsProperties(input: WebMcpAnalyticsProperties): PostHogEventProperties {
+  const routeKind = WEBMCP_ROUTE_KINDS.has(input.route_kind) ? input.route_kind : "unknown";
+  const properties: PostHogEventProperties = {
+    tool_name: input.tool_name,
+    route_kind: routeKind,
+  };
+  if (input.duration_bucket !== undefined) properties["duration_bucket"] = input.duration_bucket;
+  if (input.error_code !== undefined && WEBMCP_ERROR_CODES.has(input.error_code)) {
+    properties["error_code"] = input.error_code;
+  }
+  if (input.result_count_bucket !== undefined) properties["result_count_bucket"] = input.result_count_bucket;
+  return properties;
+}
+
+function captureWebMcpEvent(
+  eventName: "webmcp_tool_started" | "webmcp_tool_completed" | "webmcp_tool_failed",
+  properties: WebMcpAnalyticsProperties,
+): void {
+  if (typeof window === "undefined") return;
+  if (!posthogInitialized) initPostHog();
+  if (!posthogInitialized || typeof posthog.capture !== "function") return;
+  try {
+    posthog.capture(eventName, webMcpAnalyticsProperties(properties));
+  } catch {
+    console.error("Failed to track WebMCP analytics event.");
+  }
+}
+
+export function trackWebMcpToolStarted(toolName: string, routeKind: WebMcpRouteKind): void {
+  captureWebMcpEvent("webmcp_tool_started", { tool_name: toolName, route_kind: routeKind });
+}
+
+export function trackWebMcpToolCompleted(
+  toolName: string,
+  routeKind: WebMcpRouteKind,
+  durationMs: number,
+  resultCount?: number,
+): void {
+  captureWebMcpEvent("webmcp_tool_completed", {
+    tool_name: toolName,
+    route_kind: routeKind,
+    duration_bucket: durationBucket(durationMs),
+    ...(resultCount === undefined ? {} : { result_count_bucket: resultCountBucket(resultCount) }),
+  });
+}
+
+export function trackWebMcpToolFailed(
+  toolName: string,
+  routeKind: WebMcpRouteKind,
+  durationMs: number,
+  errorCode?: WebMcpErrorCode,
+): void {
+  captureWebMcpEvent("webmcp_tool_failed", {
+    tool_name: toolName,
+    route_kind: routeKind,
+    duration_bucket: durationBucket(durationMs),
+    ...(errorCode === undefined ? {} : { error_code: errorCode }),
+  });
 }
 
 function captureDownloadEvent(

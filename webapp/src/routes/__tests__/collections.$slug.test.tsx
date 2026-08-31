@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createRouter, createRootRoute, createRoute, RouterProvider } from '@tanstack/react-router'
-import { collectionPageHref, getSyncedSearchQuery, Route as CollectionsSlugRoute } from '../collections.$slug'
+import { collectionPageHref, getSyncedSearchQuery, parseTagFiltersParam, Route as CollectionsSlugRoute } from '../collections.$slug'
 import * as apiClient from '@/lib/api-client'
 import type { Collection, DatasetWithUrls, PaginatedResponse } from '@/lib/api-client'
 
@@ -178,6 +178,11 @@ describe('CollectionDetailPage - API Integration Tests', () => {
         '/collections/hifld?query=hospitals&offset=200'
       )
       expect(collectionPageHref('hifld', { limit: 25 }, 0)).toBe('/collections/hifld?limit=25')
+      expect(collectionPageHref('hifld', { tag_filters: JSON.stringify({ geometry_type: 'Point' }) }, 0)).toBe(
+        '/collections/hifld?tag_filters=%7B%22geometry_type%22%3A%22Point%22%7D'
+      )
+      expect(parseTagFiltersParam('{"geometry_type":"Point"}')).toEqual({ geometry_type: 'Point' })
+      expect(parseTagFiltersParam('{bad-json')).toBeUndefined()
     })
 
     it('should call getCollectionDatasets with correct limit and offset on initial load', async () => {

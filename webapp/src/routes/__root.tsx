@@ -3,6 +3,7 @@ import Footer from "../components/Footer";
 import Header from "../components/Header";
 import { PostHogProvider } from "../components/PostHogProvider";
 import { PageLoader } from "../components/ui/page-loader";
+import { WebMcpProvider } from "../components/WebMcpProvider";
 import { usePageTracking } from "../hooks/usePageTracking";
 import appCss from "../styles.css?url";
 
@@ -78,13 +79,15 @@ function RootLayout() {
 
   return (
     <PostHogProvider>
-      <div className="flex flex-col min-h-screen">
-        <Header />
-        <main className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
-          <Outlet />
-        </main>
-        <Footer />
-      </div>
+      <WebMcpProvider>
+        <div className="flex flex-col min-h-screen">
+          <Header />
+          <main className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
+            <Outlet />
+          </main>
+          <Footer />
+        </div>
+      </WebMcpProvider>
     </PostHogProvider>
   );
 }

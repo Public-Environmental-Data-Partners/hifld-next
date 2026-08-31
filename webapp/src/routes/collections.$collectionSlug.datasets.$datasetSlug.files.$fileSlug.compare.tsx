@@ -186,6 +186,7 @@ function FileComparePage() {
 
   useWebMcpTool({
     name: "compare_file_versions",
+    routeKind: "comparison",
     title: "Compare file versions",
     description: "Compare metadata and schema changes between two versions of the current file.",
     schema: compareFileVersionsInputSchema,
