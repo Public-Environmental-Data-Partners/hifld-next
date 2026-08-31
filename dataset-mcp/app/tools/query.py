@@ -42,7 +42,11 @@ def _limit(value: int) -> int:
 
 
 def _result(label: str, payload: JSONMapping) -> ToolResult:
-    return ToolResult(text=f"{label}: {len(payload)} result fields", structured_content=payload)
+    public_payload = {key: value for key, value in payload.items() if key != "resolved_sources"}
+    return ToolResult(
+        text=f"{label}: {len(public_payload)} result fields",
+        structured_content=public_payload,
+    )
 
 
 async def read_geoparquet_rows(

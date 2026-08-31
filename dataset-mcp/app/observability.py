@@ -10,7 +10,9 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from typing import Protocol
+from typing import Literal, Protocol
+
+type QueryTransport = Literal["mcp", "webapp_http"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,12 +39,22 @@ class StructuredLogEvent:
         return json.dumps(asdict(self), separators=(",", ":"), sort_keys=True)
 
 
+@dataclass(frozen=True, slots=True)
+class TransportLogEvent:
+    event: Literal["dataset_query_transport"]
+    transport: QueryTransport
+    duration_ms: float
+
+    def as_json(self) -> str:
+        return json.dumps(asdict(self), separators=(",", ":"), sort_keys=True)
+
+
 class MetricSink(Protocol):
     def record(self, event: MetricEvent) -> None: ...
 
 
 class StructuredLogSink(Protocol):
-    def emit(self, event: StructuredLogEvent) -> None: ...
+    def emit(self, event: StructuredLogEvent | TransportLogEvent) -> None: ...
 
 
 @dataclass(slots=True)
@@ -58,12 +70,12 @@ class InMemoryMetricSink:
 
 @dataclass(slots=True)
 class InMemoryStructuredLogSink:
-    events: list[StructuredLogEvent]
+    events: list[StructuredLogEvent | TransportLogEvent]
 
     def __init__(self) -> None:
         self.events = []
 
-    def emit(self, event: StructuredLogEvent) -> None:
+    def emit(self, event: StructuredLogEvent | TransportLogEvent) -> None:
         self.events.append(event)
 
 
@@ -118,6 +130,24 @@ class QueryObservability:
                 offset=offset,
                 duration_ms=duration_ms,
                 error_code=error_code,
+            )
+        )
+
+    def record_transport(self, *, transport: QueryTransport, duration_ms: float) -> None:
+        """Record a bounded transport timing without request-derived fields."""
+        labels = (("transport", transport),)
+        self._metrics.record(
+            MetricEvent(
+                name="dataset_mcp_transport_duration_ms",
+                value=duration_ms,
+                labels=labels,
+            )
+        )
+        self._logs.emit(
+            TransportLogEvent(
+                event="dataset_query_transport",
+                transport=transport,
+                duration_ms=duration_ms,
             )
         )
 

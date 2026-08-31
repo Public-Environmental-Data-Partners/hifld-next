@@ -72,7 +72,6 @@ class QueryResult(QueryModel):
     page: PageResult
     query_token: str
     query_id: str = Field(pattern=r"^[A-Za-z0-9_-]{20,64}$")
-    resolved_sources: list[ResolvedSource]
     map_configuration: dict[str, JsonValue] | None = None
 
 

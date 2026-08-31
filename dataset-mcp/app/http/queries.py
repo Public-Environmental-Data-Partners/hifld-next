@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from time import perf_counter
 from typing import Protocol
 
 from fastapi import APIRouter, Header, Request, Response
@@ -15,6 +16,7 @@ from app.http.tiles import (
     MVT_MEDIA_TYPE,
     QUERY_TOKEN_HEADER,
 )
+from app.observability import QueryObservability
 from app.query.models import JsonValue
 from query_worker.protocol import WorkerFailure, WorkerTile
 from query_worker.tiles import validate_tile_coordinates
@@ -80,6 +82,11 @@ def _source_payload(source: QuerySourceHttpRequest) -> dict[str, JsonValue]:
     }
 
 
+def _public_payload(payload: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    """Defend the HTTP boundary against accidental storage-resolution output."""
+    return {key: value for key, value in payload.items() if key != "resolved_sources"}
+
+
 def _error_status(code: ErrorCode | str) -> int:
     if code in {
         ErrorCode.QUERY_TOKEN_INVALID,
@@ -134,6 +141,7 @@ def create_query_router(
     *,
     webapp_origins: tuple[str, ...] = (),
     tile_timeout_seconds: float = DEFAULT_TILE_TIMEOUT_SECONDS,
+    observability: QueryObservability | None = None,
 ) -> APIRouter:
     """Adapt query application methods to stable REST resources without SQL logic."""
     if tile_timeout_seconds <= 0 or tile_timeout_seconds > DEFAULT_TILE_TIMEOUT_SECONDS:
@@ -141,7 +149,15 @@ def create_query_router(
     router = APIRouter()
     allowed_origins = frozenset(webapp_origins)
 
+    def record_transport(started_at: float) -> None:
+        if observability is not None:
+            observability.record_transport(
+                transport="webapp_http",
+                duration_ms=(perf_counter() - started_at) * 1_000,
+            )
+
     async def create_query(request: QueryHttpRequest) -> JSONResponse:
+        started_at = perf_counter()
         try:
             result = await service.query(
                 tuple(_source_payload(source) for source in request.sources),
@@ -154,13 +170,16 @@ def create_query_router(
             return _error_response(error.code, error.message, {})
         except ValueError:
             return _error_response("invalid_request", "request validation failed", {})
-        return JSONResponse(content=result)
+        finally:
+            record_transport(started_at)
+        return JSONResponse(content=_public_payload(result))
 
     async def query_page(
         query_id: str,
         request: QueryPageHttpRequest,
         query_token: str | None = Header(default=None, alias=QUERY_TOKEN_HEADER),
     ) -> JSONResponse:
+        started_at = perf_counter()
         try:
             token = _required_query_token(query_token)
             service.validate_query_identity(token, query_id)
@@ -169,7 +188,9 @@ def create_query_router(
             return _error_response(error.code, error.message, {})
         except ValueError:
             return _error_response("invalid_request", "request validation failed", {})
-        return JSONResponse(content=result)
+        finally:
+            record_transport(started_at)
+        return JSONResponse(content=_public_payload(result))
 
     async def query_tile_preflight(
         request: Request,
@@ -193,9 +214,10 @@ def create_query_router(
         query_token: str | None = Header(default=None, alias=QUERY_TOKEN_HEADER),
     ) -> Response:
         headers = _tile_cors_headers(request.headers.get("origin"), allowed_origins)
-        if not validate_tile_coordinates(z, x, y):
-            return Response(status_code=404, headers=headers)
+        started_at = perf_counter()
         try:
+            if not validate_tile_coordinates(z, x, y):
+                return Response(status_code=404, headers=headers)
             token = _required_query_token(query_token)
             service.validate_query_identity(token, query_id)
             result = await service.render_tile(token, z, x, y, timeout_seconds=tile_timeout_seconds)
@@ -209,6 +231,8 @@ def create_query_router(
                 "The tile query exceeded its time limit.",
                 headers,
             )
+        finally:
+            record_transport(started_at)
         if isinstance(result, WorkerFailure):
             return _error_response(result.code, result.message, headers)
         if not result.content:

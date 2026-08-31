@@ -243,11 +243,6 @@ class QueryApplicationService:
             payload["query_token"] = query_token
         if query_id is not None:
             payload["query_id"] = query_id
-        if sources:
-            payload["resolved_sources"] = [
-                _JsonMapping.model_validate(source.resolved.model_dump(mode="json")).root
-                for source in sources
-            ]
         map_configuration = self._map_configuration(
             sources,
             geometry_column=geometry_column,

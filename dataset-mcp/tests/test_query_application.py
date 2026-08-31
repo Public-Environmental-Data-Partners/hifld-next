@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.catalog.client import CatalogClientError
@@ -167,6 +169,21 @@ async def test_query_builds_map_contract_with_explicit_crs_and_preserves_token()
         1,
         2,
     ]
+
+
+@pytest.mark.asyncio
+async def test_public_query_payloads_omit_resolved_storage_uris() -> None:
+    service = _service(Resolver(), Executor())
+
+    initial = await service.query((_source(),), "SELECT id FROM roads ORDER BY id", 1, None, None)
+    token = initial["query_token"]
+    assert isinstance(token, str)
+    page = await service.page(token, 1, 1)
+    serialized = json.dumps({"initial": initial, "page": page})
+
+    assert "resolved_sources" not in initial
+    assert "resolved_sources" not in page
+    assert "gs://datasets/roads.parquet" not in serialized
 
 
 @pytest.mark.asyncio
