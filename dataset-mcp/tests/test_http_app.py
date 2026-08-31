@@ -10,7 +10,7 @@ from fastmcp import Client
 
 import app.mcp_server as mcp_server_module
 from app.catalog.client import CatalogClientError
-from app.http_app import create_http_app
+from app.http_app import HttpDependencies, create_http_app
 from app.mcp_server import (
     AppDependencies,
     UIResourceConfig,
@@ -142,6 +142,42 @@ def test_http_routes_share_lifespan_and_bound_concurrency() -> None:
                 assert (await client.get("/mcp/")).status_code in {200, 405}
 
     asyncio.run(assert_routes())
+
+
+def test_http_app_wires_query_resources_to_the_shared_query_service() -> None:
+    async def assert_query_route() -> None:
+        query = QueryStub()
+        app = create_http_app(
+            HttpDependencies(
+                tools=AppDependencies(catalog=CatalogStub(), query=query),
+                query_service=query,
+                webapp_origins=("https://webapp.example.test",),
+            ),
+            ui_html="<html><body>dataset explorer</body></html>",
+        )
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.post(
+                    "/api/queries",
+                    json={
+                        "sources": [
+                            {
+                                "alias": "roads",
+                                "collection_id": 1,
+                                "dataset_id": 2,
+                                "file_id": 3,
+                                "file_source_id": 4,
+                            }
+                        ],
+                        "sql": "SELECT id FROM roads",
+                    },
+                )
+
+        assert response.status_code == 200
+        assert response.json() == {"limit": 100}
+
+    asyncio.run(assert_query_route())
 
 
 def test_worker_asset_allows_cross_origin_module_loading(tmp_path: Path) -> None:

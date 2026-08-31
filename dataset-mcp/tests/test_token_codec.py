@@ -32,6 +32,7 @@ def payload(
     sources: tuple[QuerySourceRef, ...] | None = None,
     geometry_column: str | None = None,
     result_crs: str | None = None,
+    query_id: str = "a_query_identifier_1234",
     issued_at: datetime = NOW,
     expires_at: datetime = NOW + timedelta(hours=2),
 ) -> QueryTokenPayload:
@@ -41,6 +42,7 @@ def payload(
         sources=sources if sources is not None else (source(),),
         geometry_column=geometry_column,
         result_crs=result_crs,
+        query_id=query_id,
         issued_at=issued_at,
         expires_at=expires_at,
     )
@@ -64,6 +66,30 @@ def test_token_encoding_is_deterministic_and_round_trips() -> None:
     decoded = json.loads(zlib.decompress(raw[: -hashlib.sha256().digest_size]))
     assert decoded["token_version"] == 1
     assert decoded["issued_at"] == int(NOW.timestamp())
+
+
+def test_token_round_trips_url_safe_query_identity() -> None:
+    codec = QueryTokenCodec(SECRET)
+
+    decoded = codec.decode(codec.encode(payload(query_id="A_query-id_123456789")), now=NOW)
+
+    assert decoded.query_id == "A_query-id_123456789"
+
+
+@pytest.mark.parametrize("query_id", ("too-short", "invalid/query_id", "x" * 65))
+def test_token_rejects_missing_or_invalid_query_identity(query_id: str) -> None:
+    codec = QueryTokenCodec(SECRET)
+    data = json.loads(payload().model_dump_json())
+    data["issued_at"] = int(NOW.timestamp())
+    data["expires_at"] = int((NOW + timedelta(hours=2)).timestamp())
+    if query_id != "too-short":
+        data["query_id"] = query_id
+    else:
+        data.pop("query_id")
+
+    with pytest.raises(QueryTokenError):
+        token = encode_raw(json.dumps(data, sort_keys=True, separators=(",", ":")).encode())
+        codec.decode(token, now=NOW)
 
 
 def test_token_rejects_signature_mutation() -> None:

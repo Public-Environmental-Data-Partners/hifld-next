@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hmac
 import re
+import secrets
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -102,6 +104,15 @@ class QueryApplicationService:
             }
         ).root
 
+    def validate_query_identity(self, token: str, query_id: str) -> None:
+        """Ensure a signed token may only be used with its bound path identity."""
+        payload = self._decode_token(token)
+        if not hmac.compare_digest(payload.query_id, query_id):
+            raise AppError(
+                ErrorCode.QUERY_TOKEN_INVALID,
+                "The query token is invalid or expired",
+            )
+
     async def _execution_sources(
         self,
         refs: Sequence[QuerySourceRef],
@@ -172,18 +183,20 @@ class QueryApplicationService:
         *,
         geometry_column: str | None,
         result_crs: str | None,
-    ) -> str:
+    ) -> tuple[str, str]:
         issued_at = datetime.now(tz=UTC).replace(microsecond=0)
+        query_id = secrets.token_urlsafe(18)
         payload = QueryTokenPayload(
             canonical_sql=validated.canonical_sql,
             sources=tuple(refs),
             geometry_column=geometry_column,
             result_crs=result_crs,
+            query_id=query_id,
             issued_at=issued_at,
             expires_at=issued_at + timedelta(seconds=self._token_ttl_seconds),
         )
         try:
-            return self._token_codec.encode(payload)
+            return self._token_codec.encode(payload), query_id
         except QueryTokenError as error:
             raise AppError(
                 ErrorCode.QUERY_TOKEN_TOO_LARGE, "The query token is too large"
@@ -195,6 +208,7 @@ class QueryApplicationService:
         *,
         limit: int,
         query_token: str | None = None,
+        query_id: str | None = None,
         sources: Sequence[ExecutionSource] = (),
         geometry_column: str | None = None,
         result_crs: str | None = None,
@@ -227,6 +241,8 @@ class QueryApplicationService:
             payload["next_offset"] = parsed.next_offset
         if query_token is not None:
             payload["query_token"] = query_token
+        if query_id is not None:
+            payload["query_id"] = query_id
         if sources:
             payload["resolved_sources"] = [
                 _JsonMapping.model_validate(source.resolved.model_dump(mode="json")).root
@@ -236,6 +252,7 @@ class QueryApplicationService:
             sources,
             geometry_column=geometry_column,
             result_crs=result_crs,
+            query_id=query_id,
         )
         if map_configuration is not None:
             payload["map_configuration"] = map_configuration
@@ -283,11 +300,19 @@ class QueryApplicationService:
         *,
         geometry_column: str | None,
         result_crs: str | None,
+        query_id: str | None,
     ) -> dict[str, JsonValue] | None:
-        if self._public_origin is None or geometry_column is None or result_crs is None:
+        if (
+            self._public_origin is None
+            or geometry_column is None
+            or result_crs is None
+            or query_id is None
+        ):
             return None
         configuration: dict[str, JsonValue] = {
-            "tile_url": f"{self._public_origin}/tiles/{{z}}/{{x}}/{{y}}.mvt",
+            "tile_url": (
+                f"{self._public_origin}/api/queries/{query_id}/tiles/{{z}}/{{x}}/{{y}}.mvt"
+            ),
             "worker_url": f"{self._public_origin}/assets/maplibre-gl-worker.mjs",
             "source_layer": "hifld",
             "geometry_column": geometry_column,
@@ -330,7 +355,7 @@ class QueryApplicationService:
             result_crs=None,
             infer_source_crs=True,
         )
-        token = self._encode_token(
+        token, query_id = self._encode_token(
             validated,
             (ref,),
             geometry_column=resolved_geometry,
@@ -340,6 +365,7 @@ class QueryApplicationService:
             page,
             limit=limit,
             query_token=token,
+            query_id=query_id,
             sources=sources,
             geometry_column=resolved_geometry,
             result_crs=resolved_crs,
@@ -371,7 +397,7 @@ class QueryApplicationService:
             result_crs=result_crs,
             infer_source_crs=False,
         )
-        token = self._encode_token(
+        token, query_id = self._encode_token(
             validated,
             refs,
             geometry_column=resolved_geometry,
@@ -381,6 +407,7 @@ class QueryApplicationService:
             page,
             limit=limit,
             query_token=token,
+            query_id=query_id,
             sources=execution_sources,
             geometry_column=resolved_geometry,
             result_crs=resolved_crs,
@@ -396,7 +423,12 @@ class QueryApplicationService:
             limit=limit,
             offset=offset,
         )
-        return self._page_payload(page, limit=limit, query_token=token)
+        return self._page_payload(
+            page,
+            limit=limit,
+            query_token=token,
+            query_id=payload.query_id,
+        )
 
     @staticmethod
     def _worker_sources(sources: Sequence[ExecutionSource]) -> tuple[WorkerSourceSpec, ...]:

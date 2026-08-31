@@ -42,6 +42,7 @@ class _EncodedPayload(_TokenModel):
     sources: tuple[_EncodedSource, ...] = Field(min_length=1, max_length=MAX_SOURCES)
     geometry_column: str | None
     result_crs: str | None
+    query_id: str = Field(pattern=r"^[A-Za-z0-9_-]{20,64}$")
     issued_at: int
     expires_at: int
 
@@ -59,6 +60,7 @@ class QueryTokenCodec:
             "geometry_column": payload.geometry_column,
             "issued_at": _unix_seconds(payload.issued_at),
             "result_crs": payload.result_crs,
+            "query_id": payload.query_id,
             "sources": [
                 {
                     "alias": source.alias,
@@ -128,6 +130,7 @@ class QueryTokenCodec:
             sources=sources,
             geometry_column=encoded.geometry_column,
             result_crs=encoded.result_crs,
+            query_id=encoded.query_id,
             issued_at=datetime.fromtimestamp(encoded.issued_at, UTC),
             expires_at=datetime.fromtimestamp(encoded.expires_at, UTC),
         )

@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.http.queries import QueryHttpService, create_query_router
 from app.http.tiles import TileService, create_tile_router
 from app.mcp_server import AppDependencies, UIResourceConfig, create_mcp_server
 
@@ -27,6 +28,8 @@ class HttpDependencies:
     shutdown: tuple[LifecycleAction, ...] = ()
     tile_service: TileService | None = None
     tile_timeout_seconds: float = 10.0
+    query_service: QueryHttpService | None = None
+    webapp_origins: tuple[str, ...] = ()
 
 
 class ConcurrencyLimiter:
@@ -129,6 +132,14 @@ def create_http_app(
             create_tile_router(
                 http_dependencies.tile_service,
                 timeout_seconds=http_dependencies.tile_timeout_seconds,
+            )
+        )
+    if http_dependencies.query_service is not None:
+        app.include_router(
+            create_query_router(
+                http_dependencies.query_service,
+                webapp_origins=http_dependencies.webapp_origins,
+                tile_timeout_seconds=http_dependencies.tile_timeout_seconds,
             )
         )
 

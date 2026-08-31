@@ -71,6 +71,8 @@ def create_production_app(settings: Settings | None = None) -> ASGIApp:
             shutdown=(catalog.aclose, pool.close),
             tile_service=query,
             tile_timeout_seconds=configured.tile_timeout_seconds,
+            query_service=query,
+            webapp_origins=configured.webapp_origins,
         ),
         resource_config=UIResourceConfig(
             tile_origin=public_origin or "self",

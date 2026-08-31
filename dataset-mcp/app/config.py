@@ -1,5 +1,8 @@
-from pydantic import AnyHttpUrl, Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Annotated
+from urllib.parse import urlsplit
+
+from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.storage.models import StorageSettings
 
@@ -23,5 +26,42 @@ class Settings(BaseSettings):
     max_sources: int = Field(default=8, ge=1, le=8)
     max_result_bytes: int = Field(default=4 * 1024 * 1024, ge=1024)
     public_origin: AnyHttpUrl | None = None
+    webapp_origins: Annotated[tuple[str, ...], NoDecode] = ()
     max_concurrency: int = Field(default=8, ge=1, le=64)
     storage_settings: StorageSettings = Field(default_factory=lambda: StorageSettings(profiles={}))
+
+    @field_validator("webapp_origins", mode="before")
+    @classmethod
+    def parse_webapp_origins(cls, value: str | tuple[str, ...]) -> tuple[str, ...]:
+        values = (
+            tuple(part.strip() for part in value.split(",")) if isinstance(value, str) else value
+        )
+        origins: list[str] = []
+        for value in values:
+            parsed = urlsplit(value)
+            if (
+                not parsed.scheme
+                or parsed.hostname is None
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path not in {"", "/"}
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("webapp origins must be absolute origins without a path")
+            try:
+                port = parsed.port
+            except ValueError as error:
+                raise ValueError("webapp origins must use a valid port") from error
+            hostname = parsed.hostname.lower()
+            if parsed.scheme != "https" and not (
+                parsed.scheme == "http" and hostname in {"localhost", "127.0.0.1"}
+            ):
+                raise ValueError("webapp origins must use HTTPS except for localhost development")
+            default_port = 443 if parsed.scheme == "https" else 80
+            host = f"[{hostname}]" if ":" in hostname else hostname
+            netloc = host if port is None or port == default_port else f"{host}:{port}"
+            origins.append(f"{parsed.scheme}://{netloc}")
+        if len(set(origins)) != len(origins):
+            raise ValueError("webapp origins must be unique")
+        return tuple(origins)

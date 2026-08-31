@@ -138,8 +138,12 @@ async def test_query_builds_map_contract_with_explicit_crs_and_preserves_token()
     )
     token = first["query_token"]
     assert isinstance(token, str)
+    query_id = first["query_id"]
+    assert isinstance(query_id, str)
     assert first["map_configuration"] == {
-        "tile_url": "https://mcp.example.test/base/tiles/{z}/{x}/{y}.mvt",
+        "tile_url": (
+            f"https://mcp.example.test/base/api/queries/{query_id}/tiles/{{z}}/{{x}}/{{y}}.mvt"
+        ),
         "worker_url": "https://mcp.example.test/base/assets/maplibre-gl-worker.mjs",
         "source_layer": "hifld",
         "geometry_column": "geometry",
@@ -152,6 +156,12 @@ async def test_query_builds_map_contract_with_explicit_crs_and_preserves_token()
 
     assert second["query_token"] == token
     assert third["query_token"] == token
+    assert second["query_id"] == query_id
+    assert third["query_id"] == query_id
+    service.validate_query_identity(token, query_id)
+    with pytest.raises(AppError) as caught:
+        service.validate_query_identity(token, "other_query_identity_123")
+    assert caught.value.code is ErrorCode.QUERY_TOKEN_INVALID
     assert [request.offset for request in executor.calls if isinstance(request, WorkerQuery)] == [
         0,
         1,
