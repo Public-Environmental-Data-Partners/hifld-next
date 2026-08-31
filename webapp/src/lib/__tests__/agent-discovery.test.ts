@@ -8,6 +8,8 @@ describe("agent-discovery", () => {
     expect(v).toContain("</llms.txt>");
     expect(v).toContain("</.well-known/api-catalog>");
     expect(v).toContain("</.well-known/agent-skills/index.json>");
+    expect(v).toContain("</.well-known/mcp/server-card.json>");
+    expect(v).toContain("</.well-known/ai-catalog.json>");
   });
 
   it("buildSitemapXml includes core paths", () => {
@@ -21,6 +23,8 @@ describe("agent-discovery", () => {
     expect(xml).toContain(
       "<loc>https://example.org/.well-known/agent-skills/index.json</loc>"
     );
+    expect(xml).toContain("<loc>https://example.org/.well-known/mcp/server-card.json</loc>");
+    expect(xml).toContain("<loc>https://example.org/.well-known/ai-catalog.json</loc>");
   });
 
   it("buildRobotsTxt references sitemap.xml on same origin", () => {

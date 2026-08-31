@@ -10,6 +10,8 @@ export function discoveryLinkHeaderValue(): string {
     `</llms.txt>; rel="alternate"; type="text/markdown"`,
     `</.well-known/api-catalog>; rel="service-meta"; type="application/json"`,
     `</.well-known/agent-skills/index.json>; rel="service-meta"; type="application/json"`,
+    `</.well-known/mcp/server-card.json>; rel="service-meta"; type="application/json"`,
+    `</.well-known/ai-catalog.json>; rel="service-meta"; type="application/json"`,
   ];
   return parts.join(", ");
 }
@@ -25,6 +27,8 @@ export function buildSitemapXml(origin: string): string {
     "/llms.txt",
     "/.well-known/api-catalog",
     "/.well-known/agent-skills/index.json",
+    "/.well-known/mcp/server-card.json",
+    "/.well-known/ai-catalog.json",
   ];
   const urls = paths
     .map((p) => {
@@ -69,6 +73,8 @@ export function homePageMarkdown(origin: string): string {
     `- [GET ${origin}/llms.txt](${origin}/llms.txt) - markdown overview and URL patterns`,
     `- [GET ${origin}/.well-known/api-catalog](${origin}/.well-known/api-catalog) - discovery document`,
     `- [GET ${origin}/.well-known/agent-skills/index.json](${origin}/.well-known/agent-skills/index.json) - Agent Skills discovery index`,
+    `- [GET ${origin}/.well-known/mcp/server-card.json](${origin}/.well-known/mcp/server-card.json) - MCP Server Card`,
+    `- [GET ${origin}/.well-known/ai-catalog.json](${origin}/.well-known/ai-catalog.json) - Agent Resource Discovery catalog`,
     "",
     "## Human UI",
     "",
