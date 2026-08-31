@@ -20,7 +20,9 @@ function validToken(environment: WebMcpOriginTrialEnvironment): string | null {
  */
 export function registerWebMcpOriginTrial(
   registrar: ResponseHookRegistrar,
-  environment: WebMcpOriginTrialEnvironment = process.env,
+  environment: WebMcpOriginTrialEnvironment = {
+    WEBMCP_ORIGIN_TRIAL_TOKEN: process.env["WEBMCP_ORIGIN_TRIAL_TOKEN"],
+  },
 ): void {
   const token = validToken(environment);
   if (!token) return;

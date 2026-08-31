@@ -26,7 +26,7 @@ export interface AgentResourceDiscovery {
 }
 
 function configuredMcpEndpoint(origin: string): string {
-  const configured = process.env.DATASET_MCP_PUBLIC_ENDPOINT?.trim();
+  const configured = process.env["DATASET_MCP_PUBLIC_ENDPOINT"]?.trim();
   // Deployments must route same-origin /mcp or configure DATASET_MCP_PUBLIC_ENDPOINT.
   if (!configured) return new URL("/mcp", origin).href;
   try {

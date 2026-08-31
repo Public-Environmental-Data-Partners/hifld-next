@@ -68,16 +68,18 @@ function isAbortError(error: Error | DOMException): boolean {
 }
 
 function requestInit(request: Request): RequestInit {
-  const init: RequestInit = {
+  const baseInit: RequestInit = {
     method: request.method,
     headers: forwardedRequestHeaders(request),
     signal: request.signal,
   };
-  if (request.body !== null) {
-    init.body = request.body;
-    init.duplex = "half";
-  }
-  return init;
+  if (request.body === null) return baseInit;
+  const streamingInit: RequestInit & { duplex: "half" } = {
+    ...baseInit,
+    body: request.body,
+    duplex: "half",
+  };
+  return streamingInit;
 }
 
 /** Proxy the same-origin Streamable HTTP endpoint without exposing upstream topology. */
