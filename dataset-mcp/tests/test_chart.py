@@ -42,6 +42,29 @@ def test_chart_configures_mcp_transport_allowlists() -> None:
     assert 'value: "https://web.example.test"' in result.stdout
 
 
+def test_chart_includes_ingress_hostname_in_http_allowlist() -> None:
+    result = subprocess.run(
+        [
+            "helm",
+            "template",
+            "dataset-mcp",
+            str(CHART),
+            "--set",
+            "ingress.enabled=true",
+            "--set",
+            "ingress.host=mcp.example.test",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert (
+        'value: "dataset-mcp,dataset-mcp.default.svc.cluster.local,mcp.example.test"'
+        in result.stdout
+    )
+
+
 def test_chart_caps_duckdb_spill_below_the_empty_directory_limit() -> None:
     result = subprocess.run(
         ["helm", "template", "dataset-mcp", str(CHART)],

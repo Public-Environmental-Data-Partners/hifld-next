@@ -17,8 +17,9 @@ export function MapLayerListItem({
   onRemove,
   children,
 }: MapLayerListItemProps) {
-  const description =
-    layer.kind === "query_mvt"
+  const description = layer.loadError
+    ? "Layer unavailable"
+    : layer.kind === "query_mvt"
       ? layer.status === "error"
         ? "Query layer unavailable"
         : "Query MVT layer"

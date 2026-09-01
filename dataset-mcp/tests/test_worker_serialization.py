@@ -1,9 +1,11 @@
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+from typing import Never
 from uuid import UUID
 
 import pytest
 
+from app.query import serialization
 from app.query.serialization import RowTooLargeError, encode_cell, serialize_rows
 
 
@@ -40,6 +42,20 @@ def test_encode_cell_recurses_and_summarizes_binary_values() -> None:
 
 
 def test_encode_cell_replaces_oversized_values_with_truncated_summary() -> None:
+    assert encode_cell("abcdefgh", "VARCHAR", max_cell_bytes=7) == {
+        "$type": "truncated",
+        "byte_length": 8,
+    }
+
+
+def test_encode_cell_rejects_an_oversized_string_before_materializing_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_if_materialized(value: object, logical_type: str) -> Never:
+        del value, logical_type
+        raise AssertionError("oversized value was materialized")
+
+    monkeypatch.setattr(serialization, "_encode_unbounded", fail_if_materialized)
     assert encode_cell("abcdefgh", "VARCHAR", max_cell_bytes=7) == {
         "$type": "truncated",
         "byte_length": 8,

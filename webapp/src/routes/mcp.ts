@@ -4,6 +4,7 @@ import { env } from "@/env/server";
 type McpFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 type McpProxyOptions = {
+  allowedOrigins?: readonly string[] | undefined;
   baseUrl?: string | undefined;
   fetcher?: McpFetcher | undefined;
 };
@@ -58,7 +59,7 @@ function forbiddenOrigin(): Response {
   return Response.json({ code: "origin_forbidden", message: "The request origin is not allowed." }, { status: 403 });
 }
 
-function isSameOriginRequest(request: Request): boolean {
+function isAllowedOriginRequest(request: Request, allowedOrigins: readonly string[]): boolean {
   const origin = request.headers.get("Origin");
   if (origin === null) return true;
   try {
@@ -72,7 +73,7 @@ function isSameOriginRequest(request: Request): boolean {
     ) {
       return false;
     }
-    return parsed.origin === new URL(request.url).origin;
+    return allowedOrigins.includes(parsed.origin);
   } catch {
     return false;
   }
@@ -108,7 +109,7 @@ function requestInit(request: Request): RequestInit {
 
 /** Proxy the same-origin Streamable HTTP endpoint without exposing upstream topology. */
 export async function mcpProxyHandler(request: Request, options: McpProxyOptions = {}): Promise<Response> {
-  if (!isSameOriginRequest(request)) return forbiddenOrigin();
+  if (!isAllowedOriginRequest(request, options.allowedOrigins ?? [])) return forbiddenOrigin();
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: { Allow: ALLOW_HEADER } });
   }
@@ -136,10 +137,10 @@ export async function mcpProxyHandler(request: Request, options: McpProxyOptions
 export const Route = createFileRoute("/mcp")({
   server: {
     handlers: {
-      GET: ({ request }) => mcpProxyHandler(request),
-      POST: ({ request }) => mcpProxyHandler(request),
-      DELETE: ({ request }) => mcpProxyHandler(request),
-      OPTIONS: ({ request }) => mcpProxyHandler(request),
+      GET: ({ request }) => mcpProxyHandler(request, { allowedOrigins: [env.WEBAPP_PUBLIC_ORIGIN] }),
+      POST: ({ request }) => mcpProxyHandler(request, { allowedOrigins: [env.WEBAPP_PUBLIC_ORIGIN] }),
+      DELETE: ({ request }) => mcpProxyHandler(request, { allowedOrigins: [env.WEBAPP_PUBLIC_ORIGIN] }),
+      OPTIONS: ({ request }) => mcpProxyHandler(request, { allowedOrigins: [env.WEBAPP_PUBLIC_ORIGIN] }),
     },
   },
 });

@@ -22,7 +22,7 @@ export function publicQueryPage(page: QueryPage): PublicQueryPage {
 }
 
 export function appendQueryPage(current: PublicQueryPage, next: PublicQueryPage): PublicQueryPage {
-  if (current.query_id !== next.query_id || next.offset < current.offset + current.rows.length) {
+  if (current.query_id !== next.query_id || next.offset !== current.offset + current.rows.length) {
     return next;
   }
   return {

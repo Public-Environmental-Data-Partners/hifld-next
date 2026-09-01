@@ -54,7 +54,12 @@ const mapZoomOut = vi.hoisted(() => vi.fn());
 const mapEaseTo = vi.hoisted(() => vi.fn());
 const mapGetZoom = vi.hoisted(() => vi.fn(() => 6));
 const mapQuerySourceFeatures = vi.hoisted(() =>
-  vi.fn((): Array<{ properties: Record<string, string | number> }> => []),
+  vi.fn(
+    (
+      _sourceId: string,
+      _options?: { sourceLayer?: string },
+    ): Array<{ properties: Record<string, string | number> }> => [],
+  ),
 );
 const mapQueryRenderedFeatures = vi.hoisted(() =>
   vi.fn(
@@ -190,8 +195,8 @@ vi.mock("maplibre-gl", () => ({
     ) {
       return mapQueryRenderedFeatures(geometry, options);
     }
-    querySourceFeatures() {
-      return mapQuerySourceFeatures();
+    querySourceFeatures(sourceId: string, options?: { sourceLayer?: string }) {
+      return mapQuerySourceFeatures(sourceId, options);
     }
   },
   setWorkerUrl: vi.fn(),
@@ -519,6 +524,10 @@ describe("MapView", () => {
       "hifld-query-roadsquery1234567890ABCD-points",
       "circle-radius",
       expect.arrayContaining(["interpolate"]),
+    );
+    expect(mapQuerySourceFeatures).toHaveBeenCalledWith(
+      "hifld-query-roadsquery1234567890ABCD",
+      { sourceLayer: "hifld" },
     );
     expect(screen.getByText("Interstate")).toBeVisible();
     expect(screen.getByText("Local")).toBeVisible();

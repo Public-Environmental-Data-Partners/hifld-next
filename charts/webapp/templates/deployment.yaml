@@ -40,8 +40,12 @@ spec:
             - name: http
               containerPort: {{ .Values.containerPort }}
               protocol: TCP
-          {{- if or .Values.env .Values.secretEnv }}
+          {{- if or .Values.publicOrigin .Values.env .Values.secretEnv }}
           env:
+            {{- if .Values.publicOrigin }}
+            - name: WEBAPP_PUBLIC_ORIGIN
+              value: {{ .Values.publicOrigin | quote }}
+            {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

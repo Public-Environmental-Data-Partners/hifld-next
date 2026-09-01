@@ -91,6 +91,7 @@ def _error_status(code: ErrorCode | str) -> int:
     if code in {
         ErrorCode.QUERY_TOKEN_INVALID,
         ErrorCode.QUERY_TOKEN_EXPIRED,
+        ErrorCode.SQL_REJECTED,
         "invalid_request",
     }:
         return 400
@@ -100,6 +101,8 @@ def _error_status(code: ErrorCode | str) -> int:
         ErrorCode.GEOMETRY_AMBIGUOUS,
         ErrorCode.GEOMETRY_CRS_REQUIRED,
         ErrorCode.MAP_NOT_SUPPORTED,
+        ErrorCode.QUERY_RESULT_TOO_WIDE,
+        ErrorCode.ROW_TOO_LARGE,
         ErrorCode.TILE_TOO_DENSE,
     }:
         return 422

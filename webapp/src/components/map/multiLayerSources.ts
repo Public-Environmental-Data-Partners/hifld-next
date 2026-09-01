@@ -15,6 +15,7 @@ interface MapLayerBase {
   visible: boolean;
   opacity: number;
   bounds: MapBounds | null;
+  loadError?: string | null | undefined;
 }
 
 export interface CatalogPmtilesLayer extends MapLayerBase {

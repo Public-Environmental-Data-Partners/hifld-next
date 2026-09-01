@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -17,6 +18,7 @@ class QueryService:
         self.calls: list[str] = []
         self.identity_error = False
         self.request_error = False
+        self.query_error_code: ErrorCode | None = None
         self.include_resolved_sources = False
         self.tile = WorkerTile(b"mvt", 1.0, 0, 0)
 
@@ -31,6 +33,8 @@ class QueryService:
         del sources, sql, geometry_column, result_crs
         if self.request_error:
             raise ValueError("internal validation detail")
+        if self.query_error_code is not None:
+            raise AppError(self.query_error_code, "query rejected")
         self.calls.append(f"query:{limit}")
         response: dict[str, JsonValue] = {
             "query_id": "query_123",
@@ -125,6 +129,26 @@ def test_http_query_create_maps_service_validation_without_leaking_details() -> 
         "code": "invalid_request",
         "message": "request validation failed",
     }
+
+
+@pytest.mark.parametrize(
+    ("error_code", "expected_status"),
+    [
+        (ErrorCode.SQL_REJECTED, 400),
+        (ErrorCode.QUERY_RESULT_TOO_WIDE, 422),
+        (ErrorCode.ROW_TOO_LARGE, 422),
+    ],
+)
+def test_http_query_create_does_not_mark_permanent_errors_as_unavailable(
+    error_code: ErrorCode, expected_status: int
+) -> None:
+    service = QueryService()
+    service.query_error_code = error_code
+
+    response = client(service).post("/api/queries", json=query_request())
+
+    assert response.status_code == expected_status
+    assert response.json() == {"code": error_code.value, "message": "query rejected"}
 
 
 def test_http_query_responses_omit_resolved_storage_uris() -> None:

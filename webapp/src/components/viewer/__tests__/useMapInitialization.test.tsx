@@ -165,6 +165,24 @@ describe("useMapInitialization helpers", () => {
     expect(map.addLayer).toHaveBeenCalledTimes(3);
   });
 
+  it("identifies the catalog layer that failed during source synchronization", async () => {
+    vi.spyOn(PMTiles.prototype, "getMetadata").mockRejectedValue(new Error("PMTiles metadata unavailable"));
+    const map = createMockMap();
+    const source: CatalogPmtilesLayer = {
+      kind: "catalog_pmtiles", id: "amtrak", name: "Amtrak", label: "Amtrak",
+      descriptor: {
+        collectionSlug: "hifld", datasetSlug: "amtrak-stations", fileSlug: "amtrak-stations",
+        formatType: "pmtiles", storageLocationId: 2, version: "v1.0.0", sourceId: 8,
+      },
+      pmtilesUrl: "http://localhost:8888/amtrak.pmtiles", mapSourceId: "source-amtrak",
+      visible: true, opacity: 0.82, bounds: null,
+    };
+    await expect(syncLoadedMapSources({
+      map: map as maplibregl.Map, protocol: null, sources: [source], managedSourceIds: new Set(),
+      vectorLayersBySource: {}, shouldContinue: () => true,
+    })).rejects.toMatchObject({ sourceId: "amtrak", message: "PMTiles metadata unavailable" });
+  });
+
   it("reorders all rendered style layers in source order without moving the basemap", () => {
     const map = {
       getLayer: vi.fn((id: string) => ({

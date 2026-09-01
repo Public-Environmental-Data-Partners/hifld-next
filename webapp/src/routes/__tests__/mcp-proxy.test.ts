@@ -4,6 +4,19 @@ import { mcpProxyHandler } from "../mcp";
 type McpFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 describe("same-origin MCP transport proxy", () => {
+  it("rejects a hostile Origin even when the request URL has the same hostile origin", async () => {
+    const fetcher = vi.fn<McpFetcher>();
+    const response = await mcpProxyHandler(
+      new Request("https://evil.example.test/mcp", {
+        method: "POST",
+        headers: { Origin: "https://evil.example.test" },
+        body: '{"jsonrpc":"2.0"}',
+      }),
+      { allowedOrigins: ["https://web.example.test"], baseUrl: "http://dataset-mcp.internal:8000", fetcher },
+    );
+    expect(response.status).toBe(403);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it("rejects a hostile browser Origin without contacting the MCP service", async () => {
     const fetcher = vi.fn<McpFetcher>();
     const response = await mcpProxyHandler(
@@ -12,7 +25,7 @@ describe("same-origin MCP transport proxy", () => {
         headers: { Origin: "https://evil.example.test" },
         body: '{"jsonrpc":"2.0"}',
       }),
-      { baseUrl: "http://dataset-mcp.internal:8000", fetcher },
+      { allowedOrigins: ["https://web.example.test"], baseUrl: "http://dataset-mcp.internal:8000", fetcher },
     );
 
     expect(response.status).toBe(403);
@@ -42,7 +55,7 @@ describe("same-origin MCP transport proxy", () => {
         },
         body: '{"jsonrpc":"2.0"}',
       }),
-      { baseUrl: "http://dataset-mcp.internal:8000", fetcher },
+      { allowedOrigins: ["https://web.example.test"], baseUrl: "http://dataset-mcp.internal:8000", fetcher },
     );
 
     expect(response.status).toBe(200);

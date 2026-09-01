@@ -6,7 +6,9 @@ describe("well-known discovery routes", () => {
   it("serves the MCP card as JSON with an origin-aware endpoint", async () => {
     const response = mcpServerCardHandler(new Request("https://example.test/.well-known/mcp/server-card.json"));
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(response.headers.get("content-type")).toBe("application/mcp-server-card+json");
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-methods")).toBe("GET");
     const body = await response.json();
     expect(body.remotes[0].url).toBe("https://example.test/mcp");
   });

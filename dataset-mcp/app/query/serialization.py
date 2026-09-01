@@ -40,6 +40,58 @@ def _summary(kind: str, byte_length: int) -> dict[str, JsonValue]:
     return {"$type": kind, "byte_length": byte_length}
 
 
+def _json_string_size(value: str) -> int:
+    size = 2
+    short_escapes = {'"', "\\", "\b", "\f", "\n", "\r", "\t"}
+    for character in value:
+        if character in short_escapes:
+            size += 2
+        elif ord(character) < 0x20:
+            size += 6
+        else:
+            size += len(character.encode("utf-8"))
+    return size
+
+
+def _encoded_json_size(value: object, logical_type: str) -> int:
+    if value is None:
+        return 4
+    if isinstance(value, bool):
+        return 4 if value else 5
+    if isinstance(value, str):
+        return _json_string_size(value)
+    if isinstance(value, int):
+        encoded = str(value)
+        return _json_string_size(encoded) if abs(value) > _MAX_SAFE_INTEGER else len(encoded)
+    if isinstance(value, float):
+        encoded = str(value)
+        return _json_string_size(encoded) if not math.isfinite(value) else len(encoded)
+    if isinstance(value, Decimal):
+        return _json_string_size(str(value))
+    if isinstance(value, (datetime, date, time)):
+        return _json_string_size(value.isoformat())
+    if isinstance(value, (timedelta, UUID)):
+        return _json_string_size(str(value))
+    if isinstance(value, memoryview):
+        kind = "geometry" if logical_type.upper() == "GEOMETRY" else "binary"
+        return _json_size(_summary(kind, value.nbytes))
+    if isinstance(value, (bytes, bytearray)):
+        kind = "geometry" if logical_type.upper() == "GEOMETRY" else "binary"
+        return _json_size(_summary(kind, len(value)))
+    if isinstance(value, (list, tuple)):
+        items = cast(list[object] | tuple[object, ...], value)
+        return 2 + max(0, len(items) - 1) + sum(_encoded_json_size(item, "") for item in items)
+    if isinstance(value, dict):
+        struct = cast(dict[object, object], value)
+        size = 2 + max(0, len(struct) - 1)
+        for key, item in struct.items():
+            if not isinstance(key, str):
+                raise TypeError("DuckDB struct keys must be strings")
+            size += _json_string_size(key) + 1 + _encoded_json_size(item, "")
+        return size
+    raise TypeError(f"Unsupported DuckDB value type: {type(value).__name__}")
+
+
 def _encode_unbounded(value: object, logical_type: str) -> JsonValue:
     if value is None or isinstance(value, (bool, str)):
         return value
@@ -87,12 +139,11 @@ def encode_cell(
     """Encode one value, replacing an oversized cell with a safe summary."""
     if max_cell_bytes < 1:
         raise ValueError("max_cell_bytes must be positive")
-    encoded = _encode_unbounded(value, logical_type)
-    size = _json_size(encoded)
+    size = _encoded_json_size(value, logical_type)
     if size > max_cell_bytes:
         original_size = len(value.encode("utf-8")) if isinstance(value, str) else size
         return _summary("truncated", original_size)
-    return encoded
+    return _encode_unbounded(value, logical_type)
 
 
 def serialize_rows(

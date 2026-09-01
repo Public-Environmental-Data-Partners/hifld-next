@@ -760,18 +760,28 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     [loadedLayers],
   );
 
-  const handleQueryLayerError = useCallback(({ queryId }: { queryId: string; message: string }) => {
-    setLoadedLayers((current) =>
-      current.map((layer) =>
-        layer.kind === "query_mvt" && layer.queryId === queryId ? { ...layer, status: "error" } : layer,
-      ),
-    );
-    setQueryResult((current) =>
-      current?.page.query_id === queryId
-        ? { ...current, status: "error", errorMessage: "The query layer could not be loaded." }
-        : current,
-    );
-  }, []);
+  const handleMapSourceError = useCallback(
+    ({ sourceId, queryId, message }: { sourceId: string; queryId?: string | undefined; message: string }) => {
+      setLoadedLayers((current) =>
+        current.map((layer) =>
+          layer.id === sourceId
+            ? {
+                ...layer,
+                loadError: message,
+                ...(layer.kind === "query_mvt" ? { status: "error" as const } : {}),
+              }
+            : layer,
+        ),
+      );
+      if (queryId === undefined) return;
+      setQueryResult((current) =>
+        current?.page.query_id === queryId
+          ? { ...current, status: "error", errorMessage: "The query layer could not be loaded." }
+          : current,
+      );
+    },
+    [],
+  );
 
   const { mapRef, setHoverFeature, clearHoverFeature, clearSelectionBox } = useMultiLayerMapInitialization(
     mapContainerRef,
@@ -785,7 +795,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     pinnedPopupInfo?.lngLat ?? null,
     pinnedPopupElementRef,
     queryTokensRef.current,
-    handleQueryLayerError,
+    handleMapSourceError,
   );
 
   useLayerStyling(mapRef, vectorLayers, layerStyles, setLayerStyles);

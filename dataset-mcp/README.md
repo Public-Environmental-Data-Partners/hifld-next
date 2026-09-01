@@ -32,7 +32,7 @@ prefix and is exposed on port 8000. Required settings are:
 `DATASET_MCP_PUBLIC_ORIGIN` is optional. DuckDB's `httpfs` and `spatial`
 extensions are installed into `/opt/duckdb/extensions` while the image is
 built; the container never downloads extensions at startup. `/healthz` is the
-Kubernetes and container health endpoint; MCP traffic is served at `/mcp/`.
+Kubernetes and container health endpoint; MCP traffic is served at `/mcp`.
 
 The first-party webapp keeps the MCP transport same-origin by default. Its
 server-only `DATASET_MCP_QUERY_API_URL` points to this internal service, while

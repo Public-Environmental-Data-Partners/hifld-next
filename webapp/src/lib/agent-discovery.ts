@@ -10,7 +10,7 @@ export function discoveryLinkHeaderValue(): string {
     `</llms.txt>; rel="alternate"; type="text/markdown"`,
     `</.well-known/api-catalog>; rel="service-meta"; type="application/json"`,
     `</.well-known/agent-skills/index.json>; rel="service-meta"; type="application/json"`,
-    `</.well-known/mcp/server-card.json>; rel="service-meta"; type="application/json"`,
+    `</.well-known/mcp/server-card.json>; rel="service-meta"; type="application/mcp-server-card+json"`,
     `</.well-known/ai-catalog.json>; rel="ai-catalog"; type="application/ai-catalog+json"`,
   ];
   return parts.join(", ");

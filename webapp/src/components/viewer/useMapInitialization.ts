@@ -28,9 +28,10 @@ interface VectorLayersBySource {
   [sourceId: string]: VectorLayerInfo[] | undefined;
 }
 
-class QueryLayerSyncError extends Error {
+class MapSourceSyncError extends Error {
   constructor(
-    readonly queryId: string,
+    readonly sourceId: string,
+    readonly queryId: string | undefined,
     message: string,
   ) {
     super(message);
@@ -715,9 +716,9 @@ async function loadMapSourceForSync(
   try {
     return await loadMapSource(map, protocol, source, shouldContinue);
   } catch (error) {
-    if (source.kind !== "query_mvt") throw error;
-    throw new QueryLayerSyncError(
-      source.queryId,
+    throw new MapSourceSyncError(
+      source.id,
+      source.kind === "query_mvt" ? source.queryId : undefined,
       error instanceof Error ? error.message : "Query map layer could not be loaded.",
     );
   }
@@ -777,16 +778,17 @@ export async function syncLoadedMapSources({
 
 function reportSourceSyncError(
   error: Error,
-  sources: readonly LoadedMapLayer[],
-  onQueryLayerError: ((error: { queryId: string; message: string }) => void) | undefined,
+  onSourceLayerError:
+    | ((error: { sourceId: string; queryId?: string | undefined; message: string }) => void)
+    | undefined,
 ): void {
   const message = error.message || "Query map layer could not be loaded.";
-  if (error instanceof QueryLayerSyncError) {
-    onQueryLayerError?.({ queryId: error.queryId, message });
-    return;
-  }
-  for (const source of sources) {
-    if (source.kind === "query_mvt") onQueryLayerError?.({ queryId: source.queryId, message });
+  if (error instanceof MapSourceSyncError) {
+    onSourceLayerError?.({
+      sourceId: error.sourceId,
+      ...(error.queryId === undefined ? {} : { queryId: error.queryId }),
+      message,
+    });
   }
 }
 
@@ -814,7 +816,9 @@ export function useMultiLayerMapInitialization(
   pinnedPopupLngLat?: PopupLngLat | null,
   pinnedPopupElementRef?: React.RefObject<HTMLDivElement | null>,
   queryTokens: ReadonlyMap<string, string> = new Map(),
-  onQueryLayerError?: ((error: { queryId: string; message: string }) => void) | undefined,
+  onSourceLayerError?:
+    | ((error: { sourceId: string; queryId?: string | undefined; message: string }) => void)
+    | undefined,
 ) {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const currentBasemapModeRef = useRef(basemapMode);
@@ -827,7 +831,7 @@ export function useMultiLayerMapInitialization(
   const pinnedPopupLngLatRef = useRef(pinnedPopupLngLat);
   const pinnedPopupElementRefRef = useRef(pinnedPopupElementRef);
   const queryTokensRef = useRef(queryTokens);
-  const onQueryLayerErrorRef = useRef(onQueryLayerError);
+  const onSourceLayerErrorRef = useRef(onSourceLayerError);
   const isSelectionActiveRef = useRef(isSelectionActive);
   const boxSelectionStartRef = useRef<{ x: number; y: number } | null>(null);
   const boxSelectionStartLngLatRef = useRef<SelectionLngLat | null>(null);
@@ -871,8 +875,8 @@ export function useMultiLayerMapInitialization(
   }, [queryTokens]);
 
   useEffect(() => {
-    onQueryLayerErrorRef.current = onQueryLayerError;
-  }, [onQueryLayerError]);
+    onSourceLayerErrorRef.current = onSourceLayerError;
+  }, [onSourceLayerError]);
 
   useEffect(() => {
     isSelectionActiveRef.current = isSelectionActive;
@@ -951,7 +955,8 @@ export function useMultiLayerMapInitialization(
           return undefined;
         }
         if ("blocked" in transformed) {
-          onQueryLayerErrorRef.current?.({
+          onSourceLayerErrorRef.current?.({
+            sourceId: `query:${transformed.queryId}`,
             queryId: transformed.queryId,
             message: "Query map layer is unavailable.",
           });
@@ -1128,8 +1133,7 @@ export function useMultiLayerMapInitialization(
         if (cancelled) return;
         reportSourceSyncError(
           error instanceof Error ? error : new Error("Query map layer could not be loaded."),
-          sources,
-          onQueryLayerErrorRef.current,
+          onSourceLayerErrorRef.current,
         );
       }
     };

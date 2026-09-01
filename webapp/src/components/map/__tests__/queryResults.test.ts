@@ -14,6 +14,19 @@ describe("query result workspace state", () => {
     const next = publicQueryPage({ ...first, query_token: "next", offset: 1, rows: [{ name: "B" }], returned_count: 1, has_more: false });
     expect(appendQueryPage(first, next)).toMatchObject({ offset: 0, rows: [{ name: "A" }, { name: "B" }], returned_count: 2 });
   });
+  it("replaces accumulated rows when the next page is not contiguous", () => {
+    const first = publicQueryPage({
+      query_id: "QwErTyUiOpAsDfGhJkLzXcVb", query_token: token,
+      columns: [{ name: "name", type: "VARCHAR", nullable: false }], rows: [{ name: "A" }],
+      offset: 0, limit: 100, returned_count: 1, has_more: true, warnings: [], elapsed_ms: 1,
+      bytes_read: 1, files_read: 1, response_truncated: false, deterministic_order: true,
+    });
+    const gapped = publicQueryPage({
+      ...first, query_token: "next", offset: 500, rows: [{ name: "Page 500" }],
+      returned_count: 1, has_more: false,
+    });
+    expect(appendQueryPage(first, gapped)).toEqual(gapped);
+  });
   it("removes the private query token before retaining a page for UI rendering", () => {
     const page = publicQueryPage({
       query_id: "QwErTyUiOpAsDfGhJkLzXcVb",

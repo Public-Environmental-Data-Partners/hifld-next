@@ -328,14 +328,14 @@ function layersForQuery(
 function applyLayerStyle(
   map: MapLibreMap,
   layer: MapLayerConfiguration,
-  index: number,
   queryId: string,
   style: LayerStyleState,
 ): LegendItem[] {
+  const sourceId = querySourceId(queryId);
   const driven = dataDrivenColor(
     map,
     layer,
-    index,
+    sourceId,
     style.colorProperty,
     style.colorScheme,
     style.breaks,
@@ -354,7 +354,7 @@ function applyLayerStyle(
     dataDrivenSize(
       map,
       layer,
-      index,
+      sourceId,
       style.pointRadiusProperty,
       style.pointRadiusScale,
       style.pointRadius,
@@ -367,7 +367,7 @@ function applyLayerStyle(
     dataDrivenSize(
       map,
       layer,
-      index,
+      sourceId,
       style.lineWidthProperty,
       style.lineWidthScale,
       style.lineWidth,
@@ -750,12 +750,11 @@ export function MapView({
           configureBasemap(map, parsed.data.basemap);
           addQueryOverlays(map, parsed.data);
           const items = Object.fromEntries(
-            parsed.data.layers.map((layer, index) => [
+            parsed.data.layers.map((layer) => [
               layer.query_id,
               applyLayerStyle(
                 map,
                 layer,
-                index,
                 layer.query_id,
                 initialLayerStyle(layer),
               ),
@@ -765,12 +764,11 @@ export function MapView({
           map.once("idle", () => {
             setLegendItems(
               Object.fromEntries(
-                parsed.data.layers.map((layer, index) => [
+                parsed.data.layers.map((layer) => [
                   layer.query_id,
                   applyLayerStyle(
                     map,
                     layer,
-                    index,
                     layer.query_id,
                     initialLayerStyle(layer),
                   ),

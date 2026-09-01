@@ -139,5 +139,10 @@ describe("buildOpenApiDocument", () => {
     expect(doc.components?.schemas?.QueryRequest).toMatchObject({
       properties: { sources: { maxItems: 8 }, sql: { maxLength: 8192 }, limit: { maximum: 1000 } },
     });
+    expect(create?.responses).toHaveProperty("422");
+    expect(create?.responses).toHaveProperty("504");
+    expect(create?.responses).not.toHaveProperty("201");
+    expect(page?.responses).toHaveProperty("422");
+    expect(page?.responses).toHaveProperty("504");
   });
 });

@@ -18,6 +18,10 @@ service:
 
 containerPort: 8080
 
+# Canonical browser origin used to validate Origin on the same-origin MCP proxy.
+# Production deployments should set an absolute HTTPS origin.
+publicOrigin: ""
+
 # WebMCP registration is enabled for native scanner acceptance. Unsupported
 # browsers still no-op. DATASET_MCP_QUERY_API_URL is read only by the server;
 # it is never copied into runtime client configuration. Supply an origin-trial

@@ -75,6 +75,10 @@ test("image publishing runs for deployable chart changes", async () => {
   ]) {
     assert.ok(workflow.includes(`- "${path}"`));
   }
+  assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /build-only:/);
+  assert.match(workflow, /needs: build-only/);
+  assert.match(workflow, /docker buildx imagetools create/);
 });
 
 test("MCP asset copying resolves MapLibre from the workspace dependency graph", async () => {

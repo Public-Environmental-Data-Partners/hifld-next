@@ -14,9 +14,11 @@ export const env = createEnv({
         return protocol === "http:" || protocol === "https:";
       }, "DATASET_MCP_QUERY_API_URL must use HTTP or HTTPS")
       .optional(),
+    WEBAPP_PUBLIC_ORIGIN: z.string().url().default("http://localhost:3000"),
   },
   runtimeEnv: {
     DATASET_API_URL: process.env["DATASET_API_URL"],
     DATASET_MCP_QUERY_API_URL: process.env["DATASET_MCP_QUERY_API_URL"],
+    WEBAPP_PUBLIC_ORIGIN: process.env["WEBAPP_PUBLIC_ORIGIN"],
   },
 });

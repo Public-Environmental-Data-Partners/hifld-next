@@ -698,11 +698,12 @@ registry.registerPath({
       description: "Bounded query result page",
       content: { "application/json": { schema: OpenApiQueryResult } },
     },
-    201: {
-      description: "Bounded query result page",
-      content: { "application/json": { schema: OpenApiQueryResult } },
-    },
     400: { description: "Invalid request", content: { "application/json": { schema: OpenApiQueryError } } },
+    422: {
+      description: "Query cannot be executed as requested",
+      content: { "application/json": { schema: OpenApiQueryError } },
+    },
+    504: { description: "Query timed out", content: { "application/json": { schema: OpenApiQueryError } } },
     503: { description: "Query service unavailable", content: { "application/json": { schema: OpenApiQueryError } } },
   },
 });
@@ -731,6 +732,11 @@ registry.registerPath({
       content: { "application/json": { schema: OpenApiQueryResult } },
     },
     400: { description: "Invalid request", content: { "application/json": { schema: OpenApiQueryError } } },
+    422: {
+      description: "Query cannot be executed as requested",
+      content: { "application/json": { schema: OpenApiQueryError } },
+    },
+    504: { description: "Query timed out", content: { "application/json": { schema: OpenApiQueryError } } },
     503: { description: "Query service unavailable", content: { "application/json": { schema: OpenApiQueryError } } },
   },
 });

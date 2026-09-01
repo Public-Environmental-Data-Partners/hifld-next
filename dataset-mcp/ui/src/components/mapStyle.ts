@@ -35,10 +35,10 @@ export function isNumericColumn(logicalType: string): boolean {
 function sampledValues(
   map: MapLibreMap,
   layer: MapLayerConfiguration,
-  index: number,
+  sourceId: string,
   property: string,
 ): Array<string | number | boolean> {
-  const features = map.querySourceFeatures(`hifld-query-${index}`, {
+  const features = map.querySourceFeatures(sourceId, {
     sourceLayer: layer.source_layer,
   });
   const values: Array<string | number | boolean> = [];
@@ -59,14 +59,14 @@ function sampledValues(
 export function dataDrivenSize(
   map: MapLibreMap,
   layer: MapLayerConfiguration,
-  index: number,
+  sourceId: string,
   property: string | null,
   scale: NumericScale,
   baseValue: number,
   minimumValue: number,
 ): NumericPaintValue {
   if (!property) return baseValue;
-  const values = sampledValues(map, layer, index, property)
+  const values = sampledValues(map, layer, sourceId, property)
     .map((value) => Number(value))
     .filter(Number.isFinite)
     .map((value) => applyScale(value, scale));
@@ -98,7 +98,7 @@ export interface DataDrivenColor {
 export function dataDrivenColor(
   map: MapLibreMap,
   layer: MapLayerConfiguration,
-  index: number,
+  sourceId: string,
   property: string | null,
   scheme: ColorScheme,
   configuredBreaks: number[] | undefined,
@@ -111,7 +111,7 @@ export function dataDrivenColor(
     };
   }
   const column = layer.columns.find((candidate) => candidate.name === property);
-  const values = sampledValues(map, layer, index, property);
+  const values = sampledValues(map, layer, sourceId, property);
   if (column && isNumericColumn(column.type)) {
     const numericValues = values.flatMap((value) => {
       const numeric = typeof value === "number" ? value : Number(value);
