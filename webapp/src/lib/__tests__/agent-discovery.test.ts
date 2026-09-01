@@ -9,7 +9,7 @@ describe("agent-discovery", () => {
     expect(v).toContain("</.well-known/api-catalog>");
     expect(v).toContain("</.well-known/agent-skills/index.json>");
     expect(v).toContain("</.well-known/mcp/server-card.json>");
-    expect(v).toContain("</.well-known/ai-catalog.json>");
+    expect(v).toContain('</.well-known/ai-catalog.json>; rel="ai-catalog"; type="application/ai-catalog+json"');
   });
 
   it("buildSitemapXml includes core paths", () => {

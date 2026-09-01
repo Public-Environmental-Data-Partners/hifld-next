@@ -103,6 +103,22 @@ describe("useMapInitialization helpers", () => {
     expect(map.once).not.toHaveBeenCalled();
   });
 
+  it("remembers the initial style event even while map loading APIs remain false", () => {
+    const map = createMockMap();
+    const firstCallback = vi.fn();
+    const secondCallback = vi.fn();
+    runWhenMapStyleReady(map as maplibregl.Map, firstCallback);
+    const styleListener = map.once.mock.calls[0]?.[1] as (() => void) | undefined;
+    styleListener?.();
+    map.isStyleLoaded.mockReturnValue(false);
+    map.loaded.mockReturnValue(false);
+
+    runWhenMapStyleReady(map as maplibregl.Map, secondCallback);
+
+    expect(firstCallback).toHaveBeenCalledOnce();
+    expect(secondCallback).toHaveBeenCalledOnce();
+  });
+
   it("recovers PMTiles metadata and rendered layers when a cancelled load already added the source", async () => {
     vi.spyOn(PMTiles.prototype, "getMetadata").mockResolvedValue({
       vector_layers: [{ id: "stations", fields: { name: "String" } }],

@@ -192,35 +192,53 @@ class WorkerPool:
         if timeout <= 0:
             self._available.put_nowait(slot)
             raise ValueError("timeout_seconds must be positive")
+        replacement_task: asyncio.Task[None] | None = None
+
+        async def replace_once() -> None:
+            nonlocal replacement_task
+            if replacement_task is None:
+                replacement_task = asyncio.create_task(self._replace(slot))
+            while True:
+                try:
+                    await asyncio.shield(replacement_task)
+                    return
+                except asyncio.CancelledError:
+                    continue
+
         try:
             await asyncio.to_thread(slot.connection.send, request)
             response_ready = await asyncio.to_thread(slot.connection.poll, timeout)
             if not response_ready:
-                await self._replace(slot)
+                await replace_once()
                 return WorkerFailure(
                     code="query_timeout",
                     message="The query exceeded its execution timeout",
                 )
             response: object = await asyncio.to_thread(slot.connection.recv)
         except (EOFError, BrokenPipeError, OSError):
-            await self._replace(slot)
+            await replace_once()
             return WorkerFailure(
                 code="worker_failed",
                 message="The query worker stopped unexpectedly",
             )
+        except asyncio.CancelledError:
+            await replace_once()
+            raise
 
         if not isinstance(response, (WorkerPage, WorkerTile, WorkerFailure)):
-            await self._replace(slot)
+            await replace_once()
             return WorkerFailure(
                 code="worker_protocol_invalid",
                 message="The query worker returned an invalid response",
             )
 
         slot.completed_requests += 1
-        if isinstance(response, WorkerFailure) or (
-            slot.completed_requests >= self._config.recycle_after_requests
-        ):
-            await self._replace(slot)
+        fatal_failure = isinstance(response, WorkerFailure) and response.code in {
+            "worker_failed",
+            "worker_protocol_invalid",
+        }
+        if fatal_failure or (slot.completed_requests >= self._config.recycle_after_requests):
+            await replace_once()
         else:
             self._available.put_nowait(slot)
         return response

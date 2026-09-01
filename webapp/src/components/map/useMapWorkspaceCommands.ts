@@ -122,7 +122,11 @@ function applyStyleUpdate(style: LayerStyle, update: LayerStyleUpdate): LayerSty
 }
 
 function applyCameraBoundsTarget(map: maplibregl.Map, input: MapCameraInput, bounds: MapBounds): void {
-  map.fitBounds(bounds, { padding: input.padding ?? 48 });
+  map.fitBounds(bounds, {
+    padding: input.padding ?? 48,
+    ...(input.bearing === undefined ? {} : { bearing: input.bearing }),
+    ...(input.pitch === undefined ? {} : { pitch: input.pitch }),
+  });
 }
 
 function applyCameraCenterTarget(
@@ -132,8 +136,12 @@ function applyCameraCenterTarget(
   targetZoom: number | undefined,
 ): void {
   const zoom = input.zoom ?? targetZoom;
-  if (zoom === undefined) map.easeTo({ center });
-  else map.easeTo({ center, zoom });
+  map.easeTo({
+    center,
+    ...(zoom === undefined ? {} : { zoom }),
+    ...(input.bearing === undefined ? {} : { bearing: input.bearing }),
+    ...(input.pitch === undefined ? {} : { pitch: input.pitch }),
+  });
 }
 
 function applyCameraLayerTarget(
@@ -203,6 +211,7 @@ export function useMapWorkspaceCommands({
   const selectedFeaturesRef = useRef(selectedFeatures);
   const initialFitAttemptedRef = useRef(false);
   const firstLayerFitScheduledRef = useRef(false);
+  const pendingLayerIdsRef = useRef<Set<string>>(new Set());
   loadedLayersRef.current = loadedLayers;
   vectorLayersRef.current = vectorLayers;
   selectedFeaturesRef.current = selectedFeatures;
@@ -229,22 +238,32 @@ export function useMapWorkspaceCommands({
     async (input: DatasetLayerInput): Promise<MapLayerSummary> => {
       const current = loadedLayersRef.current;
       assertValidAddDatasetLayer(input, summaries(current));
-      const resolved = await resolveDatasetLayer(input);
-      if (!resolved || resolved.id !== input.layerId) {
-        throw new Error("The requested map layer could not be resolved.");
+      if (pendingLayerIdsRef.current.has(input.layerId)) {
+        throw new Error(`layer ${input.layerId} is already being added`);
       }
-      assertValidAddDatasetLayer(
-        { layerId: resolved.id, label: resolved.label, kind: resolved.kind },
-        summaries(current),
-      );
-      const wasEmpty = current.length === 0;
-      setLoadedLayers((previous) => [...previous, resolved]);
-      if (resolved.kind === "catalog_pmtiles") onCatalogLayerAdded?.(resolved);
-      if (wasEmpty && !firstLayerFitScheduledRef.current) {
-        firstLayerFitScheduledRef.current = true;
-        fitKnownLayerUnion([resolved]);
+      pendingLayerIdsRef.current.add(input.layerId);
+      try {
+        const resolved = await resolveDatasetLayer(input);
+        if (!resolved || resolved.id !== input.layerId) {
+          throw new Error("The requested map layer could not be resolved.");
+        }
+        assertValidAddDatasetLayer(
+          { layerId: resolved.id, label: resolved.label, kind: resolved.kind },
+          summaries(loadedLayersRef.current),
+        );
+        const wasEmpty = loadedLayersRef.current.length === 0;
+        setLoadedLayers((previous) =>
+          previous.some((layer) => layer.id === resolved.id) ? previous : [...previous, resolved],
+        );
+        if (resolved.kind === "catalog_pmtiles") onCatalogLayerAdded?.(resolved);
+        if (wasEmpty && !firstLayerFitScheduledRef.current) {
+          firstLayerFitScheduledRef.current = true;
+          fitKnownLayerUnion([resolved]);
+        }
+        return { id: resolved.id, label: resolved.label, kind: resolved.kind, visible: resolved.visible };
+      } finally {
+        pendingLayerIdsRef.current.delete(input.layerId);
       }
-      return { id: resolved.id, label: resolved.label, kind: resolved.kind, visible: resolved.visible };
     },
     [fitKnownLayerUnion, onCatalogLayerAdded, resolveDatasetLayer, setLoadedLayers],
   );
@@ -306,7 +325,10 @@ export function useMapWorkspaceCommands({
       const map = mapRef.current;
       if (!map) throw new Error("Map is not ready.");
       applyCameraTarget(map, input, loadedLayersRef.current, selectedFeaturesRef.current);
-      applyCameraOrientation(map, input);
+      const target = input.target ?? input;
+      if (!target.center && !target.featureId && !target.bounds && !target.layerIds) {
+        applyCameraOrientation(map, input);
+      }
       return waitForMapMovement(map);
     },
     [mapRef],

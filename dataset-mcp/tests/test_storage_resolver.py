@@ -32,6 +32,17 @@ def test_public_gcs_is_resolved_from_catalog_storage_config() -> None:
     assert spec.seaweedfs is None
 
 
+def test_public_gcs_rejects_wildcard_object_uri() -> None:
+    config = BucketStorageConfig(
+        type="gcs",
+        base_url="https://storage.googleapis.com/hifld",
+        bucket="hifld",
+    )
+
+    with pytest.raises(StorageResolutionError, match="concrete objects"):
+        StorageResolver().resolve(source(config, "gs://hifld/geo/%2A.parquet"))
+
+
 def test_local_seaweed_is_resolved_from_catalog_storage_config() -> None:
     config = BucketStorageConfig(
         type="seaweedfs",

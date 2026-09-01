@@ -14,6 +14,18 @@ Object.defineProperty(globalThis, "ResizeObserver", {
   value: TestResizeObserver,
 })
 
+Object.defineProperty(window.URL, "createObjectURL", {
+  configurable: true,
+  writable: true,
+  value: () => "blob:test-worker",
+})
+
+Object.defineProperty(window.URL, "revokeObjectURL", {
+  configurable: true,
+  writable: true,
+  value: () => undefined,
+})
+
 // Extend Vitest's expect with jest-dom matchers
 expect.extend(matchers)
 

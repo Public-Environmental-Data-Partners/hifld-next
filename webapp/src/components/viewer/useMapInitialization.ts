@@ -28,6 +28,25 @@ interface VectorLayersBySource {
   [sourceId: string]: VectorLayerInfo[] | undefined;
 }
 
+class QueryLayerSyncError extends Error {
+  constructor(
+    readonly queryId: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+interface MapSourceSyncResult {
+  layers: VectorLayerInfo[];
+  interactiveLayerIds: string[];
+}
+
+interface LoadedMapSourceResult {
+  vectorLayers: VectorLayerInfo[];
+  interactiveLayerIds: string[];
+}
+
 function isNumericFieldType(type: string | number | boolean | undefined): boolean {
   if (typeof type === "number") {
     return true;
@@ -110,6 +129,7 @@ const EMPTY_SELECTION_BOX_FEATURES: SelectionBoxFeatureCollection = {
   type: "FeatureCollection",
   features: [],
 };
+const mapsWithInitialStyle = new WeakSet<maplibregl.Map>();
 
 function fallbackBasemapStyle(mode: BasemapMode): maplibregl.StyleSpecification {
   return {
@@ -643,7 +663,7 @@ async function loadMapSource(
   protocol: Protocol | null,
   source: LoadedMapLayer,
   shouldContinue: () => boolean,
-): Promise<{ vectorLayers: VectorLayerInfo[]; interactiveLayerIds: string[] } | null> {
+): Promise<LoadedMapSourceResult | null> {
   if (source.kind === "query_mvt") {
     if (map.getSource(source.mapSourceId)) {
       return {
@@ -686,6 +706,32 @@ async function loadMapSource(
   };
 }
 
+async function loadMapSourceForSync(
+  map: maplibregl.Map,
+  protocol: Protocol | null,
+  source: LoadedMapLayer,
+  shouldContinue: () => boolean,
+): Promise<LoadedMapSourceResult | null> {
+  try {
+    return await loadMapSource(map, protocol, source, shouldContinue);
+  } catch (error) {
+    if (source.kind !== "query_mvt") throw error;
+    throw new QueryLayerSyncError(
+      source.queryId,
+      error instanceof Error ? error.message : "Query map layer could not be loaded.",
+    );
+  }
+}
+
+function removeInactiveVectorLayers(
+  vectorLayersBySource: VectorLayersBySource,
+  activeLayerIds: ReadonlySet<string>,
+): void {
+  for (const loadedLayerId of Object.keys(vectorLayersBySource)) {
+    if (!activeLayerIds.has(loadedLayerId)) delete vectorLayersBySource[loadedLayerId];
+  }
+}
+
 export async function syncLoadedMapSources({
   map,
   protocol,
@@ -700,7 +746,7 @@ export async function syncLoadedMapSources({
   managedSourceIds: Set<string>;
   vectorLayersBySource: VectorLayersBySource;
   shouldContinue: () => boolean;
-}): Promise<{ layers: VectorLayerInfo[]; interactiveLayerIds: string[] } | null> {
+}): Promise<MapSourceSyncResult | null> {
   const nextLayers: VectorLayerInfo[] = [];
   const nextInteractiveLayerIds: string[] = [];
   const activeSourceIds = new Set(sources.map((source) => source.mapSourceId));
@@ -709,7 +755,7 @@ export async function syncLoadedMapSources({
   for (const source of sources) {
     if (!shouldContinue()) return null;
     managedSourceIds.add(source.mapSourceId);
-    const loadedSource = await loadMapSource(map, protocol, source, shouldContinue);
+    const loadedSource = await loadMapSourceForSync(map, protocol, source, shouldContinue);
     if (!shouldContinue() || !loadedSource) return null;
     if (loadedSource.vectorLayers.length > 0) {
       vectorLayersBySource[source.id] = loadedSource.vectorLayers;
@@ -720,11 +766,7 @@ export async function syncLoadedMapSources({
 
   if (!shouldContinue()) return null;
   removeInactiveMapSources(map, activeSourceIds, managedSourceIds);
-  for (const loadedLayerId of Object.keys(vectorLayersBySource)) {
-    if (!activeLayerIds.has(loadedLayerId)) {
-      delete vectorLayersBySource[loadedLayerId];
-    }
-  }
+  removeInactiveVectorLayers(vectorLayersBySource, activeLayerIds);
   syncRenderedLayerOrder(map, sources, vectorLayersBySource);
 
   return {
@@ -733,12 +775,31 @@ export async function syncLoadedMapSources({
   };
 }
 
+function reportSourceSyncError(
+  error: Error,
+  sources: readonly LoadedMapLayer[],
+  onQueryLayerError: ((error: { queryId: string; message: string }) => void) | undefined,
+): void {
+  const message = error.message || "Query map layer could not be loaded.";
+  if (error instanceof QueryLayerSyncError) {
+    onQueryLayerError?.({ queryId: error.queryId, message });
+    return;
+  }
+  for (const source of sources) {
+    if (source.kind === "query_mvt") onQueryLayerError?.({ queryId: source.queryId, message });
+  }
+}
+
 export function runWhenMapStyleReady(map: maplibregl.Map, callback: () => void): void {
-  if (map.isStyleLoaded()) {
+  if (mapsWithInitialStyle.has(map) || map.isStyleLoaded()) {
+    mapsWithInitialStyle.add(map);
     callback();
     return;
   }
-  map.once("style.load", callback);
+  map.once("style.load", () => {
+    mapsWithInitialStyle.add(map);
+    callback();
+  });
 }
 
 export function useMultiLayerMapInitialization(
@@ -908,6 +969,7 @@ export function useMultiLayerMapInitialization(
         return;
       }
       hasSyncedBasemapAfterStyleLoad = true;
+      mapsWithInitialStyle.add(map);
       syncBasemapVisibilityAfterStyleLoad(map, currentBasemapModeRef);
     };
     map.once("style.load", syncBasemapAfterStyleLoad);
@@ -1007,6 +1069,9 @@ export function useMultiLayerMapInitialization(
       map.dragPan.enable();
       updateCursorForCurrentSelectionState();
       suppressNextClickSelectionRef.current = true;
+      window.setTimeout(() => {
+        suppressNextClickSelectionRef.current = false;
+      }, 0);
       const selectedFeatures = queryRenderedBoxFeatures({
         map,
         start,
@@ -1046,18 +1111,27 @@ export function useMultiLayerMapInitialization(
     let cancelled = false;
 
     const loadSources = async () => {
-      const result = await syncLoadedMapSources({
-        map,
-        protocol: protocolRef.current,
-        sources,
-        managedSourceIds: managedSourceIds.current,
-        vectorLayersBySource: vectorLayersBySource.current,
-        shouldContinue: () => !cancelled,
-      });
-      if (!result) return;
-      interactiveLayerIds.current = result.interactiveLayerIds;
-      onLayersLoadedRef.current(result.layers);
-      map.resize();
+      try {
+        const result = await syncLoadedMapSources({
+          map,
+          protocol: protocolRef.current,
+          sources,
+          managedSourceIds: managedSourceIds.current,
+          vectorLayersBySource: vectorLayersBySource.current,
+          shouldContinue: () => !cancelled,
+        });
+        if (!result) return;
+        interactiveLayerIds.current = result.interactiveLayerIds;
+        onLayersLoadedRef.current(result.layers);
+        map.resize();
+      } catch (error) {
+        if (cancelled) return;
+        reportSourceSyncError(
+          error instanceof Error ? error : new Error("Query map layer could not be loaded."),
+          sources,
+          onQueryLayerErrorRef.current,
+        );
+      }
     };
 
     runWhenMapStyleReady(map, () => {

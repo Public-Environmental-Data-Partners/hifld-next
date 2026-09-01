@@ -20,6 +20,7 @@ import { clearedLayerPickerSelection, layerPickerSelectionAfterLayerRemoval } fr
 import { buildLoadedMapLayer, type LoadedMapLayer } from "@/components/map/multiLayerSources";
 import { QueryResultPanel } from "@/components/map/QueryResultPanel";
 import {
+  appendQueryPage,
   canSetQueryResultPage,
   publicQueryPage,
   type QueryResultState,
@@ -937,7 +938,12 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
       const publicPage = publicQueryPage(page);
       setQueryResult((current) =>
         current?.page.query_id === queryId
-          ? { ...current, page: publicPage, status: "ready", errorMessage: null }
+          ? {
+              ...current,
+              page: appendQueryPage(current.page, publicPage),
+              status: "ready",
+              errorMessage: null,
+            }
           : current,
       );
       return publicPage;

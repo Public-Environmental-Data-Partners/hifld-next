@@ -71,16 +71,25 @@ def _response_with_sources(
 
 
 @pytest.mark.asyncio
-async def test_resolver_groups_expanded_sources_and_prefers_glob_pattern() -> None:
+async def test_resolver_prefers_concrete_multipart_gcs_objects_over_incompatible_glob_pattern() -> (
+    None
+):
     response = _response_with_sources(
-        glob_pattern="s3://catalog/roads/**/*.parquet",
-        storage_uris=("s3://catalog/roads/a.parquet", "s3://catalog/roads/b.parquet"),
+        glob_pattern="gs://catalog/roads/**/*.parquet",
+        storage_uris=(
+            "gs://catalog/roads/**/*.parquet",
+            "gs://catalog/roads/a.parquet",
+            "gs://catalog/roads/b.parquet",
+        ),
     )
     resolver = SourceResolver(FakeCatalog(response))
     resolved = await resolver.resolve(
         QuerySourceRef(collection_id=1, dataset_id=12, file_id=99, file_source_id=88, alias="roads")
     )
-    assert resolved.object_uris == ("s3://catalog/roads/**/*.parquet",)
+    assert resolved.object_uris == (
+        "gs://catalog/roads/a.parquet",
+        "gs://catalog/roads/b.parquet",
+    )
     assert resolved.storage_config.type == "gcs"
 
 
@@ -88,13 +97,35 @@ async def test_resolver_groups_expanded_sources_and_prefers_glob_pattern() -> No
 async def test_resolver_collects_concrete_storage_uris_for_expanded_sources() -> None:
     response = _response_with_sources(
         glob_pattern=None,
-        storage_uris=("s3://catalog/roads/a.parquet", "s3://catalog/roads/b.parquet"),
+        storage_uris=("gs://catalog/roads/a.parquet", "gs://catalog/roads/b.parquet"),
     )
     resolver = SourceResolver(FakeCatalog(response))
     resolved = await resolver.resolve(
         QuerySourceRef(collection_id=1, dataset_id=12, file_id=99, file_source_id=88, alias="roads")
     )
     assert resolved.object_uris == (
-        "s3://catalog/roads/a.parquet",
-        "s3://catalog/roads/b.parquet",
+        "gs://catalog/roads/a.parquet",
+        "gs://catalog/roads/b.parquet",
     )
+
+
+@pytest.mark.asyncio
+async def test_resolver_allows_glob_pattern_for_seaweedfs_when_no_objects_exist() -> None:
+    response = _response_with_sources(
+        glob_pattern="s3://catalog/roads/**/*.parquet",
+        storage_uris=("",),
+    )
+    source = response.file.formats[0].sources[0]
+    source.storage_location.config = BucketStorageConfig(
+        type="seaweedfs",
+        base_url="http://localhost:8888",
+        bucket="catalog",
+        endpoint_url="http://localhost:8333",
+    )
+    resolver = SourceResolver(FakeCatalog(response))
+
+    resolved = await resolver.resolve(
+        QuerySourceRef(collection_id=1, dataset_id=12, file_id=99, file_source_id=88, alias="roads")
+    )
+
+    assert resolved.object_uris == ("s3://catalog/roads/**/*.parquet",)

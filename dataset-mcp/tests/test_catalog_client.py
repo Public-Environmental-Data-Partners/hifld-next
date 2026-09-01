@@ -4,7 +4,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.catalog.client import CatalogClient
+from app.catalog.client import CatalogClient, CatalogClientError
 from app.catalog.models import DatasetSearchRequest
 from app.catalog.tool_adapter import CatalogToolAdapter, _identity, _tag_filters
 from app.tools import discovery
@@ -77,6 +77,22 @@ async def test_get_dataset_file_uses_resolved_collection_when_api_omits_it() -> 
     assert response.collection.id == 3
     assert response.dataset.id == 12
     assert response.file.id == 99
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("dataset", "file"),
+    [("../secret", "stations-file"), ("stations", "../../secret")],
+)
+async def test_malicious_dataset_or_file_identity_is_rejected_before_catalog_request(
+    dataset: str, file: str
+) -> None:
+    catalog = client_for(
+        {"/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}]}
+    )
+
+    with pytest.raises(CatalogClientError, match="catalog_identity_invalid"):
+        await catalog.get_dataset_file("public-safety", dataset, file)
 
 
 @pytest.mark.asyncio

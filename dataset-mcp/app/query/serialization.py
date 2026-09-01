@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
@@ -15,6 +16,10 @@ from app.query.models import EncodedRow, JsonValue
 DEFAULT_MAX_CELL_BYTES = 64 * 1024
 DEFAULT_MAX_RESULT_BYTES = 4 * 1024 * 1024
 _MAX_SAFE_INTEGER = (1 << 53) - 1
+
+
+class RowTooLargeError(ValueError):
+    """Raised when one encoded row cannot fit in the response budget."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,7 +98,7 @@ def encode_cell(
 def serialize_rows(
     *,
     columns: tuple[tuple[str, str], ...],
-    rows: list[tuple[object, ...]],
+    rows: Iterable[tuple[object, ...]],
     offset: int,
     requested_limit: int,
     deterministic_order: bool,
@@ -117,7 +122,11 @@ def serialize_rows(
     used_bytes = 0
     response_truncated = False
 
-    for raw_row in rows[:requested_limit]:
+    fetched_extra = False
+    for row_index, raw_row in enumerate(rows):
+        if row_index >= requested_limit:
+            fetched_extra = True
+            break
         if len(raw_row) != len(columns):
             raise ValueError("DuckDB row width does not match its schema")
         encoded_row: EncodedRow = {}
@@ -128,12 +137,13 @@ def serialize_rows(
         row_bytes = _json_size(encoded_row)
         separator_bytes = 1 if encoded_rows else 0
         if used_bytes + separator_bytes + row_bytes > max_result_bytes:
+            if not encoded_rows:
+                raise RowTooLargeError("A result row exceeds the response size limit")
             response_truncated = True
             break
         encoded_rows.append(encoded_row)
         used_bytes += separator_bytes + row_bytes
 
-    fetched_extra = len(rows) > requested_limit
     has_more = response_truncated or fetched_extra
     returned = len(encoded_rows)
     next_offset = offset + returned if has_more else None

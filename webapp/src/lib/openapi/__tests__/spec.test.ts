@@ -114,4 +114,30 @@ describe("buildOpenApiDocument", () => {
       },
     });
   });
+
+  it("documents bounded query creation and page contracts", () => {
+    const doc = buildOpenApiDocument();
+    const create = doc.paths?.["/api/queries"]?.post;
+    const page = doc.paths?.["/api/queries/{query_id}/pages"]?.post;
+
+    expect(create).toBeDefined();
+    expect(page).toBeDefined();
+    expect(create?.requestBody).toMatchObject({
+      required: true,
+      content: { "application/json": { schema: { $ref: "#/components/schemas/QueryRequest" } } },
+    });
+    expect(page?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "query_id", in: "path", required: true }),
+        expect.objectContaining({ name: "X-HIFLD-Query-Token", in: "header", required: true }),
+      ]),
+    );
+    expect(page?.requestBody).toMatchObject({
+      required: true,
+      content: { "application/json": { schema: { $ref: "#/components/schemas/QueryPageRequest" } } },
+    });
+    expect(doc.components?.schemas?.QueryRequest).toMatchObject({
+      properties: { sources: { maxItems: 8 }, sql: { maxLength: 8192 }, limit: { maximum: 1000 } },
+    });
+  });
 });

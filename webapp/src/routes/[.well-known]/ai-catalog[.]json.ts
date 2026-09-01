@@ -5,7 +5,7 @@ export function agentResourceDiscoveryHandler(request: Request): Response {
   const origin = new URL(request.url).origin;
   return new Response(JSON.stringify(buildAgentResourceDiscovery(origin)), {
     headers: {
-      "Content-Type": "application/json; charset=utf-8",
+      "Content-Type": "application/ai-catalog+json; charset=utf-8",
       "Access-Control-Allow-Origin": "*",
       "Cache-Control": "public, max-age=3600",
     },

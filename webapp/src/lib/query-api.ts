@@ -1,5 +1,51 @@
 import { z } from "zod";
 
+export const MAX_QUERY_SQL_BYTES = 8 * 1024;
+export const MAX_QUERY_BODY_BYTES = 64 * 1024;
+
+function utf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+/** Read a request body without allowing an unbounded payload into memory. */
+export async function readBoundedRequestBody(
+  request: Request,
+  maxBytes: number = MAX_QUERY_BODY_BYTES,
+): Promise<string | null> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength !== null) {
+    const declaredLength = Number(contentLength);
+    if (!Number.isFinite(declaredLength) || declaredLength < 0 || declaredLength > maxBytes) return null;
+  }
+
+  const reader = request.body?.getReader();
+  if (reader === undefined) {
+    const text = await request.text();
+    return utf8ByteLength(text) <= maxBytes ? text : null;
+  }
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  while (true) {
+    const next = await reader.read();
+    if (next.done) break;
+    totalBytes += next.value.byteLength;
+    if (totalBytes > maxBytes) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(next.value);
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(body);
+}
+
 const httpUrlSchema = z
   .string()
   .url()
@@ -126,7 +172,11 @@ export const QueryPageRequestSchema = z
 export const QueryRequestSchema = z
   .object({
     sources: z.array(QuerySourceRefSchema).min(1).max(8),
-    sql: z.string().min(1),
+    sql: z
+      .string()
+      .min(1)
+      .max(MAX_QUERY_SQL_BYTES)
+      .refine((value) => utf8ByteLength(value) <= MAX_QUERY_SQL_BYTES, "SQL exceeds the maximum UTF-8 byte length"),
     limit: z.number().int().positive().max(1000).default(100),
     geometry_column: z.string().min(1).optional(),
     result_crs: z.string().min(1).optional(),

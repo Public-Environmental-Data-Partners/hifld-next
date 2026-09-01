@@ -8,9 +8,14 @@ describe("agent resource discovery", () => {
 
   it("builds an origin-aware MCP server card", () => {
     const card = buildMcpServerCard("https://hifld.publicenvirodata.org");
-    expect(card.serverInfo).toEqual({ name: "HIFLD Next", version: expect.any(String) });
-    expect(card.transport.endpoint).toBe("https://hifld.publicenvirodata.org/mcp");
-    expect(card.capabilities).toEqual({ tools: { enabled: true }, resources: { enabled: true }, prompts: { enabled: false } });
+    expect(card).toEqual({
+      $schema: "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
+      name: "org.publicenvirodata.hifld/dataset-mcp",
+      version: expect.any(String),
+      description: expect.any(String),
+      title: "HIFLD Next Dataset MCP",
+      remotes: [{ type: "streamable-http", url: "https://hifld.publicenvirodata.org/mcp" }],
+    });
   });
 
   it("builds ARD entries with identifiers, media types, URLs, and queries", () => {
@@ -29,8 +34,8 @@ describe("agent resource discovery", () => {
 
   it("uses a validated public endpoint and never leaks invalid configuration", () => {
     process.env.DATASET_MCP_PUBLIC_ENDPOINT = "https://mcp.example.test/mcp";
-    expect(buildMcpServerCard("https://hifld.publicenvirodata.org").transport.endpoint).toBe("https://mcp.example.test/mcp");
+    expect(buildMcpServerCard("https://hifld.publicenvirodata.org").remotes[0]?.url).toBe("https://mcp.example.test/mcp");
     process.env.DATASET_MCP_PUBLIC_ENDPOINT = "http://dataset-mcp.internal:8000";
-    expect(buildMcpServerCard("https://hifld.publicenvirodata.org").transport.endpoint).toBe("https://hifld.publicenvirodata.org/mcp");
+    expect(buildMcpServerCard("https://hifld.publicenvirodata.org").remotes[0]?.url).toBe("https://hifld.publicenvirodata.org/mcp");
   });
 });

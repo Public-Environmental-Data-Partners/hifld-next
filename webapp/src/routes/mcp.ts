@@ -54,13 +54,37 @@ function methodNotAllowed(): Response {
   return new Response(null, { status: 405, headers: { Allow: ALLOW_HEADER } });
 }
 
+function forbiddenOrigin(): Response {
+  return Response.json({ code: "origin_forbidden", message: "The request origin is not allowed." }, { status: 403 });
+}
+
+function isSameOriginRequest(request: Request): boolean {
+  const origin = request.headers.get("Origin");
+  if (origin === null) return true;
+  try {
+    const parsed = new URL(origin);
+    if (
+      parsed.username !== "" ||
+      parsed.password !== "" ||
+      parsed.pathname !== "/" ||
+      parsed.search !== "" ||
+      parsed.hash !== ""
+    ) {
+      return false;
+    }
+    return parsed.origin === new URL(request.url).origin;
+  } catch {
+    return false;
+  }
+}
+
 function configuredBaseUrl(value: string | undefined): string | null {
   const baseUrl = value?.trim();
   return baseUrl ? baseUrl.replace(/\/+$/, "") : null;
 }
 
 function upstreamMcpUrl(baseUrl: string, request: Request): string {
-  return `${baseUrl}/mcp/${new URL(request.url).search}`;
+  return `${baseUrl}/mcp${new URL(request.url).search}`;
 }
 
 function isAbortError(error: Error | DOMException): boolean {
@@ -84,6 +108,7 @@ function requestInit(request: Request): RequestInit {
 
 /** Proxy the same-origin Streamable HTTP endpoint without exposing upstream topology. */
 export async function mcpProxyHandler(request: Request, options: McpProxyOptions = {}): Promise<Response> {
+  if (!isSameOriginRequest(request)) return forbiddenOrigin();
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: { Allow: ALLOW_HEADER } });
   }

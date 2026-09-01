@@ -153,11 +153,25 @@ export function mapTileRequest(
   return token ? { url, headers: { "X-HIFLD-Query-Token": token } } : { url };
 }
 
+function blobText(blob: Blob): Promise<string> {
+  if (typeof blob.text === "function") return blob.text();
+  return new Promise((resolveText, rejectText) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () =>
+      resolveText(String(reader.result ?? "")),
+    );
+    reader.addEventListener("error", () =>
+      rejectText(reader.error ?? new Error("Blob read failed")),
+    );
+    reader.readAsText(blob);
+  });
+}
+
 export async function mapErrorMessage(error: Error): Promise<string> {
   if (error instanceof maplibregl.AJAXError) {
     try {
       const parsed = TileErrorSchema.safeParse(
-        JSON.parse(await error.body.text()),
+        JSON.parse(await blobText(error.body)),
       );
       if (parsed.success) {
         return `${parsed.data.message} (${parsed.data.code})`;
@@ -223,12 +237,12 @@ export function initialMapView(
   return { center: [0, 0], zoom: 1, ...orientation };
 }
 
-function querySourceId(index: number): string {
-  return `hifld-query-${index}`;
+function querySourceId(queryId: string): string {
+  return `hifld-query-${queryId}`;
 }
 
-function queryRenderLayerIds(index: number): [string, string, string] {
-  const sourceId = querySourceId(index);
+function queryRenderLayerIds(queryId: string): [string, string, string] {
+  const sourceId = querySourceId(queryId);
   return [`${sourceId}-polygons`, `${sourceId}-lines`, `${sourceId}-points`];
 }
 
@@ -260,11 +274,11 @@ function initialLayerVisibility(
 }
 
 function layersForQuery(
-  index: number,
+  queryId: string,
   layer: MapLayerConfiguration,
 ): AddLayerObject[] {
-  const source = querySourceId(index);
-  const [polygons, lines, points] = queryRenderLayerIds(index);
+  const source = querySourceId(queryId);
+  const [polygons, lines, points] = queryRenderLayerIds(queryId);
   const color = layer.style?.color ?? DEFAULT_QUERY_COLOR;
   const layout = {
     visibility: layer.visible ? ("visible" as const) : ("none" as const),
@@ -315,6 +329,7 @@ function applyLayerStyle(
   map: MapLibreMap,
   layer: MapLayerConfiguration,
   index: number,
+  queryId: string,
   style: LayerStyleState,
 ): LegendItem[] {
   const driven = dataDrivenColor(
@@ -326,7 +341,7 @@ function applyLayerStyle(
     style.breaks,
     style.color,
   );
-  const [polygons, lines, points] = queryRenderLayerIds(index);
+  const [polygons, lines, points] = queryRenderLayerIds(queryId);
   map.setPaintProperty(polygons, "fill-color", driven.paint);
   map.setPaintProperty(lines, "line-color", driven.paint);
   map.setPaintProperty(points, "circle-color", driven.paint);
@@ -422,22 +437,24 @@ function addQueryOverlays(
   const firstLabel = map
     .getStyle()
     .layers?.find((layer) => layer.type === "symbol")?.id;
-  configuration.layers.forEach((layer, index) => {
-    const sourceId = querySourceId(index);
+  configuration.layers.forEach((layer) => {
+    const sourceId = querySourceId(layer.query_id);
     map.addSource(sourceId, {
       type: "vector",
       tiles: [layer.tile_url],
       minzoom: 0,
       maxzoom: 22,
     });
-    for (const renderLayer of layersForQuery(index, layer)) {
+    for (const renderLayer of layersForQuery(layer.query_id, layer)) {
       map.addLayer(renderLayer, firstLabel);
     }
   });
 }
 
 function allQueryRenderLayerIds(configuration: MapConfiguration): string[] {
-  return configuration.layers.flatMap((_, index) => queryRenderLayerIds(index));
+  return configuration.layers.flatMap((layer) =>
+    queryRenderLayerIds(layer.query_id),
+  );
 }
 
 function selectionBoxCollection(
@@ -492,8 +509,8 @@ function setMapSelectionCursor(map: MapLibreMap, active: boolean): void {
 }
 
 function highlightedLayers(configuration: MapConfiguration) {
-  return configuration.layers.map((layer, index) => ({
-    mapSourceId: querySourceId(index),
+  return configuration.layers.map((layer) => ({
+    mapSourceId: querySourceId(layer.query_id),
     queryId: layer.query_id,
     layerName: layer.layer_name,
     sourceLayerId: layer.source_layer,
@@ -735,7 +752,13 @@ export function MapView({
           const items = Object.fromEntries(
             parsed.data.layers.map((layer, index) => [
               layer.query_id,
-              applyLayerStyle(map, layer, index, initialLayerStyle(layer)),
+              applyLayerStyle(
+                map,
+                layer,
+                index,
+                layer.query_id,
+                initialLayerStyle(layer),
+              ),
             ]),
           );
           setLegendItems(items);
@@ -744,7 +767,13 @@ export function MapView({
               Object.fromEntries(
                 parsed.data.layers.map((layer, index) => [
                   layer.query_id,
-                  applyLayerStyle(map, layer, index, initialLayerStyle(layer)),
+                  applyLayerStyle(
+                    map,
+                    layer,
+                    index,
+                    layer.query_id,
+                    initialLayerStyle(layer),
+                  ),
                 ]),
               ),
             );
@@ -855,6 +884,9 @@ export function MapView({
         map.dragPan.enable();
         setMapSelectionCursor(map, selectionActiveRef.current);
         suppressNextClickSelectionRef.current = true;
+        window.setTimeout(() => {
+          suppressNextClickSelectionRef.current = false;
+        }, 0);
         const bounds = selectionScreenBounds(start, {
           x: event.point.x,
           y: event.point.y,
@@ -937,12 +969,9 @@ export function MapView({
       [queryId]: nextVisible,
     }));
     if (!parsed.success) return;
-    const index = parsed.data.layers.findIndex(
-      (layer) => layer.query_id === queryId,
-    );
     const map = mapRef.current;
-    if (!map || index < 0) return;
-    for (const layerId of queryRenderLayerIds(index)) {
+    if (!map) return;
+    for (const layerId of queryRenderLayerIds(queryId)) {
       map.setLayoutProperty(
         layerId,
         "visibility",

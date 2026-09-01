@@ -50,3 +50,8 @@ def test_sql_policy_rejects_more_than_eight_kibibytes() -> None:
 
     with pytest.raises(SqlPolicyError):
         SqlPolicy.validate(oversized_sql, ALIASES)
+
+
+def test_sql_policy_rejects_source_alias_cte_collision_case_insensitively() -> None:
+    with pytest.raises(SqlPolicyError, match="collide"):
+        SqlPolicy.validate("WITH ROADS AS (SELECT 1 AS id) SELECT * FROM roads", ALIASES)

@@ -61,6 +61,7 @@ _FAILURE_CODES: dict[str, ErrorCode] = {
     "query_offset_limit": ErrorCode.QUERY_OFFSET_LIMIT,
     "query_execution_failed": ErrorCode.QUERY_EXECUTION_FAILED,
     "query_result_too_wide": ErrorCode.QUERY_RESULT_TOO_WIDE,
+    "row_too_large": ErrorCode.ROW_TOO_LARGE,
     "storage_unavailable": ErrorCode.STORAGE_UNAVAILABLE,
     "worker_failed": ErrorCode.WORKER_FAILED,
     "worker_protocol_invalid": ErrorCode.WORKER_PROTOCOL_INVALID,

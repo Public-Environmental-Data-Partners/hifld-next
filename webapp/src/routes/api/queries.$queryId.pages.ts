@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { env } from "@/env/server";
-import { QueryIdSchema, QueryPageRequestSchema, QueryTokenSchema } from "@/lib/query-api";
+import { QueryIdSchema, QueryPageRequestSchema, QueryTokenSchema, readBoundedRequestBody } from "@/lib/query-api";
 
 const QUERY_TOKEN_HEADER = "X-HIFLD-Query-Token";
 
@@ -54,7 +54,9 @@ export async function queryPageHandler(request: Request, options: QueryPageProxy
 
   let payload: ReturnType<typeof QueryPageRequestSchema.parse>;
   try {
-    payload = QueryPageRequestSchema.parse(await request.json());
+    const body = await readBoundedRequestBody(request);
+    if (body === null) return invalidRequest("The query page request is invalid.");
+    payload = QueryPageRequestSchema.parse(JSON.parse(body));
   } catch {
     return invalidRequest("The query page request is invalid.");
   }

@@ -253,9 +253,134 @@ def test_http_routes_share_lifespan_and_bound_concurrency() -> None:
                 assert health.json() == {"status": "ok"}
                 assert (await client.get("/assets/missing.js")).status_code == 404
                 assert (await client.get("/tiles/0/0/0.mvt")).status_code == 404
-                assert (await client.get("/mcp/")).status_code in {200, 405}
+                assert (await client.get("/mcp")).status_code == 405
 
     asyncio.run(assert_routes())
+
+
+def test_mcp_transport_rejects_hostile_origins_and_invalid_hosts() -> None:
+    async def assert_guard() -> None:
+        app = create_http_app(
+            HttpDependencies(
+                tools=_dependencies(),
+                mcp_allowed_hosts=("trusted.example.test",),
+                mcp_allowed_origins=("https://trusted.example.test",),
+            ),
+            ui_html="<html><body>dataset explorer</body></html>",
+        )
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="https://trusted.example.test",
+            ) as client:
+                hostile_origin = await client.post(
+                    "/mcp",
+                    headers={"Origin": "https://evil.example.test"},
+                )
+                invalid_host = await client.post(
+                    "/mcp",
+                    headers={"Host": "evil.example.test"},
+                )
+
+        assert hostile_origin.status_code == 403
+        assert invalid_host.status_code == 421
+
+    asyncio.run(assert_guard())
+
+
+def test_mcp_transport_uses_the_advertised_canonical_path_without_redirect() -> None:
+    async def assert_canonical_path() -> None:
+        app = create_http_app(
+            _dependencies(),
+            ui_html="<html><body>dataset explorer</body></html>",
+        )
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                follow_redirects=False,
+            ) as client:
+                canonical = await client.get("/mcp")
+                slash_variant = await client.get("/mcp/")
+
+        assert canonical.status_code == 405
+        assert canonical.headers.get("location") is None
+        assert slash_variant.status_code == 307
+        assert slash_variant.headers["location"] == "http://test/mcp"
+
+    asyncio.run(assert_canonical_path())
+
+
+def test_health_and_assets_bypass_expensive_request_concurrency(
+    tmp_path: Path,
+) -> None:
+    async def assert_bypass() -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class BlockingQueryStub(QueryStub):
+            async def query(
+                self,
+                sources: Sequence[dict[str, str]],
+                sql: str,
+                limit: int,
+                geometry_column: str | None,
+                result_crs: str | None,
+            ) -> dict[str, int | str | list[dict[str, str | bool]]]:
+                entered.set()
+                await release.wait()
+                return await super().query(
+                    sources,
+                    sql,
+                    limit,
+                    geometry_column,
+                    result_crs,
+                )
+
+        (tmp_path / "ready.js").write_text("export {};", encoding="utf-8")
+        query = BlockingQueryStub()
+        app = create_http_app(
+            HttpDependencies(
+                tools=AppDependencies(catalog=CatalogStub(), query=query),
+                query_service=query,
+            ),
+            ui_html="<html><body>dataset explorer</body></html>",
+            assets_directory=tmp_path,
+            max_concurrency=1,
+        )
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                expensive_request = asyncio.create_task(
+                    client.post(
+                        "/api/queries",
+                        json={
+                            "sources": [
+                                {
+                                    "alias": "roads",
+                                    "collection_id": 1,
+                                    "dataset_id": 2,
+                                    "file_id": 3,
+                                    "file_source_id": 4,
+                                }
+                            ],
+                            "sql": "SELECT id FROM roads",
+                        },
+                    )
+                )
+                await asyncio.wait_for(entered.wait(), timeout=1)
+                health = await asyncio.wait_for(client.get("/healthz"), timeout=0.25)
+                asset = await asyncio.wait_for(client.get("/assets/ready.js"), timeout=0.25)
+                release.set()
+                query_response = await expensive_request
+
+        assert health.status_code == 200
+        assert asset.status_code == 200
+        assert query_response.status_code == 200
+
+    asyncio.run(assert_bypass())
 
 
 def test_http_app_wires_query_resources_to_the_shared_query_service() -> None:

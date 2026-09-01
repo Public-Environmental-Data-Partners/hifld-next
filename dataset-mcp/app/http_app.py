@@ -30,21 +30,36 @@ class HttpDependencies:
     tile_timeout_seconds: float = 10.0
     query_service: QueryHttpService | None = None
     webapp_origins: tuple[str, ...] = ()
+    mcp_allowed_hosts: tuple[str, ...] | None = None
+    mcp_allowed_origins: tuple[str, ...] | None = None
 
 
 class ConcurrencyLimiter:
-    """One process-wide bound shared by MCP, tile, and asset traffic."""
+    """One process-wide bound shared only by expensive query execution."""
 
     def __init__(self, app: ASGIApp, maximum: int) -> None:
         self._app = app
         self._semaphore = asyncio.Semaphore(maximum)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http":
+        if self._is_expensive_request(scope):
             async with self._semaphore:
                 await self._app(scope, receive, send)
             return
         await self._app(scope, receive, send)
+
+    @staticmethod
+    def _is_expensive_request(scope: Scope) -> bool:
+        if scope["type"] != "http" or scope.get("method") == "OPTIONS":
+            return False
+        path = scope.get("path", "")
+        return (
+            path == "/mcp"
+            or path.startswith("/mcp/")
+            or path == "/api/queries"
+            or path.startswith("/api/queries/")
+            or path.startswith("/tiles/")
+        )
 
 
 class AssetHeadersMiddleware(BaseHTTPMiddleware):
@@ -92,7 +107,21 @@ def create_http_app(
         http_dependencies.tools, ui_html=ui_html, resource_config=resource_config
     )
     # FastMCP v3 applies the stateless setting on the ASGI factory, not FastMCP().
-    mcp_asgi = mcp.http_app("/", stateless_http=True)
+    mcp_asgi = mcp.http_app(
+        "/mcp",
+        stateless_http=True,
+        host_origin_protection="auto",
+        allowed_hosts=(
+            list(http_dependencies.mcp_allowed_hosts)
+            if http_dependencies.mcp_allowed_hosts is not None
+            else None
+        ),
+        allowed_origins=(
+            list(http_dependencies.mcp_allowed_origins)
+            if http_dependencies.mcp_allowed_origins is not None
+            else None
+        ),
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
@@ -148,7 +177,7 @@ def create_http_app(
         raise FileNotFoundError(f"built UI assets directory does not exist: {static_root}")
     app.mount("/assets", StaticFiles(directory=static_root), name="assets")
 
-    app.mount("/mcp", mcp_asgi, name="mcp")
+    app.mount("", mcp_asgi, name="mcp")
     return app
 
 

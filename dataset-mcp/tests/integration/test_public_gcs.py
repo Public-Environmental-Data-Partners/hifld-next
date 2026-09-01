@@ -94,3 +94,65 @@ def test_public_gcs_object_is_reachable_when_explicitly_configured() -> None:
     assert isinstance(result, WorkerPage)
     assert result.returned_count == 2
     assert result.files_read == 1
+
+
+@pytest.mark.skipif(
+    not os.getenv("HIFLD_TEST_GCS_BUCKET") or not os.getenv("HIFLD_TEST_GCS_OBJECTS"),
+    reason=(
+        "set HIFLD_TEST_GCS_BUCKET and comma-separated HIFLD_TEST_GCS_OBJECTS "
+        "to run the multipart public-GCS network check"
+    ),
+)
+def test_public_gcs_multipart_objects_are_queried_as_concrete_urls() -> None:
+    bucket = os.environ["HIFLD_TEST_GCS_BUCKET"]
+    object_keys = tuple(
+        key.strip() for key in os.environ["HIFLD_TEST_GCS_OBJECTS"].split(",") if key.strip()
+    )
+    assert len(object_keys) >= 2
+    source = ResolvedSource(
+        source={
+            "alias": "dataset",
+            "collection_id": 1,
+            "dataset_id": 2,
+            "file_id": 3,
+            "file_source_id": 4,
+        },
+        version="acceptance",
+        format_type="geoparquet",
+        storage_location_slug="public",
+        storage_config=BucketStorageConfig(
+            type="gcs",
+            base_url=f"https://storage.googleapis.com/{bucket}",
+            bucket=bucket,
+        ),
+        object_uris=tuple(f"gs://{bucket}/{key}" for key in object_keys),
+    )
+    spec = StorageResolver().resolve(source)
+    assert spec.object_uris == tuple(
+        f"https://storage.googleapis.com/{bucket}/{key}" for key in object_keys
+    )
+
+    runtime = WorkerRuntime(
+        WorkerRuntimeConfig(
+            threads=2,
+            memory_limit="512MB",
+            temp_directory="/tmp/dataset-mcp-gcs-multipart-acceptance",
+            extension_directory=os.getenv("HIFLD_TEST_DUCKDB_EXTENSION_DIRECTORY"),
+        )
+    )
+    try:
+        result = runtime.execute(
+            WorkerQuery(
+                canonical_sql="SELECT count(*) AS row_count FROM dataset",
+                sources=(WorkerSourceSpec(alias="dataset", object_uris=spec.object_uris),),
+                limit=1,
+                offset=0,
+                deadline=datetime.now(tz=UTC) + timedelta(seconds=30),
+            )
+        )
+    finally:
+        runtime.close()
+
+    assert isinstance(result, WorkerPage)
+    assert result.returned_count == 1
+    assert result.files_read == len(object_keys)

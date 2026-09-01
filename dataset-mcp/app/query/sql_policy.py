@@ -215,7 +215,10 @@ class SqlPolicy:
     @staticmethod
     def _validate_tables(statement: exp.Query, aliases: frozenset[str]) -> None:
         allowed_relations = {alias.casefold() for alias in aliases}
-        allowed_relations.update(cte.alias.casefold() for cte in statement.find_all(exp.CTE))
+        cte_names = {cte.alias.casefold() for cte in statement.find_all(exp.CTE)}
+        if allowed_relations.intersection(cte_names):
+            raise SqlPolicyError("Source aliases must not collide with CTE names")
+        allowed_relations.update(cte_names)
 
         for table in statement.find_all(exp.Table):
             if table.catalog or table.db:

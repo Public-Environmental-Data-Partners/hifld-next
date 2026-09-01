@@ -11,7 +11,7 @@ export function discoveryLinkHeaderValue(): string {
     `</.well-known/api-catalog>; rel="service-meta"; type="application/json"`,
     `</.well-known/agent-skills/index.json>; rel="service-meta"; type="application/json"`,
     `</.well-known/mcp/server-card.json>; rel="service-meta"; type="application/json"`,
-    `</.well-known/ai-catalog.json>; rel="service-meta"; type="application/json"`,
+    `</.well-known/ai-catalog.json>; rel="ai-catalog"; type="application/ai-catalog+json"`,
   ];
   return parts.join(", ");
 }

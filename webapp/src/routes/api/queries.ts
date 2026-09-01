@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { env } from "@/env/server";
-import { QueryRequestSchema } from "@/lib/query-api";
+import { QueryRequestSchema, readBoundedRequestBody } from "@/lib/query-api";
 
 type QueryFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -39,7 +39,9 @@ function isAbortError(error: Error | DOMException): boolean {
 export async function queryCreateHandler(request: Request, options: QueryProxyOptions = {}): Promise<Response> {
   let payload: ReturnType<typeof QueryRequestSchema.parse>;
   try {
-    payload = QueryRequestSchema.parse(await request.json());
+    const body = await readBoundedRequestBody(request);
+    if (body === null) return invalidRequest("The query request is invalid.");
+    payload = QueryRequestSchema.parse(JSON.parse(body));
   } catch {
     return invalidRequest("The query request is invalid.");
   }

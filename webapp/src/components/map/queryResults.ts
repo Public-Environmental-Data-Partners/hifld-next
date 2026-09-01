@@ -21,6 +21,18 @@ export function publicQueryPage(page: QueryPage): PublicQueryPage {
   return publicPage;
 }
 
+export function appendQueryPage(current: PublicQueryPage, next: PublicQueryPage): PublicQueryPage {
+  if (current.query_id !== next.query_id || next.offset < current.offset + current.rows.length) {
+    return next;
+  }
+  return {
+    ...next,
+    offset: current.offset,
+    rows: [...current.rows, ...next.rows],
+    returned_count: current.returned_count + next.returned_count,
+  };
+}
+
 function scalarFields(columns: readonly QueryColumn[], geometryColumn: string) {
   return columns
     .filter(

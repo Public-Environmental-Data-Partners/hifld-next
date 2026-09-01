@@ -30,14 +30,14 @@ declare global {
   }
 }
 
-const capabilitySchema = z.object({ enabled: z.boolean() }).strict();
 const mcpServerCardSchema = z
   .object({
-    serverInfo: z.object({ name: z.string(), version: z.string() }).strict(),
-    transport: z.object({ type: z.literal("streamable-http"), endpoint: z.string().url() }).strict(),
-    capabilities: z
-      .object({ tools: capabilitySchema, resources: capabilitySchema, prompts: capabilitySchema })
-      .strict(),
+    $schema: z.literal("https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json"),
+    name: z.string().regex(/^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/),
+    version: z.string(),
+    description: z.string().min(1),
+    title: z.string().min(1).optional(),
+    remotes: z.array(z.object({ type: z.literal("streamable-http"), url: z.string().url() }).strict()).min(1),
   })
   .strict();
 const agentResourceDiscoverySchema = z
@@ -137,9 +137,9 @@ test("publishes a same-origin Streamable HTTP MCP server card", async ({ request
   expect(response.status()).toBe(200);
   const card = mcpServerCardSchema.parse(await response.json());
   expect(card).toMatchObject({
-    serverInfo: { name: "HIFLD Next" },
-    transport: { type: "streamable-http", endpoint: "http://127.0.0.1:4173/mcp" },
-    capabilities: { tools: { enabled: true }, resources: { enabled: true }, prompts: { enabled: false } },
+    name: "org.publicenvirodata.hifld/dataset-mcp",
+    title: "HIFLD Next Dataset MCP",
+    remotes: [{ type: "streamable-http", url: "http://127.0.0.1:4173/mcp" }],
   });
 });
 

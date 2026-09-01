@@ -30,6 +30,11 @@ def _decoded_key(value: str) -> str:
     return decoded.lstrip("/")
 
 
+def _reject_wildcard(key: str) -> None:
+    if any(character in key for character in "*?["):
+        raise StorageResolutionError("public GCS sources must name concrete objects")
+
+
 def _key_for_scope(bucket: str, configured_bucket: str, configured_prefix: str, key: str) -> str:
     if bucket != configured_bucket:
         raise StorageResolutionError("source bucket is outside configured storage scope")
@@ -84,6 +89,7 @@ class StorageResolver:
             else:
                 raise StorageResolutionError("public GCS source must be gs:// or GCS HTTPS")
             safe_key = _key_for_scope(bucket, configured_bucket, "", key)
+            _reject_wildcard(safe_key)
             result.append(f"https://storage.googleapis.com/{bucket}/{safe_key}")
         return tuple(result)
 

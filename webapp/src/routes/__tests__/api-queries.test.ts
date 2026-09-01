@@ -9,6 +9,39 @@ const body = {
 };
 
 describe("same-origin query proxy routes", () => {
+  it("rejects an oversized create request before contacting the upstream", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const response = await queryCreateHandler(
+      new Request("https://web.test/api/queries", {
+        method: "POST",
+        body: JSON.stringify({ ...body, sql: "x".repeat(70_000) }),
+      }),
+      { fetcher, baseUrl: "http://dataset-mcp.internal:8000" },
+    );
+
+    expect(response.status).toBe(400);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized page request before contacting the upstream", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const response = await queryPageHandler(
+      new Request("https://web.test/api/queries/query_12345678901234567890/pages", {
+        method: "POST",
+        headers: { "X-HIFLD-Query-Token": "private-token" },
+        body: JSON.stringify({ offset: 0, page_size: 10, padding: "x".repeat(70_000) }),
+      }),
+      {
+        params: { queryId: "query_12345678901234567890" },
+        fetcher,
+        baseUrl: "http://dataset-mcp.internal:8000",
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("forwards create requests with only content type and a generated request ID", async () => {
     const upstream = new Response(JSON.stringify({ query_id: "q", query_token: "t" }), {
       status: 201,

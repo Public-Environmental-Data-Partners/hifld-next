@@ -46,6 +46,7 @@ class WorkerRuntimeConfig:
     max_columns: int = 200
     max_result_bytes: int = 4 * 1024 * 1024
     max_cell_bytes: int = 64 * 1024
+    max_temp_directory_size: str = "1GiB"
 
 
 @dataclass(frozen=True, slots=True)

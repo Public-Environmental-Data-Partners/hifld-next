@@ -40,6 +40,7 @@ def create_production_app(
             threads=configured.duckdb_threads,
             memory_limit=configured.duckdb_memory_limit,
             temp_directory=configured.duckdb_temp_directory,
+            max_temp_directory_size=configured.duckdb_max_temp_directory_size,
             extension_directory=configured.duckdb_extension_directory,
             seaweedfs_credentials=seaweedfs_credentials,
             install_extensions=install_extensions,
@@ -79,6 +80,8 @@ def create_production_app(
             tile_timeout_seconds=configured.tile_timeout_seconds,
             query_service=query,
             webapp_origins=configured.webapp_origins,
+            mcp_allowed_hosts=configured.http_allowed_hosts,
+            mcp_allowed_origins=configured.webapp_origins,
         ),
         resource_config=UIResourceConfig(
             tile_origin=public_origin or "self",

@@ -13,7 +13,7 @@ from query_worker.protocol import (
     WorkerSeaweedSource,
     WorkerSourceSpec,
 )
-from query_worker.runtime import WorkerRuntime
+from query_worker.runtime import WorkerRuntime, _rewrite_source_aliases
 
 
 def _write_parquet(path: Path, sql: str) -> None:
@@ -214,3 +214,20 @@ def test_runtime_sets_pinned_extension_directory_before_accepting_queries(tmp_pa
         runtime.close()
 
     assert configured == (str(extension_directory),)
+
+
+def test_rewrite_aliases_is_case_insensitive_without_rewriting_cte_references() -> None:
+    rewritten = _rewrite_source_aliases(
+        "WITH roads AS (SELECT 1 AS id) SELECT * FROM roads UNION ALL SELECT * FROM ROADS",
+        {"ROADS": "_mcp_source_1"},
+    )
+
+    assert "FROM roads" in rewritten
+    assert "FROM ROADS" in rewritten
+    assert 'FROM "_mcp_source_1"' not in rewritten
+
+
+def test_rewrite_aliases_rewrites_case_insensitive_source_reference() -> None:
+    rewritten = _rewrite_source_aliases("SELECT * FROM RoAdS", {"roads": "_mcp_source_1"})
+
+    assert 'FROM "_mcp_source_1"' in rewritten

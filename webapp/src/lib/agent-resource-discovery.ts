@@ -1,13 +1,13 @@
 const SERVER_VERSION = "1.0.0";
+const MCP_SERVER_CARD_SCHEMA = "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json";
 
 export interface McpServerCard {
-  serverInfo: { name: string; version: string };
-  transport: { type: "streamable-http"; endpoint: string };
-  capabilities: { tools: Capability; resources: Capability; prompts: Capability };
-}
-
-interface Capability {
-  readonly enabled?: boolean;
+  $schema: string;
+  name: string;
+  version: string;
+  description: string;
+  title?: string;
+  remotes: Array<{ type: "streamable-http"; url: string }>;
 }
 
 export interface AgentResourceEntry {
@@ -51,9 +51,12 @@ function safeHost(origin: string): string {
 
 export function buildMcpServerCard(origin: string): McpServerCard {
   return {
-    serverInfo: { name: "HIFLD Next", version: SERVER_VERSION },
-    transport: { type: "streamable-http", endpoint: configuredMcpEndpoint(origin) },
-    capabilities: { tools: { enabled: true }, resources: { enabled: true }, prompts: { enabled: false } },
+    $schema: MCP_SERVER_CARD_SCHEMA,
+    name: "org.publicenvirodata.hifld/dataset-mcp",
+    version: SERVER_VERSION,
+    description: "Public HIFLD Next catalog and query tools over the Model Context Protocol.",
+    title: "HIFLD Next Dataset MCP",
+    remotes: [{ type: "streamable-http", url: configuredMcpEndpoint(origin) }],
   };
 }
 

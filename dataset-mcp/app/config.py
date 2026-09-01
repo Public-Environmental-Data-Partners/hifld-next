@@ -20,11 +20,13 @@ class Settings(BaseSettings):
     duckdb_threads: int = Field(default=2, ge=1, le=8)
     duckdb_memory_limit: str = "1GiB"
     duckdb_temp_directory: str = "/tmp/dataset-mcp"
+    duckdb_max_temp_directory_size: str = "3GiB"
     duckdb_extension_directory: str = "/opt/duckdb/extensions"
     max_sources: int = Field(default=8, ge=1, le=8)
     max_result_bytes: int = Field(default=4 * 1024 * 1024, ge=1024)
     public_origin: AnyHttpUrl | None = None
     webapp_origins: Annotated[tuple[str, ...], NoDecode] = ()
+    http_allowed_hosts: Annotated[tuple[str, ...], NoDecode] = ()
     max_concurrency: int = Field(default=8, ge=1, le=64)
 
     @field_validator("webapp_origins", mode="before")
@@ -62,3 +64,34 @@ class Settings(BaseSettings):
         if len(set(origins)) != len(origins):
             raise ValueError("webapp origins must be unique")
         return tuple(origins)
+
+    @field_validator("http_allowed_hosts", mode="before")
+    @classmethod
+    def parse_http_allowed_hosts(cls, value: str | tuple[str, ...]) -> tuple[str, ...]:
+        values = (
+            tuple(part.strip() for part in value.split(",")) if isinstance(value, str) else value
+        )
+        hosts: list[str] = []
+        for value in values:
+            candidate = value.strip().lower()
+            if not candidate or "*" in candidate:
+                raise ValueError("HTTP allowed hosts must be exact hostnames")
+            parsed = urlsplit(f"//{candidate}")
+            if (
+                parsed.hostname is None
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("HTTP allowed hosts must be hostnames without a path")
+            try:
+                _ = parsed.port
+            except ValueError as error:
+                raise ValueError("HTTP allowed hosts must use a valid port") from error
+            hostname = parsed.hostname.lower()
+            hosts.append(hostname)
+        if len(set(hosts)) != len(hosts):
+            raise ValueError("HTTP allowed hosts must be unique")
+        return tuple(hosts)

@@ -20,6 +20,7 @@ class ErrorCode(StrEnum):
     QUERY_OFFSET_LIMIT = "query_offset_limit"
     QUERY_EXECUTION_FAILED = "query_execution_failed"
     QUERY_RESULT_TOO_WIDE = "query_result_too_wide"
+    ROW_TOO_LARGE = "row_too_large"
     STORAGE_UNAVAILABLE = "storage_unavailable"
     WORKER_FAILED = "worker_failed"
     WORKER_PROTOCOL_INVALID = "worker_protocol_invalid"

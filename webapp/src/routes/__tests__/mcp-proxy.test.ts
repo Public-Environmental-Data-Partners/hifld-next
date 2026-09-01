@@ -4,6 +4,25 @@ import { mcpProxyHandler } from "../mcp";
 type McpFetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 describe("same-origin MCP transport proxy", () => {
+  it("rejects a hostile browser Origin without contacting the MCP service", async () => {
+    const fetcher = vi.fn<McpFetcher>();
+    const response = await mcpProxyHandler(
+      new Request("https://web.example.test/mcp", {
+        method: "POST",
+        headers: { Origin: "https://evil.example.test" },
+        body: '{"jsonrpc":"2.0"}',
+      }),
+      { baseUrl: "http://dataset-mcp.internal:8000", fetcher },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      code: "origin_forbidden",
+      message: "The request origin is not allowed.",
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("forwards only Streamable HTTP request headers to the fixed upstream MCP path", async () => {
     const fetcher = vi.fn<McpFetcher>().mockResolvedValue(new Response("ok"));
     const response = await mcpProxyHandler(
@@ -28,7 +47,7 @@ describe("same-origin MCP transport proxy", () => {
 
     expect(response.status).toBe(200);
     const [input, init] = fetcher.mock.calls[0] ?? [];
-    expect(input).toBe("http://dataset-mcp.internal:8000/mcp/?cursor=next");
+    expect(input).toBe("http://dataset-mcp.internal:8000/mcp?cursor=next");
     expect(init?.method).toBe("POST");
     expect(init?.signal?.aborted).toBe(false);
     const forwardedHeaders = new Headers(init?.headers);

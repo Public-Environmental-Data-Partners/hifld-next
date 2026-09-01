@@ -81,12 +81,15 @@ class SourceResolver:
         storage_uris = _unique_non_empty(candidate.storage_uri for candidate in grouped_sources)
         metadata_object_paths = metadata.object_paths if metadata is not None else ()
         object_paths = _unique_non_empty(metadata_object_paths or ())
-        if glob_patterns:
+        storage_config = source.storage_location.config
+        concrete_storage_uris = [uri for uri in storage_uris if not _contains_glob(uri)]
+        concrete_object_paths = [path for path in object_paths if not _contains_glob(path)]
+        if concrete_storage_uris:
+            paths = concrete_storage_uris
+        elif concrete_object_paths:
+            paths = concrete_object_paths
+        elif glob_patterns and storage_config.type == "seaweedfs":
             paths = glob_patterns
-        elif storage_uris:
-            paths = storage_uris
-        elif object_paths:
-            paths = object_paths
         else:
             raise CatalogClientError(
                 "source_location_invalid", "catalog source has no trusted storage URI"
@@ -96,7 +99,7 @@ class SourceResolver:
             version=str(source.version),
             format_type=entry.format.format_type,
             storage_location_slug=source.storage_location.slug,
-            storage_config=source.storage_location.config,
+            storage_config=storage_config,
             object_uris=tuple(paths),
             bbox=_metadata_bounds(source),
             crs=metadata.crs if metadata is not None else None,
@@ -110,3 +113,7 @@ def _unique_non_empty(values: Iterable[str | None]) -> list[str]:
         if isinstance(value, str) and value and value not in result:
             result.append(value)
     return result
+
+
+def _contains_glob(value: str) -> bool:
+    return any(character in value for character in "*?[")

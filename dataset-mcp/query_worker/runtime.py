@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from secrets import token_hex
@@ -11,6 +12,7 @@ import duckdb
 from sqlglot import exp, parse_one
 
 from app.query.serialization import (
+    RowTooLargeError,
     serialize_rows,
 )
 from query_worker.metrics import init_connection, measure
@@ -59,6 +61,7 @@ def get_connection(config: WorkerRuntimeConfig) -> duckdb.DuckDBPyConnection:
         connection.execute("SET threads = ?", [config.threads])
         connection.execute("SET memory_limit = ?", [config.memory_limit])
         connection.execute("SET temp_directory = ?", [str(temp_directory)])
+        connection.execute("SET max_temp_directory_size = ?", [config.max_temp_directory_size])
         init_connection(
             connection,
             temp_directory=temp_directory,
@@ -73,10 +76,17 @@ def get_connection(config: WorkerRuntimeConfig) -> duckdb.DuckDBPyConnection:
 
 def _rewrite_source_aliases(sql: str, aliases: dict[str, str]) -> str:
     expression = parse_one(sql, dialect="duckdb")
+    normalized_aliases = {alias.casefold(): name for alias, name in aliases.items()}
+    cte_names = {
+        cte.alias_or_name.casefold() for cte in expression.find_all(exp.CTE) if cte.alias_or_name
+    }
     for table in expression.find_all(exp.Table):
         if table.db or table.catalog:
             continue
-        internal_name = aliases.get(table.name)
+        table_name = table.name.casefold()
+        if table_name in cte_names:
+            continue
+        internal_name = normalized_aliases.get(table_name)
         if internal_name is not None:
             table.set("this", exp.to_identifier(internal_name, quoted=True))
     return expression.sql(dialect="duckdb")
@@ -170,24 +180,31 @@ class WorkerRuntime:
             ) as mutable_metrics:
                 cursor = self.connection.execute(bounded_sql, [request.limit + 1, request.offset])
                 raw_description = cast(list[tuple[object, ...]], cursor.description)
-                raw_rows = cast(list[tuple[object, ...]], cursor.fetchall())
+
+                def rows() -> Iterator[tuple[object, ...]]:
+                    while True:
+                        row = cursor.fetchone()
+                        if row is None:
+                            return
+                        yield cast(tuple[object, ...], row)
+
+                columns = tuple((str(item[0]), str(item[1])) for item in raw_description)
+                if len(columns) > self._config.max_columns:
+                    return WorkerFailure(
+                        code="query_result_too_wide",
+                        message="The query returned too many columns",
+                    )
+                serialized = serialize_rows(
+                    columns=columns,
+                    rows=rows(),
+                    offset=request.offset,
+                    requested_limit=request.limit,
+                    deterministic_order=request.deterministic_order,
+                    max_cell_bytes=request.max_cell_bytes or self._config.max_cell_bytes,
+                    max_result_bytes=request.max_result_bytes or self._config.max_result_bytes,
+                )
             metrics = mutable_metrics.snapshot()
 
-            columns = tuple((str(item[0]), str(item[1])) for item in raw_description)
-            if len(columns) > self._config.max_columns:
-                return WorkerFailure(
-                    code="query_result_too_wide",
-                    message="The query returned too many columns",
-                )
-            serialized = serialize_rows(
-                columns=columns,
-                rows=raw_rows,
-                offset=request.offset,
-                requested_limit=request.limit,
-                deterministic_order=request.deterministic_order,
-                max_cell_bytes=request.max_cell_bytes or self._config.max_cell_bytes,
-                max_result_bytes=request.max_result_bytes or self._config.max_result_bytes,
-            )
             return WorkerPage(
                 columns=tuple((name, logical_type, True) for name, logical_type in columns),
                 rows=serialized.rows,
@@ -200,6 +217,11 @@ class WorkerRuntime:
                 next_offset=serialized.next_offset,
                 response_truncated=serialized.response_truncated,
                 deterministic_order=serialized.deterministic_order,
+            )
+        except RowTooLargeError:
+            return WorkerFailure(
+                code="row_too_large",
+                message="A result row exceeds the response size limit",
             )
         except duckdb.OutOfMemoryException:
             return WorkerFailure(

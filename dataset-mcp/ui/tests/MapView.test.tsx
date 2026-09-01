@@ -247,10 +247,10 @@ const selectableFeature = (
   overrides: Partial<MockRenderedFeature> = {},
 ): MockRenderedFeature => ({
   id: 7,
-  source: "hifld-query-0",
+  source: "hifld-query-roadsquery1234567890ABCD",
   sourceLayer: "hifld",
   geometry: { type: "Point", coordinates: [-77, 39] },
-  layer: { id: "hifld-query-0-points" },
+  layer: { id: "hifld-query-roadsquery1234567890ABCD-points" },
   properties: {
     name: "Route 1",
     __hifld_feature_key: "road-7",
@@ -380,30 +380,38 @@ describe("MapView", () => {
   it("renders sources and geometry layers in query order", () => {
     render(<MapView {...baseProps} />);
 
-    expect(mapAddSource).toHaveBeenNthCalledWith(2, "hifld-query-0", {
-      type: "vector",
-      tiles: [baseConfiguration.layers[0]?.tile_url],
-      minzoom: 0,
-      maxzoom: 22,
-    });
-    expect(mapAddSource).toHaveBeenNthCalledWith(3, "hifld-query-1", {
-      type: "vector",
-      tiles: [baseConfiguration.layers[1]?.tile_url],
-      minzoom: 0,
-      maxzoom: 22,
-    });
+    expect(mapAddSource).toHaveBeenNthCalledWith(
+      2,
+      "hifld-query-roadsquery1234567890ABCD",
+      {
+        type: "vector",
+        tiles: [baseConfiguration.layers[0]?.tile_url],
+        minzoom: 0,
+        maxzoom: 22,
+      },
+    );
+    expect(mapAddSource).toHaveBeenNthCalledWith(
+      3,
+      "hifld-query-bridgesquery123456789AB",
+      {
+        type: "vector",
+        tiles: [baseConfiguration.layers[1]?.tile_url],
+        minzoom: 0,
+        maxzoom: 22,
+      },
+    );
     expect(mapAddLayer).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: "hifld-query-0-polygons",
-        source: "hifld-query-0",
+        id: "hifld-query-roadsquery1234567890ABCD-polygons",
+        source: "hifld-query-roadsquery1234567890ABCD",
         paint: expect.objectContaining({ "fill-color": "#2166ac" }),
       }),
       "place-label",
     );
     expect(mapAddLayer).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: "hifld-query-1-points",
-        source: "hifld-query-1",
+        id: "hifld-query-bridgesquery123456789AB-points",
+        source: "hifld-query-bridgesquery123456789AB",
         layout: { visibility: "none" },
       }),
       "place-label",
@@ -416,7 +424,7 @@ describe("MapView", () => {
     render(<MapView {...baseProps} />);
 
     expect(mapAddSource).toHaveBeenCalledWith(
-      "hifld-query-0",
+      "hifld-query-roadsquery1234567890ABCD",
       expect.objectContaining({ type: "vector" }),
     );
     expect(screen.queryByText("Loading map…")).not.toBeInTheDocument();
@@ -461,14 +469,14 @@ describe("MapView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Hide Roads" }));
     expect(mapSetLayoutProperty).toHaveBeenCalledWith(
-      "hifld-query-0-points",
+      "hifld-query-roadsquery1234567890ABCD-points",
       "visibility",
       "none",
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Show Bridges" }));
     expect(mapSetLayoutProperty).toHaveBeenCalledWith(
-      "hifld-query-1-points",
+      "hifld-query-bridgesquery123456789AB-points",
       "visibility",
       "visible",
     );
@@ -503,12 +511,12 @@ describe("MapView", () => {
     );
 
     expect(mapSetPaintProperty).toHaveBeenCalledWith(
-      "hifld-query-0-points",
+      "hifld-query-roadsquery1234567890ABCD-points",
       "circle-color",
       expect.arrayContaining(["match"]),
     );
     expect(mapSetPaintProperty).toHaveBeenCalledWith(
-      "hifld-query-0-points",
+      "hifld-query-roadsquery1234567890ABCD-points",
       "circle-radius",
       expect.arrayContaining(["interpolate"]),
     );
@@ -520,10 +528,10 @@ describe("MapView", () => {
     mapQueryRenderedFeatures.mockReturnValue([
       {
         id: 8,
-        source: "hifld-query-1",
+        source: "hifld-query-bridgesquery123456789AB",
         sourceLayer: "hifld",
         geometry: { type: "Point", coordinates: [-78, 38] },
-        layer: { id: "hifld-query-1-points" },
+        layer: { id: "hifld-query-bridgesquery123456789AB-points" },
         properties: {
           name: "Bay Bridge",
           __hifld_feature_key: "bridge-8",
@@ -729,18 +737,18 @@ describe("MapView", () => {
     mapQueryRenderedFeatures.mockReturnValue([
       {
         id: 7,
-        source: "hifld-query-0",
+        source: "hifld-query-roadsquery1234567890ABCD",
         sourceLayer: "hifld",
         geometry: { type: "Point", coordinates: [-77, 39] },
-        layer: { id: "hifld-query-0-points" },
+        layer: { id: "hifld-query-roadsquery1234567890ABCD-points" },
         properties: { name: "Route 1", __hifld_feature_key: "road-7" },
       },
       {
         id: 8,
-        source: "hifld-query-1",
+        source: "hifld-query-bridgesquery123456789AB",
         sourceLayer: "hifld",
         geometry: { type: "Point", coordinates: [-78, 38] },
-        layer: { id: "hifld-query-1-points" },
+        layer: { id: "hifld-query-bridgesquery123456789AB-points" },
         properties: { name: "Bay Bridge", __hifld_feature_key: "bridge-8" },
       },
     ]);
@@ -801,7 +809,11 @@ describe("MapView", () => {
         [10, 20],
         [30, 40],
       ],
-      { layers: expect.arrayContaining(["hifld-query-0-points"]) },
+      {
+        layers: expect.arrayContaining([
+          "hifld-query-roadsquery1234567890ABCD-points",
+        ]),
+      },
     );
     expect(mapSetData).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -904,10 +916,10 @@ describe("MapView", () => {
     mapQueryRenderedFeatures.mockReturnValue([
       {
         id: 7,
-        source: "hifld-query-0",
+        source: "hifld-query-roadsquery1234567890ABCD",
         sourceLayer: "hifld",
         geometry: { type: "Point", coordinates: [-77, 39] },
-        layer: { id: "hifld-query-0-points" },
+        layer: { id: "hifld-query-roadsquery1234567890ABCD-points" },
         properties: { name: "Route 1", __hifld_feature_key: "road-7" },
       },
     ]);
@@ -944,10 +956,10 @@ describe("MapView", () => {
     mapQueryRenderedFeatures.mockReturnValue([
       {
         id: 7,
-        source: "hifld-query-0",
+        source: "hifld-query-roadsquery1234567890ABCD",
         sourceLayer: "hifld",
         geometry: { type: "Point", coordinates: [-77, 39] },
-        layer: { id: "hifld-query-0-points" },
+        layer: { id: "hifld-query-roadsquery1234567890ABCD-points" },
         properties: { name: "Route 1", __hifld_feature_key: "road-7" },
       },
     ]);
@@ -986,10 +998,10 @@ describe("MapView", () => {
     mapQueryRenderedFeatures.mockReturnValue([
       {
         id: 7,
-        source: "hifld-query-0",
+        source: "hifld-query-roadsquery1234567890ABCD",
         sourceLayer: "hifld",
         geometry: { type: "Point", coordinates: [-77, 39] },
-        layer: { id: "hifld-query-0-points" },
+        layer: { id: "hifld-query-roadsquery1234567890ABCD-points" },
         properties: { name: "Route 1", __hifld_feature_key: "road-7" },
       },
     ]);
@@ -1040,10 +1052,10 @@ describe("MapView", () => {
     mapQueryRenderedFeatures.mockReturnValue([
       {
         id: 7,
-        source: "hifld-query-0",
+        source: "hifld-query-roadsquery1234567890ABCD",
         sourceLayer: "hifld",
         geometry: { type: "Point", coordinates: [-77, 39] },
-        layer: { id: "hifld-query-0-points" },
+        layer: { id: "hifld-query-roadsquery1234567890ABCD-points" },
         properties: { name: "Route 1", __hifld_feature_key: "road-7" },
       },
     ]);
@@ -1100,10 +1112,10 @@ describe("MapView", () => {
     mapQueryRenderedFeatures.mockReturnValue([
       {
         id: 7,
-        source: "hifld-query-0",
+        source: "hifld-query-roadsquery1234567890ABCD",
         sourceLayer: "hifld",
         geometry: { type: "Point", coordinates: [-77, 39] },
-        layer: { id: "hifld-query-0-points" },
+        layer: { id: "hifld-query-roadsquery1234567890ABCD-points" },
         properties: { name: "Route 1", __hifld_feature_key: "road-7" },
       },
     ]);
@@ -1140,10 +1152,10 @@ describe("MapView", () => {
     mapQueryRenderedFeatures.mockReturnValue([
       {
         id: 7,
-        source: "hifld-query-0",
+        source: "hifld-query-roadsquery1234567890ABCD",
         sourceLayer: "hifld",
         geometry: { type: "Point", coordinates: [-77, 39] },
-        layer: { id: "hifld-query-0-points" },
+        layer: { id: "hifld-query-roadsquery1234567890ABCD-points" },
         properties: { name: "Route 1", __hifld_feature_key: "road-7" },
       },
     ]);
@@ -1182,10 +1194,10 @@ describe("MapView", () => {
     mapQueryRenderedFeatures.mockReturnValue([
       {
         id: 7,
-        source: "hifld-query-0",
+        source: "hifld-query-roadsquery1234567890ABCD",
         sourceLayer: "hifld",
         geometry: { type: "Point", coordinates: [-77, 39] },
-        layer: { id: "hifld-query-0-points" },
+        layer: { id: "hifld-query-roadsquery1234567890ABCD-points" },
         properties: { name: "Route 1", __hifld_feature_key: "road-7" },
       },
     ]);
@@ -1230,10 +1242,10 @@ describe("MapView", () => {
     mapQueryRenderedFeatures.mockReturnValue([
       {
         id: 7,
-        source: "hifld-query-0",
+        source: "hifld-query-roadsquery1234567890ABCD",
         sourceLayer: "hifld",
         geometry: { type: "Point", coordinates: [-77, 39] },
-        layer: { id: "hifld-query-0-points" },
+        layer: { id: "hifld-query-roadsquery1234567890ABCD-points" },
         properties: { name: "Route 1", __hifld_feature_key: "road-7" },
       },
     ]);

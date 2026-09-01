@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import { devtools } from "@tanstack/devtools-vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
@@ -18,6 +19,9 @@ const config = defineConfig(({ mode }) => ({
   // Shared source packages declare React as a peer. Resolve that peer from
   // this application even when npm links the package outside this directory.
   resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
     dedupe: ["lucide-react", "react", "react-dom"],
   },
   // Nitro's node_modules trace copies only part of this package (e.g. dist/index.mjs),

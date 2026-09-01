@@ -1,5 +1,8 @@
 """Typed client for the internal dataset catalog API."""
 
+import re
+from urllib.parse import quote
+
 import httpx
 from pydantic import BaseModel, ValidationError
 
@@ -25,6 +28,16 @@ class CatalogClientError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(f"{code}: {message}")
         self.code = code
+
+
+_SLUG_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
+
+
+def _path_slug(value: str, field: str) -> str:
+    """Validate a catalog slug before putting it in a single URL path segment."""
+    if not _SLUG_PATTERN.fullmatch(value) or value in {".", ".."}:
+        raise CatalogClientError("catalog_identity_invalid", f"{field} identity is invalid")
+    return quote(value, safe="")
 
 
 class CatalogClient:
@@ -96,11 +109,12 @@ class CatalogClient:
         return DatasetPage.model_validate(model)
 
     async def get_dataset(self, collection: int | str, dataset: int | str) -> DatasetWithFiles:
+        dataset_path = str(dataset) if isinstance(dataset, int) else _path_slug(dataset, "dataset")
         resolved = await self.resolve_collection(collection)
         path = (
-            f"/api/collections/{resolved.id}/datasets/{dataset}/files"
+            f"/api/collections/{resolved.id}/datasets/{dataset_path}/files"
             if isinstance(dataset, int)
-            else f"/api/collections/{resolved.id}/datasets/by-slug/{dataset}/files"
+            else (f"/api/collections/{resolved.id}/datasets/by-slug/{dataset_path}/files")
         )
         model = await self._get_model(path, DatasetWithFiles)
         return DatasetWithFiles.model_validate(model)
@@ -108,11 +122,15 @@ class CatalogClient:
     async def get_dataset_file(
         self, collection: int | str, dataset: int | str, file: int | str
     ) -> DatasetFileResponse:
+        dataset_path = str(dataset) if isinstance(dataset, int) else _path_slug(dataset, "dataset")
+        file_path = str(file) if isinstance(file, int) else _path_slug(file, "file")
         resolved = await self.resolve_collection(collection)
         if isinstance(dataset, int):
-            path = f"/api/collections/{resolved.id}/datasets/{dataset}/files/{file}"
+            path = f"/api/collections/{resolved.id}/datasets/{dataset}/files/{file_path}"
         else:
-            path = f"/api/collections/{resolved.id}/datasets/by-slug/{dataset}/files/{file}"
+            path = (
+                f"/api/collections/{resolved.id}/datasets/by-slug/{dataset_path}/files/{file_path}"
+            )
         model = await self._get_model(path, DatasetFilePayload)
         payload = DatasetFilePayload.model_validate(model)
         return DatasetFileResponse(

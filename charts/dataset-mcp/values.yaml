@@ -12,12 +12,14 @@ env: []
 secretEnv: []
 catalog: {baseUrl: ""}
 publicOrigin: ""
+webappOrigins: []
+http: {allowedHosts: []}
 tokenSecret: {name: dataset-mcp-secrets, key: query-token-secret}
 storage:
   allowedCidrs: []
   allowedPorts: [443]
 resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "2", memory: 2Gi}}
-spill: {sizeLimit: 4Gi}
+spill: {duckdbLimit: 3GiB, sizeLimit: 4Gi}
 securityContext: {runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
 podSecurityContext: {seccompProfile: {type: RuntimeDefault}}
 ingress:

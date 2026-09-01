@@ -2,7 +2,9 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from app.query.serialization import encode_cell, serialize_rows
+import pytest
+
+from app.query.serialization import RowTooLargeError, encode_cell, serialize_rows
 
 
 def test_encode_cell_preserves_json_values_and_types_special_values() -> None:
@@ -92,3 +94,38 @@ def test_serialize_rows_omits_next_offset_at_end() -> None:
 
     assert page.has_more is False
     assert page.next_offset is None
+
+
+def test_serialize_rows_rejects_row_that_cannot_fit_result_cap() -> None:
+    with pytest.raises(RowTooLargeError):
+        serialize_rows(
+            columns=(("value", "VARCHAR"),),
+            rows=[("x" * 100,)],
+            offset=4,
+            requested_limit=1,
+            deterministic_order=False,
+            max_result_bytes=1,
+        )
+
+
+def test_serialize_rows_consumes_lazily_after_response_budget() -> None:
+    fetched = 0
+
+    def rows():
+        nonlocal fetched
+        for value in (1, 2, 3, 4):
+            fetched += 1
+            yield (value,)
+
+    first_row_bytes = len(b'{"value":1}')
+    page = serialize_rows(
+        columns=(("value", "INTEGER"),),
+        rows=rows(),
+        offset=0,
+        requested_limit=3,
+        deterministic_order=False,
+        max_result_bytes=first_row_bytes,
+    )
+
+    assert page.rows == (({"value": 1}),)
+    assert fetched == 2

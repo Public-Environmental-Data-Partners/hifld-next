@@ -1,14 +1,14 @@
 # Multi-stage build for webapp
 FROM node:22-slim AS builder
 
-# Keep the app's source tree under a stable workspace path so the local
-# Shared package dependencies resolve from the repository-root context.
-WORKDIR /workspace/webapp
+WORKDIR /workspace
 
 # Copy package files first (for better layer caching)
-COPY packages/map-core /workspace/packages/map-core
-COPY packages/map-ui /workspace/packages/map-ui
-COPY webapp/package.json webapp/package-lock.json ./
+COPY package.json package-lock.json ./
+COPY packages/map-core/package.json ./packages/map-core/
+COPY packages/map-ui/package.json ./packages/map-ui/
+COPY dataset-mcp/ui/package.json ./dataset-mcp/ui/
+COPY webapp/package.json ./webapp/
 
 # Install ALL dependencies (dev + prod). ARG/ENV NODE_ENV must NOT be set to production
 # before this step — npm skips devDependencies when NODE_ENV=production, which breaks
@@ -20,10 +20,12 @@ ARG NODE_ENV=production
 
 ENV NODE_ENV=${NODE_ENV}
 
-# Copy source code
-COPY webapp/ ./
+# Copy source code after the cached dependency layer.
+COPY packages/map-core ./packages/map-core
+COPY packages/map-ui ./packages/map-ui
+COPY webapp/ ./webapp
 
-RUN npm run build
+RUN npm run --workspace webapp build
 
 # Production stage
 FROM node:22-slim

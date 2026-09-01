@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  MAX_QUERY_BODY_BYTES,
+  MAX_QUERY_SQL_BYTES,
   QueryApiError,
   QueryPageSchema,
+  QueryRequestSchema,
   QueryResultSchema,
   createQuery,
   getQueryPage,
@@ -33,6 +36,17 @@ const page = {
 };
 
 describe("query-api", () => {
+  it("rejects SQL larger than the bounded UTF-8 byte limit", () => {
+    expect(MAX_QUERY_SQL_BYTES).toBe(8192);
+    expect(MAX_QUERY_BODY_BYTES).toBeGreaterThan(MAX_QUERY_SQL_BYTES);
+    expect(
+      QueryRequestSchema.safeParse({ sources: [source], sql: "x".repeat(MAX_QUERY_SQL_BYTES + 1), limit: 10 }).success,
+    ).toBe(false);
+    expect(
+      QueryRequestSchema.safeParse({ sources: [source], sql: "é".repeat(Math.floor(MAX_QUERY_SQL_BYTES / 2) + 1), limit: 10 })
+        .success,
+    ).toBe(false);
+  });
   it("posts a typed query to the same-origin create route", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify(page), {

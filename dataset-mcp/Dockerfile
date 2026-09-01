@@ -1,12 +1,16 @@
 # syntax=docker/dockerfile:1.7
 FROM node:22-bookworm-slim AS ui-build
-WORKDIR /workspace/dataset-mcp/ui
-COPY packages/map-core /workspace/packages/map-core
-COPY packages/map-ui /workspace/packages/map-ui
-COPY dataset-mcp/ui/package.json dataset-mcp/ui/package-lock.json ./
+WORKDIR /workspace
+COPY package.json package-lock.json ./
+COPY packages/map-core/package.json ./packages/map-core/
+COPY packages/map-ui/package.json ./packages/map-ui/
+COPY dataset-mcp/ui/package.json ./dataset-mcp/ui/
+COPY webapp/package.json ./webapp/
 RUN npm ci
-COPY dataset-mcp/ui/ ./
-RUN npm run build
+COPY packages/map-core ./packages/map-core
+COPY packages/map-ui ./packages/map-ui
+COPY dataset-mcp/ui ./dataset-mcp/ui
+RUN npm run --workspace @hifld/dataset-mcp-ui build
 
 FROM python:3.12-slim AS python-deps
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy

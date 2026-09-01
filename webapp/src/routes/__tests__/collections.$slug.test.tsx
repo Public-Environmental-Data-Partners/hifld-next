@@ -145,7 +145,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
   })
 
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     vi.mocked(apiClient.getCollectionBySlug).mockResolvedValue(mockCollection)
     vi.mocked(apiClient.getCollectionTagValues).mockResolvedValue({
       categories: ['Boundaries', 'Transportation'],

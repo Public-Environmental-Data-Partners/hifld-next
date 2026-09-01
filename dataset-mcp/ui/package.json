@@ -15,23 +15,23 @@
     "@hifld/map-core": "file:../../packages/map-core",
     "@modelcontextprotocol/ext-apps": "latest",
     "lucide-react": "^0.544.0",
-    "maplibre-gl": "latest",
+    "maplibre-gl": "^6.6.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zod": "latest"
   },
   "devDependencies": {
-    "@biomejs/biome": "latest",
+    "@biomejs/biome": "2.5.11",
     "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
     "@testing-library/user-event": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "@vitejs/plugin-react": "latest",
-    "jsdom": "latest",
-    "typescript": "latest",
-    "vite": "latest",
+    "@vitejs/plugin-react": "^5.0.4",
+    "jsdom": "^27.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^7.1.7",
     "vite-plugin-singlefile": "latest",
-    "vitest": "latest"
+    "vitest": "^3.0.5"
   }
 }
