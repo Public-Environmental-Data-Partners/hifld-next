@@ -31,13 +31,13 @@ Leave `PUBLIC_POSTHOG_KEY` unset to disable analytics. Do not use `VITE_PUBLIC_*
 
 ### WebMCP and query-service configuration
 
-WebMCP is a native browser feature. `WEBMCP_ENABLED=true` enables registration
-only in browsers that support it; the current standard `document.modelContext`
+WebMCP is a native browser feature. Registration is enabled by default only in
+browsers that support it; the current standard `document.modelContext`
 surface is preferred, while native Chrome preview/scanner builds may expose
 `navigator.modelContext` as a fallback. Unsupported browsers keep the ordinary
 webapp behavior without an error or polyfill.
 
-- `WEBMCP_ENABLED` defaults to `false`.
+- `WEBMCP_ENABLED` defaults to enabled; set it to `false` to disable registration.
 - `WEBMCP_ORIGIN_TRIAL_TOKEN` is optional, server-only webapp configuration
   used to emit the native browser Origin-Trial header. Do not expose it through
   runtime client config or commit a production token.

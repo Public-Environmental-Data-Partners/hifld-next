@@ -7,6 +7,19 @@ import viteTsConfigPaths from "vite-tsconfig-paths";
 import { defineConfig } from "vitest/config";
 
 const config = defineConfig(({ mode }) => ({
+  // Keep local development reachable through the same IPv4 URL used by the
+  // dataset API, browser tooling, and generated links. Vite's localhost
+  // default can otherwise bind only to ::1 on macOS.
+  server: {
+    host: "127.0.0.1",
+    port: 3000,
+    strictPort: true,
+  },
+  // Shared source packages declare React as a peer. Resolve that peer from
+  // this application even when npm links the package outside this directory.
+  resolve: {
+    dedupe: ["lucide-react", "react", "react-dom"],
+  },
   // Nitro's node_modules trace copies only part of this package (e.g. dist/index.mjs),
   // while Node's resolver still targets dist/index.cjs from "main" and breaks Docker runtime.
   ssr: {

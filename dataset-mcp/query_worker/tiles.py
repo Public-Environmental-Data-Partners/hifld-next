@@ -15,6 +15,15 @@ from query_worker.protocol import WorkerFailure, WorkerTile, WorkerTileQuery
 
 MAX_TILE_BYTES = 1024 * 1024
 MVT_EXTENT = 4_096
+MVT_FEATURE_ID_COLUMN = "_mcp_feature_id"
+MVT_FEATURE_HASH_COLUMN = "__hifld_feature_hash"
+MVT_FEATURE_KEY_COLUMN = "__hifld_feature_key"
+MVT_CENTROID_LNG_COLUMN = "__hifld_centroid_lng"
+MVT_CENTROID_LAT_COLUMN = "__hifld_centroid_lat"
+MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
+# DuckDB's current spatial extension validates ST_AsMVT feature IDs as int32
+# even when the source column is BIGINT.
+MAX_MVT_FEATURE_ID = 2_147_483_647
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _CRS = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,31}:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -101,10 +110,19 @@ def _is_scalar(logical_type: str) -> bool:
 
 
 def _properties(columns: tuple[tuple[str, str], ...], geometry_column: str) -> tuple[str, ...]:
+    internal_columns = {
+        geometry_column,
+        "bbox",
+        MVT_FEATURE_ID_COLUMN,
+        MVT_FEATURE_HASH_COLUMN,
+        MVT_FEATURE_KEY_COLUMN,
+        MVT_CENTROID_LNG_COLUMN,
+        MVT_CENTROID_LAT_COLUMN,
+    }
     return tuple(
         name
         for name, logical_type in columns
-        if name not in {geometry_column, "bbox"} and _is_scalar(logical_type)
+        if name not in internal_columns and _is_scalar(logical_type)
     )
 
 
@@ -139,15 +157,29 @@ WITH
   limited_features AS (
     SELECT * FROM candidate_features LIMIT {feature_cap}
   ),
+  identified_features AS (
+    SELECT *,
+           hash(source_geometry{hash_separator}{hash_properties}) AS {feature_hash_column},
+           ST_X(ST_Transform(ST_Centroid(source_geometry), {result_crs}, 'EPSG:4326',
+                             always_xy := true)) AS {centroid_lng_column},
+           ST_Y(ST_Transform(ST_Centroid(source_geometry), {result_crs}, 'EPSG:4326',
+                             always_xy := true)) AS {centroid_lat_column}
+    FROM limited_features
+  ),
   f AS (
     SELECT {mvt_properties}{mvt_separator}
+           CAST((({feature_hash_column} & {max_signed_bigint})
+                 % {max_mvt_feature_id}) AS BIGINT) AS {feature_id_column},
+           CAST({feature_hash_column} AS VARCHAR) AS {feature_key_column},
+           {centroid_lng_column},
+           {centroid_lat_column},
            ST_AsMVTGeom(
              ST_Transform(source_geometry, {result_crs}, 'EPSG:3857', always_xy := true),
              ST_Extent((SELECT env FROM tile))
            ) AS geom
-    FROM limited_features
+    FROM identified_features
   )
-SELECT ST_AsMVT(f, 'hifld', 4096, 'geom'),
+SELECT ST_AsMVT(f, 'hifld', 4096, 'geom', {feature_id_literal}),
        (SELECT COUNT(*) FROM candidate_features)
 FROM f WHERE geom IS NOT NULL;
 """
@@ -173,6 +205,8 @@ def build_tile_sql(
 
     properties = _properties(columns, request.geometry_column)
     selected_properties = ", ".join(_quote_identifier(name) for name in properties)
+    hash_properties = ", ".join(_quote_identifier(name) for name in properties)
+    hash_separator = ", " if hash_properties else ""
     predicates: list[str] = []
     if _has_bbox(columns):
         predicates.append(_bbox_bounds_predicate("bbox"))
@@ -193,6 +227,16 @@ def build_tile_sql(
         feature_cap=request.feature_cap,
         mvt_properties=selected_properties,
         mvt_separator="," if selected_properties else "",
+        hash_properties=hash_properties,
+        hash_separator=hash_separator,
+        max_signed_bigint=MAX_SIGNED_BIGINT,
+        max_mvt_feature_id=MAX_MVT_FEATURE_ID,
+        feature_id_column=_quote_identifier(MVT_FEATURE_ID_COLUMN),
+        feature_id_literal=_quote_literal(MVT_FEATURE_ID_COLUMN),
+        feature_hash_column=_quote_identifier(MVT_FEATURE_HASH_COLUMN),
+        feature_key_column=_quote_identifier(MVT_FEATURE_KEY_COLUMN),
+        centroid_lng_column=_quote_identifier(MVT_CENTROID_LNG_COLUMN),
+        centroid_lat_column=_quote_identifier(MVT_CENTROID_LAT_COLUMN),
     )
 
 

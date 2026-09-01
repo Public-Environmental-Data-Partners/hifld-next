@@ -177,6 +177,10 @@ describe("feature selection helpers", () => {
           source: queryLayer.mapSourceId,
           sourceLayer: "hifld",
           id: "row-7",
+          properties: {
+            OBJECTID: 7,
+            __hifld_feature_key: "row-7",
+          },
         }),
       ],
       loadedLayers: [queryLayer],
@@ -192,5 +196,145 @@ describe("feature selection helpers", () => {
     });
     expect(selected[0]).not.toHaveProperty("datasetSlug");
     expect(isComparableFeatureDiffSelection(selected)).toBe(false);
+  });
+
+  it("uses query tile identity and WGS84 centroid metadata while hiding server fields", () => {
+    const queryLayer: LoadedMapLayer = {
+      kind: "query_mvt",
+      id: "query:q-456",
+      name: "Stations query",
+      label: "Stations query",
+      queryId: "q-456",
+      sourceAliases: ["stations"],
+      geometryColumn: "geom",
+      tileTemplate: "https://query.example.test/tiles/{z}/{x}/{y}.mvt",
+      sourceLayerId: "hifld",
+      scalarFields: [],
+      bounds: null,
+      status: "ready",
+      mapSourceId: "source-query-q-456",
+      visible: true,
+      opacity: 0.82,
+    };
+
+    const selected = normalizeSelectedFeatures({
+      features: [
+        feature({
+          source: queryLayer.mapSourceId,
+          sourceLayer: "hifld",
+          id: 1,
+          properties: {
+            NAME: "Station",
+            __hifld_feature_key: "station-42",
+            __hifld_feature_hash: "123",
+            __hifld_centroid_lng: -122.4,
+            __hifld_centroid_lat: 37.8,
+            _mcp_feature_id: 123,
+          },
+          geometry: { type: "Point", coordinates: [10, 20] },
+        }),
+      ],
+      loadedLayers: [queryLayer],
+    });
+
+    expect(selected[0]).toMatchObject({
+      id: "query:q-456:hifld:station-42",
+      featureId: "station-42",
+      centroid: { lng: -122.4, lat: 37.8 },
+      properties: { NAME: "Station" },
+    });
+    expect(selected[0]?.properties).not.toHaveProperty("__hifld_feature_key");
+    expect(selected[0]?.properties).not.toHaveProperty("__hifld_feature_hash");
+    expect(selected[0]?.properties).not.toHaveProperty("__hifld_centroid_lng");
+    expect(selected[0]?.properties).not.toHaveProperty("__hifld_centroid_lat");
+    expect(selected[0]?.properties).not.toHaveProperty("_mcp_feature_id");
+  });
+
+  it("uses point geometry only when query centroid metadata is invalid", () => {
+    const queryLayer: LoadedMapLayer = {
+      kind: "query_mvt",
+      id: "query:q-789",
+      name: "Stations query",
+      label: "Stations query",
+      queryId: "q-789",
+      sourceAliases: ["stations"],
+      geometryColumn: "geom",
+      tileTemplate: "https://query.example.test/tiles/{z}/{x}/{y}.mvt",
+      sourceLayerId: "hifld",
+      scalarFields: [],
+      bounds: null,
+      status: "ready",
+      mapSourceId: "source-query-q-789",
+      visible: true,
+      opacity: 0.82,
+    };
+
+    const selected = normalizeSelectedFeatures({
+      features: [
+        feature({
+          source: queryLayer.mapSourceId,
+          properties: {
+            __hifld_feature_key: "station-43",
+            __hifld_centroid_lng: 181,
+            __hifld_centroid_lat: 37.8,
+          },
+          geometry: { type: "Point", coordinates: [-80, 40] },
+        }),
+      ],
+      loadedLayers: [queryLayer],
+    });
+
+    expect(selected[0]?.centroid).toEqual({ lng: -80, lat: 40 });
+
+    const polygonSelected = normalizeSelectedFeatures({
+      features: [
+        feature({
+          source: queryLayer.mapSourceId,
+          properties: {
+            __hifld_feature_key: "station-polygon",
+            __hifld_centroid_lng: 181,
+            __hifld_centroid_lat: 37.8,
+          },
+          geometry: {
+            type: "Polygon",
+            coordinates: [[[-80, 40], [-79, 40], [-79, 41], [-80, 40]]],
+          },
+        }),
+      ],
+      loadedLayers: [queryLayer],
+    });
+    expect(polygonSelected[0]?.centroid).toBeNull();
+  });
+
+  it("does not select query features without the server feature key", () => {
+    const queryLayer: LoadedMapLayer = {
+      kind: "query_mvt",
+      id: "query:q-missing-key",
+      name: "Stations query",
+      label: "Stations query",
+      queryId: "q-missing-key",
+      sourceAliases: ["stations"],
+      geometryColumn: "geom",
+      tileTemplate: "https://query.example.test/tiles/{z}/{x}/{y}.mvt",
+      sourceLayerId: "hifld",
+      scalarFields: [],
+      bounds: null,
+      status: "ready",
+      mapSourceId: "source-query-q-missing-key",
+      visible: true,
+      opacity: 0.82,
+    };
+
+    expect(
+      normalizeSelectedFeatures({
+        features: [
+          feature({
+            source: queryLayer.mapSourceId,
+            properties: { NAME: "Station", __hifld_feature_key: 42 },
+          }),
+        ],
+        loadedLayers: [queryLayer],
+      }),
+    ).toEqual([]);
   });
 });

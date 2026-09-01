@@ -1,11 +1,12 @@
 """Pure catalog discovery tool functions.
 
 The functions in this module deliberately know nothing about FastMCP.  The
-assembly layer can expose their ``ToolResult`` values to both model and app.
+assembly layer decides how their ``ToolResult`` values are exposed.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -18,8 +19,6 @@ type JSONMapping = Mapping[str, JSONValue]
 class ToolResult:
     text: str
     structured_content: JSONMapping
-    visibility: tuple[str, str] = ("model", "app")
-    resource_uri: str = "ui://hifld/dataset-explorer.html"
 
 
 class CatalogClient(Protocol):
@@ -36,7 +35,8 @@ class CatalogClient(Protocol):
 
 
 def _result(label: str, payload: JSONMapping) -> ToolResult:
-    return ToolResult(text=f"{label}: {len(payload)} metadata fields", structured_content=payload)
+    text_payload = json.dumps(dict(payload), ensure_ascii=False, separators=(",", ":"))
+    return ToolResult(text=f"{label}:\n{text_payload}", structured_content=payload)
 
 
 def _strip_columns(value: JSONValue) -> JSONValue:

@@ -1,3 +1,9 @@
+import type { BasemapMode } from "@hifld/map-core";
+import {
+  ESRI_WORLD_IMAGERY_TILE_URL,
+  selectionBoxFeature as mapCoreSelectionBoxFeature,
+  OPENFREEMAP_BRIGHT_STYLE_URL,
+} from "@hifld/map-core";
 import maplibregl from "maplibre-gl";
 import { type RefObject, useCallback, useEffect, useRef } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -81,7 +87,7 @@ function numericFieldSummaries({
 }
 
 export type FeatureSelectionMode = "replace" | "append";
-export type BasemapMode = "street" | "satellite";
+export type { BasemapMode } from "@hifld/map-core";
 
 interface SelectionLngLat {
   lng: number;
@@ -95,7 +101,6 @@ type PopupLngLat = NonNullable<HoverInfo["lngLat"]>;
 const SELECTION_BOX_SOURCE_ID = "selection-box-source";
 const SELECTION_BOX_FILL_LAYER_ID = "selection-box-fill";
 const SELECTION_BOX_LINE_LAYER_ID = "selection-box-line";
-const OPENMAPTILES_STYLE_URL = "https://tiles.openfreemap.org/styles/bright";
 const OPENMAPTILES_SOURCE_IDS = new Set(["openmaptiles", "openfreemap"]);
 const STREET_BASE_LAYER_ID = "osm-base";
 const STREET_BASE_SOURCE_ID = "osm-tiles";
@@ -118,7 +123,7 @@ function fallbackBasemapStyle(mode: BasemapMode): maplibregl.StyleSpecification 
       },
       [SATELLITE_BASE_SOURCE_ID]: {
         type: "raster",
-        tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+        tiles: [ESRI_WORLD_IMAGERY_TILE_URL],
         tileSize: 256,
         attribution: "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
       },
@@ -353,22 +358,7 @@ function queryRenderedBoxFeatures({
 }
 
 export function selectionBoxFeature(start: SelectionLngLat, end: SelectionLngLat): SelectionBoxFeature {
-  return {
-    type: "Feature",
-    properties: {},
-    geometry: {
-      type: "Polygon",
-      coordinates: [
-        [
-          [start.lng, start.lat],
-          [end.lng, start.lat],
-          [end.lng, end.lat],
-          [start.lng, end.lat],
-          [start.lng, start.lat],
-        ],
-      ],
-    },
-  };
+  return mapCoreSelectionBoxFeature(start, end);
 }
 
 function selectionBoxFeatureCollection(feature: SelectionBoxFeature | null): SelectionBoxFeatureCollection {
@@ -450,52 +440,58 @@ function addRenderedLayersForVectorLayer(
   const circleId = `${baseId}-circle`;
   const visibility = source.visible ? "visible" : "none";
 
-  map.addLayer({
-    id: fillId,
-    type: "fill",
-    source: source.mapSourceId,
-    "source-layer": sourceLayerId,
-    filter: ["==", "$type", "Polygon"],
-    layout: {
-      visibility,
-    },
-    paint: {
-      "fill-color": "#C5E8FF",
-      "fill-opacity": source.opacity,
-    },
-  });
+  if (!map.getLayer(fillId)) {
+    map.addLayer({
+      id: fillId,
+      type: "fill",
+      source: source.mapSourceId,
+      "source-layer": sourceLayerId,
+      filter: ["==", "$type", "Polygon"],
+      layout: {
+        visibility,
+      },
+      paint: {
+        "fill-color": "#C5E8FF",
+        "fill-opacity": source.opacity,
+      },
+    });
+  }
 
-  map.addLayer({
-    id: lineId,
-    type: "line",
-    source: source.mapSourceId,
-    "source-layer": sourceLayerId,
-    filter: ["==", "$type", "LineString"],
-    layout: {
-      visibility,
-    },
-    paint: {
-      "line-color": "#6D6659",
-      "line-opacity": source.opacity,
-      "line-width": DEFAULT_STYLE.lineWidth,
-    },
-  });
+  if (!map.getLayer(lineId)) {
+    map.addLayer({
+      id: lineId,
+      type: "line",
+      source: source.mapSourceId,
+      "source-layer": sourceLayerId,
+      filter: ["==", "$type", "LineString"],
+      layout: {
+        visibility,
+      },
+      paint: {
+        "line-color": "#6D6659",
+        "line-opacity": source.opacity,
+        "line-width": DEFAULT_STYLE.lineWidth,
+      },
+    });
+  }
 
-  map.addLayer({
-    id: circleId,
-    type: "circle",
-    source: source.mapSourceId,
-    "source-layer": sourceLayerId,
-    filter: ["==", "$type", "Point"],
-    layout: {
-      visibility,
-    },
-    paint: {
-      "circle-color": "#C0E6AA",
-      "circle-opacity": source.opacity,
-      "circle-radius": DEFAULT_STYLE.radius,
-    },
-  });
+  if (!map.getLayer(circleId)) {
+    map.addLayer({
+      id: circleId,
+      type: "circle",
+      source: source.mapSourceId,
+      "source-layer": sourceLayerId,
+      filter: ["==", "$type", "Point"],
+      layout: {
+        visibility,
+      },
+      paint: {
+        "circle-color": "#C0E6AA",
+        "circle-opacity": source.opacity,
+        "circle-radius": DEFAULT_STYLE.radius,
+      },
+    });
+  }
 
   return source.visible ? [fillId, lineId, circleId] : [];
 }
@@ -648,14 +644,13 @@ async function loadMapSource(
   source: LoadedMapLayer,
   shouldContinue: () => boolean,
 ): Promise<{ vectorLayers: VectorLayerInfo[]; interactiveLayerIds: string[] } | null> {
-  if (map.getSource(source.mapSourceId)) {
-    return {
-      vectorLayers: [],
-      interactiveLayerIds: syncExistingRenderedLayers(map, source),
-    };
-  }
-
   if (source.kind === "query_mvt") {
+    if (map.getSource(source.mapSourceId)) {
+      return {
+        vectorLayers: [],
+        interactiveLayerIds: syncExistingRenderedLayers(map, source),
+      };
+    }
     const vectorLayers = getVectorLayersForQuerySource(source);
     if (!shouldContinue()) {
       return null;
@@ -667,18 +662,23 @@ async function loadMapSource(
     };
   }
 
+  const sourceAlreadyAdded = map.getSource(source.mapSourceId) !== undefined;
   const pmtiles = new PMTiles(source.pmtilesUrl);
-  protocol?.add(pmtiles);
+  if (!sourceAlreadyAdded) {
+    protocol?.add(pmtiles);
+  }
   const metadata = (await pmtiles.getMetadata()) as PMTilesMetadata;
   if (!shouldContinue()) {
     return null;
   }
   const vectorLayers = getVectorLayersForSource(metadata, source);
 
-  map.addSource(source.mapSourceId, {
-    type: "vector",
-    url: `pmtiles://${source.pmtilesUrl}`,
-  });
+  if (!sourceAlreadyAdded) {
+    map.addSource(source.mapSourceId, {
+      type: "vector",
+      url: `pmtiles://${source.pmtilesUrl}`,
+    });
+  }
 
   return {
     vectorLayers,
@@ -686,7 +686,7 @@ async function loadMapSource(
   };
 }
 
-async function syncLoadedMapSources({
+export async function syncLoadedMapSources({
   map,
   protocol,
   sources,
@@ -731,6 +731,14 @@ async function syncLoadedMapSources({
     layers: nextLayers,
     interactiveLayerIds: nextInteractiveLayerIds,
   };
+}
+
+export function runWhenMapStyleReady(map: maplibregl.Map, callback: () => void): void {
+  if (map.isStyleLoaded()) {
+    callback();
+    return;
+  }
+  map.once("style.load", callback);
 }
 
 export function useMultiLayerMapInitialization(
@@ -873,7 +881,7 @@ export function useMultiLayerMapInitialization(
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: OPENMAPTILES_STYLE_URL,
+      style: OPENFREEMAP_BRIGHT_STYLE_URL,
       center: [-98.5795, 39.8283],
       zoom: 4,
       transformRequest: (url) => {
@@ -1052,11 +1060,7 @@ export function useMultiLayerMapInitialization(
       map.resize();
     };
 
-    if (map.loaded()) {
-      void loadSources();
-      return;
-    }
-    map.once("load", () => {
+    runWhenMapStyleReady(map, () => {
       void loadSources();
     });
     return () => {

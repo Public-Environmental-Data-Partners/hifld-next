@@ -1,8 +1,15 @@
 import { runtimeClientConfigFromEnv } from "../server-runtime-client-config";
 
 describe("runtimeClientConfigFromEnv", () => {
-  it("defaults WebMCP and query tools to disabled", () => {
+  it("exposes catalog WebMCP tools by default without enabling query tools", () => {
     expect(runtimeClientConfigFromEnv({ WEBMCP_ENABLED: undefined })).toMatchObject({
+      webMcpEnabled: true,
+      queryToolsEnabled: false,
+    });
+  });
+
+  it("allows WebMCP registration to be explicitly disabled", () => {
+    expect(runtimeClientConfigFromEnv({ WEBMCP_ENABLED: "false" })).toMatchObject({
       webMcpEnabled: false,
       queryToolsEnabled: false,
     });

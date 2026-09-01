@@ -4,8 +4,6 @@ from urllib.parse import urlsplit
 from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-from app.storage.models import StorageSettings
-
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DATASET_MCP_", extra="forbid")
@@ -28,7 +26,6 @@ class Settings(BaseSettings):
     public_origin: AnyHttpUrl | None = None
     webapp_origins: Annotated[tuple[str, ...], NoDecode] = ()
     max_concurrency: int = Field(default=8, ge=1, le=64)
-    storage_settings: StorageSettings = Field(default_factory=lambda: StorageSettings(profiles={}))
 
     @field_validator("webapp_origins", mode="before")
     @classmethod

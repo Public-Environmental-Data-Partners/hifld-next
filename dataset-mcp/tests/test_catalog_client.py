@@ -47,6 +47,7 @@ async def test_search_resolves_slug_then_uses_numeric_dataset_route() -> None:
 @pytest.mark.asyncio
 async def test_get_dataset_parses_dataset_with_files_route() -> None:
     payload = json.loads((FIXTURES / "dataset.json").read_text())
+    payload["files"][0]["formats"] = [{"format_count": 1}]
     catalog = client_for(
         {
             "/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}],
@@ -57,6 +58,25 @@ async def test_get_dataset_parses_dataset_with_files_route() -> None:
     assert dataset.id == 12
     assert dataset.files is not None
     assert dataset.files[0].id == 99
+    assert dataset.files[0].formats[0].format_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_dataset_file_uses_resolved_collection_when_api_omits_it() -> None:
+    payload = json.loads((FIXTURES / "file_response.json").read_text())
+    payload.pop("collection")
+    catalog = client_for(
+        {
+            "/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}],
+            "/api/collections/3/datasets/by-slug/stations/files/stations-file": payload,
+        }
+    )
+
+    response = await catalog.get_dataset_file("public-safety", "stations", "stations-file")
+
+    assert response.collection.id == 3
+    assert response.dataset.id == 12
+    assert response.file.id == 99
 
 
 @pytest.mark.asyncio

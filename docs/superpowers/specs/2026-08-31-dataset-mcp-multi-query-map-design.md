@@ -8,11 +8,11 @@ the semantic query inputs (`sources` and `sql`) instead of copying opaque query
 tokens between tool calls. The server remains stateless and stores neither
 query definitions nor query results.
 
-The server issues signed query tokens internally and delivers them to the MCP
-App through tool-result `_meta`. MCP Apps defines `_meta` as application
-metadata that is delivered to the view and is not intended for model context.
-The visible tool result contains only non-secret query IDs and presentation
-configuration.
+The server issues signed query tokens internally and returns each token with
+its layer configuration. This avoids an agent copying the opaque token between
+tool calls and avoids depending on hosts forwarding custom tool-result
+metadata. Query tools already expose these signed, scoped tokens, so this does
+not introduce a new credential class into model-visible results.
 
 ## Goals
 
@@ -134,6 +134,7 @@ The structured result contains:
   layers: [
     {
       query_id,
+      query_token,
       layer_name,
       tile_url,
       source_layer,
@@ -147,20 +148,9 @@ The structured result contains:
 }
 ```
 
-The FastMCP result `_meta` contains the application-only token map:
-
-```text
-{
-  "hifld/queryTokens": {
-    "<query_id>": "<signed_query_token>"
-  }
-}
-```
-
-The React app requires both structures and validates them independently with
-strict Zod schemas. It rejects missing tokens, extra tokens, duplicate query
-IDs, invalid URLs, or a token map whose keys do not exactly match the visible
-layers. There is no fallback to a model-visible token.
+The React app validates the single self-contained structure with a strict Zod
+schema. It rejects missing tokens, duplicate query IDs, and invalid URLs. There
+is no secondary token path or server-side token registry.
 
 ## Stateless Tile Routing
 
@@ -227,7 +217,7 @@ required names, or malformed presentation inputs.
 The app shows one bounded error state when:
 
 - tool-result structured content is invalid;
-- application-only token metadata is absent or inconsistent;
+- a layer token is absent or invalid;
 - the worker or tile URL is invalid;
 - a tile returns a stable server error; or
 - MapLibre cannot initialize.
@@ -243,16 +233,15 @@ Server tests cover:
 - one-layer and eight-layer preparation;
 - per-layer SQL validation and map configuration;
 - failure of the complete call when any layer is invalid or non-spatial;
-- concise public results with no tokens;
-- exact app-only `_meta` query-token mapping;
+- concise results with the exact internally issued token on each layer;
 - the query-ID tile route, CORS preflight, missing tokens, and identity
   mismatches;
 - absence of result or query registries.
 
 UI tests cover:
 
-- strict structured-result and `_meta` parsing;
-- rejection of missing, extra, or mismatched token entries;
+- strict self-contained structured-result parsing;
+- rejection of missing layer tokens;
 - one source and three render layers per query layer;
 - deterministic render order and initial visibility;
 - query-ID-to-token request transformation;
@@ -263,13 +252,11 @@ UI tests cover:
 Acceptance includes all existing Python and UI quality gates, a production UI
 build, and a live local MCP smoke test that executes two distinct queries,
 opens one map, and fetches a tile for each layer with the corresponding
-application-only token.
+layer token.
 
 ## Documentation Basis
 
 The [MCP Apps specification](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/draft/apps.mdx)
-describes tool-result `_meta` as metadata delivered to the view and not
-intended for model context. FastMCP's `ToolResult` exposes this as its `meta`
-argument, which serializes to MCP `_meta`. The installed MCP Apps client
-delivers the complete tool result, including `_meta`, through `ontoolresult`,
-consistent with the official [MCP Apps patterns](https://github.com/modelcontextprotocol/ext-apps/blob/main/docs/patterns.md).
+defines `ontoolresult` as the view's tool-result delivery mechanism. The map
+uses standard `structuredContent` because it is the interoperable result field
+forwarded by the deployed hosts under test.

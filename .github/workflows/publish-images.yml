@@ -7,8 +7,11 @@ on:
       - main
     paths:
       - ".github/workflows/publish-images.yml"
+      - ".dockerignore"
       - "dataset-api/**"
       - "dataset-mcp/**"
+      - "packages/map-core/**"
+      - "packages/map-ui/**"
       - "webapp/**"
 
 permissions:
@@ -76,7 +79,7 @@ jobs:
       - name: Build and push webapp
         uses: docker/build-push-action@v6
         with:
-          context: webapp
+          context: .
           file: webapp/Dockerfile
           platforms: linux/amd64
           push: true
@@ -87,7 +90,7 @@ jobs:
       - name: Build and push dataset-mcp
         uses: docker/build-push-action@v6
         with:
-          context: dataset-mcp
+          context: .
           file: dataset-mcp/Dockerfile
           platforms: linux/amd64
           push: true

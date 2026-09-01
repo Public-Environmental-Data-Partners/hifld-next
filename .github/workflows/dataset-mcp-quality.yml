@@ -1,10 +1,10 @@
 name: dataset-mcp quality
 on:
   pull_request:
-    paths: ["dataset-mcp/**", "charts/dataset-mcp/**", ".github/workflows/dataset-mcp-quality.yml", "docs/superpowers/specs/2026-08-29-dataset-mcp-app-server-design.md", "docs/superpowers/plans/2026-08-29-dataset-mcp-app-server.md"]
+    paths: ["dataset-mcp/**", "packages/map-core/**", "packages/map-ui/**", "webapp/**", "charts/dataset-mcp/**", ".github/workflows/dataset-mcp-quality.yml", "docs/superpowers/specs/2026-08-29-dataset-mcp-app-server-design.md", "docs/superpowers/plans/2026-08-29-dataset-mcp-app-server.md", "docs/superpowers/specs/2026-08-31-shared-map-highlighting-design.md", "docs/superpowers/plans/2026-08-31-shared-map-highlighting.md", "docs/superpowers/specs/2026-08-31-shared-selected-features-table-design.md", "docs/superpowers/plans/2026-08-31-shared-selected-features-table.md"]
   push:
     branches: [main]
-    paths: ["dataset-mcp/**", "charts/dataset-mcp/**", ".github/workflows/dataset-mcp-quality.yml", "docs/superpowers/specs/2026-08-29-dataset-mcp-app-server-design.md", "docs/superpowers/plans/2026-08-29-dataset-mcp-app-server.md"]
+    paths: ["dataset-mcp/**", "packages/map-core/**", "packages/map-ui/**", "webapp/**", "charts/dataset-mcp/**", ".github/workflows/dataset-mcp-quality.yml", "docs/superpowers/specs/2026-08-29-dataset-mcp-app-server-design.md", "docs/superpowers/plans/2026-08-29-dataset-mcp-app-server.md", "docs/superpowers/specs/2026-08-31-shared-map-highlighting-design.md", "docs/superpowers/plans/2026-08-31-shared-map-highlighting.md", "docs/superpowers/specs/2026-08-31-shared-selected-features-table-design.md", "docs/superpowers/plans/2026-08-31-shared-selected-features-table.md"]
 jobs:
   python:
     runs-on: ubuntu-latest
@@ -26,6 +26,38 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: {node-version: 22, cache: npm, cache-dependency-path: dataset-mcp/ui/package-lock.json}
+      - run: npm ci
+      - run: npm run check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+  map-core:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: packages/map-core}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm, cache-dependency-path: packages/map-core/package-lock.json}
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+  map-ui:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: packages/map-ui}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm, cache-dependency-path: packages/map-ui/package-lock.json}
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+  webapp:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: webapp}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm, cache-dependency-path: webapp/package-lock.json}
       - run: npm ci
       - run: npm run check
       - run: npm run typecheck

@@ -1,17 +1,19 @@
 # Multi-stage build for webapp
-FROM node:20-slim AS builder
+FROM node:22-slim AS builder
 
-# Set working directory
-WORKDIR /app
+# Keep the app's source tree under a stable workspace path so the local
+# Shared package dependencies resolve from the repository-root context.
+WORKDIR /workspace/webapp
 
 # Copy package files first (for better layer caching)
-COPY package.json ./
-COPY package-lock.json* ./
+COPY packages/map-core /workspace/packages/map-core
+COPY packages/map-ui /workspace/packages/map-ui
+COPY webapp/package.json webapp/package-lock.json ./
 
 # Install ALL dependencies (dev + prod). ARG/ENV NODE_ENV must NOT be set to production
 # before this step — npm skips devDependencies when NODE_ENV=production, which breaks
 # the build because vite.config.ts imports @tanstack/devtools-vite (a devDependency).
-RUN npm install
+RUN npm ci
 
 # Declare build-time args AFTER install so they don't affect the npm install environment.
 ARG NODE_ENV=production
@@ -19,20 +21,20 @@ ARG NODE_ENV=production
 ENV NODE_ENV=${NODE_ENV}
 
 # Copy source code
-COPY . .
+COPY webapp/ ./
 
 RUN npm run build
 
 # Production stage
-FROM node:20-slim
+FROM node:22-slim
 
 # Set working directory
 WORKDIR /app
 
 # Copy built output from builder
 # Nitro outputs to .output directory
-COPY --from=builder /app/.output ./.output
-COPY --from=builder /app/package.json ./
+COPY --from=builder /workspace/webapp/.output ./.output
+COPY --from=builder /workspace/webapp/package.json ./
 
 # Set port environment variable
 ENV PORT=8080

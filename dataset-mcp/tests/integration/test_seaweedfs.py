@@ -5,27 +5,26 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.catalog.models import BucketStorageConfig
 from app.query.models import ResolvedSource
-from app.query.service import worker_profiles_from_storage
-from app.storage.models import SeaweedProfile, StorageSettings
 from app.storage.resolver import StorageResolver
 from query_worker.protocol import (
     WorkerPage,
     WorkerQuery,
     WorkerRuntimeConfig,
+    WorkerSeaweedCredentials,
+    WorkerSeaweedSource,
     WorkerSourceSpec,
 )
 from query_worker.runtime import WorkerRuntime
 
 
 def test_seaweedfs_source_gets_request_scoped_secret_and_path_style() -> None:
-    profile = SeaweedProfile(
+    config = BucketStorageConfig(
         type="seaweedfs",
-        slug="local-seaweed",
+        base_url="http://localhost:8888",
         bucket="datasets",
-        endpoint="http://seaweed-s3:8333",
-        access_key_id="access",
-        secret_access_key="secret",
+        endpoint_url="http://localhost:8333",
     )
     source = ResolvedSource(
         source={
@@ -38,13 +37,14 @@ def test_seaweedfs_source_gets_request_scoped_secret_and_path_style() -> None:
         version="v1",
         format_type="geoparquet",
         storage_location_slug="local-seaweed",
+        storage_config=config,
         object_uris=("s3://datasets/roads.parquet",),
     )
-    spec = StorageResolver(StorageSettings(profiles={"local-seaweed": profile})).resolve(source)
+    spec = StorageResolver().resolve(source)
     assert spec.object_uris == ("s3://datasets/roads.parquet",)
-    assert spec.secret is not None
-    assert spec.secret.endpoint == "http://seaweed-s3:8333"
-    assert spec.secret.url_style == "path"
+    assert spec.seaweedfs is not None
+    assert spec.seaweedfs.endpoint == "localhost:8333"
+    assert spec.seaweedfs.url_style == "path"
 
 
 @pytest.mark.skipif(
@@ -62,16 +62,11 @@ def test_seaweedfs_endpoint_is_reachable_when_explicitly_configured() -> None:
     endpoint = os.environ["HIFLD_TEST_SEAWEED_ENDPOINT"]
     bucket = os.environ["HIFLD_TEST_SEAWEED_BUCKET"]
     object_key = os.environ["HIFLD_TEST_SEAWEED_OBJECT"]
-    settings = StorageSettings(
-        profiles={
-            "local-seaweed": SeaweedProfile(
-                slug="local-seaweed",
-                bucket=bucket,
-                endpoint=endpoint,
-                access_key_id=os.getenv("HIFLD_TEST_SEAWEED_ACCESS_KEY", "access"),
-                secret_access_key=os.getenv("HIFLD_TEST_SEAWEED_SECRET_KEY", "secret"),
-            )
-        }
+    config = BucketStorageConfig(
+        type="seaweedfs",
+        base_url="http://localhost:8888",
+        bucket=bucket,
+        endpoint_url=endpoint,
     )
     source = ResolvedSource(
         source={
@@ -84,16 +79,21 @@ def test_seaweedfs_endpoint_is_reachable_when_explicitly_configured() -> None:
         version="acceptance",
         format_type="geoparquet",
         storage_location_slug="local-seaweed",
+        storage_config=config,
         object_uris=(f"s3://{bucket}/{object_key}",),
     )
-    spec = StorageResolver(settings).resolve(source)
+    spec = StorageResolver().resolve(source)
+    assert spec.seaweedfs is not None
     runtime = WorkerRuntime(
         WorkerRuntimeConfig(
             threads=2,
             memory_limit="512MB",
             temp_directory="/tmp/dataset-mcp-seaweed-acceptance",
             extension_directory=os.getenv("HIFLD_TEST_DUCKDB_EXTENSION_DIRECTORY"),
-            credential_profiles=worker_profiles_from_storage(settings),
+            seaweedfs_credentials=WorkerSeaweedCredentials(
+                access_key_id=os.getenv("HIFLD_TEST_SEAWEED_ACCESS_KEY", "access"),
+                secret_access_key=os.getenv("HIFLD_TEST_SEAWEED_SECRET_KEY", "secret"),
+            ),
         )
     )
     try:
@@ -104,7 +104,11 @@ def test_seaweedfs_endpoint_is_reachable_when_explicitly_configured() -> None:
                     WorkerSourceSpec(
                         alias="dataset",
                         object_uris=spec.object_uris,
-                        profile_slug="local-seaweed",
+                        seaweedfs=WorkerSeaweedSource(
+                            bucket=spec.seaweedfs.bucket,
+                            endpoint=spec.seaweedfs.endpoint,
+                            tls=spec.seaweedfs.tls,
+                        ),
                     ),
                 ),
                 limit=2,

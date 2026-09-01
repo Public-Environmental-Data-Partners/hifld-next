@@ -5,8 +5,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.catalog.models import BucketStorageConfig
 from app.query.models import ResolvedSource
-from app.storage.models import PublicGcsProfile, StorageSettings
 from app.storage.resolver import StorageResolver
 from query_worker.protocol import (
     WorkerPage,
@@ -18,11 +18,7 @@ from query_worker.runtime import WorkerRuntime
 
 
 def test_public_gcs_uri_is_restricted_to_configured_bucket() -> None:
-    resolver = StorageResolver(
-        StorageSettings(
-            profiles={"public": PublicGcsProfile(type="public_gcs", slug="public", bucket="demo")}
-        )
-    )
+    resolver = StorageResolver()
     source = ResolvedSource(
         source={
             "alias": "roads",
@@ -34,11 +30,16 @@ def test_public_gcs_uri_is_restricted_to_configured_bucket() -> None:
         version="v1",
         format_type="geoparquet",
         storage_location_slug="public",
+        storage_config=BucketStorageConfig(
+            type="gcs",
+            base_url="https://storage.googleapis.com/demo",
+            bucket="demo",
+        ),
         object_uris=("gs://demo/roads.parquet",),
     )
     spec = resolver.resolve(source)
     assert spec.object_uris == ("https://storage.googleapis.com/demo/roads.parquet",)
-    assert spec.secret is None
+    assert spec.seaweedfs is None
 
 
 @pytest.mark.skipif(
@@ -50,7 +51,6 @@ def test_public_gcs_uri_is_restricted_to_configured_bucket() -> None:
 def test_public_gcs_object_is_reachable_when_explicitly_configured() -> None:
     bucket = os.environ["HIFLD_TEST_GCS_BUCKET"]
     object_key = os.environ["HIFLD_TEST_GCS_OBJECT"]
-    settings = StorageSettings(profiles={"public": PublicGcsProfile(slug="public", bucket=bucket)})
     source = ResolvedSource(
         source={
             "alias": "dataset",
@@ -62,9 +62,14 @@ def test_public_gcs_object_is_reachable_when_explicitly_configured() -> None:
         version="acceptance",
         format_type="geoparquet",
         storage_location_slug="public",
+        storage_config=BucketStorageConfig(
+            type="gcs",
+            base_url=f"https://storage.googleapis.com/{bucket}",
+            bucket=bucket,
+        ),
         object_uris=(f"gs://{bucket}/{object_key}",),
     )
-    spec = StorageResolver(settings).resolve(source)
+    spec = StorageResolver().resolve(source)
     runtime = WorkerRuntime(
         WorkerRuntimeConfig(
             threads=2,

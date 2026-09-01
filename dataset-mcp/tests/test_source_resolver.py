@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from app.catalog.models import DatasetFileResponse, QuerySourceRef, StorageLocation
+from app.catalog.models import (
+    BucketStorageConfig,
+    DatasetFileResponse,
+    QuerySourceRef,
+    StorageLocation,
+)
 from app.catalog.source_resolver import SourceResolver
 
 FIXTURE = Path(__file__).parent / "contract_fixtures" / "file_response.json"
@@ -44,7 +49,15 @@ def _response_with_sources(
     response = DatasetFileResponse.model_validate_json(FIXTURE.read_text())
     source = response.file.formats[0].sources[0]
     source.storage_location = StorageLocation(
-        id=3, slug="public-gcs", name="Public GCS", backend_type="s3"
+        id=3,
+        slug="public-gcs",
+        name="Public GCS",
+        backend_type="s3",
+        config=BucketStorageConfig(
+            type="gcs",
+            base_url="https://storage.googleapis.com/catalog",
+            bucket="catalog",
+        ),
     )
     source.glob_pattern = glob_pattern
     source.storage_uri = storage_uris[0]
@@ -68,6 +81,7 @@ async def test_resolver_groups_expanded_sources_and_prefers_glob_pattern() -> No
         QuerySourceRef(collection_id=1, dataset_id=12, file_id=99, file_source_id=88, alias="roads")
     )
     assert resolved.object_uris == ("s3://catalog/roads/**/*.parquet",)
+    assert resolved.storage_config.type == "gcs"
 
 
 @pytest.mark.asyncio

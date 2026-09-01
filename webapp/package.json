@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev --port 3000",
+    "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -17,6 +17,8 @@
     "quality": "npm run check && npm run typecheck && npm test"
   },
   "dependencies": {
+    "@hifld/map-core": "file:../packages/map-core",
+    "@hifld/map-ui": "file:../packages/map-ui",
     "@asteasolutions/zod-to-openapi": "^8.5.0",
     "@fontsource-variable/figtree": "^5.2.10",
     "@fontsource-variable/inter": "^5.2.8",

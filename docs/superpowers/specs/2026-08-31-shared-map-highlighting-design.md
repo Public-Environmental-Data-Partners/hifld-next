@@ -20,6 +20,9 @@ behavior.
   tile URLs, SQL, or complete geometries.
 - The snapshot is capped at 100 features per rendered query layer, matching the
   webapp. Capping is explicit in both the UI and context payload.
+- Query tiles derive a stable content key and WGS84 centroid from the complete
+  source feature before clipping. Those reserved MVT fields are consumed and
+  removed by the UI; there is no client-side geometry-hash identity fallback.
 - Context updates use text and structured content when the host advertises those
   modalities. Unsupported or rejected updates do not break selection and are
   reported as a small status message.
@@ -53,11 +56,14 @@ package and would broaden this change considerably.
    as the webapp.
 2. Rendered features are mapped back to `MapLayerConfiguration` through their
    `hifld-query-{index}` source and render-layer ID.
-3. Features are deduplicated, normalized, and capped per query layer.
-4. React updates the visible selection summary and feature details.
-5. A dedicated context adapter inspects `app.getHostCapabilities()` and calls
+3. The tile encoder supplies a stable server-derived content key, MVT feature
+   ID, and unclipped WGS84 centroid through reserved internal properties.
+4. Features are deduplicated by the stable key, normalized, stripped of the
+   internal properties, and capped per query layer.
+5. React updates the visible selection summary and feature details.
+6. A dedicated context adapter inspects `app.getHostCapabilities()` and calls
    `app.updateModelContext()` with the latest full snapshot.
-6. The next user prompt receives that snapshot. No FastMCP endpoint or server
+7. The next user prompt receives that snapshot. No FastMCP endpoint or server
    state is involved.
 
 The structured payload is shaped as follows:
@@ -121,4 +127,3 @@ virtual environments, dependency trees, and build output.
   `npm run typecheck`, `npm test`, and `npm run build`.
 - Container boundary: build both images from repository root when Docker is
   available.
-

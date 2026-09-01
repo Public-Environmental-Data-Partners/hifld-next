@@ -39,6 +39,10 @@ ALLOWED_CASES = (
         "safe spatial functions",
         "SELECT ST_Area(geometry), ST_Intersects(geometry, ST_Point(-77, 39)) FROM roads",
     ),
+    SqlPolicyCase(
+        "boolean operators around between predicates",
+        "SELECT * FROM roads WHERE lon BETWEEN -80 AND -70 AND lat BETWEEN 38 AND 45",
+    ),
 )
 
 

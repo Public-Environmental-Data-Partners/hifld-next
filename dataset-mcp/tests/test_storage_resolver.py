@@ -4,95 +4,82 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from pydantic import SecretStr
 
-from app.storage.models import (
-    PublicGcsProfile,
-    S3Profile,
-    SeaweedProfile,
-    StorageSettings,
-)
+from app.catalog.models import BucketStorageConfig
 from app.storage.resolver import StorageResolutionError, StorageResolver
 
 if TYPE_CHECKING:
     from app.query.models import ResolvedSource
 
 
-def source(slug: str, *uris: str) -> ResolvedSource:
+def source(config: BucketStorageConfig, *uris: str) -> ResolvedSource:
     return cast(
         "ResolvedSource",
-        SimpleNamespace(storage_location_slug=slug, object_uris=tuple(uris)),
+        SimpleNamespace(storage_config=config, object_uris=tuple(uris)),
     )
 
 
-def test_public_gcs_is_converted_to_https() -> None:
-    resolver = StorageResolver(
-        StorageSettings(
-            profiles={"published": PublicGcsProfile(slug="published", bucket="hifld", prefix="geo")}
-        )
-    )
-    spec = resolver.resolve(source("published", "gs://hifld/geo/roads.parquet"))
-    assert spec.object_uris == ("https://storage.googleapis.com/hifld/geo/roads.parquet",)
-    assert spec.secret is None
-
-
-def test_s3_is_scoped_and_uses_native_uri() -> None:
-    profile = S3Profile(
-        slug="aws",
-        bucket="catalog",
-        prefix="datasets",
-        region="us-east-1",
-        access_key_id=SecretStr("AKIA-secret"),
-        secret_access_key=SecretStr("super-secret"),
-    )
-    spec = StorageResolver(StorageSettings(profiles={"aws": profile})).resolve(
-        source("aws", "s3://catalog/datasets/a.parquet")
-    )
-    assert spec.object_uris == ("s3://catalog/datasets/a.parquet",)
-    assert spec.secret is not None
-    assert "super-secret" not in repr(spec)
-    assert "super-secret" not in str(spec.model_dump(mode="json"))
-
-
-def test_seaweed_uses_configured_endpoint_and_path_style() -> None:
-    profile = SeaweedProfile(
-        slug="local",
+def test_public_gcs_is_resolved_from_catalog_storage_config() -> None:
+    config = BucketStorageConfig(
+        type="gcs",
+        base_url="https://storage.googleapis.com/hifld",
         bucket="hifld",
-        prefix="",
-        endpoint="https://s3.local:8333",
-        access_key_id=SecretStr("local-key"),
-        secret_access_key=SecretStr("local-secret"),
-        tls=True,
     )
-    spec = StorageResolver(StorageSettings(profiles={"local": profile})).resolve(
-        source("local", "s3://hifld/a.parquet")
+
+    spec = StorageResolver().resolve(source(config, "gs://hifld/geo/roads.parquet"))
+
+    assert spec.object_uris == ("https://storage.googleapis.com/hifld/geo/roads.parquet",)
+    assert spec.seaweedfs is None
+
+
+def test_local_seaweed_is_resolved_from_catalog_storage_config() -> None:
+    config = BucketStorageConfig(
+        type="seaweedfs",
+        base_url="http://localhost:8888",
+        bucket="hifld",
+        endpoint_url="http://localhost:8333",
     )
-    assert spec.secret is not None
-    assert spec.secret.endpoint == "https://s3.local:8333"
-    assert spec.secret.url_style == "path"
-    assert spec.secret.tls is True
+
+    spec = StorageResolver().resolve(source(config, "s3://hifld/a.parquet"))
+
+    assert spec.object_uris == ("s3://hifld/a.parquet",)
+    assert spec.seaweedfs is not None
+    assert spec.seaweedfs.bucket == "hifld"
+    assert spec.seaweedfs.endpoint == "localhost:8333"
+    assert spec.seaweedfs.tls is False
 
 
 @pytest.mark.parametrize(
-    "uri", ["s3://catalog/other/a.parquet", "s3://catalog/datasets/%2e%2e/secret.parquet"]
+    "uri", ["s3://other/a.parquet", "s3://hifld/datasets/%2e%2e/secret.parquet"]
 )
-def test_scope_and_traversal_are_rejected(uri: str) -> None:
-    profile = S3Profile(
-        slug="aws",
-        bucket="catalog",
-        prefix="datasets",
-        region="us-east-1",
-        access_key_id=SecretStr("key"),
-        secret_access_key=SecretStr("secret"),
+def test_catalog_bucket_scope_and_traversal_are_rejected(uri: str) -> None:
+    config = BucketStorageConfig(
+        type="seaweedfs",
+        base_url="http://localhost:8888",
+        bucket="hifld",
+        endpoint_url="http://localhost:8333",
     )
+
     with pytest.raises(StorageResolutionError):
-        StorageResolver(StorageSettings(profiles={"aws": profile})).resolve(source("aws", uri))
+        StorageResolver().resolve(source(config, uri))
 
 
-def test_unknown_slug_and_non_catalog_endpoint_fail_closed() -> None:
-    profile = PublicGcsProfile(slug="published", bucket="hifld")
-    resolver = StorageResolver(StorageSettings(profiles={"published": profile}))
+@pytest.mark.parametrize(
+    "config",
+    [
+        BucketStorageConfig(
+            type="s3",
+            base_url="https://s3.amazonaws.com/catalog",
+            bucket="catalog",
+        ),
+        BucketStorageConfig(
+            type="seaweedfs",
+            base_url="https://storage.example.test",
+            bucket="catalog",
+            endpoint_url="https://storage.example.test:8333",
+        ),
+    ],
+)
+def test_unsupported_or_nonlocal_storage_fails_closed(config: BucketStorageConfig) -> None:
     with pytest.raises(StorageResolutionError):
-        resolver.resolve(source("missing", "gs://hifld/a.parquet"))
-    with pytest.raises(StorageResolutionError):
-        resolver.resolve(source("published", "https://evil.example/a.parquet"))
+        StorageResolver().resolve(source(config, f"s3://{config.bucket}/a.parquet"))

@@ -32,6 +32,8 @@ describe("query result workspace state", () => {
       query_token: token,
       columns: [
         { name: "name", type: "VARCHAR", nullable: false },
+        { name: "__hifld_feature_key", type: "VARCHAR", nullable: false },
+        { name: "__hifld_centroid_lng", type: "DOUBLE", nullable: true },
         { name: "geom", type: "GEOMETRY", nullable: true },
       ],
       rows: [],

@@ -9,26 +9,28 @@ from app.query.models import EncodedRow
 
 
 @dataclass(frozen=True, slots=True)
-class WorkerSourceSpec:
-    alias: str
-    object_uris: tuple[str, ...]
-    profile_slug: str | None = None
+class WorkerSeaweedSource:
+    """Non-secret local SeaweedFS configuration from the catalog."""
+
+    bucket: str
+    endpoint: str
+    tls: bool = False
+    url_style: Literal["path"] = "path"
 
 
 @dataclass(frozen=True, slots=True)
-class WorkerCredentialProfile:
-    """Spawn-time credentials; never included in a per-query IPC message."""
+class WorkerSeaweedCredentials:
+    """Spawn-time local credentials; never included in per-query IPC."""
 
-    slug: str
-    type: Literal["s3", "seaweedfs"]
-    bucket: str
     access_key_id: str = dataclass_field(repr=False)
     secret_access_key: str = dataclass_field(repr=False)
-    prefix: str = ""
-    endpoint: str | None = None
-    region: str | None = None
-    url_style: Literal["vhost", "path"] = "vhost"
-    tls: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerSourceSpec:
+    alias: str
+    object_uris: tuple[str, ...]
+    seaweedfs: WorkerSeaweedSource | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +39,8 @@ class WorkerRuntimeConfig:
     memory_limit: str
     temp_directory: str
     extension_directory: str | None = None
-    credential_profiles: tuple[WorkerCredentialProfile, ...] = ()
+    seaweedfs_credentials: WorkerSeaweedCredentials | None = None
+    install_extensions: bool = False
     load_extensions: bool = True
     metrics_enabled: bool = False
     max_columns: int = 200

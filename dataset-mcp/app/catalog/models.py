@@ -194,6 +194,37 @@ class Dataset(CatalogModel):
     links: dict[str, str] | None = None
 
 
+class DatasetFileFormatSummary(CatalogModel):
+    format_count: int = Field(ge=0)
+
+
+class DatasetFileSummary(CatalogModel):
+    id: int
+    dataset_id: int
+    slug: str
+    name: str
+    description: str | None = None
+    layer_name: str | None = None
+    source_file_path: str | None = None
+    formats: list[DatasetFileFormatSummary] = []
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class DatasetWithFiles(CatalogModel):
+    """Dataset metadata with the compact file summaries returned by dataset-api."""
+
+    id: int
+    collection_id: int
+    slug: str
+    name: str
+    description: str | None = None
+    tags: DatasetTags = Field(default_factory=dict)
+    files: list[DatasetFileSummary] = []
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class DatasetSearchRequest(CatalogModel):
     collection: int | str
     search: str | None = None
@@ -219,6 +250,13 @@ class DatasetPage(CatalogModel):
 
 class DatasetFileResponse(CatalogModel):
     collection: Collection
+    dataset: Dataset
+    file: DatasetFile
+
+
+class DatasetFilePayload(CatalogModel):
+    """Internal dataset-api file response before collection context is restored."""
+
     dataset: Dataset
     file: DatasetFile
 

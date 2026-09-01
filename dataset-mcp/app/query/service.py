@@ -5,23 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
-from urllib.parse import urlsplit
 
 from app.errors import AppError, ErrorCode
 from app.query.models import ColumnResult, PageResult, ResolvedSource
 from app.query.sql_policy import ValidatedSql
-from app.storage.models import (
-    DuckDbSourceSpec,
-    PublicGcsProfile,
-    S3Profile,
-    StorageSettings,
-)
+from app.storage.models import DuckDbSourceSpec
 from query_worker.protocol import (
-    WorkerCredentialProfile,
     WorkerFailure,
     WorkerPage,
     WorkerQuery,
     WorkerResult,
+    WorkerSeaweedSource,
     WorkerSourceSpec,
 )
 
@@ -32,6 +26,25 @@ class ExecutionSource:
     duckdb: DuckDbSourceSpec
 
 
+def worker_source(source: ExecutionSource) -> WorkerSourceSpec:
+    """Shape trusted resolved storage into a non-secret worker request."""
+    seaweedfs = source.duckdb.seaweedfs
+    return WorkerSourceSpec(
+        alias=source.resolved.source.alias,
+        object_uris=source.duckdb.object_uris,
+        seaweedfs=(
+            WorkerSeaweedSource(
+                bucket=seaweedfs.bucket,
+                endpoint=seaweedfs.endpoint,
+                tls=seaweedfs.tls,
+                url_style=seaweedfs.url_style,
+            )
+            if seaweedfs is not None
+            else None
+        ),
+    )
+
+
 class QueryExecutor(Protocol):
     async def execute(
         self,
@@ -39,50 +52,6 @@ class QueryExecutor(Protocol):
         *,
         timeout_seconds: float | None = None,
     ) -> WorkerResult: ...
-
-
-def _duckdb_s3_endpoint(endpoint: str) -> str:
-    """Return the authority DuckDB expects for its S3 ENDPOINT setting."""
-    if endpoint.startswith(("http://", "https://")):
-        return urlsplit(endpoint).netloc
-    return endpoint.rstrip("/")
-
-
-def worker_profiles_from_storage(
-    settings: StorageSettings,
-) -> tuple[WorkerCredentialProfile, ...]:
-    """Copy server credentials into immutable spawn-time worker config."""
-    profiles: list[WorkerCredentialProfile] = []
-    for slug, profile in settings.profiles.items():
-        if isinstance(profile, PublicGcsProfile):
-            continue
-        if isinstance(profile, S3Profile):
-            profiles.append(
-                WorkerCredentialProfile(
-                    slug=slug,
-                    type="s3",
-                    bucket=profile.bucket,
-                    prefix=profile.prefix,
-                    region=profile.region,
-                    access_key_id=profile.access_key_id.get_secret_value(),
-                    secret_access_key=profile.secret_access_key.get_secret_value(),
-                )
-            )
-            continue
-        profiles.append(
-            WorkerCredentialProfile(
-                slug=slug,
-                type="seaweedfs",
-                bucket=profile.bucket,
-                prefix=profile.prefix,
-                endpoint=_duckdb_s3_endpoint(profile.endpoint),
-                url_style="path" if profile.use_path_style else "vhost",
-                tls=profile.tls,
-                access_key_id=profile.access_key_id.get_secret_value(),
-                secret_access_key=profile.secret_access_key.get_secret_value(),
-            )
-        )
-    return tuple(profiles)
 
 
 _FAILURE_CODES: dict[str, ErrorCode] = {
@@ -125,14 +94,7 @@ class QueryService:
 
     @staticmethod
     def _worker_source(source: ExecutionSource) -> WorkerSourceSpec:
-        profile_slug = (
-            source.resolved.storage_location_slug if source.duckdb.secret is not None else None
-        )
-        return WorkerSourceSpec(
-            alias=source.resolved.source.alias,
-            object_uris=source.duckdb.object_uris,
-            profile_slug=profile_slug,
-        )
+        return worker_source(source)
 
     @staticmethod
     def _raise_failure(failure: WorkerFailure) -> None:

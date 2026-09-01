@@ -50,8 +50,8 @@ class QueryStub:
     def validate_sql(self, sql: str, aliases: Sequence[str]) -> None:
         return None
 
-    def validate_token(self, token: str) -> dict[str, str]:
-        return {"version": "1"}
+    def validate_token(self, token: str) -> dict[str, str | int]:
+        return {"token_version": 1, "expires_at": "2026-09-01T18:00:00+00:00"}
 
     async def read_rows(
         self, source: dict[str, str], columns: Sequence[str], limit: int, offset: int
@@ -65,25 +65,47 @@ class QueryStub:
         limit: int,
         geometry_column: str | None,
         result_crs: str | None,
-    ) -> dict[str, int]:
-        return {"limit": limit}
+    ) -> dict[str, int | str | list[dict[str, str | bool]]]:
+        alias = str(sources[0]["alias"])
+        return {
+            "limit": limit,
+            "query_id": "capitolsquery123456789AB",
+            "query_token": f"signed-{alias}",
+            "columns": [
+                {"name": "geometry", "type": "GEOMETRY", "nullable": False},
+                {"name": "name", "type": "VARCHAR", "nullable": True},
+            ],
+        }
 
     async def page(self, token: str, offset: int, limit: int) -> dict[str, int]:
         return {"offset": offset, "limit": limit}
+
+    async def map_configuration(self, token: str) -> dict[str, object]:
+        query_id = "capitolsquery123456789AB"
+        return {
+            "query_token": token,
+            "query_id": query_id,
+            "map_configuration": {
+                "tile_url": (f"https://tiles.example.test/tiles/{query_id}/{{z}}/{{x}}/{{y}}.mvt"),
+                "worker_url": "https://assets.example.test/maplibre-gl-worker.mjs",
+                "source_layer": "hifld",
+                "geometry_column": "geometry",
+                "result_crs": "EPSG:4326",
+            },
+        }
 
 
 def _dependencies() -> AppDependencies:
     return AppDependencies(catalog=CatalogStub(), query=QueryStub())
 
 
-def test_mcp_tools_link_the_app_resource_and_return_text_and_structured_content() -> None:
+def test_only_view_query_map_opens_the_app_resource() -> None:
     async def assert_protocol() -> None:
         mcp = create_mcp_server(
             _dependencies(),
             ui_html="<html><body>dataset explorer</body></html>",
             resource_config=UIResourceConfig(
                 tile_origin="https://tiles.example.test",
-                basemap_origins=("https://basemap.example.test",),
                 worker_asset_origin="https://assets.example.test",
             ),
         )
@@ -100,25 +122,117 @@ def test_mcp_tools_link_the_app_resource_and_return_text_and_structured_content(
                 "read_geoparquet_rows",
                 "query_geoparquet",
                 "get_query_page",
+                "view_query_map",
+                "refresh_query_map",
             }
             assert set(by_name) == expected_model_tools
             for name in expected_model_tools:
                 assert by_name[name].description
-                assert by_name[name].meta is not None
-                assert by_name[name].meta["ui"] == {
-                    "resourceUri": "ui://hifld/dataset-explorer.html",
-                    "visibility": ["model", "app"],
-                }
+            assert by_name["view_query_map"].meta is not None
+            assert by_name["view_query_map"].meta["ui"] == {
+                "resourceUri": "ui://hifld/dataset-explorer.html",
+                "visibility": ["model"],
+            }
+            assert by_name["refresh_query_map"].meta is not None
+            assert by_name["refresh_query_map"].meta["ui"] == {
+                "resourceUri": "ui://hifld/dataset-explorer.html",
+                "visibility": ["app"],
+            }
+            for name in {
+                "list_collections",
+                "get_collection",
+                "search_datasets",
+                "get_dataset",
+                "get_dataset_file",
+                "get_dataset_file_schema",
+                "read_geoparquet_rows",
+                "query_geoparquet",
+                "get_query_page",
+            }:
+                assert by_name[name].meta is None or "ui" not in by_name[name].meta
             result = await client.call_tool("search_datasets", {"collection": "public", "limit": 5})
             assert result.structured_content == {"kind": "dataset_page", "limit": 5}
             assert result.content[0].text.startswith("Datasets:")
+
+            map_result = await client.call_tool(
+                "view_query_map",
+                {
+                    "title": "State capitols",
+                    "layers": [
+                        {
+                            "layer_name": "Capitols",
+                            "sources": [{"alias": "capitols"}],
+                            "sql": "SELECT geometry, name FROM capitols",
+                            "result_crs": "EPSG:4326",
+                            "color": "#2166ac",
+                            "color_property": "name",
+                            "color_scheme": "plasma",
+                            "opacity": 0.7,
+                            "point_radius": 8,
+                            "line_width": 3,
+                        }
+                    ],
+                    "basemap": "satellite",
+                    "camera": {
+                        "center": [-77.04, 38.9],
+                        "zoom": 11,
+                        "bearing": 15,
+                        "pitch": 30,
+                        "padding": 32,
+                    },
+                },
+            )
+            assert map_result.structured_content is not None
+            assert map_result.structured_content["basemap"] == "satellite"
+            assert map_result.structured_content["title"] == "State capitols"
+            assert map_result.structured_content["layers"][0]["layer_name"] == "Capitols"
+            assert map_result.structured_content["layers"][0]["query_token"] == "signed-capitols"
+            assert map_result.structured_content["layers"][0]["style"] == {
+                "color": "#2166ac",
+                "color_property": "name",
+                "color_scheme": "plasma",
+                "opacity": 0.7,
+                "point_radius": 8.0,
+                "line_width": 3.0,
+            }
+            assert map_result.structured_content["camera"] == {
+                "center": [-77.04, 38.9],
+                "zoom": 11.0,
+                "bearing": 15.0,
+                "pitch": 30.0,
+                "padding": 32.0,
+            }
+            assert map_result.meta is None
+            assert "signed" not in map_result.content[0].text
+
+            refreshed = await client.call_tool(
+                "refresh_query_map",
+                {"map_spec": map_result.structured_content["map_spec"]},
+            )
+            assert refreshed.structured_content is not None
+            assert (
+                refreshed.structured_content["map_spec"]
+                == (map_result.structured_content["map_spec"])
+            )
+            assert refreshed.structured_content["layers"][0]["expires_at"] == (
+                "2026-09-01T18:00:00+00:00"
+            )
 
             resources = await client.list_resources()
             assert resources[0].mimeType == "text/html;profile=mcp-app"
             assert resources[0].meta is not None
             assert resources[0].meta["ui"]["csp"] == {
-                "connectDomains": ["https://tiles.example.test", "https://basemap.example.test"],
-                "resourceDomains": ["https://assets.example.test", "blob:"],
+                "connectDomains": [
+                    "https://tiles.example.test",
+                    "https://tiles.openfreemap.org",
+                    "https://services.arcgisonline.com",
+                ],
+                "resourceDomains": [
+                    "https://assets.example.test",
+                    "https://tiles.openfreemap.org",
+                    "https://services.arcgisonline.com",
+                    "blob:",
+                ],
             }
 
     asyncio.run(assert_protocol())
@@ -175,7 +289,15 @@ def test_http_app_wires_query_resources_to_the_shared_query_service() -> None:
                 )
 
         assert response.status_code == 200
-        assert response.json() == {"limit": 100}
+        assert response.json() == {
+            "limit": 100,
+            "query_id": "capitolsquery123456789AB",
+            "query_token": "signed-roads",
+            "columns": [
+                {"name": "geometry", "type": "GEOMETRY", "nullable": False},
+                {"name": "name", "type": "VARCHAR", "nullable": True},
+            ],
+        }
 
     asyncio.run(assert_query_route())
 

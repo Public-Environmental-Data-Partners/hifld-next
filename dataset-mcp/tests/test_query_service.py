@@ -2,12 +2,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.catalog.models import QuerySourceRef
+from app.catalog.models import BucketStorageConfig, QuerySourceRef
 from app.errors import AppError, ErrorCode
 from app.query.models import ResolvedSource
-from app.query.service import ExecutionSource, QueryService, worker_profiles_from_storage
+from app.query.service import ExecutionSource, QueryService, worker_source
 from app.query.sql_policy import ValidatedSql
-from app.storage.models import DuckDbSourceSpec, SeaweedProfile, StorageSettings
+from app.storage.models import DuckDbSeaweedSpec, DuckDbSourceSpec
 from query_worker.protocol import WorkerFailure, WorkerPage, WorkerQuery, WorkerTile
 
 
@@ -37,6 +37,11 @@ def _source() -> ExecutionSource:
         version="v1",
         format_type="geoparquet",
         storage_location_slug="public-gcs",
+        storage_config=BucketStorageConfig(
+            type="gcs",
+            base_url="https://storage.googleapis.com/datasets",
+            bucket="datasets",
+        ),
         object_uris=("gs://datasets/roads.parquet",),
     )
     return ExecutionSource(
@@ -236,19 +241,22 @@ async def test_service_rejects_limit_and_offset_before_dispatch() -> None:
     assert executor.request is None
 
 
-def test_worker_profile_strips_http_scheme_from_duckdb_endpoint() -> None:
-    settings = StorageSettings(
-        profiles={
-            "local-seaweed": SeaweedProfile(
-                slug="local-seaweed",
+def test_worker_source_carries_non_secret_catalog_seaweed_configuration() -> None:
+    execution = _source()
+    execution = ExecutionSource(
+        resolved=execution.resolved,
+        duckdb=DuckDbSourceSpec(
+            object_uris=("s3://datasets/roads.parquet",),
+            seaweedfs=DuckDbSeaweedSpec(
                 bucket="datasets",
-                endpoint="http://seaweed-s3:8333",
-                access_key_id="access",
-                secret_access_key="secret",
-            )
-        }
+                endpoint="localhost:8333",
+            ),
+        ),
     )
 
-    (profile,) = worker_profiles_from_storage(settings)
+    shaped = worker_source(execution)
 
-    assert profile.endpoint == "seaweed-s3:8333"
+    assert shaped.seaweedfs is not None
+    assert shaped.seaweedfs.endpoint == "localhost:8333"
+    assert "access" not in repr(shaped)
+    assert "secret" not in repr(shaped)

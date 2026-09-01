@@ -3,13 +3,12 @@ import json
 import pytest
 
 from app.catalog.client import CatalogClientError
-from app.catalog.models import QuerySourceRef
+from app.catalog.models import BucketStorageConfig, QuerySourceRef
 from app.errors import AppError, ErrorCode
 from app.query.application import QueryApplicationService
 from app.query.models import JsonValue, ResolvedSource
 from app.query.service import QueryService
 from app.query.token_codec import QueryTokenCodec
-from app.storage.models import PublicGcsProfile, StorageSettings
 from app.storage.resolver import StorageResolver
 from query_worker.protocol import (
     WorkerFailure,
@@ -34,6 +33,11 @@ class Resolver:
             version="v1",
             format_type="geoparquet",
             storage_location_slug="public",
+            storage_config=BucketStorageConfig(
+                type="gcs",
+                base_url="https://storage.googleapis.com/datasets",
+                bucket="datasets",
+            ),
             object_uris=("gs://datasets/roads.parquet",),
             bbox=(-80.0, 35.0, -79.0, 36.0),
             crs="EPSG:4326",
@@ -67,6 +71,56 @@ class Executor:
             returned_count=1,
             has_more=next_offset < 3,
             next_offset=next_offset if next_offset < 3 else None,
+            elapsed_ms=1,
+            bytes_read=0,
+            files_read=1,
+            deterministic_order=True,
+        )
+
+
+class CrsTypedGeometryExecutor(Executor):
+    async def execute(
+        self,
+        request: WorkerQuery | WorkerTileQuery,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> WorkerResult:
+        del timeout_seconds
+        self.calls.append(request)
+        if not isinstance(request, WorkerQuery):
+            return WorkerFailure("unused", "not exercised")
+        return WorkerPage(
+            columns=(("geometry", "GEOMETRY('EPSG:3857')", True),),
+            rows=({"geometry": {"tag": "geometry"}},),
+            offset=request.offset,
+            returned_count=1,
+            has_more=False,
+            next_offset=None,
+            elapsed_ms=1,
+            bytes_read=0,
+            files_read=1,
+            deterministic_order=True,
+        )
+
+
+class NonSpatialExecutor(Executor):
+    async def execute(
+        self,
+        request: WorkerQuery | WorkerTileQuery,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> WorkerResult:
+        del timeout_seconds
+        self.calls.append(request)
+        if not isinstance(request, WorkerQuery):
+            return WorkerFailure("unused", "not exercised")
+        return WorkerPage(
+            columns=(("id", "INTEGER", False),),
+            rows=({"id": 1},),
+            offset=request.offset,
+            returned_count=1,
+            has_more=False,
+            next_offset=None,
             elapsed_ms=1,
             bytes_read=0,
             files_read=1,
@@ -108,11 +162,7 @@ def _source(alias: str = "roads") -> dict[str, JsonValue]:
 
 
 def _service(resolver: Resolver, executor: Executor) -> QueryApplicationService:
-    storage = StorageResolver(
-        StorageSettings(
-            profiles={"public": PublicGcsProfile(slug="public", bucket="datasets", prefix="")}
-        )
-    )
+    storage = StorageResolver()
     return QueryApplicationService(
         source_resolver=resolver,
         storage_resolver=storage,
@@ -199,6 +249,58 @@ async def test_arbitrary_query_does_not_guess_result_crs_from_its_sources() -> N
     )
 
     assert "map_configuration" not in result
+
+
+@pytest.mark.asyncio
+async def test_query_uses_crs_declared_by_the_result_geometry_type() -> None:
+    service = _service(Resolver(), CrsTypedGeometryExecutor())
+
+    result = await service.query(
+        (_source(),),
+        "SELECT geometry FROM roads",
+        1,
+        None,
+        None,
+    )
+
+    query_id = result["query_id"]
+    assert result["map_configuration"] == {
+        "tile_url": (
+            f"https://mcp.example.test/base/api/queries/{query_id}/tiles/{{z}}/{{x}}/{{y}}.mvt"
+        ),
+        "worker_url": "https://mcp.example.test/base/assets/maplibre-gl-worker.mjs",
+        "source_layer": "hifld",
+        "geometry_column": "geometry",
+        "result_crs": "EPSG:3857",
+        "initial_bounds": [-80.0, 35.0, -79.0, 36.0],
+    }
+
+    map_result = await service.map_configuration(result["query_token"])
+    assert map_result == {
+        "query_token": result["query_token"],
+        "query_id": query_id,
+        "map_configuration": {
+            **result["map_configuration"],
+            "tile_url": (f"https://mcp.example.test/base/tiles/{query_id}/{{z}}/{{x}}/{{y}}.mvt"),
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_map_configuration_rejects_a_non_spatial_query_token() -> None:
+    service = _service(Resolver(), NonSpatialExecutor())
+    result = await service.query(
+        (_source(),),
+        "SELECT id FROM roads",
+        1,
+        None,
+        None,
+    )
+
+    with pytest.raises(AppError) as caught:
+        await service.map_configuration(result["query_token"])
+
+    assert caught.value.code is ErrorCode.GEOMETRY_AMBIGUOUS
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import type maplibregl from "maplibre-gl";
+import { PMTiles } from "pmtiles";
 import { describe, expect, it, vi } from "vitest";
 import {
   type BasemapMode,
@@ -15,8 +16,10 @@ import {
   transformQueryTileRequest,
   getVectorLayersForSource,
   syncRenderedLayerOrder,
+  syncLoadedMapSources,
+  runWhenMapStyleReady,
 } from "../useMapInitialization";
-import type { QueryMvtLayer } from "@/components/map/multiLayerSources";
+import type { CatalogPmtilesLayer, QueryMvtLayer } from "@/components/map/multiLayerSources";
 
 vi.mock("maplibre-gl", () => ({
   default: {
@@ -42,7 +45,9 @@ interface MockMap {
   getLayer: ReturnType<typeof vi.fn>;
   getSource: ReturnType<typeof vi.fn>;
   getStyle: ReturnType<typeof vi.fn>;
+  isStyleLoaded: ReturnType<typeof vi.fn>;
   loaded: ReturnType<typeof vi.fn>;
+  moveLayer: ReturnType<typeof vi.fn>;
   on: ReturnType<typeof vi.fn>;
   once: ReturnType<typeof vi.fn>;
   queryRenderedFeatures: ReturnType<typeof vi.fn>;
@@ -72,7 +77,9 @@ function createMockMap(): MockMap {
         { id: "water", type: "fill", source: "openmaptiles" },
       ],
     })),
+    isStyleLoaded: vi.fn(() => false),
     loaded: vi.fn(() => false),
+    moveLayer: vi.fn(),
     on: vi.fn(),
     once: vi.fn(),
     queryRenderedFeatures: vi.fn(() => []),
@@ -84,6 +91,64 @@ function createMockMap(): MockMap {
 }
 
 describe("useMapInitialization helpers", () => {
+  it("loads data sources as soon as the style is ready without waiting for basemap tiles", () => {
+    const map = createMockMap();
+    const loadSources = vi.fn();
+    map.isStyleLoaded.mockReturnValue(true);
+    map.loaded.mockReturnValue(false);
+
+    runWhenMapStyleReady(map as maplibregl.Map, loadSources);
+
+    expect(loadSources).toHaveBeenCalledOnce();
+    expect(map.once).not.toHaveBeenCalled();
+  });
+
+  it("recovers PMTiles metadata and rendered layers when a cancelled load already added the source", async () => {
+    vi.spyOn(PMTiles.prototype, "getMetadata").mockResolvedValue({
+      vector_layers: [{ id: "stations", fields: { name: "String" } }],
+    });
+    const map = createMockMap();
+    map.getSource.mockReturnValue({});
+    const source: CatalogPmtilesLayer = {
+      kind: "catalog_pmtiles",
+      id: "amtrak",
+      name: "Amtrak",
+      label: "Amtrak",
+      descriptor: {
+        collectionSlug: "hifld",
+        datasetSlug: "amtrak-stations",
+        fileSlug: "amtrak-stations",
+        formatType: "pmtiles",
+        storageLocationId: 2,
+        version: "v1.0.0",
+        sourceId: 8,
+      },
+      pmtilesUrl: "http://localhost:8888/amtrak.pmtiles",
+      mapSourceId: "source-amtrak",
+      visible: true,
+      opacity: 0.82,
+      bounds: null,
+    };
+
+    const result = await syncLoadedMapSources({
+      map: map as maplibregl.Map,
+      protocol: null,
+      sources: [source],
+      managedSourceIds: new Set(),
+      vectorLayersBySource: {},
+      shouldContinue: () => true,
+    });
+
+    expect(result?.layers).toEqual([
+      expect.objectContaining({
+        id: "amtrak:stations",
+        sourceLayerId: "stations",
+      }),
+    ]);
+    expect(map.addSource).not.toHaveBeenCalled();
+    expect(map.addLayer).toHaveBeenCalledTimes(3);
+  });
+
   it("reorders all rendered style layers in source order without moving the basemap", () => {
     const map = {
       getLayer: vi.fn((id: string) => ({

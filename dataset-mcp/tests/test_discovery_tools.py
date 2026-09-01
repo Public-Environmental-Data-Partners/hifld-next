@@ -32,11 +32,12 @@ class InvalidSchemaClient(Client):
 @pytest.mark.asyncio
 async def test_search_and_schema_are_bounded() -> None:
     result = await search_datasets(Client(), limit=4, offset=2)
-    assert result.visibility == ("model", "app")
     assert result.structured_content["filters"]["limit"] == 4  # type: ignore[index]
+    assert '"limit":4' in result.text
     schema = await get_dataset_file_schema(Client(), "c", "d", "f", column_offset=1, column_limit=1)
     assert schema.structured_content["columns"] == [{"name": "1"}]
     assert schema.structured_content["has_more"] is True
+    assert '"columns":[{"name":"1"}]' in schema.text
 
 
 @pytest.mark.asyncio

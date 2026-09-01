@@ -21,8 +21,6 @@ spec:
             - {name: DATASET_MCP_CATALOG_BASE_URL, value: {{ .Values.catalog.baseUrl | quote }}}
             - name: DATASET_MCP_QUERY_TOKEN_SECRET
               valueFrom: {secretKeyRef: {name: {{ .Values.tokenSecret.name }}, key: {{ .Values.tokenSecret.key }}}}
-            - name: DATASET_MCP_STORAGE_SETTINGS
-              valueFrom: {secretKeyRef: {name: {{ .Values.storage.settingsSecret.name }}, key: {{ .Values.storage.settingsSecret.key }}}}
             - {name: DATASET_MCP_DUCKDB_TEMP_DIRECTORY, value: /var/lib/dataset-mcp/spill}
             {{- if .Values.publicOrigin }}
             - {name: DATASET_MCP_PUBLIC_ORIGIN, value: {{ .Values.publicOrigin | quote }}}

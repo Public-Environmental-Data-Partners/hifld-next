@@ -1,4 +1,4 @@
-"""FastMCP registration for the Dataset Explorer MCP App."""
+"""FastMCP registration for catalog, query, and query-map tools."""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, J
 
 UI_RESOURCE_URI = "ui://hifld/dataset-explorer.html"
 UI_MIME_TYPE = "text/html;profile=mcp-app"
+OPENFREEMAP_ORIGIN = "https://tiles.openfreemap.org"
+ESRI_IMAGERY_ORIGIN = "https://services.arcgisonline.com"
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,13 +32,25 @@ class AppDependencies:
 @dataclass(frozen=True, slots=True)
 class UIResourceConfig:
     tile_origin: str
-    basemap_origins: tuple[str, ...] = ()
     worker_asset_origin: str = "self"
+    basemap_origin: str = OPENFREEMAP_ORIGIN
+    satellite_origin: str = ESRI_IMAGERY_ORIGIN
 
     def csp(self) -> ResourceCSP:
         return ResourceCSP(
-            connect_domains=[self.tile_origin, *self.basemap_origins],
-            resource_domains=[self.worker_asset_origin, "blob:"],
+            connect_domains=list(
+                dict.fromkeys([self.tile_origin, self.basemap_origin, self.satellite_origin])
+            ),
+            resource_domains=list(
+                dict.fromkeys(
+                    [
+                        self.worker_asset_origin,
+                        self.basemap_origin,
+                        self.satellite_origin,
+                        "blob:",
+                    ]
+                )
+            ),
         )
 
 
@@ -54,6 +68,11 @@ def _result(result: discovery.ToolResult | query.ToolResult) -> FastMCPToolResul
     return FastMCPToolResult(
         content=[TextContent(type="text", text=result.text)],
         structured_content=dict(result.structured_content),
+        meta=(
+            dict(result.meta)
+            if isinstance(result, query.ToolResult) and result.meta is not None
+            else None
+        ),
     )
 
 
@@ -101,7 +120,8 @@ def create_mcp_server(
     than the constructor; ``http_app.py`` supplies that setting.
     """
     mcp = FastMCP("HIFLD Dataset Explorer")
-    model_and_app = _app_config(visibility=["model", "app"])
+    query_map_app = _app_config(visibility=["model"])
+    query_map_refresh_app = _app_config(visibility=["app"])
 
     async def list_collections() -> FastMCPToolResult:
         """List catalog collections as the starting point for dataset discovery."""
@@ -110,7 +130,7 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool(app=model_and_app)(list_collections)
+    mcp.tool()(list_collections)
 
     async def get_collection(identity: str) -> FastMCPToolResult:
         """Get collection metadata by numeric ID or slug."""
@@ -119,7 +139,7 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool(app=model_and_app)(get_collection)
+    mcp.tool()(get_collection)
 
     async def search_datasets(
         collection: str,
@@ -143,7 +163,7 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool(app=model_and_app)(search_datasets)
+    mcp.tool()(search_datasets)
 
     async def get_dataset(collection: str, identity: str) -> FastMCPToolResult:
         """Get dataset metadata and compact file summaries by ID or slug."""
@@ -152,7 +172,7 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool(app=model_and_app)(get_dataset)
+    mcp.tool()(get_dataset)
 
     async def get_dataset_file(collection: str, dataset: str, identity: str) -> FastMCPToolResult:
         """Get file metadata and ready-to-copy GeoParquet query source references."""
@@ -165,7 +185,7 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool(app=model_and_app)(get_dataset_file)
+    mcp.tool()(get_dataset_file)
 
     async def get_dataset_file_schema(
         collection: str,
@@ -191,7 +211,7 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool(app=model_and_app)(get_dataset_file_schema)
+    mcp.tool()(get_dataset_file_schema)
 
     async def read_geoparquet_rows(
         source: dict[str, JSONValue],
@@ -214,7 +234,7 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool(app=model_and_app)(read_geoparquet_rows)
+    mcp.tool()(read_geoparquet_rows)
 
     async def query_geoparquet(
         sources: list[dict[str, JSONValue]],
@@ -244,7 +264,7 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool(app=model_and_app)(query_geoparquet)
+    mcp.tool()(query_geoparquet)
 
     async def get_query_page(
         query_token: str, offset: int, page_size: int = 100
@@ -257,18 +277,62 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool(app=model_and_app)(get_query_page)
+    mcp.tool()(get_query_page)
+
+    async def view_query_map(
+        title: query.MapTitle,
+        layers: list[query.MapQueryLayerInput],
+        basemap: query.BasemapStyle = "street",
+        camera: query.MapCameraInput | None = None,
+    ) -> FastMCPToolResult:
+        """Execute and map up to eight named spatial GeoParquet queries.
+
+        Copy source objects from get_dataset_file.query_sources into each
+        layer and provide its safe read-only SQL. Always supply a meaningful
+        map title and unique layer names. For data-driven styling, select the
+        styled columns in SQL and set color_property directly on that layer,
+        with optional breaks and color_scheme. Numeric columns can also drive
+        point_radius_property or line_width_property. The server creates query
+        tokens internally, so callers never copy opaque tokens into this tool.
+        """
+        try:
+            return _result(
+                await query.view_query_map(
+                    dependencies.query,
+                    title=title,
+                    layers=layers,
+                    basemap=basemap,
+                    camera=camera,
+                )
+            )
+        except Exception as error:
+            return _error_result(error)
+
+    mcp.tool(app=query_map_app)(view_query_map)
+
+    async def refresh_query_map(map_spec: query.MapDefinitionInput) -> FastMCPToolResult:
+        """Refresh runtime map tokens from a durable map definition.
+
+        This app-only tool lets a restored or long-running map renew its signed
+        query tokens without persisting query state on the MCP server.
+        """
+        try:
+            return _result(await query.refresh_query_map(dependencies.query, map_spec))
+        except Exception as error:
+            return _error_result(error)
+
+    mcp.tool(app=query_map_refresh_app)(refresh_query_map)
 
     config = resource_config or UIResourceConfig(tile_origin="self")
 
-    def dataset_explorer() -> str:
+    def query_map() -> str:
         return ui_html if ui_html is not None else default_ui_html()
 
     mcp.resource(
         UI_RESOURCE_URI,
-        name="dataset-explorer",
+        name="query-map",
         mime_type=UI_MIME_TYPE,
         app=AppConfig(csp=config.csp()),
-    )(dataset_explorer)
+    )(query_map)
 
     return mcp

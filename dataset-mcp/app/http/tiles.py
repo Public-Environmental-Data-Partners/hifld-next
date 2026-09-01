@@ -19,6 +19,8 @@ DEFAULT_TILE_TIMEOUT_SECONDS = 10.0
 class TileService(Protocol):
     """Revalidates the token/sources and dispatches bounded worker requests."""
 
+    def validate_query_identity(self, token: str, query_id: str) -> None: ...
+
     async def render_tile(
         self,
         token: str,
@@ -85,11 +87,12 @@ def create_tile_router(
         del z, x, y
         return Response(status_code=204, headers=_cors_headers())
 
-    async def tile(
+    async def render(
         z: int,
         x: int,
         y: int,
-        query_token: str | None = Header(default=None, alias=QUERY_TOKEN_HEADER),
+        query_token: str | None,
+        query_id: str | None = None,
     ) -> Response:
         # Coordinate validation, MVT MIME, and empty 204 behavior are adapted
         # from ../geoparquet-duckdb-partitioning/server.py:tile.
@@ -100,6 +103,8 @@ def create_tile_router(
                 ErrorCode.QUERY_TOKEN_INVALID.value, "A valid query token is required."
             )
         try:
+            if query_id is not None:
+                service.validate_query_identity(query_token, query_id)
             result = await service.render_tile(
                 query_token, z, x, y, timeout_seconds=timeout_seconds
             )
@@ -119,6 +124,31 @@ def create_tile_router(
             headers=_response_headers(),
         )
 
+    async def tile(
+        z: int,
+        x: int,
+        y: int,
+        query_token: str | None = Header(default=None, alias=QUERY_TOKEN_HEADER),
+    ) -> Response:
+        return await render(z, x, y, query_token)
+
+    async def query_tile_preflight(query_id: str, z: int, x: int, y: int) -> Response:
+        del query_id, z, x, y
+        return Response(status_code=204, headers=_cors_headers())
+
+    async def query_tile(
+        query_id: str,
+        z: int,
+        x: int,
+        y: int,
+        query_token: str | None = Header(default=None, alias=QUERY_TOKEN_HEADER),
+    ) -> Response:
+        return await render(z, x, y, query_token, query_id)
+
     router.add_api_route("/tiles/{z}/{x}/{y}.mvt", tile_preflight, methods=["OPTIONS"])
     router.add_api_route("/tiles/{z}/{x}/{y}.mvt", tile, methods=["GET"])
+    router.add_api_route(
+        "/tiles/{query_id}/{z}/{x}/{y}.mvt", query_tile_preflight, methods=["OPTIONS"]
+    )
+    router.add_api_route("/tiles/{query_id}/{z}/{x}/{y}.mvt", query_tile, methods=["GET"])
     return router

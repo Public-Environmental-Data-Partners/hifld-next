@@ -72,7 +72,7 @@ def test_tile_sql_preserves_bbox_order_and_exact_clipping_shape() -> None:
     assert 'ST_Intersects("geometry", b.env)' in sql
     assert "ST_AsMVTGeom(" in sql
     assert "ST_Transform(source_geometry, 'EPSG:4326', 'EPSG:3857', always_xy := true)" in sql
-    assert "ST_AsMVT(f, 'hifld', 4096, 'geom')" in sql
+    assert "ST_AsMVT(f, 'hifld', 4096, 'geom', '_mcp_feature_id')" in sql
     assert "FROM (SELECT geometry, bbox, name, details FROM roads) AS _mcp_result" in sql
     assert 'SELECT "name",' in sql
     assert (
@@ -89,6 +89,55 @@ def test_tile_sql_preserves_bbox_order_and_exact_clipping_shape() -> None:
     )
     outer_projection = sql.split("candidate_features AS", maxsplit=1)[1]
     assert '"details"' not in outer_projection
+
+
+def test_tile_sql_assigns_a_content_id_before_geometry_clipping() -> None:
+    sql = build_tile_sql(
+        "SELECT geometry, name, population FROM roads",
+        tile_request(),
+        columns=(
+            ("geometry", "GEOMETRY"),
+            ("name", "VARCHAR"),
+            ("population", "INTEGER"),
+        ),
+    )
+
+    assert "identified_features AS" in sql
+    assert 'hash(source_geometry, "name", "population")' in sql
+    assert 'AS "__hifld_feature_hash"' in sql
+    assert 'CAST((("__hifld_feature_hash" & 9223372036854775807)' in sql
+    assert '% 2147483647) AS BIGINT) AS "_mcp_feature_id"' in sql
+    assert 'CAST("__hifld_feature_hash" AS VARCHAR) AS "__hifld_feature_key"' in sql
+    assert "ST_X(ST_Transform(ST_Centroid(source_geometry), 'EPSG:4326', 'EPSG:4326'," in sql
+    assert 'AS "__hifld_centroid_lng"' in sql
+    assert "ST_Y(ST_Transform(ST_Centroid(source_geometry), 'EPSG:4326', 'EPSG:4326'," in sql
+    assert 'AS "__hifld_centroid_lat"' in sql
+    assert "ST_AsMVT(f, 'hifld', 4096, 'geom', '_mcp_feature_id')" in sql
+    assert "ST_AsMVTGeom(" in sql
+    assert sql.index("hash(source_geometry") < sql.index("ST_AsMVTGeom(")
+
+
+def test_tile_sql_excludes_reserved_feature_id_property_from_mvt_properties() -> None:
+    sql = build_tile_sql(
+        "SELECT geometry, _mcp_feature_id, __hifld_centroid_lng, "
+        "__hifld_centroid_lat, __hifld_feature_key, name FROM roads",
+        tile_request(),
+        columns=(
+            ("geometry", "GEOMETRY"),
+            ("_mcp_feature_id", "BIGINT"),
+            ("__hifld_centroid_lng", "DOUBLE"),
+            ("__hifld_centroid_lat", "DOUBLE"),
+            ("__hifld_feature_key", "VARCHAR"),
+            ("name", "VARCHAR"),
+        ),
+    )
+
+    assert 'SELECT "name",' in sql
+    assert 'SELECT "_mcp_feature_id",' not in sql
+    assert 'SELECT "__hifld_centroid_lng",' not in sql
+    assert 'SELECT "__hifld_centroid_lat",' not in sql
+    assert 'SELECT "__hifld_feature_key",' not in sql
+    assert 'hash(source_geometry, "name")' in sql
 
 
 def test_tile_sql_rejects_untrusted_identifiers_and_crs() -> None:
@@ -232,6 +281,10 @@ class TileService:
     def __init__(self, result: WorkerTile | WorkerFailure) -> None:
         self.result = result
         self.calls: list[tuple[str, int, int, int, float]] = []
+        self.identity_calls: list[tuple[str, str]] = []
+
+    def validate_query_identity(self, token: str, query_id: str) -> None:
+        self.identity_calls.append((token, query_id))
 
     async def render_tile(
         self, token: str, z: int, x: int, y: int, *, timeout_seconds: float
@@ -268,6 +321,30 @@ def test_http_tile_revalidates_token_with_ten_second_timeout_and_safe_cors() -> 
     assert response.headers["access-control-allow-headers"] == "X-HIFLD-Query-Token"
     assert response.headers["vary"] == "X-HIFLD-Query-Token"
     assert service.calls == [("signed", 2, 1, 1, 10.0)]
+
+
+def test_http_query_id_tile_binds_path_identity_before_rendering() -> None:
+    service = TileService(WorkerTile(b"mvt", 1.0, 0, 0))
+    query_id = "capitolsquery123456789AB"
+    response = make_client(service).get(
+        f"/tiles/{query_id}/2/1/1.mvt",
+        headers={"X-HIFLD-Query-Token": "signed"},
+    )
+
+    assert response.status_code == 200
+    assert service.identity_calls == [("signed", query_id)]
+    assert service.calls == [("signed", 2, 1, 1, 10.0)]
+
+
+def test_http_query_id_tile_preflight_allows_sandbox_token_header() -> None:
+    query_id = "capitolsquery123456789AB"
+    response = make_client(TileService(WorkerTile(b"", 1.0, 0, 0))).options(
+        f"/tiles/{query_id}/0/0/0.mvt"
+    )
+
+    assert response.status_code == 204
+    assert response.headers["access-control-allow-origin"] == "*"
+    assert response.headers["access-control-allow-headers"] == "X-HIFLD-Query-Token"
 
 
 def test_http_tile_returns_204_for_an_empty_tile_and_typed_dense_error() -> None:

@@ -1,9 +1,12 @@
+@import "@hifld/map-ui/styles.css";
 @import "@fontsource-variable/figtree";
 @import "@fontsource-variable/source-serif-4/opsz.css";
 @import "@fontsource-variable/source-serif-4/opsz-italic.css";
 @import "@fontsource-variable/jetbrains-mono";
 @import "tailwindcss";
 @import "tw-animate-css";
+
+@source "../../packages/map-ui/src";
 
 @custom-variant dark (&:is(.dark *));
 

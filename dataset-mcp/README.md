@@ -6,15 +6,28 @@ DuckDB `httpfs` and `spatial` extensions at image-build time, and runs as a
 non-root user with a read-only root filesystem. Runtime scratch space is the
 dedicated 4 GiB spill volume configured by the Helm chart.
 
-The service is configured through the `DATASET_MCP_` environment prefix and is
-exposed on port 8000. Required settings are:
+## Local development
+
+Start the service on port 8001 with no configuration:
+
+```bash
+cd dataset-mcp
+uv run fastapi dev
+```
+
+Local development defaults the dataset-api URL to `http://127.0.0.1:8000` and
+uses the fixed `access` / `secret` credentials from the repository's local
+SeaweedFS setup. Set `DATASET_MCP_CATALOG_BASE_URL` only when dataset-api is
+running elsewhere. Object locations and non-secret storage configuration come
+from dataset-api; dataset-mcp does not maintain a second storage-profile
+configuration.
+
+The production service is configured through the `DATASET_MCP_` environment
+prefix and is exposed on port 8000. Required settings are:
 
 - `DATASET_MCP_CATALOG_BASE_URL`: the internal dataset-api base URL.
 - `DATASET_MCP_QUERY_TOKEN_SECRET`: at least 32 bytes, used to sign stateless
   query and tile tokens.
-- `DATASET_MCP_STORAGE_SETTINGS`: JSON matching `StorageSettings`, containing
-  the server-owned storage profiles keyed by catalog storage slug. Keep this
-  value in a Kubernetes Secret; it can contain S3 or SeaweedFS credentials.
 
 `DATASET_MCP_PUBLIC_ORIGIN` is optional. DuckDB's `httpfs` and `spatial`
 extensions are installed into `/opt/duckdb/extensions` while the image is
@@ -26,6 +39,18 @@ server-only `DATASET_MCP_QUERY_API_URL` points to this internal service, while
 the optional server-only `DATASET_MCP_PUBLIC_ENDPOINT` overrides only the
 public endpoint advertised by the webapp's MCP Server Card. Neither setting is
 exposed as browser client configuration.
+
+## Docker image builds
+
+Build from the repository root so the image can include the shared
+`packages/map-core` and `packages/map-ui` packages:
+
+```bash
+docker build -f webapp/Dockerfile -t hifld-webapp:test .
+docker build -f dataset-mcp/Dockerfile -t hifld-dataset-mcp:test .
+```
+
+The dataset-mcp image builds and serves the UI as a single-file bundle.
 
 ## Webapp query HTTP resources
 
@@ -52,37 +77,43 @@ for development. This service continues to support the existing local
 SeaweedFS S3-compatible and public GCS storage configurations; never put
 storage credentials, source paths, or internal service URLs in browser config.
 
-For example, a storage-settings secret can contain:
-
-```json
-{"profiles":{"public-gcs":{"type":"public_gcs","slug":"public-gcs","bucket":"public-datasets","prefix":"geoparquet"}}}
-```
-
 The Helm chart reads the catalog URL from `catalog.baseUrl`, references
-`tokenSecret` for the query-token secret, and references
-`storage.settingsSecret` for this JSON. Add `storage.allowedCidrs` (and, when
-needed, `storage.allowedPorts`) for the object-store network ranges; use
+`tokenSecret` for the query-token secret. Add `storage.allowedCidrs` (and,
+when needed, `storage.allowedPorts`) for the object-store network ranges; use
 `networkPolicy.extraEgress` for an in-cluster S3-compatible endpoint. Do not
 allow arbitrary egress or pass storage URLs through tool arguments.
 
-## Map result contract
+## Interactive query maps
 
-Mappable query results include `map_configuration` in structured content. The
-server should emit these keys:
+Regular discovery, metadata, row, and query tools return text and structured
+content without opening an app. `view_query_map` opens the map-only MCP App and
+accepts one through eight named spatial query layers. Each layer contains the
+same trusted `sources`, safe read-only `sql`, optional geometry/CRS selection,
+and constrained style accepted by `query_geoparquet`. The agent must provide a
+meaningful map title and unique layer names; query-ID labels are never
+generated.
 
-- `tile_url`: absolute `http`/`https` URL with `{z}`, `{x}`, and `{y}`
-  placeholders, normally `${publicOrigin}/tiles/{z}/{x}/{y}.mvt`.
-- `worker_url`: absolute URL for the matching MapLibre worker asset,
-  normally `${publicOrigin}/assets/maplibre-gl-worker.mjs`.
-- `geometry_type`: optional geometry-type styling hint; mixed geometry results
-  are supported when omitted.
-- `source_layer`: the MVT source layer, `hifld` for the built-in tile encoder.
-- `bounds`: optional `[west, south, east, north]` initial viewport.
+The server executes a bounded validation page for each layer and creates its
+signed query token internally. Agents never copy tokens into the map tool. The
+self-contained layer result includes that exact token, its expiration, and a
+durable map definition. Before the earliest token expires, the component calls
+the app-only `refresh_query_map` tool to re-run that definition and replace all
+runtime query IDs and tokens. This also restores maps from saved conversations
+when the host restores the MCP App result and supports proxied server-tool
+calls. Nothing is stored in memory, Valkey, or a result registry.
 
-For local or proxied deployments, `tile_origin` may be supplied with relative
-asset paths, but the UI never resolves `/tiles` or `/assets` against its
-sandboxed iframe origin by default. Tile requests carry the signed query token
-in `X-HIFLD-Query-Token`.
+Each layer receives an absolute sandbox-compatible
+`${publicOrigin}/tiles/{query_id}/{z}/{x}/{y}.mvt` URL. The component matches
+that query ID to its layer token and sends `X-HIFLD-Query-Token`; the server
+verifies that the path ID matches the signed token before re-running the
+bounded DuckDB tile query. The component renders independent MapLibre sources
+in input order, fits their combined bounds unless the agent supplies a camera,
+and displays one named solid-color legend group per layer.
+
+`view_query_map` defaults to the same OpenFreeMap Bright street basemap as the
+HIFLD webapp and also supports its Esri World Imagery satellite mode. Arbitrary
+style URLs, raw MapLibre expressions, partial maps, GeoJSON conversion, and
+alternate tile fallbacks are not accepted.
 
 ## Opt-in storage acceptance tests
 

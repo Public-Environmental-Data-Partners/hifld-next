@@ -6,10 +6,11 @@ import duckdb
 
 from query_worker.metrics import init_connection, measure
 from query_worker.protocol import (
-    WorkerCredentialProfile,
     WorkerFailure,
     WorkerQuery,
     WorkerRuntimeConfig,
+    WorkerSeaweedCredentials,
+    WorkerSeaweedSource,
     WorkerSourceSpec,
 )
 from query_worker.runtime import WorkerRuntime
@@ -161,21 +162,15 @@ def test_metrics_profile_uses_stable_typed_output(tmp_path: Path) -> None:
 
 
 def test_credentials_are_spawn_time_only_and_redacted_from_runtime_repr(tmp_path: Path) -> None:
-    profile = WorkerCredentialProfile(
-        slug="seaweed",
-        type="seaweedfs",
-        bucket="datasets",
+    credentials = WorkerSeaweedCredentials(
         access_key_id="access-value",
         secret_access_key="secret-value",
-        endpoint="seaweed:8333",
-        url_style="path",
-        tls=False,
     )
     config = WorkerRuntimeConfig(
         threads=1,
         memory_limit="256MiB",
         temp_directory=str(tmp_path),
-        credential_profiles=(profile,),
+        seaweedfs_credentials=credentials,
         load_extensions=False,
     )
     request = _request(
@@ -184,7 +179,10 @@ def test_credentials_are_spawn_time_only_and_redacted_from_runtime_repr(tmp_path
             WorkerSourceSpec(
                 alias="source",
                 object_uris=("s3://datasets/sample.parquet",),
-                profile_slug="seaweed",
+                seaweedfs=WorkerSeaweedSource(
+                    bucket="datasets",
+                    endpoint="localhost:8333",
+                ),
             ),
         ),
     )
@@ -194,7 +192,7 @@ def test_credentials_are_spawn_time_only_and_redacted_from_runtime_repr(tmp_path
     request_message = pickle.dumps(request)
     assert b"access-value" not in request_message
     assert b"secret-value" not in request_message
-    assert b"seaweed" in request_message
+    assert b"localhost:8333" in request_message
 
 
 def test_runtime_sets_pinned_extension_directory_before_accepting_queries(tmp_path: Path) -> None:

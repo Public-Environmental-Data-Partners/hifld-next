@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from starlette.types import ASGIApp
+from fastapi import FastAPI
 
 from app.catalog.client import CatalogClient
 from app.catalog.source_resolver import SourceResolver
@@ -11,20 +11,25 @@ from app.config import Settings
 from app.http_app import HttpDependencies, create_http_app
 from app.mcp_server import AppDependencies, UIResourceConfig
 from app.query.application import QueryApplicationService
-from app.query.service import QueryService, worker_profiles_from_storage
+from app.query.service import QueryService
 from app.query.token_codec import QueryTokenCodec
 from app.storage.resolver import StorageResolver
 from query_worker.pool import WorkerPool, WorkerPoolConfig
-from query_worker.protocol import WorkerRuntimeConfig
+from query_worker.protocol import WorkerRuntimeConfig, WorkerSeaweedCredentials
 
 
-def create_production_app(settings: Settings | None = None) -> ASGIApp:
+def create_production_app(
+    settings: Settings | None = None,
+    *,
+    install_extensions: bool = False,
+    seaweedfs_credentials: WorkerSeaweedCredentials | None = None,
+) -> FastAPI:
     """Build all long-lived services from validated environment settings."""
 
     configured = settings or Settings.model_validate({})
     catalog = CatalogClient(str(configured.catalog_base_url))
     source_resolver = SourceResolver(catalog)
-    storage_resolver = StorageResolver(configured.storage_settings)
+    storage_resolver = StorageResolver()
     pool = WorkerPool(
         WorkerPoolConfig(
             worker_count=configured.worker_count,
@@ -36,7 +41,8 @@ def create_production_app(settings: Settings | None = None) -> ASGIApp:
             memory_limit=configured.duckdb_memory_limit,
             temp_directory=configured.duckdb_temp_directory,
             extension_directory=configured.duckdb_extension_directory,
-            credential_profiles=worker_profiles_from_storage(configured.storage_settings),
+            seaweedfs_credentials=seaweedfs_credentials,
+            install_extensions=install_extensions,
             max_result_bytes=configured.max_result_bytes,
         ),
     )

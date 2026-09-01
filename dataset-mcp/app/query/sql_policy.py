@@ -228,6 +228,10 @@ class SqlPolicy:
     @staticmethod
     def _validate_functions(statement: exp.Query) -> None:
         for function in statement.find_all(exp.Func):
+            # sqlglot models boolean operators such as AND as Func subclasses,
+            # even though they are SQL syntax rather than callable functions.
+            if isinstance(function, exp.Binary):
+                continue
             name = (
                 function.name.upper()
                 if isinstance(function, exp.Anonymous)

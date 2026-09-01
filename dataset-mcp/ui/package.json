@@ -8,25 +8,26 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "vite build",
-    "postbuild": "node scripts/copy-maplibre-assets.mjs"
+    "postbuild": "node scripts/copy-maplibre-assets.mjs && node scripts/assert-self-contained-build.mjs"
   },
   "dependencies": {
+    "@hifld/map-ui": "file:../../packages/map-ui",
+    "@hifld/map-core": "file:../../packages/map-core",
     "@modelcontextprotocol/ext-apps": "latest",
-    "@tanstack/react-table": "latest",
-    "@tanstack/react-virtual": "latest",
+    "lucide-react": "^0.544.0",
     "maplibre-gl": "latest",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zod": "latest"
   },
   "devDependencies": {
+    "@biomejs/biome": "latest",
     "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
     "@testing-library/user-event": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "@vitejs/plugin-react": "latest",
-    "@biomejs/biome": "latest",
     "jsdom": "latest",
     "typescript": "latest",
     "vite": "latest",

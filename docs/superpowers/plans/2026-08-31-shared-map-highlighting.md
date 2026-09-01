@@ -182,6 +182,8 @@
 - Create: `dataset-mcp/ui/src/mcp/highlightContext.ts`
 - Create: `dataset-mcp/ui/tests/mapSelection.test.ts`
 - Create: `dataset-mcp/ui/tests/highlightContext.test.ts`
+- Modify: `dataset-mcp/query_worker/tiles.py`
+- Modify: `dataset-mcp/tests/test_tiles.py`
 - Modify: `dataset-mcp/ui/src/components/MapView.tsx`
 - Modify: `dataset-mcp/ui/src/components/MapControls.tsx`
 - Modify: `dataset-mcp/ui/src/styles.css`
@@ -218,6 +220,10 @@
     }>;
   }
   ```
+- [ ] Generate a stable content key, MVT feature ID, and WGS84 centroid from
+  the full source feature before `ST_AsMVTGeom` clips it. Carry them through
+  reserved MVT fields, strip them from exposed properties in the UI, and omit
+  ID-less legacy features rather than hashing clipped geometry client-side.
 - [ ] Implement point and box selection across every visible interactive query
   render layer. Match the webapp's mousedown/move/up flow, Shift activation,
   drag-pan disable/enable, persistent translucent selection box, reverse-drag
@@ -254,6 +260,15 @@
   npm run typecheck
   npm test
   npm run build
+  ```
+- [ ] Run the focused Python tile tests and formatting checks after changing
+  the trusted MVT wrapper:
+
+  ```bash
+  cd dataset-mcp
+  uv run ruff check query_worker/tiles.py tests/test_tiles.py
+  uv run ruff format --check query_worker/tiles.py tests/test_tiles.py
+  uv run pytest tests/test_tiles.py
   ```
 
 ### Task 6: Make Docker and CI resolve the shared package

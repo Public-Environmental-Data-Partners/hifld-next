@@ -3,7 +3,13 @@
 from collections.abc import Iterable
 
 from app.catalog.client import CatalogClient, CatalogClientError
-from app.catalog.models import DatasetFormat, FileLocation, FileSource, QuerySourceRef
+from app.catalog.models import (
+    BucketStorageConfig,
+    DatasetFormat,
+    FileLocation,
+    FileSource,
+    QuerySourceRef,
+)
 from app.query.models import ResolvedSource
 
 
@@ -60,6 +66,8 @@ class SourceResolver:
             source.source_type != "file"
             or source.storage_location is None
             or not source.storage_location.slug
+            or not isinstance(source.storage_location.config, BucketStorageConfig)
+            or source.storage_location.config.type not in {"gcs", "seaweedfs"}
         ):
             raise CatalogClientError(
                 "source_not_queryable", "catalog source is not a file-backed GeoParquet source"
@@ -88,6 +96,7 @@ class SourceResolver:
             version=str(source.version),
             format_type=entry.format.format_type,
             storage_location_slug=source.storage_location.slug,
+            storage_config=source.storage_location.config,
             object_uris=tuple(paths),
             bbox=_metadata_bounds(source),
             crs=metadata.crs if metadata is not None else None,

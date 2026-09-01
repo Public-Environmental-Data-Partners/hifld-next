@@ -5,7 +5,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.catalog.models import (
     Collection,
-    Dataset,
+    DatasetFilePayload,
     DatasetFileResponse,
     DatasetFileSchema,
     DatasetFileSchemaResult,
@@ -13,6 +13,7 @@ from app.catalog.models import (
     DatasetFormat,
     DatasetPage,
     DatasetSearchRequest,
+    DatasetWithFiles,
     FileSource,
     SchemaSummary,
 )
@@ -94,15 +95,15 @@ class CatalogClient:
         )
         return DatasetPage.model_validate(model)
 
-    async def get_dataset(self, collection: int | str, dataset: int | str) -> Dataset:
+    async def get_dataset(self, collection: int | str, dataset: int | str) -> DatasetWithFiles:
         resolved = await self.resolve_collection(collection)
         path = (
             f"/api/collections/{resolved.id}/datasets/{dataset}/files"
             if isinstance(dataset, int)
             else f"/api/collections/{resolved.id}/datasets/by-slug/{dataset}/files"
         )
-        model = await self._get_model(path, Dataset)
-        return Dataset.model_validate(model)
+        model = await self._get_model(path, DatasetWithFiles)
+        return DatasetWithFiles.model_validate(model)
 
     async def get_dataset_file(
         self, collection: int | str, dataset: int | str, file: int | str
@@ -112,8 +113,13 @@ class CatalogClient:
             path = f"/api/collections/{resolved.id}/datasets/{dataset}/files/{file}"
         else:
             path = f"/api/collections/{resolved.id}/datasets/by-slug/{dataset}/files/{file}"
-        model = await self._get_model(path, DatasetFileResponse)
-        return DatasetFileResponse.model_validate(model)
+        model = await self._get_model(path, DatasetFilePayload)
+        payload = DatasetFilePayload.model_validate(model)
+        return DatasetFileResponse(
+            collection=resolved,
+            dataset=payload.dataset,
+            file=payload.file,
+        )
 
     async def get_file_versions(
         self, collection: int | str, dataset: int | str, file: int | str

@@ -1,3 +1,4 @@
+import { isQueryMvtReservedProperty } from "@hifld/map-core";
 import { createFileRoute, Link, notFound, useSearch } from "@tanstack/react-router";
 import { ArrowLeft, Check, ChevronDown, ChevronsUpDown, Layers, PanelLeft, Plus } from "lucide-react";
 import type maplibregl from "maplibre-gl";
@@ -93,6 +94,8 @@ type MapSearch = {
 const MAP_DATASET_PAGE_SIZE = 12;
 const SEARCH_DEBOUNCE_MS = 500;
 const MOBILE_SETTINGS_MEDIA_QUERY = "(max-width: 767.98px)";
+export const MAP_CANVAS_DESKTOP_DEFAULT_SIZE = "45%";
+export const MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE = "55%";
 export const DATASET_SEARCH_PANEL_CLASSNAME =
   "absolute top-full right-0 left-0 z-30 mt-2 min-w-0 rounded-md border bg-popover p-0 text-popover-foreground shadow-md";
 export const DATASET_SEARCH_LIST_CLASSNAME =
@@ -294,9 +297,15 @@ function CollectionMapRoutePage() {
   );
 }
 
-function popupProperties(hoverInfo: HoverInfo | null): PopupPropertyEntry[] {
+export function popupProperties(
+  hoverInfo: HoverInfo | null,
+  loadedLayers: readonly LoadedMapLayer[],
+): PopupPropertyEntry[] {
   const selectedFeature = hoverInfo?.features?.[hoverInfo.selectedIndex ?? 0] ?? null;
+  const mapSourceId = typeof selectedFeature?.source === "string" ? selectedFeature.source : "";
+  const isQueryMvt = loadedLayers.some((layer) => layer.mapSourceId === mapSourceId && layer.kind === "query_mvt");
   return Object.entries(selectedFeature?.properties ?? {})
+    .filter(([key]) => !isQueryMvt || !isQueryMvtReservedProperty(key))
     .map(([key, value]) => [key, String(value)] satisfies PopupPropertyEntry)
     .sort(([left], [right]) => left.localeCompare(right));
 }
@@ -1062,7 +1071,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   }, [clearHoverFeature]);
 
   const activePopupInfo = pinnedPopupInfo ?? hoverInfo;
-  const propertyEntries = popupProperties(activePopupInfo);
+  const propertyEntries = popupProperties(activePopupInfo, loadedLayers);
   const activePopupSelectedFeature = useMemo(
     () => selectedMapFeatureFromHoverInfo(activePopupInfo, loadedLayers),
     [activePopupInfo, loadedLayers],
@@ -1474,7 +1483,9 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const mapWorkspaceContent = (
     <ResizablePanelGroup orientation="vertical" className="min-h-0">
       <ResizablePanel
-        defaultSize={selectedFeatures.length > 0 ? (isMobileMapLayout ? "38%" : "68%") : "100%"}
+        defaultSize={
+          selectedFeatures.length > 0 ? (isMobileMapLayout ? "38%" : MAP_CANVAS_DESKTOP_DEFAULT_SIZE) : "100%"
+        }
         minSize={isMobileMapLayout ? "24%" : "40%"}
         className="min-h-0 overflow-hidden"
         onResize={() => mapRef.current?.resize()}
@@ -1520,7 +1531,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
         <>
           <ResizableHandle withHandle />
           <ResizablePanel
-            defaultSize={isMobileMapLayout ? "62%" : "32%"}
+            defaultSize={isMobileMapLayout ? "62%" : MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE}
             minSize={isMobileMapLayout ? "42%" : "18%"}
             className="min-h-0 overflow-hidden"
             onResize={() => mapRef.current?.resize()}

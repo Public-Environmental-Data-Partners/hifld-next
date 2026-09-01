@@ -18,7 +18,7 @@ export function runtimeClientConfigFromEnv(env: RuntimeClientConfigEnv): Runtime
   const publicDatasetApiUrl = nonEmpty(env.PUBLIC_DATASET_API_URL);
   const posthogKey = nonEmpty(env.PUBLIC_POSTHOG_KEY);
   const posthogHost = nonEmpty(env.PUBLIC_POSTHOG_HOST) ?? DEFAULT_POSTHOG_HOST;
-  const webMcpEnabled = env.WEBMCP_ENABLED === "true";
+  const webMcpEnabled = env.WEBMCP_ENABLED === undefined || env.WEBMCP_ENABLED === "true";
   const runtimeConfig: RuntimeClientConfig = {
     posthogHost,
     webMcpEnabled,

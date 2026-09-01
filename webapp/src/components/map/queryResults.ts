@@ -1,3 +1,4 @@
+import { isQueryMvtReservedProperty } from "@hifld/map-core";
 import type { QueryColumn, QueryPage, QueryResult } from "@/lib/query-api";
 import { buildQueryMvtLayer, type QueryMvtLayer } from "./multiLayerSources";
 
@@ -22,7 +23,12 @@ export function publicQueryPage(page: QueryPage): PublicQueryPage {
 
 function scalarFields(columns: readonly QueryColumn[], geometryColumn: string) {
   return columns
-    .filter((column) => column.name !== geometryColumn && column.type.toLowerCase() !== "geometry")
+    .filter(
+      (column) =>
+        column.name !== geometryColumn &&
+        column.type.toLowerCase() !== "geometry" &&
+        !isQueryMvtReservedProperty(column.name),
+    )
     .map((column) => ({ name: column.name, logicalType: column.type, nullable: column.nullable }));
 }
 

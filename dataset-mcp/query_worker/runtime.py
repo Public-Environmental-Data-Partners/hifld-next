@@ -15,7 +15,6 @@ from app.query.serialization import (
 )
 from query_worker.metrics import init_connection, measure
 from query_worker.protocol import (
-    WorkerCredentialProfile,
     WorkerFailure,
     WorkerPage,
     WorkerQuery,
@@ -46,11 +45,14 @@ def get_connection(config: WorkerRuntimeConfig) -> duckdb.DuckDBPyConnection:
     temp_directory.mkdir(parents=True, exist_ok=True)
     connection = duckdb.connect(database=":memory:")
     try:
+        if config.extension_directory is not None:
+            connection.execute("SET extension_directory = ?", [config.extension_directory])
+        if config.install_extensions:
+            connection.execute("INSTALL httpfs")
+            connection.execute("INSTALL spatial")
         connection.execute("SET autoinstall_known_extensions = false")
         connection.execute("SET autoload_known_extensions = false")
         connection.execute("SET allow_community_extensions = false")
-        if config.extension_directory is not None:
-            connection.execute("SET extension_directory = ?", [config.extension_directory])
         if config.load_extensions:
             connection.execute("LOAD httpfs")
             connection.execute("LOAD spatial")
@@ -85,19 +87,7 @@ class WorkerRuntime:
 
     def __init__(self, config: WorkerRuntimeConfig) -> None:
         self._config = config
-        self._credential_profiles = self._index_profiles(config.credential_profiles)
         self.connection = get_connection(config)
-
-    @staticmethod
-    def _index_profiles(
-        profiles: tuple[WorkerCredentialProfile, ...],
-    ) -> dict[str, WorkerCredentialProfile]:
-        indexed: dict[str, WorkerCredentialProfile] = {}
-        for profile in profiles:
-            if profile.slug in indexed:
-                raise ValueError("worker credential profile slugs must be unique")
-            indexed[profile.slug] = profile
-        return indexed
 
     def close(self) -> None:
         self.connection.close()
@@ -105,28 +95,24 @@ class WorkerRuntime:
     def _create_request_secrets(self, request: WorkerQuery | WorkerTileQuery) -> tuple[str, ...]:
         secret_names: list[str] = []
         for source in request.sources:
-            if source.profile_slug is None:
+            storage = source.seaweedfs
+            if storage is None:
                 continue
-            profile = self._credential_profiles.get(source.profile_slug)
-            if profile is None:
-                raise ValueError("worker credential profile is not configured")
+            credentials = self._config.seaweedfs_credentials
+            if credentials is None:
+                raise ValueError("local SeaweedFS credentials are not configured")
             secret_name = f"_mcp_secret_{token_hex(16)}"
-            scope = f"s3://{profile.bucket}"
-            if profile.prefix:
-                scope = f"{scope}/{profile.prefix.strip('/')}"
+            scope = f"s3://{storage.bucket}"
             options = [
                 "TYPE S3",
                 "PROVIDER CONFIG",
-                f"KEY_ID {_sql_string(profile.access_key_id)}",
-                f"SECRET {_sql_string(profile.secret_access_key)}",
+                f"KEY_ID {_sql_string(credentials.access_key_id)}",
+                f"SECRET {_sql_string(credentials.secret_access_key)}",
                 f"SCOPE {_sql_string(scope)}",
-                f"URL_STYLE {_sql_string(profile.url_style)}",
-                f"USE_SSL {'true' if profile.tls else 'false'}",
+                f"URL_STYLE {_sql_string(storage.url_style)}",
+                f"USE_SSL {'true' if storage.tls else 'false'}",
+                f"ENDPOINT {_sql_string(storage.endpoint)}",
             ]
-            if profile.region is not None:
-                options.append(f"REGION {_sql_string(profile.region)}")
-            if profile.endpoint is not None:
-                options.append(f"ENDPOINT {_sql_string(profile.endpoint)}")
             self.connection.execute(
                 f"CREATE TEMPORARY SECRET {_quoted_identifier(secret_name)} ({', '.join(options)})"
             )

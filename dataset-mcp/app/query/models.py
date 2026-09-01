@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.catalog.models import QuerySourceRef
+from app.catalog.models import BucketStorageConfig, QuerySourceRef
 
 type JsonScalar = None | bool | int | float | str
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
@@ -42,6 +42,7 @@ class ResolvedSource(QueryModel):
     version: str
     format_type: str
     storage_location_slug: str
+    storage_config: BucketStorageConfig
     object_uris: tuple[str, ...] = Field(min_length=1)
     bbox: tuple[float, float, float, float] | None = None
     crs: str | None = None

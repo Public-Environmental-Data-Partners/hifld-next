@@ -15,7 +15,7 @@ from app.catalog.client import CatalogClientError
 from app.catalog.models import QuerySourceRef
 from app.errors import AppError, ErrorCode
 from app.query.models import JsonValue, PageResult, QueryTokenPayload, ResolvedSource
-from app.query.service import ExecutionSource, QueryService
+from app.query.service import ExecutionSource, QueryService, worker_source
 from app.query.sql_policy import SqlPolicy, SqlPolicyError, ValidatedSql
 from app.query.token_codec import QueryTokenCodec, QueryTokenError
 from app.storage.resolver import StorageResolutionError, StorageResolver
@@ -31,6 +31,7 @@ from query_worker.protocol import (
 type JSONMapping = Mapping[str, JsonValue]
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+_GEOMETRY_CRS = re.compile(r"^GEOMETRY\s*\(\s*'(?P<crs>EPSG:[1-9][0-9]*)'\s*\)$", re.IGNORECASE)
 
 
 class _JsonMapping(RootModel[dict[str, JsonValue]]):
@@ -263,24 +264,31 @@ class QueryApplicationService:
         infer_source_crs: bool,
     ) -> tuple[str | None, str | None]:
         geometry_columns = tuple(
-            column.name
-            for column in page.columns
-            if column.logical_type.upper().startswith("GEOMETRY")
+            column for column in page.columns if column.logical_type.upper().startswith("GEOMETRY")
         )
         if geometry_column is not None:
-            matching = tuple(name for name in geometry_columns if name == geometry_column)
-            if not matching:
+            matching = next(
+                (column for column in geometry_columns if column.name == geometry_column),
+                None,
+            )
+            if matching is None:
                 raise AppError(
                     ErrorCode.MAP_NOT_SUPPORTED,
                     "The named geometry column is not a GEOMETRY result column",
                 )
             resolved_geometry = geometry_column
         elif len(geometry_columns) == 1:
-            resolved_geometry = geometry_columns[0]
+            matching = geometry_columns[0]
+            resolved_geometry = matching.name
         else:
+            matching = None
             resolved_geometry = None
 
         resolved_crs = result_crs
+        if resolved_crs is None and matching is not None:
+            declared_crs = _GEOMETRY_CRS.fullmatch(matching.logical_type)
+            if declared_crs is not None:
+                resolved_crs = declared_crs.group("crs").upper()
         if infer_source_crs and resolved_geometry is not None and resolved_crs is None:
             source_crs = {
                 source.resolved.crs for source in sources if source.resolved.crs is not None
@@ -425,20 +433,53 @@ class QueryApplicationService:
             query_id=payload.query_id,
         )
 
+    async def map_configuration(self, token: str) -> JSONMapping:
+        public_origin = self._public_origin
+        if public_origin is None:
+            raise AppError(
+                ErrorCode.MAP_NOT_SUPPORTED,
+                "Map rendering is not configured for this server",
+            )
+        payload = self._decode_token(token)
+        if payload.geometry_column is None:
+            raise AppError(
+                ErrorCode.GEOMETRY_AMBIGUOUS,
+                "The query does not have one selected geometry column",
+            )
+        if payload.result_crs is None:
+            raise AppError(
+                ErrorCode.GEOMETRY_CRS_REQUIRED,
+                "The query geometry coordinate reference system is required",
+            )
+        sources = await self._execution_sources(payload.sources, token_revalidation=True)
+        configuration = self._map_configuration(
+            sources,
+            geometry_column=payload.geometry_column,
+            result_crs=payload.result_crs,
+            query_id=payload.query_id,
+        )
+        if configuration is None:
+            raise AppError(
+                ErrorCode.MAP_NOT_SUPPORTED,
+                "Map rendering is not configured for this server",
+            )
+        # MCP Apps run in sandboxed iframes whose Origin is commonly `null`.
+        # Use the capability-token tile route, which intentionally permits
+        # cross-origin reads, instead of the webapp-only REST route.
+        configuration["tile_url"] = (
+            f"{public_origin}/tiles/{payload.query_id}/{{z}}/{{x}}/{{y}}.mvt"
+        )
+        return _JsonMapping.model_validate(
+            {
+                "query_token": token,
+                "query_id": payload.query_id,
+                "map_configuration": configuration,
+            }
+        ).root
+
     @staticmethod
     def _worker_sources(sources: Sequence[ExecutionSource]) -> tuple[WorkerSourceSpec, ...]:
-        return tuple(
-            WorkerSourceSpec(
-                alias=source.resolved.source.alias,
-                object_uris=source.duckdb.object_uris,
-                profile_slug=(
-                    source.resolved.storage_location_slug
-                    if source.duckdb.secret is not None
-                    else None
-                ),
-            )
-            for source in sources
-        )
+        return tuple(worker_source(source) for source in sources)
 
     async def render_tile(
         self,

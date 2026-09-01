@@ -5,4 +5,5 @@
 *.pyc
 ui/node_modules/
 ui/dist/
+*.egg-info/
 ui/coverage/

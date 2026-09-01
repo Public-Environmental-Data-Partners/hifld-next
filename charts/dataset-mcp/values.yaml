@@ -12,7 +12,6 @@ catalog: {baseUrl: ""}
 publicOrigin: ""
 tokenSecret: {name: dataset-mcp-secrets, key: query-token-secret}
 storage:
-  settingsSecret: {name: dataset-mcp-secrets, key: storage-settings}
   allowedCidrs: []
   allowedPorts: [443]
 resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "2", memory: 2Gi}}
