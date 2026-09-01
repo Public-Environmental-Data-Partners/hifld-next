@@ -3,6 +3,10 @@ kind: Service
 metadata:
   name: {{ include "dataset-mcp.fullname" . }}
   labels: {{- include "dataset-mcp.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.service.type }}
   ports: [{name: http, port: {{ .Values.service.port }}, targetPort: http, protocol: TCP}]

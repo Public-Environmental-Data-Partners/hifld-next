@@ -1,4 +1,6 @@
 replicaCount: 1
+nameOverride: ""
+fullnameOverride: ""
 image:
   repository: ghcr.io/public-environmental-data-partners/hifld-next/dataset-mcp
   tag: latest
