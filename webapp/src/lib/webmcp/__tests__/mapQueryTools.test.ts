@@ -313,6 +313,19 @@ describe("map WebMCP tools", () => {
     installModelContextFake(fake);
     const addDatasetLayer = vi.fn(async () => ({ id: "generated", label: "Roads", kind: "catalog_pmtiles" as const, visible: true }));
     const resolveCatalogLayer = vi.fn(async () => ({ layerId: "generated", label: "Roads" }));
+    let stateSnapshot: MapWebMcpState = {
+      ...emptyState,
+      layers: [
+        {
+          id: "query:stations",
+          label: "Alternative fueling stations",
+          kind: "query_mvt",
+          visible: true,
+          status: "ready",
+          query_id: "stations",
+        },
+      ],
+    };
     function AddHarness() {
       useMapWebMcpTools({
         enabled: true,
@@ -327,11 +340,11 @@ describe("map WebMCP tools", () => {
           clearSelection: vi.fn(),
         },
         resolveCatalogLayer,
-        getState: () => emptyState,
+        getState: () => stateSnapshot,
       });
       return null;
     }
-    render(createElement(AddHarness));
+    const { rerender } = render(createElement(AddHarness));
     await waitFor(() => expect(fake.toolNames()).toContain("add_dataset_layer"));
     await expect(
       fake.execute("add_dataset_layer", {
@@ -350,6 +363,32 @@ describe("map WebMCP tools", () => {
       label: "Roads",
     });
     expect(addDatasetLayer).toHaveBeenCalledWith({ layerId: "generated", label: "Roads" });
+    await expect(fake.execute("get_map_state", {})).resolves.toMatchObject({
+      ok: true,
+      data: {
+        layers: [
+          { map_layer_id: "query:stations", kind: "query_mvt" },
+          { map_layer_id: "generated", kind: "catalog_pmtiles" },
+        ],
+      },
+    });
+    stateSnapshot = {
+      ...stateSnapshot,
+      layers: [
+        ...stateSnapshot.layers,
+        { id: "generated", label: "Roads", kind: "catalog_pmtiles", visible: true },
+      ],
+    };
+    rerender(createElement(AddHarness));
+    await waitFor(() => expect(fake.toolNames()).toContain("reorder_map_layers"));
+    stateSnapshot = { ...stateSnapshot, layers: stateSnapshot.layers.filter((layer) => layer.id !== "generated") };
+    rerender(createElement(AddHarness));
+    await waitFor(async () => {
+      await expect(fake.execute("get_map_state", {})).resolves.toMatchObject({
+        ok: true,
+        data: { layers: [{ map_layer_id: "query:stations" }] },
+      });
+    });
     await expect(
       fake.execute("add_dataset_layer", {
         collection_id: 1,
