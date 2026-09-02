@@ -307,8 +307,8 @@ def test_mcp_transport_uses_the_advertised_canonical_path_without_redirect() -> 
 
         assert canonical.status_code == 405
         assert canonical.headers.get("location") is None
-        assert slash_variant.status_code == 307
-        assert slash_variant.headers["location"] == "http://test/mcp"
+        assert slash_variant.status_code == 405
+        assert slash_variant.headers.get("location") is None
 
     asyncio.run(assert_canonical_path())
 

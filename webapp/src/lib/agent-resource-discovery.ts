@@ -25,7 +25,22 @@ export interface AgentResourceDiscovery {
   entries: AgentResourceEntry[];
 }
 
-function configuredMcpEndpoint(origin: string): string {
+function configuredPublicOrigin(requestOrigin: string): string {
+  const configured = process.env["WEBAPP_PUBLIC_ORIGIN"]?.trim();
+  if (!configured) return requestOrigin;
+  try {
+    const origin = new URL(configured);
+    const isLocalHttp =
+      origin.protocol === "http:" && (origin.hostname === "localhost" || origin.hostname === "127.0.0.1");
+    if (origin.protocol !== "https:" && !isLocalHttp) return requestOrigin;
+    return origin.origin;
+  } catch {
+    return requestOrigin;
+  }
+}
+
+function configuredMcpEndpoint(requestOrigin: string): string {
+  const origin = configuredPublicOrigin(requestOrigin);
   const configured = process.env["DATASET_MCP_PUBLIC_ENDPOINT"]?.trim();
   // Deployments must route same-origin /mcp or configure DATASET_MCP_PUBLIC_ENDPOINT.
   if (!configured) return new URL("/mcp", origin).href;

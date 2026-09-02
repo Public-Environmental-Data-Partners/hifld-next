@@ -4,6 +4,7 @@ import { buildAgentResourceDiscovery, buildMcpServerCard } from "../agent-resour
 describe("agent resource discovery", () => {
   afterEach(() => {
     delete process.env.DATASET_MCP_PUBLIC_ENDPOINT;
+    delete process.env.WEBAPP_PUBLIC_ORIGIN;
   });
 
   it("builds an origin-aware MCP server card", () => {
@@ -37,5 +38,12 @@ describe("agent resource discovery", () => {
     expect(buildMcpServerCard("https://hifld.publicenvirodata.org").remotes[0]?.url).toBe("https://mcp.example.test/mcp");
     process.env.DATASET_MCP_PUBLIC_ENDPOINT = "http://dataset-mcp.internal:8000";
     expect(buildMcpServerCard("https://hifld.publicenvirodata.org").remotes[0]?.url).toBe("https://hifld.publicenvirodata.org/mcp");
+  });
+
+  it("uses the canonical public origin behind a reverse proxy", () => {
+    process.env.WEBAPP_PUBLIC_ORIGIN = "https://hifld.publicenvirodata.org";
+    expect(buildMcpServerCard("http://webapp.hifld-next.svc.cluster.local").remotes[0]?.url).toBe(
+      "https://hifld.publicenvirodata.org/mcp",
+    );
   });
 });
