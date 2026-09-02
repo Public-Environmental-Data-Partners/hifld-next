@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { z } from "zod";
 import type {
   DatasetLayerInput,
@@ -230,6 +230,12 @@ function stateData(state: MapWebMcpState): WebMcpJsonObject {
   return data;
 }
 
+function withPendingLayers(state: MapWebMcpState, pendingLayers: ReadonlyMap<string, MapToolLayer>): MapWebMcpState {
+  const loadedLayerIds = new Set(state.layers.map(mapLayerId));
+  const missingLayers = [...pendingLayers.values()].filter((layer) => !loadedLayerIds.has(mapLayerId(layer)));
+  return missingLayers.length === 0 ? state : { ...state, layers: [...state.layers, ...missingLayers] };
+}
+
 function mapFailure(error: Error): WebMcpResult<WebMcpJsonObject> {
   if (error instanceof MapWorkspaceCommandError)
     return failure("invalid_request", "The requested map change is invalid.");
@@ -275,18 +281,21 @@ async function addCatalogLayer(
   input: z.infer<typeof catalogLayerInputSchema>,
   commands: MapWorkspaceCommands,
   resolveCatalogLayer: CatalogLayerResolver,
+  onLayerAdded: (layer: MapToolLayer) => void,
 ): Promise<WebMcpResult<WebMcpJsonObject>> {
   const layer = await commands.addDatasetLayer(await resolveCatalogLayer(input));
   if (input.visible !== undefined && input.visible !== layer.visible) {
     commands.setLayerVisibility(layer.id, input.visible);
   }
+  const addedLayer: MapToolLayer = {
+    map_layer_id: layer.id,
+    label: layer.label,
+    kind: layer.kind,
+    visible: input.visible ?? layer.visible,
+  };
+  onLayerAdded(addedLayer);
   return success("Dataset layer added.", {
-    layer: {
-      map_layer_id: layer.id,
-      label: layer.label,
-      kind: layer.kind,
-      visible: input.visible ?? layer.visible,
-    },
+    layer: mapLayerData(addedLayer),
   });
 }
 
@@ -322,15 +331,24 @@ export function useMapWebMcpTools({
   resolveCatalogLayer?: CatalogLayerResolver | undefined;
 }): void {
   const state = getState();
+  const pendingAddedLayersRef = useRef<Map<string, MapToolLayer>>(new Map());
   const layerCount = state.layers.length;
   const hasStyleLayer = state.layers.some((layer) => (layer.style_layers?.length ?? 0) > 0);
   const hasSelection = state.selected_feature_count > 0;
-  const getMapState = useCallback(() => success("Map state loaded.", stateData(getState())), [getState]);
+  useEffect(() => {
+    for (const layer of state.layers) pendingAddedLayersRef.current.delete(mapLayerId(layer));
+  }, [state.layers]);
+  const getMapState = useCallback(
+    () => success("Map state loaded.", stateData(withPendingLayers(getState(), pendingAddedLayersRef.current))),
+    [getState],
+  );
   const addLayer = useCallback(
     async (input: z.infer<typeof catalogLayerInputSchema>) => {
       try {
         if (!resolveCatalogLayer) return failure("unsupported_state", "Catalog layer resolution is unavailable.");
-        return await addCatalogLayer(input, commands, resolveCatalogLayer);
+        return await addCatalogLayer(input, commands, resolveCatalogLayer, (layer) => {
+          pendingAddedLayersRef.current.set(mapLayerId(layer), layer);
+        });
       } catch (error) {
         return error instanceof Error ? mapFailure(error) : failure("internal_error");
       }
