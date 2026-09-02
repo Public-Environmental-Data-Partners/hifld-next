@@ -63,6 +63,7 @@ same-origin.
 
 - \`POST /api/queries\` starts a bounded query and returns an opaque, non-secret \`query_id\`.
 - \`POST /api/queries/{query_id}/pages\` takes a non-negative \`offset\` and a bounded \`page_size\` (1–1,000). Send the signed token only in \`X-HIFLD-Query-Token\`; the path \`query_id\` must match that token.
+- \`GET /api/queries/{query_id}/bounds\` lazily calculates WGS84 query-result bounds for map framing. It uses the same signed-token header and bound \`query_id\`.
 - Query failures use stable problem codes, not SQL, credentials, storage paths, or token details. Public MVT is loaded directly from the returned dataset-mcp URL; there is no webapp tile proxy.
 
 ## Constraints

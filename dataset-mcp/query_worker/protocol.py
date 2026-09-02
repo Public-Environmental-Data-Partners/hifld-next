@@ -75,6 +75,15 @@ class WorkerTileQuery:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkerBoundsQuery:
+    canonical_sql: str
+    sources: tuple[WorkerSourceSpec, ...]
+    geometry_column: str
+    result_crs: str
+    deadline: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class WorkerPage:
     columns: tuple[tuple[str, str, bool], ...]
     rows: tuple[EncodedRow, ...]
@@ -98,9 +107,14 @@ class WorkerTile:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkerBounds:
+    bounds: tuple[float, float, float, float] | None
+
+
+@dataclass(frozen=True, slots=True)
 class WorkerFailure:
     code: str
     message: str
 
 
-WorkerResult = WorkerPage | WorkerTile | WorkerFailure
+WorkerResult = WorkerPage | WorkerTile | WorkerBounds | WorkerFailure

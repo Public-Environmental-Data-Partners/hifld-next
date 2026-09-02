@@ -9,6 +9,8 @@ from multiprocessing.process import BaseProcess
 from typing import Protocol
 
 from query_worker.protocol import (
+    WorkerBounds,
+    WorkerBoundsQuery,
     WorkerFailure,
     WorkerPage,
     WorkerQuery,
@@ -72,7 +74,7 @@ def _worker_main(
             message: object = connection.recv()
             if message is None:
                 return
-            if not isinstance(message, (WorkerQuery, WorkerTileQuery)):
+            if not isinstance(message, (WorkerQuery, WorkerBoundsQuery, WorkerTileQuery)):
                 connection.send(
                     WorkerFailure(
                         code="worker_protocol_invalid",
@@ -178,7 +180,7 @@ class WorkerPool:
 
     async def execute(
         self,
-        request: WorkerQuery | WorkerTileQuery,
+        request: WorkerQuery | WorkerBoundsQuery | WorkerTileQuery,
         *,
         timeout_seconds: float | None = None,
     ) -> WorkerResult:
@@ -225,7 +227,7 @@ class WorkerPool:
             await replace_once()
             raise
 
-        if not isinstance(response, (WorkerPage, WorkerTile, WorkerFailure)):
+        if not isinstance(response, (WorkerPage, WorkerBounds, WorkerTile, WorkerFailure)):
             await replace_once()
             return WorkerFailure(
                 code="worker_protocol_invalid",

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { queryCreateHandler } from "../api/queries";
+import { queryBoundsHandler } from "../api/queries.$queryId.bounds";
 import { queryPageHandler } from "../api/queries.$queryId.pages";
 
 const body = {
@@ -104,6 +105,38 @@ describe("same-origin query proxy routes", () => {
       "X-HIFLD-Query-Token": "private-token",
       "X-Request-ID": expect.any(String),
     });
+  });
+
+  it("forwards signed bounds requests without browser credentials", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ bounds: [-122.4, 37, -121.4, 37.8] }),
+    );
+
+    const response = await queryBoundsHandler(
+      new Request("https://web.test/api/queries/query_12345678901234567890/bounds", {
+        headers: { Cookie: "session=secret", "X-HIFLD-Query-Token": "private-token" },
+      }),
+      {
+        params: { queryId: "query_12345678901234567890" },
+        fetcher,
+        baseUrl: "http://dataset-mcp.internal:8000",
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ bounds: [-122.4, 37, -121.4, 37.8] });
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Vary")).toBe("X-HIFLD-Query-Token");
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://dataset-mcp.internal:8000/api/queries/query_12345678901234567890/bounds",
+      expect.objectContaining({
+        method: "GET",
+        headers: {
+          "X-HIFLD-Query-Token": "private-token",
+          "X-Request-ID": expect.any(String),
+        },
+      }),
+    );
   });
 
   it("returns a sanitized 503 for an upstream network failure", async () => {

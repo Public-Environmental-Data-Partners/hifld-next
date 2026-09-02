@@ -318,6 +318,12 @@ const OpenApiQueryErrorSchema = z
   .object({ code: z.string().min(1), message: z.string().min(1) })
   .strict()
   .openapi("QueryError");
+const OpenApiQueryBoundsSchema = z
+  .object({
+    bounds: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+  })
+  .strict()
+  .openapi("QueryBounds");
 const QueryResultCellDocumentationSchema = z.union([
   z.null(),
   z.boolean(),
@@ -363,6 +369,7 @@ const OpenApiQueryRequest = registry.register("QueryRequest", OpenApiQueryReques
 const OpenApiQueryPageRequest = registry.register("QueryPageRequest", OpenApiQueryPageRequestSchema);
 const OpenApiQueryResult = registry.register("QueryResult", QueryResultDocumentationSchema);
 const OpenApiQueryError = registry.register("QueryError", OpenApiQueryErrorSchema);
+const OpenApiQueryBounds = registry.register("QueryBounds", OpenApiQueryBoundsSchema);
 
 registry.registerPath({
   method: "get",
@@ -737,6 +744,35 @@ registry.registerPath({
       content: { "application/json": { schema: OpenApiQueryError } },
     },
     504: { description: "Query timed out", content: { "application/json": { schema: OpenApiQueryError } } },
+    503: { description: "Query service unavailable", content: { "application/json": { schema: OpenApiQueryError } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/queries/{query_id}/bounds",
+  summary: "Calculate query-result bounds for map framing",
+  description:
+    "Lazily re-executes the signed spatial query as an extent aggregate and returns WGS84 bounds. The query_id path value must match X-HIFLD-Query-Token.",
+  request: {
+    params: z.object({
+      query_id: z.string().regex(/^[A-Za-z0-9_-]{20,64}$/),
+    }),
+    headers: z.object({
+      "X-HIFLD-Query-Token": z.string().min(1),
+    }),
+  },
+  responses: {
+    200: {
+      description: "WGS84 result bounds",
+      content: { "application/json": { schema: OpenApiQueryBounds } },
+    },
+    400: { description: "Invalid request", content: { "application/json": { schema: OpenApiQueryError } } },
+    422: {
+      description: "Query result cannot be framed",
+      content: { "application/json": { schema: OpenApiQueryError } },
+    },
+    504: { description: "Bounds query timed out", content: { "application/json": { schema: OpenApiQueryError } } },
     503: { description: "Query service unavailable", content: { "application/json": { schema: OpenApiQueryError } } },
   },
 });

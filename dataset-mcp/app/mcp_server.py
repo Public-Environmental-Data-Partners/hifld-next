@@ -249,6 +249,8 @@ def create_mcp_server(
         their aliases as SQL tables. SELECTs, joins, CTEs, aggregates, and the
         allowlisted spatial functions are supported. The limit bounds the
         returned first page, not the relational meaning of SQL LIMIT clauses.
+        For map output, return a DuckDB GEOMETRY column and identify both its
+        column name and output CRS; tile rendering reprojects it server-side.
         """
         try:
             return _result(

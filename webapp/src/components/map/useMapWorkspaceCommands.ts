@@ -17,6 +17,7 @@ import {
   type MapCameraInput,
   type MapCameraState,
   type MapLayerSummary,
+  MapWorkspaceCommandError,
   type MapWorkspaceCommands,
 } from "./mapWorkspaceCommands";
 import type { LoadedMapLayer, MapBounds } from "./multiLayerSources";
@@ -33,6 +34,7 @@ export interface UseMapWorkspaceCommandsOptions {
   basemapMode: "street" | "satellite";
   setBasemapMode: (mode: "street" | "satellite") => void;
   resolveDatasetLayer: (input: DatasetLayerInput) => Promise<LoadedMapLayer | null>;
+  resolveLayerBounds?: ((layer: LoadedMapLayer) => Promise<MapBounds | null>) | undefined;
   onCatalogLayerAdded?: ((layer: Extract<LoadedMapLayer, { kind: "catalog_pmtiles" }>) => void) | undefined;
 }
 
@@ -144,14 +146,29 @@ function applyCameraCenterTarget(
   });
 }
 
-function applyCameraLayerTarget(
+export async function resolveCameraLayerBounds(
+  layers: readonly LoadedMapLayer[],
+  layerIds: readonly string[],
+  resolveLayerBounds?: ((layer: LoadedMapLayer) => Promise<MapBounds | null>) | undefined,
+): Promise<MapBounds | null> {
+  const targets = layers.filter((layer) => layerIds.includes(layer.id));
+  const resolved = await Promise.all(
+    targets.map((layer) =>
+      layer.bounds !== null || resolveLayerBounds === undefined ? layer.bounds : resolveLayerBounds(layer),
+    ),
+  );
+  return unionBounds(resolved);
+}
+
+async function applyCameraLayerTarget(
   map: maplibregl.Map,
   input: MapCameraInput,
   layerIds: readonly string[],
   layers: readonly LoadedMapLayer[],
-): void {
-  const bounds = unionBounds(layers.filter((layer) => layerIds.includes(layer.id)).map((layer) => layer.bounds));
-  if (!bounds) throw new Error("Requested layers have no known bounds.");
+  resolveLayerBounds?: ((layer: LoadedMapLayer) => Promise<MapBounds | null>) | undefined,
+): Promise<void> {
+  const bounds = await resolveCameraLayerBounds(layers, layerIds, resolveLayerBounds);
+  if (!bounds) throw new MapWorkspaceCommandError("Requested layers have no known bounds.");
   applyCameraBoundsTarget(map, input, bounds);
 }
 
@@ -166,19 +183,20 @@ function applyCameraFeatureTarget(
   applyCameraCenterTarget(map, input, [feature.centroid.lng, feature.centroid.lat], Math.max(map.getZoom(), 14));
 }
 
-function applyCameraTarget(
+async function applyCameraTarget(
   map: maplibregl.Map,
   input: MapCameraInput,
   layers: readonly LoadedMapLayer[],
   selectedFeatures: readonly SelectedMapFeature[],
-): void {
+  resolveLayerBounds?: ((layer: LoadedMapLayer) => Promise<MapBounds | null>) | undefined,
+): Promise<void> {
   const target = input.target ?? input;
   if (target.bounds) {
     applyCameraBoundsTarget(map, input, target.bounds);
   } else if (target.center) {
     applyCameraCenterTarget(map, input, target.center, target.zoom);
   } else if (target.layerIds) {
-    applyCameraLayerTarget(map, input, target.layerIds, layers);
+    await applyCameraLayerTarget(map, input, target.layerIds, layers, resolveLayerBounds);
   } else if (target.featureId) {
     applyCameraFeatureTarget(map, input, target.featureId, selectedFeatures);
   }
@@ -204,6 +222,7 @@ export function useMapWorkspaceCommands({
   clearSelection,
   setBasemapMode,
   resolveDatasetLayer,
+  resolveLayerBounds,
   onCatalogLayerAdded,
 }: UseMapWorkspaceCommandsOptions): MapWorkspaceCommands {
   const loadedLayersRef = useRef(loadedLayers);
@@ -324,14 +343,14 @@ export function useMapWorkspaceCommands({
       assertValidCameraInput(input);
       const map = mapRef.current;
       if (!map) throw new Error("Map is not ready.");
-      applyCameraTarget(map, input, loadedLayersRef.current, selectedFeaturesRef.current);
+      await applyCameraTarget(map, input, loadedLayersRef.current, selectedFeaturesRef.current, resolveLayerBounds);
       const target = input.target ?? input;
       if (!target.center && !target.featureId && !target.bounds && !target.layerIds) {
         applyCameraOrientation(map, input);
       }
       return waitForMapMovement(map);
     },
-    [mapRef],
+    [mapRef, resolveLayerBounds],
   );
 
   const setBasemap = useCallback(

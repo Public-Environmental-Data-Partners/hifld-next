@@ -7,6 +7,7 @@ import {
   QueryRequestSchema,
   QueryResultSchema,
   createQuery,
+  getQueryBounds,
   getQueryPage,
 } from "@/lib/query-api";
 
@@ -113,6 +114,23 @@ describe("query-api", () => {
         },
       }),
     );
+  });
+
+  it("loads query-result bounds lazily with the private token header", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ bounds: [-122.4, 37, -121.4, 37.8] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const result = await getQueryBounds(page.query_id, { queryToken: page.query_token, fetcher });
+
+    expect(result.bounds).toEqual([-122.4, 37, -121.4, 37.8]);
+    expect(fetcher).toHaveBeenCalledWith(`/api/queries/${page.query_id}/bounds`, {
+      method: "GET",
+      headers: { "X-HIFLD-Query-Token": page.query_token },
+    });
   });
 
   it("rejects binary and raw geometry cells", () => {

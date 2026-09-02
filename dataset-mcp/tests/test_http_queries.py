@@ -66,6 +66,10 @@ class QueryService:
             ]
         return response
 
+    async def bounds(self, token: str) -> Mapping[str, JsonValue]:
+        self.calls.append(f"bounds:{token}")
+        return {"bounds": [-122.4, 37.0, -121.4, 37.8]}
+
     async def render_tile(
         self,
         token: str,
@@ -210,6 +214,25 @@ def test_http_query_page_validates_bounds_and_dispatches_a_bound_request() -> No
     assert response.status_code == 200
     assert response.json()["offset"] == 4
     assert service.calls == ["validate:signed:query_123", "page:signed:4:5"]
+
+
+def test_http_query_bounds_requires_a_bound_token_and_returns_result_extent() -> None:
+    service = QueryService()
+    http = client(service)
+
+    missing = http.get("/api/queries/query_123/bounds")
+    assert missing.status_code == 400
+
+    response = http.get(
+        "/api/queries/query_123/bounds",
+        headers={"X-HIFLD-Query-Token": "signed"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"bounds": [-122.4, 37.0, -121.4, 37.8]}
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["vary"] == "X-HIFLD-Query-Token"
+    assert service.calls == ["validate:signed:query_123", "bounds:signed"]
 
 
 def test_http_query_tile_reflects_only_configured_origin_and_preserves_mvt_behavior() -> None:

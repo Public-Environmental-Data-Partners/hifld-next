@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { fitMapWhenReady, waitForMapMovement } from "../useMapWorkspaceCommands";
+import { buildQueryMvtLayer } from "../multiLayerSources";
+import { fitMapWhenReady, resolveCameraLayerBounds, waitForMapMovement } from "../useMapWorkspaceCommands";
 
 vi.mock("maplibre-gl", () => ({
   default: {
@@ -9,6 +10,22 @@ vi.mock("maplibre-gl", () => ({
 }));
 
 describe("useMapWorkspaceCommands", () => {
+  it("resolves missing query bounds before framing a layer target", async () => {
+    const layer = buildQueryMvtLayer({
+      queryId: "query_12345678901234567890",
+      label: "Bay Area stations",
+      sourceAliases: ["stations"],
+      geometryColumn: "geometry",
+      tileTemplate: "https://example.test/tiles/{z}/{x}/{y}.mvt",
+    });
+    const resolveLayerBounds = vi.fn().mockResolvedValue([-122.6, 37.1, -121.7, 38.0] as const);
+
+    await expect(resolveCameraLayerBounds([layer], [layer.id], resolveLayerBounds)).resolves.toEqual([
+      -122.6, 37.1, -121.7, 38.0,
+    ]);
+    expect(resolveLayerBounds).toHaveBeenCalledWith(layer);
+  });
+
   it("waits for map readiness before fitting initial or first-layer bounds", () => {
     let loadListener: (() => void) | undefined;
     const map = {

@@ -24,6 +24,7 @@ export const Route = createFileRoute("/api/")({
             example_collection_datasets: `${origin}/api/collections/hifld?search=wastewater&limit=25&omit=description`,
             create_query: `${origin}/api/queries`,
             query_page: `${origin}/api/queries/{query_id}/pages`,
+            query_bounds: `${origin}/api/queries/{query_id}/bounds`,
             query_tile: `${origin}/api/queries/{query_id}/tiles/{z}/{x}/{y}.mvt`,
           },
           hints: {
@@ -34,7 +35,7 @@ export const Route = createFileRoute("/api/")({
             bulk_analysis:
               "For statewide filters, download GeoParquet/Shapefile from file metadata `links` or source URLs and use DuckDB or GeoPandas locally.",
             query_resources:
-              "POST /api/queries starts a bounded query. POST /api/queries/{query_id}/pages requires X-HIFLD-Query-Token; its query_id path is bound to that token. offset is non-negative and page_size is 1..1000. Stable problem responses never expose SQL, credentials, physical paths, or tokens. Load MVT directly from the returned public dataset-mcp URL; the webapp does not proxy tiles.",
+              "POST /api/queries starts a bounded query. Page and bounds resources require X-HIFLD-Query-Token; their query_id path is bound to that token. Bounds are computed lazily for map framing. Stable problem responses never expose SQL, credentials, physical paths, or tokens. Load MVT directly from the returned public dataset-mcp URL; the webapp does not proxy tiles.",
             catalog_writes:
               "The JSON catalog API remains read-only. Contextual browser WebMCP tools may modify only the current browser workspace.",
             mcp_transport:

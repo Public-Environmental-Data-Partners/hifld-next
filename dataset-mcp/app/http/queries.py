@@ -61,6 +61,8 @@ class QueryHttpService(Protocol):
 
     async def page(self, token: str, offset: int, limit: int) -> Mapping[str, JsonValue]: ...
 
+    async def bounds(self, token: str) -> Mapping[str, JsonValue]: ...
+
     async def render_tile(
         self,
         token: str,
@@ -195,6 +197,29 @@ def create_query_router(
             record_transport(started_at)
         return JSONResponse(content=_public_payload(result))
 
+    async def query_bounds(
+        query_id: str,
+        query_token: str | None = Header(default=None, alias=QUERY_TOKEN_HEADER),
+    ) -> JSONResponse:
+        started_at = perf_counter()
+        try:
+            token = _required_query_token(query_token)
+            service.validate_query_identity(token, query_id)
+            result = await service.bounds(token)
+        except AppError as error:
+            return _error_response(error.code, error.message, {})
+        except ValueError:
+            return _error_response("invalid_request", "request validation failed", {})
+        finally:
+            record_transport(started_at)
+        return JSONResponse(
+            content=_public_payload(result),
+            headers={
+                "Cache-Control": "private, no-store",
+                "Vary": QUERY_TOKEN_HEADER,
+            },
+        )
+
     async def query_tile_preflight(
         request: Request,
         query_id: str,
@@ -244,6 +269,7 @@ def create_query_router(
 
     router.add_api_route("/api/queries", create_query, methods=["POST"])
     router.add_api_route("/api/queries/{query_id}/pages", query_page, methods=["POST"])
+    router.add_api_route("/api/queries/{query_id}/bounds", query_bounds, methods=["GET"])
     router.add_api_route(
         "/api/queries/{query_id}/tiles/{z}/{x}/{y}.mvt",
         query_tile_preflight,
