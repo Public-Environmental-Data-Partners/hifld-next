@@ -113,7 +113,11 @@ const collectionSchema = z
     id: z.number().int().positive(),
     slug: z.string().min(1),
     name: z.string(),
-    description: z.string().optional(),
+    description: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? undefined),
     created_at: z.string(),
     updated_at: z.string(),
     links: z.record(z.string(), z.string()).optional(),
@@ -123,30 +127,30 @@ const columnSchema = z
   .object({
     name: z.string(),
     type: z.string(),
-    description: z.string().optional(),
+    description: z.string().nullable().optional(),
     nullable: z.boolean(),
-    num_null_values: z.number().optional(),
-    num_unique_values: z.number().optional(),
-    example_values: z.array(z.string()).optional(),
-    min: z.number().optional(),
-    max: z.number().optional(),
-    length: z.number().optional(),
-    possible_values: z.array(z.string()).optional(),
+    num_null_values: z.number().nullable().optional(),
+    num_unique_values: z.number().nullable().optional(),
+    example_values: z.array(z.string()).nullable().optional(),
+    min: z.number().nullable().optional(),
+    max: z.number().nullable().optional(),
+    length: z.number().nullable().optional(),
+    possible_values: z.array(z.string()).nullable().optional(),
   })
   .strip()
   .transform(
     (column): ColumnSchema => ({
       name: column.name,
       type: column.type,
-      ...(column.description !== undefined ? { description: column.description } : {}),
+      ...(column.description != null ? { description: column.description } : {}),
       nullable: column.nullable,
-      ...(column.num_null_values !== undefined ? { num_null_values: column.num_null_values } : {}),
-      ...(column.num_unique_values !== undefined ? { num_unique_values: column.num_unique_values } : {}),
-      ...(column.example_values !== undefined ? { example_values: column.example_values } : {}),
-      ...(column.min !== undefined ? { min: column.min } : {}),
-      ...(column.max !== undefined ? { max: column.max } : {}),
-      ...(column.length !== undefined ? { length: column.length } : {}),
-      ...(column.possible_values !== undefined ? { possible_values: column.possible_values } : {}),
+      ...(column.num_null_values != null ? { num_null_values: column.num_null_values } : {}),
+      ...(column.num_unique_values != null ? { num_unique_values: column.num_unique_values } : {}),
+      ...(column.example_values != null ? { example_values: column.example_values } : {}),
+      ...(column.min != null ? { min: column.min } : {}),
+      ...(column.max != null ? { max: column.max } : {}),
+      ...(column.length != null ? { length: column.length } : {}),
+      ...(column.possible_values != null ? { possible_values: column.possible_values } : {}),
     }),
   );
 const metadataSchema = z
@@ -154,14 +158,14 @@ const metadataSchema = z
     version: z.string(),
     description: z.string().nullable().default(null),
     size_bytes: z.number().nullable().optional(),
-    mime_type: z.string().optional(),
-    feature_count: z.number().optional(),
-    bounds: z.tuple([z.number(), z.number(), z.number(), z.number()]).optional(),
-    geometry_type: z.string().optional(),
-    invalid_geometry_count: z.number().optional(),
-    quality_check_passed: z.boolean().optional(),
-    columns_hash: z.string().optional(),
-    columns: z.array(columnSchema).optional(),
+    mime_type: z.string().nullable().optional(),
+    feature_count: z.number().nullable().optional(),
+    bounds: z.tuple([z.number(), z.number(), z.number(), z.number()]).nullable().optional(),
+    geometry_type: z.string().nullable().optional(),
+    invalid_geometry_count: z.number().nullable().optional(),
+    quality_check_passed: z.boolean().nullable().optional(),
+    columns_hash: z.string().nullable().optional(),
+    columns: z.array(columnSchema).nullable().optional(),
   })
   .strip()
   .transform(
@@ -169,21 +173,21 @@ const metadataSchema = z
       version: metadata.version,
       ...(metadata.description !== undefined ? { description: metadata.description } : {}),
       ...(metadata.size_bytes !== undefined ? { size_bytes: metadata.size_bytes } : {}),
-      ...(metadata.mime_type !== undefined ? { mime_type: metadata.mime_type } : {}),
-      ...(metadata.feature_count !== undefined ? { feature_count: metadata.feature_count } : {}),
-      ...(metadata.bounds !== undefined ? { bounds: metadata.bounds } : {}),
-      ...(metadata.geometry_type !== undefined ? { geometry_type: metadata.geometry_type } : {}),
-      ...(metadata.invalid_geometry_count !== undefined
-        ? { invalid_geometry_count: metadata.invalid_geometry_count }
-        : {}),
-      ...(metadata.quality_check_passed !== undefined ? { quality_check_passed: metadata.quality_check_passed } : {}),
-      ...(metadata.columns_hash !== undefined ? { columns_hash: metadata.columns_hash } : {}),
-      ...(metadata.columns !== undefined ? { columns: metadata.columns } : {}),
+      ...(metadata.mime_type != null ? { mime_type: metadata.mime_type } : {}),
+      ...(metadata.feature_count != null ? { feature_count: metadata.feature_count } : {}),
+      ...(metadata.bounds != null ? { bounds: metadata.bounds } : {}),
+      ...(metadata.geometry_type != null ? { geometry_type: metadata.geometry_type } : {}),
+      ...(metadata.invalid_geometry_count != null ? { invalid_geometry_count: metadata.invalid_geometry_count } : {}),
+      ...(metadata.quality_check_passed != null ? { quality_check_passed: metadata.quality_check_passed } : {}),
+      ...(metadata.columns_hash != null ? { columns_hash: metadata.columns_hash } : {}),
+      ...(metadata.columns != null ? { columns: metadata.columns } : {}),
     }),
   );
 const locationSchema = z.union([
-  z.object({ version: z.string(), path: z.string() }).strict(),
-  z.object({ version: z.string(), url: z.string(), method: z.string().optional() }).strict(),
+  z.object({ type: z.literal("file").optional(), version: z.string(), path: z.string() }).strip(),
+  z
+    .object({ type: z.literal("api").optional(), version: z.string(), url: z.string(), method: z.string().optional() })
+    .strip(),
 ]);
 const sourceSchema = z
   .object({
@@ -194,14 +198,25 @@ const sourceSchema = z
     glob_pattern: z.string().optional(),
     source_type: z.enum(["file", "api"]),
     location: locationSchema,
-    source_metadata: metadataSchema.optional(),
+    source_metadata: metadataSchema
+      .nullable()
+      .optional()
+      .transform((value) => value ?? undefined),
     storage_location: z
       .object({
         id: z.number().int().positive(),
         name: z.string(),
         backend_type: z.literal("s3"),
         description: z.string().optional(),
-        config: z.object({ version: z.string(), base_url: z.string(), bucket: z.string() }).strict().optional(),
+        config: z
+          .object({
+            type: z.enum(["s3", "gcs", "seaweedfs"]).optional(),
+            version: z.string(),
+            base_url: z.string(),
+            bucket: z.string(),
+          })
+          .strip()
+          .optional(),
         created_at: z.string(),
         updated_at: z.string(),
       })
@@ -220,16 +235,7 @@ const formatSchema = z
         created_at: z.string(),
         updated_at: z.string(),
       })
-      .strict(),
-    dataset_format: z
-      .object({
-        id: z.number().int().positive(),
-        dataset_id: z.number(),
-        format_id: z.number(),
-        created_at: z.string(),
-        updated_at: z.string(),
-      })
-      .strict(),
+      .strip(),
     sources: z.array(sourceSchema),
   })
   .strip();
@@ -239,10 +245,25 @@ const fileSchema = z
     dataset_id: z.number().int().positive(),
     name: z.string(),
     slug: z.string().min(1),
-    description: z.string().optional(),
-    layer_name: z.string().optional(),
-    source_file_path: z.string().optional(),
-    file_metadata: metadataSchema.optional(),
+    description: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? undefined),
+    layer_name: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? undefined),
+    source_file_path: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? undefined),
+    file_metadata: metadataSchema
+      .nullable()
+      .optional()
+      .transform((value) => value ?? undefined),
     created_at: z.string(),
     updated_at: z.string(),
     formats: z.array(formatSchema).optional(),
@@ -254,8 +275,16 @@ const schemaFileSchema = z
     dataset_id: z.number().int().positive(),
     name: z.string(),
     slug: z.string().min(1),
-    description: z.string().optional(),
-    layer_name: z.string().optional(),
+    description: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? undefined),
+    layer_name: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? undefined),
   })
   .strip();
 const datasetSchema = z
@@ -263,7 +292,11 @@ const datasetSchema = z
     id: z.number().int().positive(),
     slug: z.string().min(1),
     name: z.string(),
-    description: z.string().optional(),
+    description: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => value ?? undefined),
     tags: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(),
     collection_id: z.number().int().positive().optional(),
     created_at: z.string(),
@@ -271,7 +304,7 @@ const datasetSchema = z
     files: z.array(fileSchema).optional(),
     formats: z.array(formatSchema).optional(),
   })
-  .strict();
+  .strip();
 const datasetSummaryResponseSchema = z
   .object({
     id: z.number().int().positive(),
@@ -339,7 +372,7 @@ const schemaResponseSchema = z
       .strip()
       .nullable(),
   })
-  .strict();
+  .strip();
 const rawFileResponseSchema = z
   .object({
     links: z.record(z.string(), z.string()).optional(),

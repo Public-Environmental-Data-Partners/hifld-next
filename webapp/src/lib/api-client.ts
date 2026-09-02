@@ -136,9 +136,18 @@ export interface DatasetFormatJoin {
   updated_at: string;
 }
 
+export interface FileFormatJoin {
+  id: number;
+  file_id: number;
+  format_id: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DatasetFormat {
   format: Format;
-  dataset_format: DatasetFormatJoin;
+  dataset_format?: DatasetFormatJoin | undefined;
+  file_format?: FileFormatJoin | undefined;
   sources: DatasetSource[];
 }
 
