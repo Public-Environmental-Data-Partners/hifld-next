@@ -1,3 +1,4 @@
+import os
 import pickle
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from query_worker.bounds import execute_bounds
 from query_worker.metrics import init_connection, measure
 from query_worker.protocol import (
     WorkerBounds,
@@ -28,7 +30,8 @@ def _write_parquet(path: Path, sql: str) -> None:
 
 
 def _write_spatial_parquet(path: Path, sql: str) -> None:
-    connection = duckdb.connect()
+    extension_directory = os.environ["DUCKDB_EXTENSION_DIRECTORY"]
+    connection = duckdb.connect(config={"extension_directory": extension_directory})
     try:
         connection.execute("LOAD spatial")
         connection.execute(f"COPY ({sql}) TO ? (FORMAT PARQUET)", [str(path)])
@@ -95,6 +98,10 @@ def test_runtime_executes_complex_join_and_extracts_schema(tmp_path: Path) -> No
     assert result.has_more is False
 
 
+@pytest.mark.skipif(
+    not os.environ.get("DUCKDB_EXTENSION_DIRECTORY"),
+    reason="spatial extension directory is not configured",
+)
 def test_runtime_computes_query_result_bounds_in_wgs84(tmp_path: Path) -> None:
     path = tmp_path / "points.parquet"
     _write_spatial_parquet(
@@ -104,7 +111,15 @@ def test_runtime_computes_query_result_bounds_in_wgs84(tmp_path: Path) -> None:
         "points(id, x, y)",
     )
     source = WorkerSourceSpec(alias="points", object_uris=(str(path),))
-    runtime = _runtime(tmp_path)
+    runtime = WorkerRuntime(
+        WorkerRuntimeConfig(
+            threads=1,
+            memory_limit="256MiB",
+            temp_directory=str(tmp_path / "spill"),
+            extension_directory=os.environ["DUCKDB_EXTENSION_DIRECTORY"],
+            load_extensions=False,
+        )
+    )
     runtime.connection.execute("LOAD spatial")
     try:
         result = runtime.execute(
@@ -121,6 +136,44 @@ def test_runtime_computes_query_result_bounds_in_wgs84(tmp_path: Path) -> None:
 
     assert isinstance(result, WorkerBounds)
     assert result.bounds == pytest.approx((-122.4, 37.0, -121.4, 37.78), abs=0.02)
+
+
+class _BoundsRows:
+    def fetchall(self) -> list[tuple[object, ...]]:
+        return [(-122.4, 37.0, -121.4, 37.8)]
+
+
+class _BoundsConnection:
+    sql = ""
+
+    def execute(self, query: str) -> _BoundsRows:
+        self.sql = query
+        return _BoundsRows()
+
+
+def test_query_bounds_wraps_validated_sql_and_reprojects_the_declared_result_crs() -> None:
+    connection = _BoundsConnection()
+    result = execute_bounds(
+        connection,
+        "SELECT geometry FROM points WHERE category = 'station'",
+        WorkerBoundsQuery(
+            canonical_sql="SELECT geometry FROM points WHERE category = 'station'",
+            sources=(),
+            geometry_column="geometry",
+            result_crs="EPSG:3857",
+            deadline=datetime.now(tz=UTC) + timedelta(seconds=5),
+        ),
+    )
+
+    assert result == WorkerBounds(bounds=(-122.4, 37.0, -121.4, 37.8))
+    assert "ST_Extent_Agg" in connection.sql
+    assert (
+        "ST_Transform(\"geometry\", 'EPSG:3857', 'EPSG:4326', always_xy := true)" in connection.sql
+    )
+    assert (
+        "FROM (SELECT geometry FROM points WHERE category = 'station') AS _mcp_result"
+        in connection.sql
+    )
 
 
 def test_runtime_applies_outer_limit_and_offset_but_preserves_inner_limit(
