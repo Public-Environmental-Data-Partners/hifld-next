@@ -1,7 +1,8 @@
-import { type SelectedFeaturesSort, SelectedFeaturesTable as SharedSelectedFeaturesTable } from "@hifld/map-ui";
+import { SelectedFeaturesTable as SharedSelectedFeaturesTable } from "@hifld/map-ui";
 import {
   ArrowDown,
   ArrowUp,
+  ChevronDown,
   ChevronsUpDown,
   ExternalLink,
   Info,
@@ -42,6 +43,7 @@ import {
   isCatalogSelectedMapFeature,
   type SelectedMapFeature,
 } from "./featureSelection";
+import { MapDataTableColumnHeader } from "./MapDataTableColumnHeader";
 
 interface FeatureTablePanelProps {
   features: SelectedMapFeature[];
@@ -51,6 +53,8 @@ interface FeatureTablePanelProps {
   onS2LevelChange: (level: number) => void;
   onFeatureClick?: ((feature: SelectedMapFeature) => void) | undefined;
   onClear: () => void;
+  panelModeControls?: React.ReactNode;
+  onCollapse?: (() => void) | undefined;
 }
 
 type FeaturePanelTab = "selected" | "diff";
@@ -244,9 +248,7 @@ function SelectedFeaturesTable({
             onFeatureClick?.(feature);
           }
         }}
-        renderColumnHeader={(column, control) => (
-          <SelectedFeatureColumnHeader column={column} label={column} control={control} />
-        )}
+        renderColumnHeader={(column, control) => <MapDataTableColumnHeader column={column} control={control} />}
         trailingHeader={<span className="sr-only">Actions</span>}
         trailingHeaderClassName="sticky right-0 w-12 bg-background px-2 py-2 text-right font-medium"
         trailingCellClassName={(feature) =>
@@ -316,30 +318,6 @@ function SelectedFeatureActions({ feature }: { feature: SelectedMapFeature }) {
         </div>
       </PopoverContent>
     </Popover>
-  );
-}
-
-function SelectedFeatureColumnHeader({
-  column,
-  label,
-  control,
-}: {
-  column: string;
-  label: string;
-  control: { sort: SelectedFeaturesSort | undefined; ariaLabel: string; onSort: () => void };
-}) {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className="h-7 max-w-full gap-1 px-1 text-xs"
-      aria-label={control.ariaLabel}
-      onClick={control.onSort}
-    >
-      <span className="truncate">{label}</span>
-      <SortIcon sort={control.sort} column={column} />
-    </Button>
   );
 }
 
@@ -1117,8 +1095,17 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
   }
 
   override render() {
-    const { features, highlightedFeatureId, wasSelectionCapped, s2Level, onS2LevelChange, onFeatureClick, onClear } =
-      this.props;
+    const {
+      features,
+      highlightedFeatureId,
+      wasSelectionCapped,
+      s2Level,
+      onS2LevelChange,
+      onFeatureClick,
+      onClear,
+      panelModeControls,
+      onCollapse,
+    } = this.props;
     const {
       activeTab,
       selectedLayerKey,
@@ -1139,6 +1126,7 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
             {wasSelectionCapped && <Badge variant="secondary">Selection is capped at 100 features per layer.</Badge>}
           </div>
           <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 sm:w-auto">
+            {panelModeControls}
             {canDiff && (
               <div className="flex w-full min-w-0 rounded-md border p-0.5 sm:w-auto">
                 <Button
@@ -1171,6 +1159,18 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
             >
               <X className="h-4 w-4" />
             </Button>
+            {onCollapse && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-11 w-11 sm:size-9"
+                onClick={onCollapse}
+                aria-label="Collapse data table"
+              >
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
         <Separator className="shrink-0" />
