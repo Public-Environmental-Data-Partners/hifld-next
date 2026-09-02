@@ -129,3 +129,26 @@ async def test_resolver_allows_glob_pattern_for_seaweedfs_when_no_objects_exist(
     )
 
     assert resolved.object_uris == ("s3://catalog/roads/**/*.parquet",)
+
+
+@pytest.mark.asyncio
+async def test_resolver_treats_seaweedfs_endpoint_query_as_a_concrete_uri() -> None:
+    storage_uri = "s3://catalog/roads/part-0.parquet?endpoint_url=http://localhost:8333"
+    response = _response_with_sources(
+        glob_pattern=None,
+        storage_uris=(storage_uri,),
+    )
+    source = response.file.formats[0].sources[0]
+    source.storage_location.config = BucketStorageConfig(
+        type="seaweedfs",
+        base_url="http://localhost:8888",
+        bucket="catalog",
+        endpoint_url="http://localhost:8333",
+    )
+    resolver = SourceResolver(FakeCatalog(response))
+
+    resolved = await resolver.resolve(
+        QuerySourceRef(collection_id=1, dataset_id=12, file_id=99, file_source_id=88, alias="roads")
+    )
+
+    assert resolved.object_uris == (storage_uri,)

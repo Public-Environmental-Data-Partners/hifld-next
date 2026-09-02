@@ -30,6 +30,7 @@ vi.mock("maplibre-gl", () => ({
 
 function mockMapWithFeatures(features: unknown[]) {
   return {
+    getSource: vi.fn(() => undefined),
     queryRenderedFeatures: vi.fn(() => features),
   };
 }
@@ -163,6 +164,56 @@ describe("useMapInitialization helpers", () => {
     ]);
     expect(map.addSource).not.toHaveBeenCalled();
     expect(map.addLayer).toHaveBeenCalledTimes(3);
+  });
+
+  it("updates visibility for an already-loaded catalog PMTiles source", async () => {
+    vi.spyOn(PMTiles.prototype, "getMetadata").mockResolvedValue({
+      vector_layers: [{ id: "stations", fields: { name: "String" } }],
+    });
+    const map = createMockMap();
+    map.getSource.mockReturnValue({});
+    map.getLayer.mockReturnValue(true);
+    map.getStyle.mockReturnValue({
+      layers: [
+        { id: "source-amtrak-stations-fill", type: "fill", source: "source-amtrak" },
+        { id: "source-amtrak-stations-line", type: "line", source: "source-amtrak" },
+        { id: "source-amtrak-stations-circle", type: "circle", source: "source-amtrak" },
+      ],
+    });
+    const source: CatalogPmtilesLayer = {
+      kind: "catalog_pmtiles",
+      id: "amtrak",
+      name: "Amtrak",
+      label: "Amtrak",
+      descriptor: {
+        collectionSlug: "hifld",
+        datasetSlug: "amtrak-stations",
+        fileSlug: "amtrak-stations",
+        formatType: "pmtiles",
+        storageLocationId: 2,
+        version: "v1.0.0",
+        sourceId: 8,
+      },
+      pmtilesUrl: "http://localhost:8888/amtrak.pmtiles",
+      mapSourceId: "source-amtrak",
+      visible: false,
+      opacity: 0.82,
+      bounds: null,
+    };
+
+    const result = await syncLoadedMapSources({
+      map: map as maplibregl.Map,
+      protocol: null,
+      sources: [source],
+      managedSourceIds: new Set([source.mapSourceId]),
+      vectorLayersBySource: {},
+      shouldContinue: () => true,
+    });
+
+    expect(result?.interactiveLayerIds).toEqual([]);
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("source-amtrak-stations-fill", "visibility", "none");
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("source-amtrak-stations-line", "visibility", "none");
+    expect(map.setLayoutProperty).toHaveBeenCalledWith("source-amtrak-stations-circle", "visibility", "none");
   });
 
   it("identifies the catalog layer that failed during source synchronization", async () => {
@@ -388,7 +439,11 @@ describe("useMapInitialization helpers", () => {
 
   it("clears pinned popup when clicking empty map space", () => {
     const onPinnedPopup = vi.fn();
-    const map = mockMapWithFeatures([]);
+    const selectionSource = { setData: vi.fn() };
+    const map = {
+      ...mockMapWithFeatures([]),
+      getSource: vi.fn(() => selectionSource),
+    };
 
     handleMapClick({
       map,
@@ -399,6 +454,10 @@ describe("useMapInitialization helpers", () => {
     });
 
     expect(onPinnedPopup).toHaveBeenCalledWith(null);
+    expect(selectionSource.setData).toHaveBeenCalledWith({
+      type: "FeatureCollection",
+      features: [],
+    });
   });
 
   it("does nothing when no pinned callback is provided", () => {

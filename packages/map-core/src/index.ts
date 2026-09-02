@@ -11,6 +11,7 @@ export {
   getSelectionControlLabel,
 } from "./controls";
 export {
+  isSelectionDrag,
   MAX_SELECTED_FEATURES,
   selectionBoxFeature,
   selectionScreenBounds,

@@ -6,6 +6,7 @@ import viteReact from "@vitejs/plugin-react";
 import { nitro } from "nitro/vite";
 import viteTsConfigPaths from "vite-tsconfig-paths";
 import { defineConfig } from "vitest/config";
+import { runtimeClientConfigDevPlugin } from "./plugins/runtime-client-config-dev";
 
 const config = defineConfig(({ mode }) => ({
   // Keep local development reachable through the same IPv4 URL used by the
@@ -30,6 +31,7 @@ const config = defineConfig(({ mode }) => ({
     noExternal: ["@asteasolutions/zod-to-openapi", "react-resizable-panels"],
   },
   plugins: [
+    runtimeClientConfigDevPlugin(),
     devtools(),
     nitro(),
     // this is the plugin that enables path aliases

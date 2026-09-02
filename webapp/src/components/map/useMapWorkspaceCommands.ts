@@ -54,18 +54,18 @@ function unionBounds(bounds: readonly (MapBounds | null)[]): MapBounds | null {
 }
 
 interface MapFitApi {
-  loaded(): boolean;
-  once(event: "load", listener: () => void): void;
+  isStyleLoaded(): boolean | undefined;
+  once(event: "style.load", listener: () => void): void;
   fitBounds(bounds: MapBounds, options: { padding: number; duration: number }): void;
 }
 
 export function fitMapWhenReady(map: MapFitApi, bounds: MapBounds): void {
   const applyFit = () => map.fitBounds(bounds, { padding: 48, duration: 0 });
-  if (map.loaded()) {
+  if (map.isStyleLoaded()) {
     applyFit();
     return;
   }
-  map.once("load", applyFit);
+  map.once("style.load", applyFit);
 }
 
 interface MapMovementApi {

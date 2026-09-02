@@ -42,6 +42,26 @@ function selectedFeature(
 }
 
 describe("FeatureTablePanel", () => {
+  it("renders unified panel mode controls and collapses the panel", async () => {
+    const user = userEvent.setup();
+    const onCollapse = vi.fn();
+    render(
+      <FeatureTablePanel
+        features={[selectedFeature("v1.0.0", { OBJECTID: "1", NAME: "General Hospital" })]}
+        wasSelectionCapped={false}
+        s2Level={16}
+        onS2LevelChange={() => undefined}
+        onClear={() => undefined}
+        panelModeControls={<button type="button">Query results</button>}
+        onCollapse={onCollapse}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Query results" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Collapse data table" }));
+    expect(onCollapse).toHaveBeenCalledOnce();
+  });
+
   it("renders selected feature rows and cap messaging", () => {
     render(
       <FeatureTablePanel

@@ -31,6 +31,9 @@ export interface SelectedFeaturesTableProps<
 > {
 	features: readonly Feature[];
 	columns?: readonly string[];
+	tableAriaLabel?: string | undefined;
+	searchAriaLabel?: string | undefined;
+	searchPlaceholder?: string | undefined;
 	highlightedFeatureId?: string | null | undefined;
 	className?: string | undefined;
 	tableClassName?: string | undefined;
@@ -86,6 +89,9 @@ export function selectedFeaturePropertyColumns<
 export function SelectedFeaturesTable<Feature extends SelectedFeatureTableRow>({
 	features,
 	columns,
+	tableAriaLabel = "Selected features",
+	searchAriaLabel = "Search selected features",
+	searchPlaceholder = "Search selected features...",
 	highlightedFeatureId,
 	className,
 	tableClassName,
@@ -184,8 +190,8 @@ export function SelectedFeaturesTable<Feature extends SelectedFeatureTableRow>({
 							<Search aria-hidden="true" />
 							{(renderSearchInput ?? defaultSearchInput)({
 								value: query,
-								ariaLabel: "Search selected features",
-								placeholder: "Search selected features...",
+								ariaLabel: searchAriaLabel,
+								placeholder: searchPlaceholder,
 								onChange: setQuery,
 							})}
 						</div>
@@ -199,7 +205,7 @@ export function SelectedFeaturesTable<Feature extends SelectedFeatureTableRow>({
 			>
 				{visibleFeatures.length > 0 ? (
 					<table
-						aria-label="Selected features"
+						aria-label={tableAriaLabel}
 						className={tableClassName}
 						data-slot="selected-features-table"
 					>

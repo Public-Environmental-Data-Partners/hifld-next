@@ -218,6 +218,24 @@ describe("SelectedFeaturesTable", () => {
 		).toBeInTheDocument();
 	});
 
+	it("accepts host-specific accessible table and search labels", () => {
+		render(
+			<SelectedFeaturesTable
+				features={features}
+				tableAriaLabel="Query results"
+				searchAriaLabel="Search query results"
+				searchPlaceholder="Search result rows..."
+			/>,
+		);
+
+		expect(
+			screen.getByRole("table", { name: "Query results" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("searchbox", { name: "Search query results" }),
+		).toHaveAttribute("placeholder", "Search result rows...");
+	});
+
 	it("sorts property columns in ascending and descending numeric-aware order", () => {
 		const numericFeatures: AppFeature[] = [
 			{ id: "ten", layer: "north", properties: { rank: "10" } },

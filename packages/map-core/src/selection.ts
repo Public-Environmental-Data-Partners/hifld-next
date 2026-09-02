@@ -21,6 +21,14 @@ export interface SelectionBoxFeature {
 }
 
 export const MAX_SELECTED_FEATURES = 100;
+const MIN_SELECTION_DRAG_DISTANCE = 4;
+
+export function isSelectionDrag(start: ScreenPoint, end: ScreenPoint): boolean {
+  return (
+    Math.abs(end.x - start.x) >= MIN_SELECTION_DRAG_DISTANCE ||
+    Math.abs(end.y - start.y) >= MIN_SELECTION_DRAG_DISTANCE
+  );
+}
 
 export function selectionBoxFeature(start: LngLatPoint, end: LngLatPoint): SelectionBoxFeature {
   return {

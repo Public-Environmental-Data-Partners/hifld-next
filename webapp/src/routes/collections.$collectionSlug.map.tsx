@@ -2,7 +2,7 @@ import { isQueryMvtReservedProperty } from "@hifld/map-core";
 import { createFileRoute, Link, notFound, useSearch } from "@tanstack/react-router";
 import { ArrowLeft, Check, ChevronDown, ChevronsUpDown, Layers, PanelLeft, Plus } from "lucide-react";
 import type maplibregl from "maplibre-gl";
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { z } from "zod";
 import { buildSourceFileUrl } from "@/components/dataset/sourceUrls";
@@ -14,7 +14,9 @@ import {
   type SelectedMapFeature,
   updateSelectedFeatures,
 } from "@/components/map/featureSelection";
+import { MapDataPanelModeControls } from "@/components/map/MapDataPanelModeControls";
 import { MapLayerListItem } from "@/components/map/MapLayerListItem";
+import { initialMapDataPanelState, reduceMapDataPanelState } from "@/components/map/mapDataPanelState";
 import { type DatasetLayerInput, MapWorkspaceCommandError } from "@/components/map/mapWorkspaceCommands";
 import { clearedLayerPickerSelection, layerPickerSelectionAfterLayerRemoval } from "@/components/map/mapWorkspaceState";
 import { buildLoadedMapLayer, type LoadedMapLayer } from "@/components/map/multiLayerSources";
@@ -613,6 +615,9 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const pinnedPopupElementRef = useRef<HTMLDivElement>(null);
   const settingsPanelRef = useRef<PanelImperativeHandle | null>(null);
+  const dataPanelRef = useRef<PanelImperativeHandle | null>(null);
+  const dataPanelOpenRef = useRef(false);
+  const dataPanelHasOpenedRef = useRef(false);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRequestIdRef = useRef(0);
   const datasetDetailsRequestIdRef = useRef(0);
@@ -631,7 +636,6 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const queryTokensRef = useRef(new Map<string, string>());
   const queryLayerLabelCounterRef = useRef(0);
   const preparedCatalogLayersRef = useRef(new Map<string, LoadedMapLayer>());
-  const queryResultsPanelRef = useRef<HTMLDivElement>(null);
   const [vectorLayers, setVectorLayers] = useState<VectorLayerInfo[]>([]);
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
   const [pinnedPopupInfo, setPinnedPopupInfo] = useState<HoverInfo | null>(null);
@@ -656,6 +660,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const [selectedFeatures, setSelectedFeatures] = useState<SelectedMapFeature[]>([]);
   const [wasSelectionCapped, setWasSelectionCapped] = useState(false);
   const [queryResult, setQueryResult] = useState<QueryResultState | null>(null);
+  const [dataPanelState, dispatchDataPanel] = useReducer(reduceMapDataPanelState, initialMapDataPanelState);
   const [isLoadingQueryPage, setIsLoadingQueryPage] = useState(false);
   const [s2Level, setS2Level] = useState(16);
   const [loadedLayers, setLoadedLayers] = useState<LoadedMapLayer[]>(() =>
@@ -751,13 +756,18 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const handleFeatureSelection = useCallback(
     (features: maplibregl.MapGeoJSONFeature[], mode: FeatureSelectionMode) => {
       const incoming = normalizeSelectedFeatures({ features, loadedLayers });
+      if (incoming.length > 0) {
+        dispatchDataPanel({ type: "features_selected" });
+      } else if (mode === "replace") {
+        dispatchDataPanel({ type: "features_cleared", hasQueryResults: queryResult !== null });
+      }
       setSelectedFeatures((current) => {
         const update = updateSelectedFeatures({ current, incoming, mode });
         setWasSelectionCapped(update.wasCapped);
         return update.rows;
       });
     },
-    [loadedLayers],
+    [loadedLayers, queryResult],
   );
 
   const handleMapSourceError = useCallback(
@@ -809,7 +819,8 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     clearSelectionBox();
     setSelectedFeatures([]);
     setWasSelectionCapped(false);
-  }, [clearSelectionBox]);
+    dispatchDataPanel({ type: "features_cleared", hasQueryResults: queryResult !== null });
+  }, [clearSelectionBox, queryResult]);
 
   const resolveDatasetLayer = useCallback(async (input: DatasetLayerInput): Promise<LoadedMapLayer | null> => {
     const prepared = preparedCatalogLayersRef.current.get(input.layerId);
@@ -950,6 +961,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
         layer?.id ?? null,
       );
       setQueryResult(state);
+      dispatchDataPanel({ type: "show_query" });
       return state.page;
     },
     [],
@@ -1089,8 +1101,32 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
 
   useEffect(() => {
     const activeLayerIds = new Set(loadedLayers.map((layer) => layer.id));
-    setSelectedFeatures((current) => current.filter((feature) => activeLayerIds.has(feature.loadedLayerId)));
-  }, [loadedLayers]);
+    const retained = selectedFeatures.filter((feature) => activeLayerIds.has(feature.loadedLayerId));
+    if (retained.length === selectedFeatures.length) return;
+    setSelectedFeatures(retained);
+    if (selectedFeatures.length > 0 && retained.length === 0) {
+      dispatchDataPanel({ type: "features_cleared", hasQueryResults: queryResult !== null });
+    }
+  }, [loadedLayers, queryResult, selectedFeatures]);
+
+  const hasDataPanel = queryResult !== null || selectedFeatures.length > 0;
+  const dataPanelShouldBeOpen = hasDataPanel && dataPanelState.isOpen;
+  useEffect(() => {
+    if (dataPanelOpenRef.current === dataPanelShouldBeOpen) return;
+    dataPanelOpenRef.current = dataPanelShouldBeOpen;
+    const panel = dataPanelRef.current;
+    if (!panel) return;
+    if (dataPanelShouldBeOpen) {
+      if (dataPanelHasOpenedRef.current) {
+        panel.expand();
+      } else {
+        panel.resize(isMobileMapLayout ? "62%" : MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE);
+        dataPanelHasOpenedRef.current = true;
+      }
+    } else {
+      panel.collapse();
+    }
+  }, [dataPanelShouldBeOpen, isMobileMapLayout]);
 
   useEffect(() => {
     mapRef.current?.resize();
@@ -1308,6 +1344,10 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
       .finally(() => setIsLoadingQueryPage(false));
   }, [executeQueryPage, isLoadingQueryPage, queryResult]);
 
+  const queryResultsVisible = dataPanelState.isOpen && dataPanelState.mode === "query";
+  const queryResultsButtonVariant = queryResultsVisible ? "secondary" : "outline";
+  const queryResultsButtonLabel = queryResultsVisible ? "Hide results" : "View results";
+
   const settingsPanelContent = (
     <div className="box-border w-full max-w-full min-w-0 overflow-hidden p-3 sm:p-4">
       <Card className="w-full max-w-full min-w-0">
@@ -1376,14 +1416,13 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
                         <div>Geometry: {layer.geometryColumn}</div>
                         <Button
                           type="button"
-                          variant="outline"
+                          variant={queryResultsButtonVariant}
                           size="sm"
                           className="w-full"
-                          onClick={() =>
-                            queryResultsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
-                          }
+                          aria-pressed={queryResultsVisible}
+                          onClick={() => dispatchDataPanel({ type: "toggle_query_results" })}
                         >
-                          View results
+                          {queryResultsButtonLabel}
                         </Button>
                       </div>
                     )}
@@ -1519,9 +1558,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const mapWorkspaceContent = (
     <ResizablePanelGroup orientation="vertical" className="min-h-0">
       <ResizablePanel
-        defaultSize={
-          selectedFeatures.length > 0 ? (isMobileMapLayout ? "38%" : MAP_CANVAS_DESKTOP_DEFAULT_SIZE) : "100%"
-        }
+        defaultSize="100%"
         minSize={isMobileMapLayout ? "24%" : "40%"}
         className="min-h-0 overflow-hidden"
         onResize={() => mapRef.current?.resize()}
@@ -1563,43 +1600,61 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
           )}
         </div>
       </ResizablePanel>
-      {selectedFeatures.length > 0 && (
-        <>
-          <ResizableHandle withHandle />
-          <ResizablePanel
-            defaultSize={isMobileMapLayout ? "62%" : MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE}
-            minSize={isMobileMapLayout ? "42%" : "18%"}
-            className="min-h-0 overflow-hidden"
-            onResize={() => mapRef.current?.resize()}
-          >
-            <FeatureTablePanel
-              features={selectedFeatures}
-              highlightedFeatureId={highlightedFeatureId}
-              wasSelectionCapped={wasSelectionCapped}
-              s2Level={s2Level}
-              onS2LevelChange={setS2Level}
-              onFeatureClick={zoomToSelectedFeature}
-              onClear={() => {
-                clearSelectedFeatures();
-              }}
-            />
-          </ResizablePanel>
-        </>
-      )}
-      {queryResult && (
-        <>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize="32%" minSize="18%" className="min-h-0 overflow-hidden">
-            <div ref={queryResultsPanelRef} className="h-full">
-              <QueryResultPanel
-                result={queryResult}
-                onLoadMore={loadNextQueryPage}
-                isLoadingMore={isLoadingQueryPage}
-              />
-            </div>
-          </ResizablePanel>
-        </>
-      )}
+      <ResizableHandle
+        withHandle
+        disabled={!dataPanelShouldBeOpen}
+        className={dataPanelShouldBeOpen ? undefined : "hidden"}
+      />
+      <ResizablePanel
+        id="map-data-panel"
+        defaultSize="0%"
+        minSize={isMobileMapLayout ? "42%" : "18%"}
+        collapsible
+        collapsedSize="0%"
+        panelRef={dataPanelRef}
+        className="min-h-0 overflow-hidden"
+        onResize={() => mapRef.current?.resize()}
+      >
+        {dataPanelShouldBeOpen && dataPanelState.mode === "selected" && selectedFeatures.length > 0 ? (
+          <FeatureTablePanel
+            features={selectedFeatures}
+            highlightedFeatureId={highlightedFeatureId}
+            wasSelectionCapped={wasSelectionCapped}
+            s2Level={s2Level}
+            onS2LevelChange={setS2Level}
+            onFeatureClick={zoomToSelectedFeature}
+            onClear={clearSelectedFeatures}
+            panelModeControls={
+              queryResult ? (
+                <MapDataPanelModeControls
+                  mode={dataPanelState.mode}
+                  onModeChange={(mode) =>
+                    dispatchDataPanel({ type: mode === "query" ? "show_query" : "show_selected" })
+                  }
+                />
+              ) : undefined
+            }
+            onCollapse={() => dispatchDataPanel({ type: "collapse" })}
+          />
+        ) : dataPanelShouldBeOpen && queryResult ? (
+          <QueryResultPanel
+            result={queryResult}
+            onLoadMore={loadNextQueryPage}
+            isLoadingMore={isLoadingQueryPage}
+            panelModeControls={
+              selectedFeatures.length > 0 ? (
+                <MapDataPanelModeControls
+                  mode={dataPanelState.mode}
+                  onModeChange={(mode) =>
+                    dispatchDataPanel({ type: mode === "query" ? "show_query" : "show_selected" })
+                  }
+                />
+              ) : undefined
+            }
+            onCollapse={() => dispatchDataPanel({ type: "collapse" })}
+          />
+        ) : null}
+      </ResizablePanel>
     </ResizablePanelGroup>
   );
 

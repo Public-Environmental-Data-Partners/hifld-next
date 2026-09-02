@@ -31,7 +31,7 @@ vi.mock("@/lib/api-client", () => ({
 
 vi.mock("react-resizable-panels", () => ({
   Group: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  Panel: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  Panel: ({ children, id }: { children: ReactNode; id?: string | undefined }) => <div data-testid={id}>{children}</div>,
   ResizableHandle: () => <div />,
   ResizablePanel: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   ResizablePanelGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -178,6 +178,12 @@ describe("MapWorkspace map-import analytics", () => {
       configurable: true,
       value: vi.fn(),
     });
+  });
+
+  it("keeps the collapsed data panel registered before the first feature selection", () => {
+    render(<MapWorkspace collection={collection} initialLayers={[initialLayer]} initialLayerKey="route" />);
+
+    expect(screen.getByTestId("map-data-panel")).toBeInTheDocument();
   });
 
   it("tracks route and picker imports once, without a duplicate after route synchronization", async () => {
