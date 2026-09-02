@@ -208,6 +208,25 @@ def test_tile_sql_executes_against_inside_outside_and_exact_filter_fixtures() ->
     assert worker_result.content
 
 
+def test_tile_sql_casts_properties_to_stable_mvt_types() -> None:
+    sql = build_tile_sql(
+        "SELECT geometry, plus4, inspected_at, ratio, feature_uuid FROM stations",
+        tile_request(),
+        columns=(
+            ("geometry", "GEOMETRY"),
+            ("plus4", "INTEGER"),
+            ("inspected_at", "TIMESTAMP"),
+            ("ratio", "DECIMAL(10,2)"),
+            ("feature_uuid", "UUID"),
+        ),
+    )
+
+    assert 'CAST("plus4" AS INTEGER) AS "plus4"' in sql
+    assert 'CAST("inspected_at" AS VARCHAR) AS "inspected_at"' in sql
+    assert 'CAST("ratio" AS DOUBLE) AS "ratio"' in sql
+    assert 'CAST("feature_uuid" AS VARCHAR) AS "feature_uuid"' in sql
+
+
 class FakeRows:
     def __init__(self, rows: list[tuple[bytes | int | None, ...]]) -> None:
         self._rows = rows
