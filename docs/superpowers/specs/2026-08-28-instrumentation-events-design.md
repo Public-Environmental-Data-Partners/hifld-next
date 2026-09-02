@@ -13,7 +13,7 @@ and filter interactions.
 
 | Event | When it is emitted | Properties |
 | --- | --- | --- |
-| `api_route_requested` | A response completes for `/api` or any `/api/**` route, or for `/llms.txt`. | `route_family`, `method`, `status`, `client_category` |
+| `api_route_requested` | A response completes for `/api` or any `/api/**` route, or for `/llms.txt`. | `request_url`, `route_family`, `method`, `status`, `client_category` |
 | `dataset_imported_into_map` | A dataset file/source has resolved and is newly added to the map workspace. | `collection_slug`, `dataset_slug`, `file_slug`, `version`, `source_id`, `import_source`, `loaded_layer_count` |
 | `dataset_download_clicked` | The user presses a download control. | Existing download context |
 | `dataset_download_succeeded` | A browser-side streamed download has completed and been saved or handed to a generated blob URL. | Existing context plus bytes and duration |
@@ -26,7 +26,9 @@ and filter interactions.
 or `llms_txt`. `client_category` is similarly coarse: `browser`,
 `known_agent`, `crawler`, `command_line`, or `other`. The implementation will
 classify the request's `User-Agent` in memory and will never send its raw
-value.
+value. `request_url` is the absolute server-observed request URL, including its
+origin, path, public resource identifiers, and complete query string. HTTP
+requests do not carry URL fragments, so fragments are not available to capture.
 
 ## Server discovery telemetry
 
@@ -35,12 +37,14 @@ It will use the deployed PostHog host and project key already supplied as
 runtime environment configuration, and it will make a best-effort capture
 request without delaying or changing the application response.
 
-The payload deliberately excludes IP addresses, request IDs, cookies, raw
-user-agent strings, referrers, request bodies, and query-string values. Direct
-machine clients therefore remain anonymous; the event measures route use and
-coarse client type rather than attempting to identify a person or agent.
-Telemetry failures are swallowed after a server-side log message and must not
-turn a successful API response into an error.
+The payload deliberately excludes IP addresses, request IDs other than those
+already present in the URL, cookies, raw user-agent strings, referrers, and
+request bodies. It intentionally retains the complete request URL so route,
+resource, and query usage can be analyzed later. Direct machine clients remain
+anonymous; the event measures request details and coarse client type rather
+than attempting to identify a person or agent. Telemetry failures are swallowed
+after a server-side log message and must not turn a successful API response into
+an error.
 
 ## Browser interaction telemetry
 
@@ -82,6 +86,7 @@ This makes zero-result demand and filter dead ends report correctly.
 
 - PostHog autocapture.
 - API-consumer identity or persistent fingerprinting.
-- Raw user agents, IP addresses, query strings, map coordinates, feature data,
-  or feature identifiers.
+- Raw user agents, IP addresses, request headers or bodies, map coordinates,
+  feature data, or feature identifiers. Complete request URLs, including query
+  strings and path identifiers, are the intentional exception.
 - Map zoom, pan, hover, feature-click, and layer-visibility analytics.
