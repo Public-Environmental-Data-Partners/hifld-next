@@ -19,6 +19,7 @@ export interface DiscoveryRouteCapture {
   event: "api_route_requested";
   properties: {
     $process_person_profile: false;
+    request_url: string;
     route_family: DiscoveryRouteFamily;
     method: DiscoveryHttpMethod;
     status: number;
@@ -74,6 +75,7 @@ export function buildDiscoveryRouteCapture(request: Request, status: number): Di
     event: "api_route_requested",
     properties: {
       $process_person_profile: false,
+      request_url: request.url,
       route_family: routeFamily,
       method: discoveryHttpMethod(request.method),
       status,

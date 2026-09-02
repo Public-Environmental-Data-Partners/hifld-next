@@ -12,6 +12,7 @@ describe("buildDiscoveryRouteCapture", () => {
       event: "api_route_requested",
       properties: {
         $process_person_profile: false,
+        request_url: "https://data.example.test/api",
         route_family: "api_root",
         method: "GET",
         status: 200,
@@ -31,6 +32,7 @@ describe("buildDiscoveryRouteCapture", () => {
       event: "api_route_requested",
       properties: {
         $process_person_profile: false,
+        request_url: url,
         route_family: routeFamily,
         method: "GET",
         status: 201,
@@ -39,8 +41,9 @@ describe("buildDiscoveryRouteCapture", () => {
     });
   });
 
-  it("keeps only privacy-safe values when serialized", () => {
-    const request = new Request("https://data.example.test/api/collections/hifld?search=hospitals", {
+  it("retains the complete request URL without capturing unrelated headers", () => {
+    const requestUrl = "https://data.example.test/api/collections/hifld?search=hospitals&limit=25";
+    const request = new Request(requestUrl, {
       headers: {
         "user-agent": "Mozilla/5.0 Example Browser",
         "x-forwarded-for": "203.0.113.10",
@@ -48,14 +51,14 @@ describe("buildDiscoveryRouteCapture", () => {
         referer: "https://elsewhere.example.test/private/path",
       },
     });
-    const serialized = JSON.stringify(buildDiscoveryRouteCapture(request, 200));
+    const capture = buildDiscoveryRouteCapture(request, 200);
+    const serialized = JSON.stringify(capture);
 
-    expect(serialized).not.toContain("search=hospitals");
+    expect(capture?.properties.request_url).toBe(requestUrl);
     expect(serialized).not.toContain("Mozilla/5.0");
     expect(serialized).not.toContain("203.0.113.10");
     expect(serialized).not.toContain("session=secret");
     expect(serialized).not.toContain("elsewhere.example.test");
-    expect(serialized).not.toContain("https://data.example.test");
   });
 
   it.each([
