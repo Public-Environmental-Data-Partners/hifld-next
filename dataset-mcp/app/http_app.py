@@ -62,6 +62,20 @@ class ConcurrencyLimiter:
         )
 
 
+class McpPathCanonicalizer:
+    """Serve the optional trailing slash without an HTTP redirect."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope.get("path") == "/mcp/":
+            scope = dict(scope)
+            scope["path"] = "/mcp"
+            scope["raw_path"] = b"/mcp"
+        await self._app(scope, receive, send)
+
+
 class AssetHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
@@ -136,6 +150,7 @@ def create_http_app(
 
     app = FastAPI(lifespan=lifespan)
     app.add_middleware(ConcurrencyLimiter, maximum=max_concurrency)
+    app.add_middleware(McpPathCanonicalizer)
     app.add_middleware(AssetHeadersMiddleware)
 
     async def invalid_request(_: Request, __: Exception) -> JSONResponse:
