@@ -53,8 +53,10 @@ function unionBounds(bounds: readonly (MapBounds | null)[]): MapBounds | null {
   ];
 }
 
+type MapStyleLoadState = ReturnType<maplibregl.Map["isStyleLoaded"]>;
+
 interface MapFitApi {
-  isStyleLoaded(): boolean | undefined;
+  isStyleLoaded(): MapStyleLoadState;
   once(event: "style.load", listener: () => void): void;
   fitBounds(bounds: MapBounds, options: { padding: number; duration: number }): void;
 }
