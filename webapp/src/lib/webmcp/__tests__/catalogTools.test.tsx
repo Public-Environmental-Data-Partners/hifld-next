@@ -227,4 +227,181 @@ describe("global catalog WebMCP tools", () => {
     expect(JSON.stringify(result)).not.toContain("private/roads.parquet");
     expect(JSON.stringify(result)).not.toContain("s3://");
   });
+
+  it("accepts the production dataset file response contract", async () => {
+    const fake = createModelContextFake();
+    installModelContextFake(fake);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          links: { self: "/api/collections/hifld/datasets/roads/files/roads" },
+          collection,
+          dataset,
+          file: {
+            id: 4,
+            dataset_id: dataset.id,
+            slug: "roads",
+            name: "Roads",
+            description: "Road network",
+            layer_name: null,
+            source_file_path: null,
+            file_metadata: null,
+            created_at: collection.created_at,
+            updated_at: collection.updated_at,
+            formats: [
+              {
+                format: {
+                  id: 1,
+                  format_type: "geoparquet",
+                  name: "GeoParquet",
+                  description: "GeoParquet format",
+                  mime_type: "application/vnd.apache.parquet",
+                  created_at: collection.created_at,
+                  updated_at: collection.updated_at,
+                },
+                file_format: {
+                  id: 8,
+                  file_id: 4,
+                  format_id: 1,
+                  created_at: collection.created_at,
+                  updated_at: collection.updated_at,
+                },
+                sources: [
+                  {
+                    id: 10,
+                    file_format_id: 8,
+                    storage_location_id: 1,
+                    version: "v1.0.0",
+                    source_type: "file",
+                    references_source_id: null,
+                    location: { type: "file", version: "v1", path: "private/roads.parquet" },
+                    storage_uri: "gs://private/roads.parquet",
+                    source_metadata: {
+                      version: "v1",
+                      description: null,
+                      mime_type: null,
+                      feature_count: 12,
+                      bounds: [-123, 37, -122, 38],
+                      columns: [],
+                    },
+                    storage_location: {
+                      id: 1,
+                      slug: "gcs-data",
+                      name: "GCS data",
+                      backend_type: "s3",
+                      description: "Production bucket",
+                      config: {
+                        type: "gcs",
+                        version: "v1",
+                        base_url: "https://example.test/storage",
+                        bucket: "private",
+                      },
+                      created_at: collection.created_at,
+                      updated_at: collection.updated_at,
+                    },
+                    created_at: collection.created_at,
+                    updated_at: collection.updated_at,
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      ),
+    );
+    render(<CatalogTools applySearch={vi.fn(async () => undefined)} enabled />);
+    await waitFor(() => expect(fake.toolNames()).toHaveLength(6));
+
+    await expect(
+      fake.execute("get_dataset_file", { collection: "hifld", dataset: "roads", file: "roads" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      data: {
+        file: { id: 4, layer_name: null },
+        query_sources: [{ alias: "source_0", file_source_id: 10 }],
+      },
+    });
+  });
+
+  it("accepts the production dataset file schema response contract", async () => {
+    const fake = createModelContextFake();
+    installModelContextFake(fake);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          links: { self: "/api/collections/hifld/datasets/roads/files/roads/schema" },
+          collection,
+          dataset,
+          file: {
+            id: 4,
+            dataset_id: dataset.id,
+            slug: "roads",
+            name: "Roads",
+            description: "Road network",
+            layer_name: null,
+          },
+          versions: ["v1.0.0"],
+          selected_version: "v1.0.0",
+          total_columns: 1,
+          column_offset: 0,
+          column_limit: 50,
+          has_more: false,
+          schema: {
+            version: "v1.0.0",
+            format_type: "geoparquet",
+            format_name: "GeoParquet",
+            source_id: 10,
+            storage_location: null,
+            source: null,
+            summary: { columnCount: 1 },
+            source_metadata: {
+              version: "v1",
+              description: null,
+              mime_type: null,
+              feature_count: 12,
+              bounds: [-123, 37, -122, 38],
+              columns: [],
+            },
+            columns: [
+              {
+                name: "geometry",
+                type: "geometry",
+                description: null,
+                nullable: false,
+                num_null_values: 0,
+                num_unique_values: null,
+                example_values: null,
+                min: null,
+                max: null,
+                length: null,
+                possible_values: null,
+              },
+            ],
+            total_columns: 1,
+            column_offset: 0,
+            column_limit: 50,
+            has_more: false,
+          },
+        }),
+      ),
+    );
+    render(<CatalogTools applySearch={vi.fn(async () => undefined)} enabled />);
+    await waitFor(() => expect(fake.toolNames()).toHaveLength(6));
+
+    await expect(
+      fake.execute("get_dataset_file_schema", { collection: "hifld", dataset: "roads", file: "roads" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      data: {
+        selected_version: "v1.0.0",
+        schema: {
+          source_id: 10,
+          total_columns: 1,
+          columns: [{ name: "geometry", nullable: false }],
+        },
+      },
+    });
+  });
 });

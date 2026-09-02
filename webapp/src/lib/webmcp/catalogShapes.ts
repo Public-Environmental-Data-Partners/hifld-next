@@ -85,6 +85,18 @@ const CatalogFileSchema = z
   })
   .strict();
 
+const CatalogSchemaIdentitySchema = CatalogIdentitySchema.omit({ links: true }).strict();
+const CatalogSchemaDatasetSchema = CatalogDatasetSchema.omit({ links: true }).strict();
+const CatalogSchemaFileSchema = z
+  .object({
+    id: z.number().int().positive(),
+    dataset_id: z.number().int().positive(),
+    slug: z.string(),
+    name: z.string(),
+    layer_name: z.string().nullable(),
+  })
+  .strict();
+
 export const CatalogDatasetFileResponseSchema = z
   .object({
     collection: CatalogIdentitySchema,
@@ -248,45 +260,48 @@ export type CatalogSchemaResponseInput = {
   } | null;
 };
 
+const CatalogSchemaDetailsSchema = z
+  .object({
+    version: z.union([z.string(), z.number()]).nullable(),
+    format_type: z.enum(["geoparquet", "pmtiles", "geopackage", "shapefile", "geojson", "file_geodatabase"]),
+    format_name: z.string(),
+    source_id: z.number().int().positive(),
+    summary: SpatialSummarySchema.nullable(),
+    columns: z.array(
+      z
+        .object({
+          name: z.string(),
+          type: z.string(),
+          description: z.string().nullable().optional(),
+          nullable: z.boolean(),
+          num_null_values: z.number().nullable().optional(),
+          num_unique_values: z.number().nullable().optional(),
+          example_values: z.array(z.string()).nullable().optional(),
+          min: z.number().nullable().optional(),
+          max: z.number().nullable().optional(),
+          length: z.number().nullable().optional(),
+          possible_values: z.array(z.string()).nullable().optional(),
+        })
+        .strict(),
+    ),
+    total_columns: z.number().int().nonnegative().optional(),
+    column_offset: z.number().int().nonnegative().optional(),
+    column_limit: z.number().int().positive().max(50).optional(),
+    has_more: z.boolean().optional(),
+  })
+  .strict();
+
 export const CatalogSchemaResponseSchema = z
   .object({
-    links: CatalogLinksSchema,
-    collection: CatalogIdentitySchema,
-    dataset: CatalogDatasetSchema,
-    file: CatalogFileSchema,
-    versions: z.array(z.union([z.string(), z.number()])),
+    // Keep the requested schema first so the generic result budget preserves
+    // columns before redundant discovery links and identities.
+    schema: CatalogSchemaDetailsSchema.nullable(),
     selected_version: z.union([z.string(), z.number()]).nullable(),
-    schema: z
-      .object({
-        version: z.union([z.string(), z.number()]).nullable(),
-        format_type: z.enum(["geoparquet", "pmtiles", "geopackage", "shapefile", "geojson", "file_geodatabase"]),
-        format_name: z.string(),
-        source_id: z.number().int().positive(),
-        summary: SpatialSummarySchema.nullable(),
-        columns: z.array(
-          z
-            .object({
-              name: z.string(),
-              type: z.string(),
-              description: z.string().nullable().optional(),
-              nullable: z.boolean(),
-              num_null_values: z.number().nullable().optional(),
-              num_unique_values: z.number().nullable().optional(),
-              example_values: z.array(z.string()).nullable().optional(),
-              min: z.number().nullable().optional(),
-              max: z.number().nullable().optional(),
-              length: z.number().nullable().optional(),
-              possible_values: z.array(z.string()).nullable().optional(),
-            })
-            .strict(),
-        ),
-        total_columns: z.number().int().nonnegative().optional(),
-        column_offset: z.number().int().nonnegative().optional(),
-        column_limit: z.number().int().positive().max(50).optional(),
-        has_more: z.boolean().optional(),
-      })
-      .strict()
-      .nullable(),
+    versions: z.array(z.union([z.string(), z.number()])),
+    file: CatalogSchemaFileSchema,
+    dataset: CatalogSchemaDatasetSchema,
+    collection: CatalogSchemaIdentitySchema,
+    links: CatalogLinksSchema,
     truncated: z.literal(true).optional(),
   })
   .strict();
@@ -323,9 +338,15 @@ export function shapeDatasetFileSchemaResponse(
   });
   const shaped: CatalogSchemaResponse = {
     links: { self: schemaLink, file: fileLink, dataset: datasetLink, collection: collectionLink },
-    collection: identity(response.collection, collectionLink),
+    collection: {
+      id: response.collection.id,
+      slug: response.collection.slug,
+      name: response.collection.name,
+    },
     dataset: {
-      ...identity(response.dataset, datasetLink),
+      id: response.dataset.id,
+      slug: response.dataset.slug,
+      name: response.dataset.name,
       collection_id: response.dataset.collection_id ?? response.collection.id,
       tags: response.dataset.tags ?? {},
     },
@@ -335,8 +356,6 @@ export function shapeDatasetFileSchemaResponse(
       slug: response.file.slug,
       name: response.file.name,
       layer_name: response.file.layer_name ?? null,
-      summary: null,
-      links: { self: fileLink, schema: schemaLink },
     },
     versions: response.versions,
     selected_version: response.selected_version,
