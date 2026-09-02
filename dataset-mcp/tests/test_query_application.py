@@ -11,6 +11,8 @@ from app.query.service import QueryService
 from app.query.token_codec import QueryTokenCodec
 from app.storage.resolver import StorageResolver
 from query_worker.protocol import (
+    WorkerBounds,
+    WorkerBoundsQuery,
     WorkerFailure,
     WorkerPage,
     WorkerQuery,
@@ -44,20 +46,28 @@ class Resolver:
         )
 
 
+class ProjectedResolver(Resolver):
+    async def resolve(self, ref: QuerySourceRef) -> ResolvedSource:
+        resolved = await super().resolve(ref)
+        return resolved.model_copy(update={"bbox": None, "crs": "EPSG:3857"})
+
+
 class Executor:
-    calls: list[WorkerQuery | WorkerTileQuery]
+    calls: list[WorkerQuery | WorkerBoundsQuery | WorkerTileQuery]
 
     def __init__(self) -> None:
         self.calls = []
 
     async def execute(
         self,
-        request: WorkerQuery | WorkerTileQuery,
+        request: WorkerQuery | WorkerBoundsQuery | WorkerTileQuery,
         *,
         timeout_seconds: float | None = None,
     ) -> WorkerResult:
         del timeout_seconds
         self.calls.append(request)
+        if isinstance(request, WorkerBoundsQuery):
+            return WorkerBounds(bounds=(-122.4, 37.0, -121.4, 37.8))
         if not isinstance(request, WorkerQuery):
             return WorkerFailure("unused", "not exercised")
         next_offset = request.offset + request.limit
@@ -219,6 +229,32 @@ async def test_query_builds_map_contract_with_explicit_crs_and_preserves_token()
         1,
         2,
     ]
+
+
+@pytest.mark.asyncio
+async def test_query_bounds_frames_a_projected_result_without_source_bounds() -> None:
+    executor = Executor()
+    service = _service(ProjectedResolver(), executor)
+    result = await service.query(
+        (_source(),),
+        "SELECT ST_Transform(geometry, 'EPSG:3857', 'EPSG:4326') AS geometry FROM roads",
+        100,
+        "geometry",
+        "EPSG:4326",
+    )
+
+    map_configuration = result["map_configuration"]
+    assert isinstance(map_configuration, dict)
+    assert "initial_bounds" not in map_configuration
+    token = result["query_token"]
+    assert isinstance(token, str)
+    bounds = await service.bounds(token)
+
+    assert bounds == {"bounds": [-122.4, 37.0, -121.4, 37.8]}
+    request = executor.calls[-1]
+    assert isinstance(request, WorkerBoundsQuery)
+    assert request.geometry_column == "geometry"
+    assert request.result_crs == "EPSG:4326"
 
 
 @pytest.mark.asyncio

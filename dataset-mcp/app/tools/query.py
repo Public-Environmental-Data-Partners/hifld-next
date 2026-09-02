@@ -107,8 +107,17 @@ class MapQueryLayerInput(MapLayerStyleInput):
     layer_name: MapTitle
     sources: list[dict[str, JSONValue]] = Field(min_length=1, max_length=8)
     sql: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50_000)]
-    geometry_column: str | None = None
-    result_crs: str | None = None
+    geometry_column: str | None = Field(
+        default=None,
+        description="Name of the DuckDB GEOMETRY result column to render.",
+    )
+    result_crs: str | None = Field(
+        default=None,
+        description=(
+            "CRS of the geometry values produced by SQL. Tiles and map framing reproject "
+            "that result server-side."
+        ),
+    )
     style: MapLayerStyleInput | None = Field(
         default=None,
         description=(

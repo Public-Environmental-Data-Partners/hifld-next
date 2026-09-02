@@ -175,7 +175,8 @@ export function useQueryWebMcpTools({
   useWebMcpTool({
     name: "run_dataset_query",
     title: "Run dataset query",
-    description: "Execute a bounded query against selected dataset sources.",
+    description:
+      "Execute a bounded query against selected dataset sources. To map it, return a DuckDB GEOMETRY column, name it in geometry_column, and set result_crs to the CRS produced by the SQL; map tiles and framing reproject server-side.",
     schema: runDatasetQueryInputSchema,
     execute: executeQueryToolCallback,
     enabled,

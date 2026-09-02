@@ -38,6 +38,7 @@ import { Route as ApiCollectionsSlugRouteImport } from './routes/api/collections
 import { Route as DotwellKnownMcpServerCardDotjsonRouteImport } from './routes/[.well-known]/mcp/server-card[.]json'
 import { Route as DotwellKnownAgentSkillsIndexDotjsonRouteImport } from './routes/[.well-known]/agent-skills/index[.]json'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug'
+import { Route as ApiQueriesQueryIdBoundsRouteImport } from './routes/api/queries.$queryId.bounds'
 import { Route as ApiQueriesQueryIdPagesRouteImport } from './routes/api/queries.$queryId.pages'
 import { Route as DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRouteImport } from './routes/[.well-known]/agent-skills/hifld-catalog/SKILL[.]md'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugIndexRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.index'
@@ -203,6 +204,11 @@ const CollectionsCollectionSlugDatasetsDatasetSlugRoute =
     path: '/$collectionSlug/datasets/$datasetSlug',
     getParentRoute: () => CollectionsRoute,
   } as any)
+const ApiQueriesQueryIdBoundsRoute = ApiQueriesQueryIdBoundsRouteImport.update({
+  id: '/$queryId/bounds',
+  path: '/$queryId/bounds',
+  getParentRoute: () => ApiQueriesRoute,
+} as any)
 const ApiQueriesQueryIdPagesRoute = ApiQueriesQueryIdPagesRouteImport.update({
   id: '/$queryId/pages',
   path: '/$queryId/pages',
@@ -332,6 +338,7 @@ export interface FileRoutesByFullPath {
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute
+  '/api/queries/$queryId/bounds': typeof ApiQueriesQueryIdBoundsRoute
   '/api/queries/$queryId/pages': typeof ApiQueriesQueryIdPagesRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
@@ -373,6 +380,7 @@ export interface FileRoutesByTo {
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute
+  '/api/queries/$queryId/bounds': typeof ApiQueriesQueryIdBoundsRoute
   '/api/queries/$queryId/pages': typeof ApiQueriesQueryIdPagesRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/tags': typeof ApiCollectionsCollectionSlugDatasetsTagsRoute
@@ -416,6 +424,7 @@ export interface FileRoutesById {
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute
+  '/api/queries/$queryId/bounds': typeof ApiQueriesQueryIdBoundsRoute
   '/api/queries/$queryId/pages': typeof ApiQueriesQueryIdPagesRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
@@ -462,6 +471,7 @@ export interface FileRouteTypes {
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/map'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
+    | '/api/queries/$queryId/bounds'
     | '/api/queries/$queryId/pages'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
@@ -503,6 +513,7 @@ export interface FileRouteTypes {
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/map'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
+    | '/api/queries/$queryId/bounds'
     | '/api/queries/$queryId/pages'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/tags'
@@ -545,6 +556,7 @@ export interface FileRouteTypes {
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/map'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
+    | '/api/queries/$queryId/bounds'
     | '/api/queries/$queryId/pages'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
@@ -796,6 +808,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiQueriesQueryIdPagesRouteImport
       parentRoute: typeof ApiQueriesRoute
     }
+    '/api/queries/$queryId/bounds': {
+      id: '/api/queries/$queryId/bounds'
+      path: '/$queryId/bounds'
+      fullPath: '/api/queries/$queryId/bounds'
+      preLoaderRoute: typeof ApiQueriesQueryIdBoundsRouteImport
+      parentRoute: typeof ApiQueriesRoute
+    }
     '/.well-known/agent-skills/hifld-catalog/SKILL.md': {
       id: '/.well-known/agent-skills/hifld-catalog/SKILL.md'
       path: '/.well-known/agent-skills/hifld-catalog/SKILL.md'
@@ -1031,10 +1050,12 @@ const ApiDatasetsRouteWithChildren = ApiDatasetsRoute._addFileChildren(
 )
 
 interface ApiQueriesRouteChildren {
+  ApiQueriesQueryIdBoundsRoute: typeof ApiQueriesQueryIdBoundsRoute
   ApiQueriesQueryIdPagesRoute: typeof ApiQueriesQueryIdPagesRoute
 }
 
 const ApiQueriesRouteChildren: ApiQueriesRouteChildren = {
+  ApiQueriesQueryIdBoundsRoute: ApiQueriesQueryIdBoundsRoute,
   ApiQueriesQueryIdPagesRoute: ApiQueriesQueryIdPagesRoute,
 }
 

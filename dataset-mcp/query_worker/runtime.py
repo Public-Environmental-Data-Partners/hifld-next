@@ -17,6 +17,8 @@ from app.query.serialization import (
 )
 from query_worker.metrics import init_connection, measure
 from query_worker.protocol import (
+    WorkerBounds,
+    WorkerBoundsQuery,
     WorkerFailure,
     WorkerPage,
     WorkerQuery,
@@ -102,7 +104,9 @@ class WorkerRuntime:
     def close(self) -> None:
         self.connection.close()
 
-    def _create_request_secrets(self, request: WorkerQuery | WorkerTileQuery) -> tuple[str, ...]:
+    def _create_request_secrets(
+        self, request: WorkerQuery | WorkerBoundsQuery | WorkerTileQuery
+    ) -> tuple[str, ...]:
         secret_names: list[str] = []
         for source in request.sources:
             storage = source.seaweedfs
@@ -133,7 +137,9 @@ class WorkerRuntime:
         for secret_name in secret_names:
             self.connection.execute(f"DROP SECRET IF EXISTS {_quoted_identifier(secret_name)}")
 
-    def _create_source_views(self, request: WorkerQuery | WorkerTileQuery) -> dict[str, str]:
+    def _create_source_views(
+        self, request: WorkerQuery | WorkerBoundsQuery | WorkerTileQuery
+    ) -> dict[str, str]:
         aliases: dict[str, str] = {}
         for source in request.sources:
             if source.alias in aliases:
@@ -153,8 +159,8 @@ class WorkerRuntime:
             self.connection.execute(f"DROP VIEW IF EXISTS {_quoted_identifier(view_name)}")
 
     def execute(
-        self, request: WorkerQuery | WorkerTileQuery
-    ) -> WorkerPage | WorkerTile | WorkerFailure:
+        self, request: WorkerQuery | WorkerBoundsQuery | WorkerTileQuery
+    ) -> WorkerPage | WorkerBounds | WorkerTile | WorkerFailure:
         if request.deadline <= datetime.now(tz=UTC):
             return WorkerFailure(code="query_timeout", message="The query deadline expired")
 
@@ -168,6 +174,10 @@ class WorkerRuntime:
                 from query_worker.tiles import execute_tile
 
                 return execute_tile(self.connection, rewritten_sql, request)
+            if isinstance(request, WorkerBoundsQuery):
+                from query_worker.bounds import execute_bounds
+
+                return execute_bounds(self.connection, rewritten_sql, request)
             # The inner SQL has already passed SqlPolicy. LIMIT and OFFSET stay
             # outside it so an inner LIMIT remains part of relational semantics.
             bounded_sql = f"SELECT * FROM ({rewritten_sql}) AS _mcp_result LIMIT ? OFFSET ?"

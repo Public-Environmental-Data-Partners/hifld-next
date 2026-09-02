@@ -83,7 +83,7 @@ import {
   getDatasetFileById,
   getDatasetFileBySlug,
 } from "@/lib/api-client";
-import { createQuery, getQueryPage, QueryApiError, type QueryRequest } from "@/lib/query-api";
+import { createQuery, getQueryBounds, getQueryPage, QueryApiError, type QueryRequest } from "@/lib/query-api";
 import { type MapCatalogLayerInput, useMapWebMcpTools } from "@/lib/webmcp/mapTools";
 import { type PublicToolQueryPage, type QueryMapPresentation, useQueryWebMcpTools } from "@/lib/webmcp/queryTools";
 
@@ -890,6 +890,25 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     [collection],
   );
 
+  const resolveLayerBounds = useCallback(async (layer: LoadedMapLayer) => {
+    if (layer.bounds !== null) return layer.bounds;
+    if (layer.kind !== "query_mvt") return null;
+    const token = queryTokensRef.current.get(layer.queryId);
+    if (!token) throw new MapWorkspaceCommandError("The query token is unavailable.");
+    try {
+      const result = await getQueryBounds(layer.queryId, { queryToken: token });
+      setLoadedLayers((current) =>
+        current.map((candidate) => (candidate.id === layer.id ? { ...candidate, bounds: result.bounds } : candidate)),
+      );
+      return result.bounds;
+    } catch (error) {
+      if (error instanceof QueryApiError) {
+        throw new MapWorkspaceCommandError("The query layer bounds are unavailable.");
+      }
+      throw error;
+    }
+  }, []);
+
   const commands = useMapWorkspaceCommands({
     mapRef,
     loadedLayers,
@@ -902,6 +921,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     basemapMode,
     setBasemapMode,
     resolveDatasetLayer,
+    resolveLayerBounds,
   });
 
   const executeQuery = useCallback(

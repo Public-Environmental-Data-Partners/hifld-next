@@ -11,6 +11,8 @@ from app.query.models import ColumnResult, PageResult, ResolvedSource
 from app.query.sql_policy import ValidatedSql
 from app.storage.models import DuckDbSourceSpec
 from query_worker.protocol import (
+    WorkerBounds,
+    WorkerBoundsQuery,
     WorkerFailure,
     WorkerPage,
     WorkerQuery,
@@ -48,7 +50,7 @@ def worker_source(source: ExecutionSource) -> WorkerSourceSpec:
 class QueryExecutor(Protocol):
     async def execute(
         self,
-        request: WorkerQuery,
+        request: WorkerQuery | WorkerBoundsQuery,
         *,
         timeout_seconds: float | None = None,
     ) -> WorkerResult: ...
@@ -66,6 +68,7 @@ _FAILURE_CODES: dict[str, ErrorCode] = {
     "worker_failed": ErrorCode.WORKER_FAILED,
     "worker_protocol_invalid": ErrorCode.WORKER_PROTOCOL_INVALID,
     "worker_unavailable": ErrorCode.WORKER_UNAVAILABLE,
+    "map_not_supported": ErrorCode.MAP_NOT_SUPPORTED,
 }
 
 
@@ -165,3 +168,33 @@ class QueryService:
             response_truncated=response.response_truncated,
             deterministic_order=response.deterministic_order,
         )
+
+    async def execute_bounds(
+        self,
+        *,
+        validated_sql: ValidatedSql,
+        sources: tuple[ExecutionSource, ...],
+        geometry_column: str,
+        result_crs: str,
+    ) -> tuple[float, float, float, float]:
+        request = WorkerBoundsQuery(
+            canonical_sql=validated_sql.canonical_sql,
+            sources=tuple(self._worker_source(source) for source in sources),
+            geometry_column=geometry_column,
+            result_crs=result_crs,
+            deadline=datetime.now(tz=UTC) + timedelta(seconds=self._timeout_seconds),
+        )
+        response = await self._executor.execute(request, timeout_seconds=self._timeout_seconds)
+        if isinstance(response, WorkerFailure):
+            self._raise_failure(response)
+        if not isinstance(response, WorkerBounds):
+            raise AppError(
+                code=ErrorCode.WORKER_PROTOCOL_INVALID,
+                message="The query worker returned an unexpected result",
+            )
+        if response.bounds is None:
+            raise AppError(
+                code=ErrorCode.MAP_NOT_SUPPORTED,
+                message="The query result has no geometry bounds",
+            )
+        return response.bounds

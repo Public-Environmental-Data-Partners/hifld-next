@@ -20,6 +20,7 @@ from app.query.sql_policy import SqlPolicy, SqlPolicyError, ValidatedSql
 from app.query.token_codec import QueryTokenCodec, QueryTokenError
 from app.storage.resolver import StorageResolutionError, StorageResolver
 from query_worker.protocol import (
+    WorkerBoundsQuery,
     WorkerFailure,
     WorkerQuery,
     WorkerResult,
@@ -58,7 +59,7 @@ class SourceResolver(Protocol):
 class WorkerExecutor(Protocol):
     async def execute(
         self,
-        request: WorkerQuery | WorkerTileQuery,
+        request: WorkerQuery | WorkerBoundsQuery | WorkerTileQuery,
         *,
         timeout_seconds: float | None = None,
     ) -> WorkerResult: ...
@@ -476,6 +477,28 @@ class QueryApplicationService:
                 "map_configuration": configuration,
             }
         ).root
+
+    async def bounds(self, token: str) -> JSONMapping:
+        payload = self._decode_token(token)
+        if payload.geometry_column is None:
+            raise AppError(
+                ErrorCode.GEOMETRY_AMBIGUOUS,
+                "The query does not have one selected geometry column",
+            )
+        if payload.result_crs is None:
+            raise AppError(
+                ErrorCode.GEOMETRY_CRS_REQUIRED,
+                "The query geometry coordinate reference system is required",
+            )
+        validated = self._validated_sql(payload.canonical_sql, payload.sources)
+        sources = await self._execution_sources(payload.sources, token_revalidation=True)
+        bounds = await self._query_service.execute_bounds(
+            validated_sql=validated,
+            sources=sources,
+            geometry_column=payload.geometry_column,
+            result_crs=payload.result_crs,
+        )
+        return _JsonMapping.model_validate({"bounds": list(bounds)}).root
 
     @staticmethod
     def _worker_sources(sources: Sequence[ExecutionSource]) -> tuple[WorkerSourceSpec, ...]:

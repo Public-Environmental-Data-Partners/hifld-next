@@ -115,18 +115,26 @@ describe("buildOpenApiDocument", () => {
     });
   });
 
-  it("documents bounded query creation and page contracts", () => {
+  it("documents bounded query creation, page, and extent contracts", () => {
     const doc = buildOpenApiDocument();
     const create = doc.paths?.["/api/queries"]?.post;
     const page = doc.paths?.["/api/queries/{query_id}/pages"]?.post;
+    const bounds = doc.paths?.["/api/queries/{query_id}/bounds"]?.get;
 
     expect(create).toBeDefined();
     expect(page).toBeDefined();
+    expect(bounds).toBeDefined();
     expect(create?.requestBody).toMatchObject({
       required: true,
       content: { "application/json": { schema: { $ref: "#/components/schemas/QueryRequest" } } },
     });
     expect(page?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "query_id", in: "path", required: true }),
+        expect.objectContaining({ name: "X-HIFLD-Query-Token", in: "header", required: true }),
+      ]),
+    );
+    expect(bounds?.parameters).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "query_id", in: "path", required: true }),
         expect.objectContaining({ name: "X-HIFLD-Query-Token", in: "header", required: true }),

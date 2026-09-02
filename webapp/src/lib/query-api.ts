@@ -73,6 +73,15 @@ function decodedPath(url: string): string {
 
 export const QueryIdSchema = z.string().regex(/^[A-Za-z0-9_-]{20,64}$/);
 export const QueryTokenSchema = z.string().min(1).max(8192).regex(/^\S+$/);
+const QueryBoundsSchema = z
+  .tuple([
+    z.number().finite().min(-180).max(180),
+    z.number().finite().min(-90).max(90),
+    z.number().finite().min(-180).max(180),
+    z.number().finite().min(-90).max(90),
+  ])
+  .refine(([minX, minY, maxX, maxY]) => minX <= maxX && minY <= maxY, "bounds must be ordered");
+export const QueryBoundsResultSchema = z.object({ bounds: QueryBoundsSchema }).strict();
 export const JsonScalarSchema = z.union([z.null(), z.boolean(), z.number().finite(), z.string()]);
 const geometrySummarySchema = z
   .object({
@@ -178,8 +187,18 @@ export const QueryRequestSchema = z
       .max(MAX_QUERY_SQL_BYTES)
       .refine((value) => utf8ByteLength(value) <= MAX_QUERY_SQL_BYTES, "SQL exceeds the maximum UTF-8 byte length"),
     limit: z.number().int().positive().max(1000).default(100),
-    geometry_column: z.string().min(1).optional(),
-    result_crs: z.string().min(1).optional(),
+    geometry_column: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Name of the DuckDB GEOMETRY result column to render on the map."),
+    result_crs: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "CRS of the geometry values produced by the SQL, such as EPSG:4326 or EPSG:3857. Tiles and framing are reprojected server-side.",
+      ),
   })
   .strict();
 
@@ -264,6 +283,7 @@ export type QueryPageRequest = z.input<typeof QueryPageRequestSchema>;
 export type QueryRequest = z.input<typeof QueryRequestSchema>;
 export type QueryPage = z.infer<typeof QueryPageSchema>;
 export type QueryResult = z.infer<typeof QueryResultSchema>;
+export type QueryBoundsResult = z.infer<typeof QueryBoundsResultSchema>;
 export type QueryError = z.infer<typeof QueryErrorSchema>;
 export type JsonScalar = z.infer<typeof JsonScalarSchema>;
 
@@ -357,6 +377,19 @@ export async function getQueryPage(
   if (options.signal !== undefined) init.signal = options.signal;
   const response = await fetcher(`/api/queries/${encodeURIComponent(validQueryId)}/pages`, init);
   return parseResponse(response, QueryPageSchema);
+}
+
+export async function getQueryBounds(queryId: string, options: QueryPageFetchOptions): Promise<QueryBoundsResult> {
+  const validQueryId = parseInput(QueryIdSchema, queryId);
+  const token = parseInput(QueryTokenSchema, options.queryToken);
+  const fetcher = options.fetcher ?? fetch;
+  const init: RequestInit = {
+    method: "GET",
+    headers: { "X-HIFLD-Query-Token": token },
+  };
+  if (options.signal !== undefined) init.signal = options.signal;
+  const response = await fetcher(`/api/queries/${encodeURIComponent(validQueryId)}/bounds`, init);
+  return parseResponse(response, QueryBoundsResultSchema);
 }
 
 export const queryPage = getQueryPage;
