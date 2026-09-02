@@ -2,6 +2,10 @@ import type { WebMcpJsonValue } from "./result";
 import type { WebMcpInput } from "./schemas";
 
 type FakeTool = WebMCP.ModelContextTool & { registrationCount: number };
+type HostToolExecute = (
+  input: WebMcpInput,
+  options?: WebMCP.ToolExecuteCallbackOptions,
+) => WebMcpJsonValue | Promise<WebMcpJsonValue>;
 
 export interface ModelContextExecuteOptions {
   signal?: AbortSignal;
@@ -48,9 +52,8 @@ export function createModelContextFake(): ModelContextFake {
     ): Promise<WebMcpJsonValue> => {
       const tool = tools.get(name);
       if (!tool) throw new Error(`Tool ${name} is not registered`);
-      return (await tool.execute(input, {
-        signal: options?.signal ?? new AbortController().signal,
-      })) as WebMcpJsonValue;
+      const execute = tool.execute as HostToolExecute;
+      return options?.signal ? execute(input, { signal: options.signal }) : execute(input);
     },
     getTool: (name: string): WebMCP.ModelContextTool => {
       const tool = tools.get(name);

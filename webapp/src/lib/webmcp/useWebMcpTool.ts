@@ -52,23 +52,24 @@ function rethrowAbortIfNeeded<T>(signal: AbortSignal, error: T): void {
 
 async function executeRegisteredTool<TInput, TData extends WebMcpJsonValue>(
   input: RegisteredToolInput,
-  options: RegisteredToolOptions,
+  options: RegisteredToolOptions | undefined,
   schema: z.ZodType<TInput>,
   executeRef: MutableRefObject<UseWebMcpToolOptions<TInput, TData>["execute"]>,
   name: string,
   routeKind: WebMcpRouteKind,
 ): Promise<WebMcpResult<TData> | WebMcpResult<WebMcpJsonValue>> {
   const startedAt = currentTimeMs();
+  const signal = options?.signal ?? new AbortController().signal;
   trackWebMcpToolStarted(name, routeKind);
-  throwIfAborted(options.signal);
+  throwIfAborted(signal);
   const parsed = schema.safeParse(input);
   if (!parsed.success) {
     trackWebMcpToolFailed(name, routeKind, currentTimeMs() - startedAt, "invalid_request");
     return failure("invalid_request", "The tool input is invalid.");
   }
   try {
-    const result = await executeRef.current(parsed.data, options.signal);
-    throwIfAborted(options.signal);
+    const result = await executeRef.current(parsed.data, signal);
+    throwIfAborted(signal);
     const durationMs = currentTimeMs() - startedAt;
     if (result.ok) {
       trackWebMcpToolCompleted(name, routeKind, durationMs);
@@ -77,7 +78,7 @@ async function executeRegisteredTool<TInput, TData extends WebMcpJsonValue>(
     }
     return boundWebMcpResult(result);
   } catch (error) {
-    rethrowAbortIfNeeded(options.signal, error);
+    rethrowAbortIfNeeded(signal, error);
     const durationMs = currentTimeMs() - startedAt;
     trackWebMcpToolFailed(name, routeKind, durationMs, "internal_error");
     return failure("internal_error");
