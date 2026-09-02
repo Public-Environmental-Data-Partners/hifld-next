@@ -1,5 +1,9 @@
 import { compareVersionValues } from "@/components/dataset/versionLabel";
-import type { SelectedMapFeature } from "./featureSelection";
+import {
+  type CatalogSelectedMapFeature,
+  isCatalogSelectedMapFeature,
+  type SelectedMapFeature,
+} from "./featureSelection";
 import { s2CellForPoint } from "./featureSpatialIndex";
 
 export const GEOMETRY_MATCH_COLUMN = "__geometry__";
@@ -124,16 +128,21 @@ function emptySummary(selected: number): FeatureDiffSummary {
   };
 }
 
-function comparisonScope(feature: SelectedMapFeature): string {
+function catalogFeatures(features: SelectedMapFeature[]): CatalogSelectedMapFeature[] {
+  return features.filter(isCatalogSelectedMapFeature);
+}
+
+function comparisonScope(feature: CatalogSelectedMapFeature): string {
   return [feature.collectionSlug, feature.datasetSlug, feature.fileSlug].join(":");
 }
 
 function comparableVersions(features: SelectedMapFeature[]): string[] | null {
-  if (features.length === 0) {
+  const catalog = catalogFeatures(features);
+  if (catalog.length === 0 || catalog.length !== features.length) {
     return null;
   }
-  const scopes = new Set(features.map(comparisonScope));
-  const versions = new Set(features.map((feature) => feature.version));
+  const scopes = new Set(catalog.map(comparisonScope));
+  const versions = new Set(catalog.map((feature) => feature.version));
   if (scopes.size !== 1 || versions.size !== 2) {
     return null;
   }
@@ -155,13 +164,14 @@ function allPropertyKeys(features: SelectedMapFeature[]): string[] {
 }
 
 function propertyKeysForVersion(features: SelectedMapFeature[], version: string): Set<string> {
+  const catalog = catalogFeatures(features);
   return new Set(
-    features.filter((feature) => feature.version === version).flatMap((feature) => Object.keys(feature.properties)),
+    catalog.filter((feature) => feature.version === version).flatMap((feature) => Object.keys(feature.properties)),
   );
 }
 
 function featuresForVersionHaveCentroid(features: SelectedMapFeature[], version: string): boolean {
-  return features.some((feature) => feature.version === version && feature.centroid !== null);
+  return catalogFeatures(features).some((feature) => feature.version === version && feature.centroid !== null);
 }
 
 function matchKeyPair(left: string, right: string): FeatureDiffMatchKeyPair {
@@ -169,10 +179,11 @@ function matchKeyPair(left: string, right: string): FeatureDiffMatchKeyPair {
 }
 
 export function featureDiffMatchKeyOptions(features: SelectedMapFeature[], version: string): FeatureDiffColumn[] {
+  const catalog = catalogFeatures(features);
   const propertyColumns = [...propertyKeysForVersion(features, version)]
     .sort((left, right) => left.localeCompare(right))
     .map((key) => ({ key, label: key }));
-  if (!featuresForVersionHaveCentroid(features, version)) {
+  if (!featuresForVersionHaveCentroid(catalog, version)) {
     return propertyColumns;
   }
   return [...propertyColumns, { key: GEOMETRY_MATCH_COLUMN, label: "Geometry" }];
@@ -183,8 +194,9 @@ export function defaultFeatureDiffMatchKeyPairs(
   leftVersion: string,
   rightVersion: string,
 ): FeatureDiffMatchKeyPair[] {
-  const leftPropertyKeys = propertyKeysForVersion(features, leftVersion);
-  const rightPropertyKeys = propertyKeysForVersion(features, rightVersion);
+  const catalog = catalogFeatures(features);
+  const leftPropertyKeys = propertyKeysForVersion(catalog, leftVersion);
+  const rightPropertyKeys = propertyKeysForVersion(catalog, rightVersion);
   for (const key of DEFAULT_MATCH_KEY_FIELDS) {
     if (leftPropertyKeys.has(key) && rightPropertyKeys.has(key)) {
       return [matchKeyPair(key, key)];
@@ -197,7 +209,7 @@ export function defaultFeatureDiffMatchKeyPairs(
     const [key] = commonKeys;
     return key ? [matchKeyPair(key, key)] : [];
   }
-  if (featuresForVersionHaveCentroid(features, leftVersion) && featuresForVersionHaveCentroid(features, rightVersion)) {
+  if (featuresForVersionHaveCentroid(catalog, leftVersion) && featuresForVersionHaveCentroid(catalog, rightVersion)) {
     return [matchKeyPair(GEOMETRY_MATCH_COLUMN, GEOMETRY_MATCH_COLUMN)];
   }
   return [];
@@ -269,8 +281,8 @@ function scoreGeometryColumn({
   s2Level,
   geometryOnly,
 }: {
-  left: SelectedMapFeature;
-  right: SelectedMapFeature;
+  left: CatalogSelectedMapFeature;
+  right: CatalogSelectedMapFeature;
   s2Level: number;
   geometryOnly: boolean;
 }): ColumnScore | null {
@@ -284,8 +296,8 @@ function scorePropertyColumn({
   right,
 }: {
   pair: FeatureDiffMatchKeyPair;
-  left: SelectedMapFeature;
-  right: SelectedMapFeature;
+  left: CatalogSelectedMapFeature;
+  right: CatalogSelectedMapFeature;
 }): ColumnScore | null {
   const isStableIdentifier = isStableIdentifierKey(pair.left) && isStableIdentifierKey(pair.right);
   const weight = matchKeyWeight(isStableIdentifier);
@@ -313,7 +325,11 @@ function scorePropertyColumn({
   };
 }
 
-function geometrySimilarity(left: SelectedMapFeature, right: SelectedMapFeature, s2Level: number): number | null {
+function geometrySimilarity(
+  left: CatalogSelectedMapFeature,
+  right: CatalogSelectedMapFeature,
+  s2Level: number,
+): number | null {
   if (!left.centroid || !right.centroid) {
     return null;
   }
@@ -336,8 +352,8 @@ function scoreForColumn({
   geometryOnly,
 }: {
   pair: FeatureDiffMatchKeyPair;
-  left: SelectedMapFeature;
-  right: SelectedMapFeature;
+  left: CatalogSelectedMapFeature;
+  right: CatalogSelectedMapFeature;
   s2Level: number;
   geometryOnly: boolean;
 }): ColumnScore | null {
@@ -406,8 +422,8 @@ function scoreCandidate({
   matchKeyPairs,
   s2Level,
 }: {
-  left: SelectedMapFeature;
-  right: SelectedMapFeature;
+  left: CatalogSelectedMapFeature;
+  right: CatalogSelectedMapFeature;
   matchKeyPairs: FeatureDiffMatchKeyPair[];
   s2Level: number;
 }): CandidateScore | null {
@@ -453,7 +469,11 @@ function cellStatus({
   return "changed";
 }
 
-function buildCells(left: SelectedMapFeature | null, right: SelectedMapFeature | null, columns: FeatureDiffColumn[]) {
+function buildCells(
+  left: CatalogSelectedMapFeature | null,
+  right: CatalogSelectedMapFeature | null,
+  columns: FeatureDiffColumn[],
+) {
   const cells: FeatureDiffCells = {};
   for (const column of columns) {
     const leftPresent = left ? hasFeatureProperty(left, column.key) : false;
@@ -477,8 +497,8 @@ function rowStatus({
   confidence,
   cells,
 }: {
-  left: SelectedMapFeature | null;
-  right: SelectedMapFeature | null;
+  left: CatalogSelectedMapFeature | null;
+  right: CatalogSelectedMapFeature | null;
   confidence: number;
   cells: FeatureDiffCells;
 }): FeatureDiffStatus {
@@ -501,8 +521,8 @@ function matchedRow({
   method,
   columns,
 }: {
-  left: SelectedMapFeature;
-  right: SelectedMapFeature;
+  left: CatalogSelectedMapFeature;
+  right: CatalogSelectedMapFeature;
   score: number;
   method: FeatureMatchMethod;
   columns: FeatureDiffColumn[];
@@ -520,7 +540,7 @@ function matchedRow({
 }
 
 function unmatchedRow(
-  feature: SelectedMapFeature,
+  feature: CatalogSelectedMapFeature,
   side: "left" | "right",
   columns: FeatureDiffColumn[],
 ): FeatureDiffRow {
@@ -590,13 +610,13 @@ function bestMatchForLeft({
   matchKeyPairs,
   s2Level,
 }: {
-  left: SelectedMapFeature;
-  rightFeatures: SelectedMapFeature[];
+  left: CatalogSelectedMapFeature;
+  rightFeatures: CatalogSelectedMapFeature[];
   unmatchedRight: Set<string>;
   matchKeyPairs: FeatureDiffMatchKeyPair[];
   s2Level: number;
-}): { right: SelectedMapFeature; score: CandidateScore } | null {
-  let bestRight: SelectedMapFeature | null = null;
+}): { right: CatalogSelectedMapFeature; score: CandidateScore } | null {
+  let bestRight: CatalogSelectedMapFeature | null = null;
   let bestScore: CandidateScore | null = null;
   for (const right of rightFeatures) {
     if (!unmatchedRight.has(right.id)) {
@@ -641,8 +661,8 @@ function buildRows({
   s2Level,
   columns,
 }: {
-  leftFeatures: SelectedMapFeature[];
-  rightFeatures: SelectedMapFeature[];
+  leftFeatures: CatalogSelectedMapFeature[];
+  rightFeatures: CatalogSelectedMapFeature[];
   matchKeyPairs: FeatureDiffMatchKeyPair[];
   s2Level: number;
   columns: FeatureDiffColumn[];
@@ -670,7 +690,8 @@ function buildRows({
 }
 
 export function buildFeatureDiff(features: SelectedMapFeature[], options: FeatureDiffOptions): FeatureDiffResult {
-  const versions = comparableVersions(features);
+  const catalog = catalogFeatures(features);
+  const versions = comparableVersions(catalog);
   if (!versions || options.leftVersion === options.rightVersion) {
     return {
       canCompare: false,
@@ -694,13 +715,13 @@ export function buildFeatureDiff(features: SelectedMapFeature[], options: Featur
       summary: emptySummary(features.length),
     };
   }
-  const columns = allPropertyKeys(features).map((key) => ({ key, label: key }));
+  const columns = allPropertyKeys(catalog).map((key) => ({ key, label: key }));
   const matchKeyPairs =
     options.matchKeyPairs.length > 0
       ? options.matchKeyPairs
-      : defaultFeatureDiffMatchKeyPairs(features, leftVersion, rightVersion);
-  const leftFeatures = features.filter((feature) => feature.version === leftVersion);
-  const rightFeatures = features.filter((feature) => feature.version === rightVersion);
+      : defaultFeatureDiffMatchKeyPairs(catalog, leftVersion, rightVersion);
+  const leftFeatures = catalog.filter((feature) => feature.version === leftVersion);
+  const rightFeatures = catalog.filter((feature) => feature.version === rightVersion);
   const rows = buildRows({ leftFeatures, rightFeatures, matchKeyPairs, s2Level: options.s2Level, columns });
   const sortedRows = sortRows(rows, options.sort);
 

@@ -1,3 +1,4 @@
+import { type SelectedFeaturesSort, SelectedFeaturesTable as SharedSelectedFeaturesTable } from "@hifld/map-ui";
 import {
   ArrowDown,
   ArrowUp,
@@ -6,7 +7,6 @@ import {
   Info,
   MessageSquareWarning,
   MoreHorizontal,
-  Search,
   X,
 } from "lucide-react";
 import * as React from "react";
@@ -37,7 +37,11 @@ import {
   GEOMETRY_MATCH_COLUMN,
   isComparableFeatureDiffSelection,
 } from "./featureDiff";
-import type { SelectedMapFeature } from "./featureSelection";
+import {
+  type CatalogSelectedMapFeature,
+  isCatalogSelectedMapFeature,
+  type SelectedMapFeature,
+} from "./featureSelection";
 
 interface FeatureTablePanelProps {
   features: SelectedMapFeature[];
@@ -65,23 +69,6 @@ function sortedPropertyKeys(features: SelectedMapFeature[]): string[] {
   );
 }
 
-function featureMatchesQuery(feature: SelectedMapFeature, query: string): boolean {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) {
-    return true;
-  }
-  const haystack = [
-    feature.layerName,
-    feature.version,
-    feature.sourceLayerId,
-    feature.featureId,
-    ...Object.entries(feature.properties).flat(),
-  ]
-    .join(" ")
-    .toLowerCase();
-  return haystack.includes(normalizedQuery);
-}
-
 interface FeatureGroupOption {
   key: string;
   label: string;
@@ -90,10 +77,16 @@ interface FeatureGroupOption {
 }
 
 function layerKeyForFeature(feature: SelectedMapFeature): string {
+  if (!isCatalogSelectedMapFeature(feature)) {
+    return [feature.loadedLayerId, feature.sourceLayerId].join(":");
+  }
   return [feature.collectionSlug, feature.datasetSlug, feature.fileSlug, feature.sourceLayerId].join(":");
 }
 
 function layerLabelForFeature(feature: SelectedMapFeature): string {
+  if (!isCatalogSelectedMapFeature(feature)) {
+    return feature.layerName;
+  }
   if (feature.datasetSlug === feature.fileSlug) {
     return feature.datasetSlug;
   }
@@ -107,7 +100,8 @@ function buildFeatureGroupOptions(features: SelectedMapFeature[]): FeatureGroupO
     const key = layerKeyForFeature(feature);
     const existing = groups.get(key);
     if (existing) {
-      existing.countByVersion.set(feature.version, (existing.countByVersion.get(feature.version) ?? 0) + 1);
+      const version = isCatalogSelectedMapFeature(feature) ? feature.version : "query";
+      existing.countByVersion.set(version, (existing.countByVersion.get(version) ?? 0) + 1);
       continue;
     }
 
@@ -115,7 +109,7 @@ function buildFeatureGroupOptions(features: SelectedMapFeature[]): FeatureGroupO
       key,
       label: layerLabelForFeature(feature),
       versions: [],
-      countByVersion: new Map([[feature.version, 1]]),
+      countByVersion: new Map([[isCatalogSelectedMapFeature(feature) ? feature.version : "query", 1]]),
     });
   }
 
@@ -137,32 +131,9 @@ function selectedFeatureSubset({
   selectedVersion: string;
 }): SelectedMapFeature[] {
   return features.filter(
-    (feature) => layerKeyForFeature(feature) === selectedLayerKey && feature.version === selectedVersion,
-  );
-}
-
-function selectedFeatureSortValue(feature: SelectedMapFeature, column: string): string {
-  if (column === "feature") {
-    return feature.featureId;
-  }
-  return feature.properties[column] ?? "";
-}
-
-function sortSelectedFeatures(features: SelectedMapFeature[], sort: FeatureDiffSort | undefined): SelectedMapFeature[] {
-  if (!sort) {
-    return features;
-  }
-  const direction = sort.direction === "asc" ? 1 : -1;
-  return [...features].sort(
-    (left, right) =>
-      selectedFeatureSortValue(left, sort.column).localeCompare(
-        selectedFeatureSortValue(right, sort.column),
-        undefined,
-        {
-          numeric: true,
-          sensitivity: "base",
-        },
-      ) * direction,
+    (feature) =>
+      layerKeyForFeature(feature) === selectedLayerKey &&
+      (isCatalogSelectedMapFeature(feature) ? feature.version : "query") === selectedVersion,
   );
 }
 
@@ -178,26 +149,18 @@ function emptyDiffCell(): FeatureDiffCell {
 
 function SelectedFeaturesTable({
   features,
-  query,
-  onQueryChange,
   selectedLayerKey,
   selectedVersion,
   onSelectedLayerKeyChange,
   onSelectedVersionChange,
-  sort,
-  onSortChange,
   highlightedFeatureId,
   onFeatureClick,
 }: {
   features: SelectedMapFeature[];
-  query: string;
-  onQueryChange: (query: string) => void;
   selectedLayerKey: string;
   selectedVersion: string;
   onSelectedLayerKeyChange: (layerKey: string) => void;
   onSelectedVersionChange: (version: string) => void;
-  sort: FeatureDiffSort | undefined;
-  onSortChange: (sort: FeatureDiffSort) => void;
   highlightedFeatureId?: string | null | undefined;
   onFeatureClick?: ((feature: SelectedMapFeature) => void) | undefined;
 }) {
@@ -210,112 +173,104 @@ function SelectedFeaturesTable({
       ? selectedFeatureSubset({ features, selectedLayerKey: selectedGroup.key, selectedVersion: activeVersion })
       : [];
   const propertyKeys = sortedPropertyKeys(scopedFeatures);
-  const visibleFeatures = sortSelectedFeatures(
-    scopedFeatures.filter((feature) => featureMatchesQuery(feature, query)),
-    sort,
-  );
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto overscroll-contain sm:overflow-hidden">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 sm:px-4">
-        <Select value={selectedGroup?.key ?? ""} onValueChange={onSelectedLayerKeyChange}>
-          <SelectTrigger aria-label="Select layer" className="h-11 w-full min-w-0 sm:h-8 sm:w-56 sm:max-w-80">
-            <SelectValue placeholder="Select layer" />
-          </SelectTrigger>
-          <SelectContent>
-            {groups.map((group) => (
-              <SelectItem key={group.key} value={group.key}>
-                {group.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={activeVersion ?? ""} onValueChange={onSelectedVersionChange}>
-          <SelectTrigger aria-label="Version" className="h-11 w-full min-w-0 sm:h-8 sm:w-40">
-            <SelectValue placeholder="Version" />
-          </SelectTrigger>
-          <SelectContent>
-            {versionOptions.map((version) => (
-              <SelectItem key={version} value={version}>
-                {version}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="relative w-full min-w-0 flex-1 sm:min-w-52">
-          <Search className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
+      <SharedSelectedFeaturesTable
+        features={scopedFeatures}
+        columns={propertyKeys}
+        highlightedFeatureId={highlightedFeatureId}
+        toolbarClassName="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 sm:px-4"
+        toolbarLeading={
+          <>
+            <Select value={selectedGroup?.key ?? ""} onValueChange={onSelectedLayerKeyChange}>
+              <SelectTrigger aria-label="Select layer" className="h-11 w-full min-w-0 sm:h-8 sm:w-56 sm:max-w-80">
+                <SelectValue placeholder="Select layer" />
+              </SelectTrigger>
+              <SelectContent>
+                {groups.map((group) => (
+                  <SelectItem key={group.key} value={group.key}>
+                    {group.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={activeVersion ?? ""} onValueChange={onSelectedVersionChange}>
+              <SelectTrigger aria-label="Version" className="h-11 w-full min-w-0 sm:h-8 sm:w-40">
+                <SelectValue placeholder="Version" />
+              </SelectTrigger>
+              <SelectContent>
+                {versionOptions.map((version) => (
+                  <SelectItem key={version} value={version}>
+                    {version}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        }
+        searchClassName="hifld-selected-features-search relative w-full min-w-0 sm:w-80 sm:flex-none"
+        renderSearchInput={(control) => (
           <Input
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="Search selected features..."
+            type="search"
+            aria-label={control.ariaLabel}
+            value={control.value}
+            onChange={(event) => control.onChange(event.target.value)}
+            placeholder={control.placeholder}
             className="h-11 pl-10 sm:h-8"
           />
-        </div>
-      </div>
-      <div
-        data-testid="selected-features-scroll"
-        className="min-w-0 shrink-0 overflow-x-auto sm:min-h-0 sm:flex-1 sm:overflow-auto sm:overscroll-contain"
-      >
-        <table className="w-full min-w-[640px] text-sm">
-          <thead className="sticky top-0 z-10 bg-background">
-            <tr className="border-b text-left text-xs text-muted-foreground">
-              {propertyKeys.map((key) => (
-                <th key={key} className="px-3 py-2 font-medium">
-                  <SelectedFeatureColumnHeader column={key} label={key} sort={sort} onSortChange={onSortChange} />
-                </th>
-              ))}
-              <th className="sticky right-0 w-12 bg-background px-2 py-2 text-right font-medium">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleFeatures.map((feature) => (
-              <tr
-                key={feature.id}
-                data-testid="selected-feature-row"
-                className={cn(
-                  "group border-b align-top transition-colors",
-                  feature.id === highlightedFeatureId ? "bg-accent/50" : undefined,
-                  feature.centroid && onFeatureClick ? "cursor-pointer hover:bg-accent/30" : undefined,
-                )}
-                onClick={() => {
-                  if (feature.centroid) {
-                    onFeatureClick?.(feature);
-                  }
-                }}
-              >
-                {propertyKeys.map((key) => (
-                  <td key={key} className="max-w-56 break-words px-3 py-2">
-                    {feature.properties[key] ?? ""}
-                  </td>
-                ))}
-                <td
-                  className={cn(
-                    "sticky right-0 w-12 px-2 py-2 text-right",
-                    feature.id === highlightedFeatureId ? "bg-accent/50" : "bg-background",
-                    feature.centroid && onFeatureClick ? "group-hover:bg-accent/30" : undefined,
-                  )}
-                >
-                  {feature.centroid && onFeatureClick ? (
-                    <span className="sr-only">Click row to zoom to feature {feature.featureId}</span>
-                  ) : null}
-                  <SelectedFeatureActions feature={feature} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {visibleFeatures.length === 0 && (
-          <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">
-            No selected features match the search.
-          </div>
         )}
-      </div>
+        getSearchText={(feature) => [
+          feature.layerName,
+          isCatalogSelectedMapFeature(feature) ? feature.version : feature.queryId,
+          feature.sourceLayerId,
+          feature.featureId,
+        ]}
+        className="min-w-0 shrink-0 overflow-x-auto sm:min-h-0 sm:flex-1 sm:overflow-auto sm:overscroll-contain"
+        tableClassName="w-full min-w-[640px] text-sm"
+        headerClassName="sticky top-0 z-10 bg-background"
+        headerRowClassName="border-b text-left text-xs text-muted-foreground"
+        headerCellClassName="px-3 py-2 font-medium"
+        rowClassName={(feature) =>
+          cn(
+            "group border-b align-top transition-colors",
+            feature.id === highlightedFeatureId ? "bg-accent/50" : undefined,
+            feature.centroid && onFeatureClick ? "cursor-pointer hover:bg-accent/30" : undefined,
+          )
+        }
+        cellClassName={() => "max-w-56 break-words px-3 py-2"}
+        isFeatureClickable={(feature) => Boolean(feature.centroid && onFeatureClick)}
+        onFeatureClick={(feature) => {
+          if (feature.centroid) {
+            onFeatureClick?.(feature);
+          }
+        }}
+        renderColumnHeader={(column, control) => (
+          <SelectedFeatureColumnHeader column={column} label={column} control={control} />
+        )}
+        trailingHeader={<span className="sr-only">Actions</span>}
+        trailingHeaderClassName="sticky right-0 w-12 bg-background px-2 py-2 text-right font-medium"
+        trailingCellClassName={(feature) =>
+          cn(
+            "sticky right-0 w-12 px-2 py-2 text-right",
+            feature.id === highlightedFeatureId ? "bg-accent/50" : "bg-background",
+            feature.centroid && onFeatureClick ? "group-hover:bg-accent/30" : undefined,
+          )
+        }
+        renderTrailingCell={(feature) => (
+          <>
+            {feature.centroid && onFeatureClick ? (
+              <span className="sr-only">Click row to zoom to feature {feature.featureId}</span>
+            ) : null}
+            <SelectedFeatureActions feature={feature} />
+          </>
+        )}
+      />
     </div>
   );
 }
 
 function SelectedFeatureActions({ feature }: { feature: SelectedMapFeature }) {
+  const catalogFeature: CatalogSelectedMapFeature | null = isCatalogSelectedMapFeature(feature) ? feature : null;
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -340,22 +295,24 @@ function SelectedFeatureActions({ feature }: { feature: SelectedMapFeature }) {
               </a>
             </Button>
           ) : null}
-          <DataQualityFeedbackDialog
-            context={{
-              collectionSlug: feature.collectionSlug,
-              datasetSlug: feature.datasetSlug,
-              fileSlug: feature.fileSlug,
-              version: feature.version,
-              sourceId: feature.sourceId,
-              feature,
-            }}
-            trigger={
-              <Button type="button" variant="ghost" size="sm" className="justify-start">
-                <MessageSquareWarning className="mr-2 h-4 w-4" />
-                Report issue
-              </Button>
-            }
-          />
+          {catalogFeature ? (
+            <DataQualityFeedbackDialog
+              context={{
+                collectionSlug: catalogFeature.collectionSlug,
+                datasetSlug: catalogFeature.datasetSlug,
+                fileSlug: catalogFeature.fileSlug,
+                version: catalogFeature.version,
+                sourceId: catalogFeature.sourceId,
+                feature: catalogFeature,
+              }}
+              trigger={
+                <Button type="button" variant="ghost" size="sm" className="justify-start">
+                  <MessageSquareWarning className="mr-2 h-4 w-4" />
+                  Report issue
+                </Button>
+              }
+            />
+          ) : null}
         </div>
       </PopoverContent>
     </Popover>
@@ -365,13 +322,11 @@ function SelectedFeatureActions({ feature }: { feature: SelectedMapFeature }) {
 function SelectedFeatureColumnHeader({
   column,
   label,
-  sort,
-  onSortChange,
+  control,
 }: {
   column: string;
   label: string;
-  sort: FeatureDiffSort | undefined;
-  onSortChange: (sort: FeatureDiffSort) => void;
+  control: { sort: SelectedFeaturesSort | undefined; ariaLabel: string; onSort: () => void };
 }) {
   return (
     <Button
@@ -379,11 +334,11 @@ function SelectedFeatureColumnHeader({
       variant="ghost"
       size="sm"
       className="h-7 max-w-full gap-1 px-1 text-xs"
-      aria-label={`Sort by ${label}`}
-      onClick={() => onSortChange(nextSort(sort, column))}
+      aria-label={control.ariaLabel}
+      onClick={control.onSort}
     >
       <span className="truncate">{label}</span>
-      <SortIcon sort={sort} column={column} />
+      <SortIcon sort={control.sort} column={column} />
     </Button>
   );
 }
@@ -1082,13 +1037,11 @@ function matchKeyPair(left: string, right: string): FeatureDiffMatchKeyPair {
 
 interface FeatureTablePanelState {
   activeTab: FeaturePanelTab;
-  query: string;
   selectedLayerKey: string;
   selectedVersion: string;
   leftVersion: string;
   rightVersion: string;
   matchKeyPairs: FeatureDiffMatchKeyPair[];
-  selectedSort: FeatureDiffSort | undefined;
   diffColumnMode: DiffColumnMode;
   sort: FeatureDiffSort | undefined;
 }
@@ -1096,13 +1049,11 @@ interface FeatureTablePanelState {
 export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, FeatureTablePanelState> {
   override state: FeatureTablePanelState = {
     activeTab: "selected",
-    query: "",
     selectedLayerKey: "",
     selectedVersion: "",
     leftVersion: "",
     rightVersion: "",
     matchKeyPairs: [],
-    selectedSort: undefined,
     diffColumnMode: "changed",
     sort: undefined,
   };
@@ -1170,13 +1121,11 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
       this.props;
     const {
       activeTab,
-      query,
       selectedLayerKey,
       selectedVersion,
       leftVersion,
       rightVersion,
       matchKeyPairs,
-      selectedSort,
       diffColumnMode,
       sort,
     } = this.state;
@@ -1229,8 +1178,6 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
           {activeTab === "selected" || !canDiff ? (
             <SelectedFeaturesTable
               features={features}
-              query={query}
-              onQueryChange={(nextQuery) => this.setState({ query: nextQuery })}
               selectedLayerKey={selectedLayerKey}
               selectedVersion={selectedVersion}
               onSelectedLayerKeyChange={(nextLayerKey) => {
@@ -1241,8 +1188,6 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
                 });
               }}
               onSelectedVersionChange={(nextVersion) => this.setState({ selectedVersion: nextVersion })}
-              sort={selectedSort}
-              onSortChange={(nextSortValue) => this.setState({ selectedSort: nextSortValue })}
               highlightedFeatureId={highlightedFeatureId}
               onFeatureClick={onFeatureClick}
             />

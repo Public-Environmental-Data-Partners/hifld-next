@@ -1,6 +1,7 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ArrowLeft, MapIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import { getComparableVersionSources, getDefaultCompareVersionPair } from "@/components/dataset/compareSources";
 import { VersionCompare } from "@/components/dataset/VersionCompare";
 import { formatVersionLabel } from "@/components/dataset/versionLabel";
@@ -21,6 +22,9 @@ import {
   getDatasetFileBySlug,
   getFileVersions,
 } from "@/lib/api-client";
+import { failure, success } from "@/lib/webmcp/result";
+import { useWebMcpTool } from "@/lib/webmcp/useWebMcpTool";
+import { compareFileVersions } from "@/lib/webmcp/versionComparisonTool";
 
 export const Route = createFileRoute("/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/compare")({
   loader: async ({ params }) => {
@@ -119,6 +123,45 @@ export function pmtilesDescriptorForVersion({
   });
 }
 
+export function comparisonMapPath(collectionSlug: string, descriptors: SourceDescriptor[]): string | undefined {
+  if (descriptors.length !== 2) return undefined;
+  const encodedSources = encodeSourceDescriptorList(descriptors);
+  if (!encodedSources) return undefined;
+  return `/collections/${encodeURIComponent(collectionSlug)}/map?sources=${encodeURIComponent(encodedSources)}`;
+}
+
+export function comparisonSourcesForVersions(
+  sources: DatasetSource[],
+  leftVersion: string | number,
+  rightVersion: string | number,
+): { left: DatasetSource; right: DatasetSource } | null {
+  const left = sources.find((source) => sourceVersionKey(source) === String(leftVersion));
+  const right = sources.find((source) => sourceVersionKey(source) === String(rightVersion));
+  return left && right ? { left, right } : null;
+}
+
+function sourceVersionKey(source: DatasetSource): string {
+  return String(source.version ?? "1");
+}
+
+const compareFileVersionsInputSchema = z
+  .object({
+    left_version: z.union([z.string().min(1), z.number()]),
+    right_version: z.union([z.string().min(1), z.number()]),
+  })
+  .strict();
+
+const compareFileVersionsAnnotations: WebMCP.ToolAnnotations = {
+  readOnlyHint: false,
+  untrustedContentHint: true,
+};
+
+type PendingComparison = {
+  left: string;
+  right: string;
+  resolve: () => void;
+};
+
 function FileComparePage() {
   const { dataset, file, versions } = Route.useLoaderData();
   const params = Route.useParams();
@@ -127,11 +170,73 @@ function FileComparePage() {
   const { left: defaultSourceA, right: defaultSourceB } = getDefaultCompareVersionPair(versionSources);
   const [selectedVersionA, setSelectedVersionA] = useState(() => String(defaultSourceA?.version ?? ""));
   const [selectedVersionB, setSelectedVersionB] = useState(() => String(defaultSourceB?.version ?? ""));
+  const pendingComparison = useRef<PendingComparison | null>(null);
+
+  useEffect(() => {
+    const pending = pendingComparison.current;
+    if (!pending || pending.left !== selectedVersionA || pending.right !== selectedVersionB) return;
+    pendingComparison.current = null;
+    queueMicrotask(pending.resolve);
+  }, [selectedVersionA, selectedVersionB]);
 
   const selectedSourceA =
-    versionSources.find((source) => String(source.version) === selectedVersionA) ?? defaultSourceA;
+    versionSources.find((source) => sourceVersionKey(source) === selectedVersionA) ?? defaultSourceA;
   const selectedSourceB =
-    versionSources.find((source) => String(source.version) === selectedVersionB) ?? defaultSourceB;
+    versionSources.find((source) => sourceVersionKey(source) === selectedVersionB) ?? defaultSourceB;
+
+  useWebMcpTool({
+    name: "compare_file_versions",
+    routeKind: "comparison",
+    title: "Compare file versions",
+    description: "Compare metadata and schema changes between two versions of the current file.",
+    schema: compareFileVersionsInputSchema,
+    enabled: versionSources.length >= 2 && Boolean(selectedSourceA && selectedSourceB),
+    annotations: compareFileVersionsAnnotations,
+    execute: async ({ left_version, right_version }) => {
+      const selectedSources = comparisonSourcesForVersions(versionSources, left_version, right_version);
+      if (!selectedSources) {
+        return failure("not_found", "Both versions must be available for this file.");
+      }
+      const { left: sourceA, right: sourceB } = selectedSources;
+
+      const left = sourceVersionKey(sourceA);
+      const right = sourceVersionKey(sourceB);
+      if (left === selectedVersionA && right === selectedVersionB) {
+        await Promise.resolve();
+      } else {
+        const rendered = new Promise<void>((resolve) => {
+          pendingComparison.current = { left, right, resolve };
+        });
+        setSelectedVersionA(left);
+        setSelectedVersionB(right);
+        await rendered;
+      }
+
+      const comparison = compareFileVersions(sourceA, sourceB);
+      const leftDescriptor = pmtilesDescriptorForVersion({
+        collectionSlug: params.collectionSlug,
+        datasetSlug: params.datasetSlug,
+        fileSlug: params.fileSlug,
+        formats: versions.formats,
+        source: sourceA,
+      });
+      const rightDescriptor = pmtilesDescriptorForVersion({
+        collectionSlug: params.collectionSlug,
+        datasetSlug: params.datasetSlug,
+        fileSlug: params.fileSlug,
+        formats: versions.formats,
+        source: sourceB,
+      });
+      const mapPath =
+        leftDescriptor && rightDescriptor
+          ? comparisonMapPath(params.collectionSlug, [leftDescriptor, rightDescriptor])
+          : undefined;
+      return success(
+        `Compared ${formatVersionLabel(sourceA.version)} with ${formatVersionLabel(sourceB.version)}.`,
+        mapPath ? { ...comparison, map_link: mapPath } : comparison,
+      );
+    },
+  });
 
   if (!selectedSourceA || !selectedSourceB) {
     return (
@@ -222,13 +327,13 @@ function FileComparePage() {
           <div className="grid min-w-0 gap-4 md:grid-cols-2">
             <div className="min-w-0 space-y-2">
               <div className="text-sm text-muted-foreground">Version A</div>
-              <Select value={String(selectedSourceA.version)} onValueChange={setSelectedVersionA}>
+              <Select value={sourceVersionKey(selectedSourceA)} onValueChange={setSelectedVersionA}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select version A" />
                 </SelectTrigger>
                 <SelectContent>
                   {versionSources.map((source) => (
-                    <SelectItem key={`a-${source.id}`} value={String(source.version)}>
+                    <SelectItem key={`a-${source.id}`} value={sourceVersionKey(source)}>
                       {formatVersionLabel(source.version)}
                     </SelectItem>
                   ))}
@@ -238,13 +343,13 @@ function FileComparePage() {
 
             <div className="min-w-0 space-y-2">
               <div className="text-sm text-muted-foreground">Version B</div>
-              <Select value={String(selectedSourceB.version)} onValueChange={setSelectedVersionB}>
+              <Select value={sourceVersionKey(selectedSourceB)} onValueChange={setSelectedVersionB}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select version B" />
                 </SelectTrigger>
                 <SelectContent>
                   {versionSources.map((source) => (
-                    <SelectItem key={`b-${source.id}`} value={String(source.version)}>
+                    <SelectItem key={`b-${source.id}`} value={sourceVersionKey(source)}>
                       {formatVersionLabel(source.version)}
                     </SelectItem>
                   ))}

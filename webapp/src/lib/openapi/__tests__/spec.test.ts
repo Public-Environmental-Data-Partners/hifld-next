@@ -48,6 +48,9 @@ describe("buildOpenApiDocument", () => {
         }),
       ]),
     );
+    expect(operation?.responses?.[400]).toMatchObject({
+      content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } },
+    });
     expect(doc.components?.schemas?.DatasetByIdResponse).toMatchObject({
       type: "object",
       properties: {
@@ -89,5 +92,57 @@ describe("buildOpenApiDocument", () => {
         size_bytes: { type: ["number", "null"] },
       },
     });
+  });
+
+  it("documents bounded schema paging and response fields", () => {
+    const doc = buildOpenApiDocument();
+    const path = doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema"];
+    const operation = path?.get;
+
+    expect(operation?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "column_offset", in: "query", required: false }),
+        expect.objectContaining({ name: "column_limit", in: "query", required: false }),
+      ]),
+    );
+    expect(doc.components?.schemas?.DatasetFileSchemaResponse).toMatchObject({
+      properties: {
+        total_columns: { type: "integer" },
+        column_offset: { type: "integer" },
+        column_limit: { type: "integer", maximum: 50 },
+        has_more: { type: "boolean" },
+      },
+    });
+  });
+
+  it("documents bounded query creation and page contracts", () => {
+    const doc = buildOpenApiDocument();
+    const create = doc.paths?.["/api/queries"]?.post;
+    const page = doc.paths?.["/api/queries/{query_id}/pages"]?.post;
+
+    expect(create).toBeDefined();
+    expect(page).toBeDefined();
+    expect(create?.requestBody).toMatchObject({
+      required: true,
+      content: { "application/json": { schema: { $ref: "#/components/schemas/QueryRequest" } } },
+    });
+    expect(page?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "query_id", in: "path", required: true }),
+        expect.objectContaining({ name: "X-HIFLD-Query-Token", in: "header", required: true }),
+      ]),
+    );
+    expect(page?.requestBody).toMatchObject({
+      required: true,
+      content: { "application/json": { schema: { $ref: "#/components/schemas/QueryPageRequest" } } },
+    });
+    expect(doc.components?.schemas?.QueryRequest).toMatchObject({
+      properties: { sources: { maxItems: 8 }, sql: { maxLength: 8192 }, limit: { maximum: 1000 } },
+    });
+    expect(create?.responses).toHaveProperty("422");
+    expect(create?.responses).toHaveProperty("504");
+    expect(create?.responses).not.toHaveProperty("201");
+    expect(page?.responses).toHaveProperty("422");
+    expect(page?.responses).toHaveProperty("504");
   });
 });

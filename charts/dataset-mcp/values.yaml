@@ -1,0 +1,35 @@
+replicaCount: 1
+nameOverride: ""
+fullnameOverride: ""
+image:
+  repository: ghcr.io/public-environmental-data-partners/hifld-next/dataset-mcp
+  tag: latest
+  pullPolicy: IfNotPresent
+serviceAccount: {create: true, name: "", annotations: {}}
+service: {type: ClusterIP, port: 80, targetPort: 8000}
+containerPort: 8000
+env: []
+secretEnv: []
+catalog: {baseUrl: ""}
+publicOrigin: ""
+webappOrigins: []
+http: {allowedHosts: []}
+tokenSecret: {name: dataset-mcp-secrets, key: query-token-secret}
+storage:
+  allowedCidrs: []
+  allowedPorts: [443]
+resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "2", memory: 2Gi}}
+spill: {duckdbLimit: 3GiB, sizeLimit: 4Gi}
+securityContext: {runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+podSecurityContext: {seccompProfile: {type: RuntimeDefault}}
+ingress:
+  enabled: false
+  className: nginx
+  host: ""
+  annotations: {nginx.ingress.kubernetes.io/limit-rps: "10", nginx.ingress.kubernetes.io/limit-connections: "20", nginx.ingress.kubernetes.io/proxy-body-size: 1m, nginx.ingress.kubernetes.io/proxy-read-timeout: "120", nginx.ingress.kubernetes.io/proxy-buffer-size: 16k, nginx.ingress.kubernetes.io/proxy-buffers-number: "4"}
+networkPolicy: {enabled: true, catalogNamespace: "", catalogSelector: {app.kubernetes.io/name: dataset-api}, extraEgress: []}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+livenessProbe: {path: /healthz, initialDelaySeconds: 15, periodSeconds: 30, timeoutSeconds: 5, failureThreshold: 3}
+readinessProbe: {path: /healthz, initialDelaySeconds: 5, periodSeconds: 10, timeoutSeconds: 5, failureThreshold: 3}

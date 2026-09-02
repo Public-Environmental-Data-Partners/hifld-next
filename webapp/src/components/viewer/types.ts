@@ -37,6 +37,21 @@ export type LayerStyle = {
   lineWidthScale: "linear" | "sqrt" | "log";
 };
 
+/** The agent-facing style vocabulary; arbitrary MapLibre expressions are not part of it. */
+export type LayerStyleUpdate = {
+  colorProperty?: string | null | undefined;
+  colorScheme?: string | undefined;
+  breaks?: readonly number[] | undefined;
+  breakMode?: LayerStyle["breakMode"] | undefined;
+  opacity?: number | undefined;
+  radius?: number | undefined;
+  lineWidth?: number | undefined;
+  radiusProperty?: string | null | undefined;
+  lineWidthProperty?: string | null | undefined;
+  radiusScale?: LayerStyle["radiusScale"] | undefined;
+  lineWidthScale?: LayerStyle["lineWidthScale"] | undefined;
+};
+
 export type HoverInfo = {
   x: number;
   y: number;

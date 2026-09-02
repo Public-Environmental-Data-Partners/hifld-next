@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DatasetSource } from "@/lib/api-client";
 import { VersionCompare } from "../VersionCompare";
+import { compareFileVersions } from "@/lib/webmcp/versionComparisonTool";
 
 const sourceA: DatasetSource = {
   id: 1,
@@ -61,6 +62,52 @@ const sourceB: DatasetSource = {
 };
 
 describe("VersionCompare", () => {
+  it("returns no changes for identical sources without row data", () => {
+    expect(compareFileVersions(sourceA, sourceA)).toEqual({
+      left_version: "v20260101",
+      right_version: "v20260101",
+      changed_metadata: [],
+      added_columns: [],
+      removed_columns: [],
+      changed_columns: [],
+    });
+  });
+
+  it("returns bounded metadata and schema changes", () => {
+    const result = compareFileVersions(sourceA, sourceB);
+
+    expect(result.left_version).toBe("v20260101");
+    expect(result.right_version).toBe("v20260214");
+    expect(result.changed_metadata.map((entry) => entry.field)).toEqual(
+      expect.arrayContaining(["feature_count", "bounds", "columns_hash"]),
+    );
+    expect(result.added_columns).toEqual(["population"]);
+    expect(result.removed_columns).toEqual([]);
+    expect(result.changed_columns).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain("parquet");
+    expect(JSON.stringify(result)).not.toContain("path");
+  });
+
+  it("bounds changed columns and marks the result when the schema is truncated", () => {
+    const left: DatasetSource = { ...sourceA, source_metadata: { ...sourceA.source_metadata, columns: [] } };
+    const right: DatasetSource = {
+      ...sourceB,
+      source_metadata: {
+        ...sourceB.source_metadata,
+        columns: Array.from({ length: 30 }, (_, index) => ({
+          name: `column_${index}`,
+          type: "STRING",
+          nullable: true,
+        })),
+      },
+    };
+
+    const result = compareFileVersions(left, right);
+
+    expect(result.added_columns).toHaveLength(25);
+    expect(result.truncated).toBe(true);
+  });
+
   it("renders metadata and schema differences side by side", () => {
     render(<VersionCompare leftSource={sourceA} rightSource={sourceB} />);
 

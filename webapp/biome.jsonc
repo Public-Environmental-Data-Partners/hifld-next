@@ -11,6 +11,7 @@
       "!node_modules",
       "!.output",
       "!.tanstack",
+      "!public/tanstack-word-logo-white.svg",
       "!src/routeTree.gen.ts",
       "!src/test",
       "!**/*.test.ts",

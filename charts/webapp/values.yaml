@@ -18,7 +18,29 @@ service:
 
 containerPort: 8080
 
-env: []
+# Canonical browser origin used to validate Origin on the same-origin MCP proxy.
+# Production deployments should set an absolute HTTPS origin.
+publicOrigin: ""
+
+# WebMCP registration is enabled for native scanner acceptance. Unsupported
+# browsers still no-op. DATASET_MCP_QUERY_API_URL is read only by the server;
+# it is never copied into runtime client configuration. Supply an origin-trial
+# token through secretEnv, never through a browser-exposed value.
+env:
+  - name: WEBMCP_ENABLED
+    value: "true"
+  # Optional server-only public endpoint advertised by the MCP Server Card.
+  # Empty means the same-origin /mcp proxy.
+  - name: DATASET_MCP_PUBLIC_ENDPOINT
+    value: ""
+# Add DATASET_MCP_QUERY_API_URL in environment-specific values when the
+# dataset-mcp service is deployed. Omitting it keeps the optional URL valid and
+# makes query/MCP proxy requests fail closed with a sanitized 503.
+# Example server-only token wiring (keep the token in a Secret):
+# secretEnv:
+#   - name: WEBMCP_ORIGIN_TRIAL_TOKEN
+#     secretName: webapp-webmcp
+#     key: origin-trial-token
 secretEnv: []
 
 resources: {}

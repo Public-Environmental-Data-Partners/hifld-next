@@ -1,0 +1,45 @@
+[project]
+name = "dataset-mcp"
+version = "0.1.0"
+description = "Public MCP application server for HIFLD datasets"
+requires-python = ">=3.12"
+dependencies = ["fastmcp", "fastapi", "uvicorn[standard]", "httpx", "pydantic-settings", "duckdb", "sqlglot[rs]"]
+
+[project.scripts]
+fastapi = "app.dev_cli:main"
+
+[tool.fastapi]
+entrypoint = "main:app"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*", "query_worker*"]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "respx",
+    "ruff",
+    "pyright",
+    "basedpyright",
+    "fastapi[standard]>=0.141.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+include = ["app", "query_worker"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as RuntimeConfigDotjsRouteImport } from './routes/runtime-config[.]js'
 import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
+import { Route as McpRouteImport } from './routes/mcp'
 import { Route as MapRouteImport } from './routes/map'
 import { Route as CommonsRouteImport } from './routes/commons'
 import { Route as CollectionsRouteImport } from './routes/collections'
@@ -22,18 +23,22 @@ import { Route as CollectionsIndexRouteImport } from './routes/collections.index
 import { Route as ApiIndexRouteImport } from './routes/api/index'
 import { Route as AboutIndexRouteImport } from './routes/about.index'
 import { Route as CollectionsSlugRouteImport } from './routes/collections.$slug'
+import { Route as ApiQueriesRouteImport } from './routes/api/queries'
 import { Route as ApiOpenapiRouteImport } from './routes/api/openapi'
 import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ApiDatasetsRouteImport } from './routes/api/datasets'
 import { Route as ApiCollectionsRouteImport } from './routes/api/collections'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
+import { Route as DotwellKnownAiCatalogDotjsonRouteImport } from './routes/[.well-known]/ai-catalog[.]json'
 import { Route as DotwellKnownApiCatalogRouteRouteImport } from './routes/[.well-known]/api-catalog/route'
 import { Route as CollectionsCollectionSlugMapRouteImport } from './routes/collections.$collectionSlug.map'
 import { Route as ApiDatasetsStatsRouteImport } from './routes/api/datasets.stats'
 import { Route as ApiDatasetsIdRouteImport } from './routes/api/datasets.$id'
 import { Route as ApiCollectionsSlugRouteImport } from './routes/api/collections.$slug'
+import { Route as DotwellKnownMcpServerCardDotjsonRouteImport } from './routes/[.well-known]/mcp/server-card[.]json'
 import { Route as DotwellKnownAgentSkillsIndexDotjsonRouteImport } from './routes/[.well-known]/agent-skills/index[.]json'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug'
+import { Route as ApiQueriesQueryIdPagesRouteImport } from './routes/api/queries.$queryId.pages'
 import { Route as DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRouteImport } from './routes/[.well-known]/agent-skills/hifld-catalog/SKILL[.]md'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugIndexRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.index'
 import { Route as ApiCollectionsCollectionSlugDatasetsTagsRouteImport } from './routes/api/collections.$collectionSlug.datasets.tags'
@@ -60,6 +65,11 @@ const RuntimeConfigDotjsRoute = RuntimeConfigDotjsRouteImport.update({
 const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
   id: '/robots.txt',
   path: '/robots.txt',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MapRoute = MapRouteImport.update({
@@ -112,6 +122,11 @@ const CollectionsSlugRoute = CollectionsSlugRouteImport.update({
   path: '/$slug',
   getParentRoute: () => CollectionsRoute,
 } as any)
+const ApiQueriesRoute = ApiQueriesRouteImport.update({
+  id: '/api/queries',
+  path: '/api/queries',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiOpenapiRoute = ApiOpenapiRouteImport.update({
   id: '/api/openapi',
   path: '/api/openapi',
@@ -137,6 +152,12 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
   path: '/api/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DotwellKnownAiCatalogDotjsonRoute =
+  DotwellKnownAiCatalogDotjsonRouteImport.update({
+    id: '/.well-known/ai-catalog.json',
+    path: '/.well-known/ai-catalog.json',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const DotwellKnownApiCatalogRouteRoute =
   DotwellKnownApiCatalogRouteRouteImport.update({
     id: '/.well-known/api-catalog',
@@ -164,6 +185,12 @@ const ApiCollectionsSlugRoute = ApiCollectionsSlugRouteImport.update({
   path: '/$slug',
   getParentRoute: () => ApiCollectionsRoute,
 } as any)
+const DotwellKnownMcpServerCardDotjsonRoute =
+  DotwellKnownMcpServerCardDotjsonRouteImport.update({
+    id: '/.well-known/mcp/server-card.json',
+    path: '/.well-known/mcp/server-card.json',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const DotwellKnownAgentSkillsIndexDotjsonRoute =
   DotwellKnownAgentSkillsIndexDotjsonRouteImport.update({
     id: '/.well-known/agent-skills/index.json',
@@ -176,6 +203,11 @@ const CollectionsCollectionSlugDatasetsDatasetSlugRoute =
     path: '/$collectionSlug/datasets/$datasetSlug',
     getParentRoute: () => CollectionsRoute,
   } as any)
+const ApiQueriesQueryIdPagesRoute = ApiQueriesQueryIdPagesRouteImport.update({
+  id: '/$queryId/pages',
+  path: '/$queryId/pages',
+  getParentRoute: () => ApiQueriesRoute,
+} as any)
 const DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute =
   DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRouteImport.update({
     id: '/.well-known/agent-skills/hifld-catalog/SKILL.md',
@@ -276,26 +308,31 @@ export interface FileRoutesByFullPath {
   '/collections': typeof CollectionsRouteWithChildren
   '/commons': typeof CommonsRouteWithChildren
   '/map': typeof MapRoute
+  '/mcp': typeof McpRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/runtime-config.js': typeof RuntimeConfigDotjsRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/.well-known/api-catalog': typeof DotwellKnownApiCatalogRouteRoute
+  '/.well-known/ai-catalog.json': typeof DotwellKnownAiCatalogDotjsonRoute
   '/api/$': typeof ApiSplatRoute
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
   '/api/health': typeof ApiHealthRoute
   '/api/openapi': typeof ApiOpenapiRoute
+  '/api/queries': typeof ApiQueriesRouteWithChildren
   '/collections/$slug': typeof CollectionsSlugRoute
   '/about/': typeof AboutIndexRoute
   '/api': typeof ApiIndexRoute
   '/collections/': typeof CollectionsIndexRoute
   '/commons/': typeof CommonsIndexRoute
   '/.well-known/agent-skills/index.json': typeof DotwellKnownAgentSkillsIndexDotjsonRoute
+  '/.well-known/mcp/server-card.json': typeof DotwellKnownMcpServerCardDotjsonRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute
+  '/api/queries/$queryId/pages': typeof ApiQueriesQueryIdPagesRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/tags': typeof ApiCollectionsCollectionSlugDatasetsTagsRoute
@@ -312,26 +349,31 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/map': typeof MapRoute
+  '/mcp': typeof McpRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/runtime-config.js': typeof RuntimeConfigDotjsRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/.well-known/api-catalog': typeof DotwellKnownApiCatalogRouteRoute
+  '/.well-known/ai-catalog.json': typeof DotwellKnownAiCatalogDotjsonRoute
   '/api/$': typeof ApiSplatRoute
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
   '/api/health': typeof ApiHealthRoute
   '/api/openapi': typeof ApiOpenapiRoute
+  '/api/queries': typeof ApiQueriesRouteWithChildren
   '/collections/$slug': typeof CollectionsSlugRoute
   '/about': typeof AboutIndexRoute
   '/api': typeof ApiIndexRoute
   '/collections': typeof CollectionsIndexRoute
   '/commons': typeof CommonsIndexRoute
   '/.well-known/agent-skills/index.json': typeof DotwellKnownAgentSkillsIndexDotjsonRoute
+  '/.well-known/mcp/server-card.json': typeof DotwellKnownMcpServerCardDotjsonRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute
+  '/api/queries/$queryId/pages': typeof ApiQueriesQueryIdPagesRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/tags': typeof ApiCollectionsCollectionSlugDatasetsTagsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugIndexRoute
@@ -350,26 +392,31 @@ export interface FileRoutesById {
   '/collections': typeof CollectionsRouteWithChildren
   '/commons': typeof CommonsRouteWithChildren
   '/map': typeof MapRoute
+  '/mcp': typeof McpRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/runtime-config.js': typeof RuntimeConfigDotjsRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/.well-known/api-catalog': typeof DotwellKnownApiCatalogRouteRoute
+  '/.well-known/ai-catalog.json': typeof DotwellKnownAiCatalogDotjsonRoute
   '/api/$': typeof ApiSplatRoute
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
   '/api/health': typeof ApiHealthRoute
   '/api/openapi': typeof ApiOpenapiRoute
+  '/api/queries': typeof ApiQueriesRouteWithChildren
   '/collections/$slug': typeof CollectionsSlugRoute
   '/about/': typeof AboutIndexRoute
   '/api/': typeof ApiIndexRoute
   '/collections/': typeof CollectionsIndexRoute
   '/commons/': typeof CommonsIndexRoute
   '/.well-known/agent-skills/index.json': typeof DotwellKnownAgentSkillsIndexDotjsonRoute
+  '/.well-known/mcp/server-card.json': typeof DotwellKnownMcpServerCardDotjsonRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRoute
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute
+  '/api/queries/$queryId/pages': typeof ApiQueriesQueryIdPagesRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/tags': typeof ApiCollectionsCollectionSlugDatasetsTagsRoute
@@ -391,26 +438,31 @@ export interface FileRouteTypes {
     | '/collections'
     | '/commons'
     | '/map'
+    | '/mcp'
     | '/robots.txt'
     | '/runtime-config.js'
     | '/sitemap.xml'
     | '/.well-known/api-catalog'
+    | '/.well-known/ai-catalog.json'
     | '/api/$'
     | '/api/collections'
     | '/api/datasets'
     | '/api/health'
     | '/api/openapi'
+    | '/api/queries'
     | '/collections/$slug'
     | '/about/'
     | '/api'
     | '/collections/'
     | '/commons/'
     | '/.well-known/agent-skills/index.json'
+    | '/.well-known/mcp/server-card.json'
     | '/api/collections/$slug'
     | '/api/datasets/$id'
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/map'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
+    | '/api/queries/$queryId/pages'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/tags'
@@ -427,26 +479,31 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/map'
+    | '/mcp'
     | '/robots.txt'
     | '/runtime-config.js'
     | '/sitemap.xml'
     | '/.well-known/api-catalog'
+    | '/.well-known/ai-catalog.json'
     | '/api/$'
     | '/api/collections'
     | '/api/datasets'
     | '/api/health'
     | '/api/openapi'
+    | '/api/queries'
     | '/collections/$slug'
     | '/about'
     | '/api'
     | '/collections'
     | '/commons'
     | '/.well-known/agent-skills/index.json'
+    | '/.well-known/mcp/server-card.json'
     | '/api/collections/$slug'
     | '/api/datasets/$id'
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/map'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
+    | '/api/queries/$queryId/pages'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/tags'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
@@ -464,26 +521,31 @@ export interface FileRouteTypes {
     | '/collections'
     | '/commons'
     | '/map'
+    | '/mcp'
     | '/robots.txt'
     | '/runtime-config.js'
     | '/sitemap.xml'
     | '/.well-known/api-catalog'
+    | '/.well-known/ai-catalog.json'
     | '/api/$'
     | '/api/collections'
     | '/api/datasets'
     | '/api/health'
     | '/api/openapi'
+    | '/api/queries'
     | '/collections/$slug'
     | '/about/'
     | '/api/'
     | '/collections/'
     | '/commons/'
     | '/.well-known/agent-skills/index.json'
+    | '/.well-known/mcp/server-card.json'
     | '/api/collections/$slug'
     | '/api/datasets/$id'
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/map'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
+    | '/api/queries/$queryId/pages'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/tags'
@@ -504,17 +566,21 @@ export interface RootRouteChildren {
   CollectionsRoute: typeof CollectionsRouteWithChildren
   CommonsRoute: typeof CommonsRouteWithChildren
   MapRoute: typeof MapRoute
+  McpRoute: typeof McpRoute
   RobotsDottxtRoute: typeof RobotsDottxtRoute
   RuntimeConfigDotjsRoute: typeof RuntimeConfigDotjsRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   DotwellKnownApiCatalogRouteRoute: typeof DotwellKnownApiCatalogRouteRoute
+  DotwellKnownAiCatalogDotjsonRoute: typeof DotwellKnownAiCatalogDotjsonRoute
   ApiSplatRoute: typeof ApiSplatRoute
   ApiCollectionsRoute: typeof ApiCollectionsRouteWithChildren
   ApiDatasetsRoute: typeof ApiDatasetsRouteWithChildren
   ApiHealthRoute: typeof ApiHealthRoute
   ApiOpenapiRoute: typeof ApiOpenapiRoute
+  ApiQueriesRoute: typeof ApiQueriesRouteWithChildren
   ApiIndexRoute: typeof ApiIndexRoute
   DotwellKnownAgentSkillsIndexDotjsonRoute: typeof DotwellKnownAgentSkillsIndexDotjsonRoute
+  DotwellKnownMcpServerCardDotjsonRoute: typeof DotwellKnownMcpServerCardDotjsonRoute
   DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute: typeof DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute
 }
 
@@ -539,6 +605,13 @@ declare module '@tanstack/react-router' {
       path: '/robots.txt'
       fullPath: '/robots.txt'
       preLoaderRoute: typeof RobotsDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/map': {
@@ -611,6 +684,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CollectionsSlugRouteImport
       parentRoute: typeof CollectionsRoute
     }
+    '/api/queries': {
+      id: '/api/queries'
+      path: '/api/queries'
+      fullPath: '/api/queries'
+      preLoaderRoute: typeof ApiQueriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/openapi': {
       id: '/api/openapi'
       path: '/api/openapi'
@@ -644,6 +724,13 @@ declare module '@tanstack/react-router' {
       path: '/api/$'
       fullPath: '/api/$'
       preLoaderRoute: typeof ApiSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known/ai-catalog.json': {
+      id: '/.well-known/ai-catalog.json'
+      path: '/.well-known/ai-catalog.json'
+      fullPath: '/.well-known/ai-catalog.json'
+      preLoaderRoute: typeof DotwellKnownAiCatalogDotjsonRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/.well-known/api-catalog': {
@@ -681,6 +768,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCollectionsSlugRouteImport
       parentRoute: typeof ApiCollectionsRoute
     }
+    '/.well-known/mcp/server-card.json': {
+      id: '/.well-known/mcp/server-card.json'
+      path: '/.well-known/mcp/server-card.json'
+      fullPath: '/.well-known/mcp/server-card.json'
+      preLoaderRoute: typeof DotwellKnownMcpServerCardDotjsonRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/.well-known/agent-skills/index.json': {
       id: '/.well-known/agent-skills/index.json'
       path: '/.well-known/agent-skills/index.json'
@@ -694,6 +788,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/collections/$collectionSlug/datasets/$datasetSlug'
       preLoaderRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteImport
       parentRoute: typeof CollectionsRoute
+    }
+    '/api/queries/$queryId/pages': {
+      id: '/api/queries/$queryId/pages'
+      path: '/$queryId/pages'
+      fullPath: '/api/queries/$queryId/pages'
+      preLoaderRoute: typeof ApiQueriesQueryIdPagesRouteImport
+      parentRoute: typeof ApiQueriesRoute
     }
     '/.well-known/agent-skills/hifld-catalog/SKILL.md': {
       id: '/.well-known/agent-skills/hifld-catalog/SKILL.md'
@@ -929,24 +1030,40 @@ const ApiDatasetsRouteWithChildren = ApiDatasetsRoute._addFileChildren(
   ApiDatasetsRouteChildren,
 )
 
+interface ApiQueriesRouteChildren {
+  ApiQueriesQueryIdPagesRoute: typeof ApiQueriesQueryIdPagesRoute
+}
+
+const ApiQueriesRouteChildren: ApiQueriesRouteChildren = {
+  ApiQueriesQueryIdPagesRoute: ApiQueriesQueryIdPagesRoute,
+}
+
+const ApiQueriesRouteWithChildren = ApiQueriesRoute._addFileChildren(
+  ApiQueriesRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRouteWithChildren,
   CollectionsRoute: CollectionsRouteWithChildren,
   CommonsRoute: CommonsRouteWithChildren,
   MapRoute: MapRoute,
+  McpRoute: McpRoute,
   RobotsDottxtRoute: RobotsDottxtRoute,
   RuntimeConfigDotjsRoute: RuntimeConfigDotjsRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   DotwellKnownApiCatalogRouteRoute: DotwellKnownApiCatalogRouteRoute,
+  DotwellKnownAiCatalogDotjsonRoute: DotwellKnownAiCatalogDotjsonRoute,
   ApiSplatRoute: ApiSplatRoute,
   ApiCollectionsRoute: ApiCollectionsRouteWithChildren,
   ApiDatasetsRoute: ApiDatasetsRouteWithChildren,
   ApiHealthRoute: ApiHealthRoute,
   ApiOpenapiRoute: ApiOpenapiRoute,
+  ApiQueriesRoute: ApiQueriesRouteWithChildren,
   ApiIndexRoute: ApiIndexRoute,
   DotwellKnownAgentSkillsIndexDotjsonRoute:
     DotwellKnownAgentSkillsIndexDotjsonRoute,
+  DotwellKnownMcpServerCardDotjsonRoute: DotwellKnownMcpServerCardDotjsonRoute,
   DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute:
     DotwellKnownAgentSkillsHifldCatalogSKILLDotmdRoute,
 }

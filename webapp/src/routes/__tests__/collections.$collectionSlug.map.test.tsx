@@ -2,6 +2,7 @@ import { createRootRoute, createRoute, createRouter } from "@tanstack/react-rout
 import { waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { encodeSourceDescriptor, encodeSourceDescriptorList, type SourceDescriptor } from "@/components/map/sourceDescriptors";
+import type { LoadedMapLayer } from "@/components/map/multiLayerSources";
 import type { Collection, Dataset, DatasetFile, DatasetSource, DatasetWithUrls, PaginatedResponse } from "@/lib/api-client";
 import * as apiClient from "@/lib/api-client";
 import {
@@ -10,10 +11,13 @@ import {
   IMPORT_LAYER_CARD_CLASSNAME,
   IMPORT_SELECT_TRIGGER_CLASSNAME,
   IMPORT_SELECT_VALUE_CLASSNAME,
+  MAP_CANVAS_DESKTOP_DEFAULT_SIZE,
+  MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE,
   newMapImportEvents,
   MOBILE_SETTINGS_SCROLL_CLASSNAME,
   Route as CollectionMapRoute,
   closeMapPopup,
+  popupProperties,
   type ResolvedDescriptor,
   resolvedToMapLayer,
   searchDatasetsForMapImport,
@@ -163,6 +167,11 @@ describe("collection map route", () => {
     vi.mocked(apiClient.getDatasetFileBySlug).mockResolvedValue({ dataset, file });
   });
 
+  it("opens the desktop selected-features drawer larger by default", () => {
+    expect(MAP_CANVAS_DESKTOP_DEFAULT_SIZE).toBe("45%");
+    expect(MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE).toBe("55%");
+  });
+
   it("resolves an initial source search param on the canonical map URL", async () => {
     const encodedSource = encodeSourceDescriptor(descriptor);
     const router = createTestRouter();
@@ -286,6 +295,84 @@ describe("collection map route", () => {
     expect(setPinnedPopupInfo).toHaveBeenCalledWith(null);
     expect(setHoverInfo).toHaveBeenCalledWith(null);
     expect(clearHoverFeature).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not expose server-generated query MVT properties in feature popups", () => {
+    const queryLayer: LoadedMapLayer = {
+      kind: "query_mvt",
+      id: "query:q-popup",
+      name: "Query layer",
+      label: "Query layer",
+      queryId: "q-popup",
+      sourceAliases: ["stations"],
+      geometryColumn: "geom",
+      tileTemplate: "https://query.example.test/tiles/{z}/{x}/{y}.mvt",
+      sourceLayerId: "hifld",
+      scalarFields: [],
+      bounds: null,
+      status: "ready",
+      mapSourceId: "query-source",
+      visible: true,
+      opacity: 0.82,
+    };
+    expect(
+      popupProperties({
+        x: 10,
+        y: 20,
+        selectedIndex: 0,
+        features: [
+          {
+            type: "Feature",
+            source: "query-source",
+            sourceLayer: "hifld",
+            properties: {
+              NAME: "Station",
+              __hifld_feature_key: "station-1",
+              __hifld_feature_hash: "123",
+              __hifld_centroid_lng: -77,
+              __hifld_centroid_lat: 38,
+              _mcp_feature_id: 123,
+            },
+            geometry: { type: "Point", coordinates: [-77, 38] },
+            layer: { id: "query-layer", type: "circle", source: "query-source" },
+            state: {},
+          },
+        ],
+      }, [queryLayer]),
+    ).toEqual([["NAME", "Station"]]);
+  });
+
+  it("preserves same-named catalog properties in feature popups", () => {
+    const catalogLayer = resolvedToMapLayer({ descriptor, dataset, file, source });
+    if (!catalogLayer) throw new Error("catalog layer fixture is required");
+
+    expect(
+      popupProperties(
+        {
+          x: 10,
+          y: 20,
+          selectedIndex: 0,
+          features: [
+            {
+              type: "Feature",
+              source: catalogLayer.mapSourceId,
+              sourceLayer: "hifld",
+              properties: {
+                NAME: "Hospital",
+                __hifld_feature_key: "legitimate-catalog-value",
+              },
+              geometry: { type: "Point", coordinates: [-77, 38] },
+              layer: { id: "catalog-layer", type: "circle", source: catalogLayer.mapSourceId },
+              state: {},
+            },
+          ],
+        },
+        [catalogLayer],
+      ),
+    ).toEqual([
+      ["__hifld_feature_key", "legitimate-catalog-value"],
+      ["NAME", "Hospital"],
+    ]);
   });
 
   it("turns a resolved initial source into a loaded map layer", () => {

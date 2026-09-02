@@ -2,12 +2,37 @@ name: Publish app images
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/publish-images.yml"
+      - ".dockerignore"
+      - "package.json"
+      - "package-lock.json"
+      - "dataset-api/**"
+      - "dataset-mcp/**"
+      - "charts/dataset-api/**"
+      - "charts/dataset-discovery/**"
+      - "charts/dataset-mcp/**"
+      - "charts/webapp/**"
+      - "packages/map-core/**"
+      - "packages/map-ui/**"
+      - "webapp/**"
   push:
     branches:
       - main
     paths:
       - ".github/workflows/publish-images.yml"
+      - ".dockerignore"
+      - "package.json"
+      - "package-lock.json"
       - "dataset-api/**"
+      - "dataset-mcp/**"
+      - "charts/dataset-api/**"
+      - "charts/dataset-discovery/**"
+      - "charts/dataset-mcp/**"
+      - "charts/webapp/**"
+      - "packages/map-core/**"
+      - "packages/map-ui/**"
       - "webapp/**"
 
 permissions:
@@ -17,9 +42,44 @@ permissions:
 env:
   DATASET_API_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/dataset-api
   WEBAPP_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/webapp
+  DATASET_MCP_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/dataset-mcp
 
 jobs:
+  build-only:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: dataset-api
+            context: dataset-api
+            file: dataset-api/Dockerfile
+            build_args: ""
+          - name: webapp
+            context: .
+            file: webapp/Dockerfile
+            build_args: NODE_ENV=production
+          - name: dataset-mcp
+            context: .
+            file: dataset-mcp/Dockerfile
+            build_args: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.name }} without publishing
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: false
+          build-args: ${{ matrix.build_args }}
+
   publish:
+    if: github.event_name != 'pull_request'
+    needs: build-only
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -35,28 +95,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve image tags
-        id: meta
-        run: |
-          set -euo pipefail
-
-          dataset_tags="${DATASET_API_IMAGE}:${GITHUB_SHA}"
-          webapp_tags="${WEBAPP_IMAGE}:${GITHUB_SHA}"
-
-          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
-            dataset_tags="${dataset_tags}"$'\n'"${DATASET_API_IMAGE}:latest"
-            webapp_tags="${webapp_tags}"$'\n'"${WEBAPP_IMAGE}:latest"
-          fi
-
-          {
-            echo "dataset_tags<<EOF"
-            echo "$dataset_tags"
-            echo "EOF"
-            echo "webapp_tags<<EOF"
-            echo "$webapp_tags"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Build and push dataset-api
         uses: docker/build-push-action@v6
         with:
@@ -64,15 +102,32 @@ jobs:
           file: dataset-api/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.dataset_tags }}
+          tags: ${{ env.DATASET_API_IMAGE }}:${{ github.sha }}
 
       - name: Build and push webapp
         uses: docker/build-push-action@v6
         with:
-          context: webapp
+          context: .
           file: webapp/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.webapp_tags }}
+          tags: ${{ env.WEBAPP_IMAGE }}:${{ github.sha }}
           build-args: |
             NODE_ENV=production
+
+      - name: Build and push dataset-mcp
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: dataset-mcp/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.DATASET_MCP_IMAGE }}:${{ github.sha }}
+
+      - name: Promote complete main image set to latest
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "${DATASET_API_IMAGE}:latest" "${DATASET_API_IMAGE}:${GITHUB_SHA}"
+          docker buildx imagetools create --tag "${WEBAPP_IMAGE}:latest" "${WEBAPP_IMAGE}:${GITHUB_SHA}"
+          docker buildx imagetools create --tag "${DATASET_MCP_IMAGE}:latest" "${DATASET_MCP_IMAGE}:${GITHUB_SHA}"

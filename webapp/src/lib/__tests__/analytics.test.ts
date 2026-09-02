@@ -269,4 +269,67 @@ describe("analytics", () => {
       }),
     });
   });
+
+  it("tracks WebMCP lifecycle events with bounded properties only", async () => {
+    const {
+      trackWebMcpToolStarted,
+      trackWebMcpToolCompleted,
+      trackWebMcpToolFailed,
+      webMcpAnalyticsProperties,
+    } = await import("../analytics");
+
+    trackWebMcpToolStarted("get_dataset", "catalog");
+    trackWebMcpToolCompleted("get_dataset", "catalog", 125, 3);
+    trackWebMcpToolFailed("get_dataset", "catalog", 2_500, "invalid_request");
+
+    expect(capture).toHaveBeenNthCalledWith(1, "webmcp_tool_started", {
+      tool_name: "get_dataset",
+      route_kind: "catalog",
+    });
+    expect(capture).toHaveBeenNthCalledWith(2, "webmcp_tool_completed", {
+      tool_name: "get_dataset",
+      route_kind: "catalog",
+      duration_bucket: "100_499ms",
+      result_count_bucket: "1_9",
+    });
+    expect(capture).toHaveBeenNthCalledWith(3, "webmcp_tool_failed", {
+      tool_name: "get_dataset",
+      route_kind: "catalog",
+      duration_bucket: "2000ms_plus",
+      error_code: "invalid_request",
+    });
+
+    const noisy: Parameters<typeof webMcpAnalyticsProperties>[0] & {
+      sql: string;
+      token: string;
+      url: string;
+      source_id: number;
+      rows: string[];
+      geometry: string;
+      stack: string;
+    } = {
+      tool_name: "get_dataset",
+      route_kind: "catalog",
+      sql: "SELECT secret",
+      token: "private-token",
+      url: "https://private.example",
+      source_id: 42,
+      rows: ["row"],
+      geometry: "POINT(0 0)",
+      stack: "Error: secret",
+    };
+    expect(webMcpAnalyticsProperties(noisy)).toEqual({
+      tool_name: "get_dataset",
+      route_kind: "catalog",
+    });
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    capture.mockImplementationOnce(() => {
+      throw new Error("SQL secret token stack");
+    });
+    trackWebMcpToolStarted("get_dataset", "catalog");
+    expect(consoleError).toHaveBeenCalledWith("Failed to track WebMCP analytics event.");
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("SQL secret token stack");
+    consoleError.mockRestore();
+  });
 });

@@ -6,8 +6,13 @@
 
 1. **[GET /api](/api)** - Bootstrap JSON: `links` to OpenAPI, `llms.txt`, collections, and short `hints` on URL shape.
 2. **[GET /api/openapi](/api/openapi)** - OpenAPI 3.1: every path, query param, and problem response shape.
-3. This API is **not** OGC API-Features or STAC: no `/items`, `/features`, `/download`, or `/map` JSON routes. Dataset paths use **string slugs**, not numeric IDs in the URL (not `/api/collections/hifld/3418`).
-4. The site is **read-only** for agents and does not expose MCP/action tools for mutations.
+3. **[GET /.well-known/mcp/server-card.json](/.well-known/mcp/server-card.json)** - JSON MCP Server Card for Streamable HTTP discovery.
+4. **[GET /.well-known/ai-catalog.json](/.well-known/ai-catalog.json)** - JSON Agent Resource Discovery catalog (ARD) for scanners.
+5. **[GET /mcp](/mcp)** - same-origin Streamable HTTP MCP proxy.
+6. This API is **not** OGC API-Features or STAC: no `/items`, `/features`, `/download`, or `/map` JSON routes. Dataset paths use **string slugs**, not numeric IDs in the URL (not `/api/collections/hifld/3418`).
+7. The **JSON API remains read-only**. On supported browsers, this first-party
+   webapp may expose contextual WebMCP tools that read catalog/query data and
+   modify only the **current browser workspace**; they never write catalog data.
 
 ## Search and pagination (one place only)
 
@@ -52,6 +57,49 @@ Unknown paths under `/api` return **404** with **application/problem+json** and 
 ## Machine-readable contract
 
 - [OpenAPI 3.1 document](/api/openapi): full schema including extended Problem bodies (`instance`, `links`).
+
+## Contextual WebMCP tools (supported browsers only)
+
+Use a **collection-first** workflow: list collections, select a collection,
+search its datasets, then inspect a dataset and file. Do not use WebMCP to
+invent catalog URLs or submit catalog writes. The contextual surface has exactly
+these 19 tools; schemas remain in the browser tool registry, not this index.
+
+- Catalog: `list_collections`, `get_collection`, `search_datasets`,
+  `get_dataset`, `get_dataset_file`, `get_dataset_file_schema`.
+- Version comparison: `compare_file_versions`.
+- Map workspace: `get_map_state`, `add_dataset_layer`, `remove_map_layer`,
+  `set_layer_visibility`, `set_layer_style`, `reorder_map_layers`,
+  `set_map_camera`, `set_basemap`, `get_map_selection`, `clear_map_selection`.
+- Bounded queries: `run_dataset_query`, `set_result_page`.
+
+The current standard `document.modelContext` surface is preferred. Native
+Chrome preview/scanner builds may expose `navigator.modelContext` as a fallback;
+this is native compatibility, not a polyfill. Unsupported browsers register no
+WebMCP tools and the ordinary webapp remains unchanged.
+
+Scanner acceptance checks the MCP Server Card and ARD responses as JSON, then
+probes same-origin `/mcp`. ARD supports cross-origin JSON discovery with CORS;
+MCP calls remain same-origin. The card advertises same-origin `/mcp` unless the
+server-only `DATASET_MCP_PUBLIC_ENDPOINT` overrides the public endpoint. The
+proxy's internal `DATASET_MCP_QUERY_API_URL` is never exposed.
+
+## Bounded query resources
+
+These same-origin webapp routes are for the contextual query workflow; they do
+not make the JSON catalog writable.
+
+- `POST /api/queries` creates a bounded server-side GeoParquet query from
+  catalog source identities and returns a non-secret opaque `query_id`.
+- `POST /api/queries/{query_id}/pages` re-executes one page. Send the signed
+  token only in `X-HIFLD-Query-Token`; never put it in a URL. The `query_id` in
+  the path must match that token. `offset` is non-negative and `page_size` is
+  bounded from 1 through 1,000.
+- Query failures use stable `application/problem+json` / structured problem
+  codes rather than DuckDB, SQL, object-path, credential, or token details.
+- MVT is loaded directly from the public dataset-mcp URL returned with the
+  query, such as `GET /api/queries/{query_id}/tiles/{z}/{x}/{y}.mvt`; it also
+  uses `X-HIFLD-Query-Token`. There is no webapp tile proxy.
 
 ## Collections
 

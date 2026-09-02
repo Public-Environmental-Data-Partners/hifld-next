@@ -26,3 +26,6 @@ geoserver/binaries/
 # Node dependencies
 node_modules/
 **/node_modules/
+
+# Isolated agent implementation worktrees
+.worktrees/

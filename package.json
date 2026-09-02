@@ -1,0 +1,13 @@
+{
+  "name": "hifld-next",
+  "private": true,
+  "workspaces": [
+    "dataset-mcp/ui",
+    "packages/map-core",
+    "packages/map-ui",
+    "webapp"
+  ],
+  "scripts": {
+    "test:frontend-workspace": "node --test tests/frontend-workspace.test.mjs"
+  }
+}

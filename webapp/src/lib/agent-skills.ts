@@ -15,6 +15,14 @@ Use this skill when you need to explore **collections**, **datasets**, and **fil
 
 - \`GET /.well-known/api-catalog\` — RFC 9727 API catalog (\`application/linkset+json\`): anchor + \`service-desc\`, \`service-doc\`, \`status\`.
 - \`GET /.well-known/agent-skills/index.json\` — Agent Skills discovery (this index).
+- \`GET /.well-known/mcp/server-card.json\` — JSON MCP Server Card describing
+  the Streamable HTTP endpoint. It advertises same-origin \`/mcp\` by default;
+  server-only \`DATASET_MCP_PUBLIC_ENDPOINT\` may override that advertised URL.
+- \`GET /.well-known/ai-catalog.json\` — JSON Agent Resource Discovery (ARD)
+  catalog with CORS for scanners and machine clients.
+- \`GET /mcp\` — same-origin Streamable HTTP proxy. It forwards MCP traffic to
+  server-only \`DATASET_MCP_QUERY_API_URL\`; internal service origins are never
+  advertised by discovery documents.
 
 ## Typical flow
 
@@ -26,9 +34,40 @@ Use this skill when you need to explore **collections**, **datasets**, and **fil
 6. For local analysis, download returned source URLs or GeoParquet and use DuckDB, GeoPandas, or similar tools.
 7. Follow \`links\` and relation URLs from responses rather than inventing path shapes.
 
+## Contextual WebMCP (supported browsers only)
+
+The JSON API remains read-only. A supported browser may expose contextual WebMCP
+tools that read catalog or query data and modify only the current browser
+workspace; they do not write catalog data. Use the collection-first discovery
+flow above before acting on dataset or file context.
+
+Exactly 19 contextual tools are available when their route state permits it:
+
+- Catalog: \`list_collections\`, \`get_collection\`, \`search_datasets\`, \`get_dataset\`, \`get_dataset_file\`, \`get_dataset_file_schema\`.
+- Version comparison: \`compare_file_versions\`.
+- Map workspace: \`get_map_state\`, \`add_dataset_layer\`, \`remove_map_layer\`, \`set_layer_visibility\`, \`set_layer_style\`, \`reorder_map_layers\`, \`set_map_camera\`, \`set_basemap\`, \`get_map_selection\`, \`clear_map_selection\`.
+- Bounded query: \`run_dataset_query\`, \`set_result_page\`.
+
+The current standard \`document.modelContext\` surface is preferred. Some
+native Chrome preview/scanner builds expose \`navigator.modelContext\` instead;
+the webapp supports that native fallback without a polyfill. Unsupported
+browsers expose no WebMCP tools and continue to use the ordinary webapp
+unchanged.
+
+Scanner acceptance checks the JSON MCP Server Card, JSON ARD response, and
+same-origin \`/mcp\` proxy before checking native tool registration. The ARD
+response permits cross-origin JSON discovery with CORS; MCP tool calls remain
+same-origin.
+
+## Query resource workflow
+
+- \`POST /api/queries\` starts a bounded query and returns an opaque, non-secret \`query_id\`.
+- \`POST /api/queries/{query_id}/pages\` takes a non-negative \`offset\` and a bounded \`page_size\` (1–1,000). Send the signed token only in \`X-HIFLD-Query-Token\`; the path \`query_id\` must match that token.
+- Query failures use stable problem codes, not SQL, credentials, storage paths, or token details. Public MVT is loaded directly from the returned dataset-mcp URL; there is no webapp tile proxy.
+
 ## Constraints
 
-- This site is read-only and does not expose MCP/action tools for mutations.
+- The JSON API remains read-only; WebMCP only changes the current browser workspace.
 - This API is not OGC API-Features or STAC: no \`/items\`, \`/features\`, \`/download\`, or \`/map\` JSON routes.
 
 Unknown paths under \`/api\` return \`404\` with \`application/problem+json\` and links back to \`/api\` and OpenAPI.

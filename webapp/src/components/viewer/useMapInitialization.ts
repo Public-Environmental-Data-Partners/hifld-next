@@ -1,8 +1,14 @@
+import type { BasemapMode } from "@hifld/map-core";
+import {
+  ESRI_WORLD_IMAGERY_TILE_URL,
+  selectionBoxFeature as mapCoreSelectionBoxFeature,
+  OPENFREEMAP_BRIGHT_STYLE_URL,
+} from "@hifld/map-core";
 import maplibregl from "maplibre-gl";
 import { type RefObject, useCallback, useEffect, useRef } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { PMTiles, Protocol } from "pmtiles";
-import type { LoadedMapLayer } from "@/components/map/multiLayerSources";
+import type { LoadedMapLayer, QueryMvtLayer } from "@/components/map/multiLayerSources";
 import type { ColumnSchema } from "@/lib/api-client";
 import type { HoverInfo, NumericFieldSummary, VectorLayerInfo } from "./types";
 import { DEFAULT_STYLE } from "./utils";
@@ -20,6 +26,26 @@ interface PMTilesMetadata {
 
 interface VectorLayersBySource {
   [sourceId: string]: VectorLayerInfo[] | undefined;
+}
+
+class MapSourceSyncError extends Error {
+  constructor(
+    readonly sourceId: string,
+    readonly queryId: string | undefined,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+interface MapSourceSyncResult {
+  layers: VectorLayerInfo[];
+  interactiveLayerIds: string[];
+}
+
+interface LoadedMapSourceResult {
+  vectorLayers: VectorLayerInfo[];
+  interactiveLayerIds: string[];
 }
 
 function isNumericFieldType(type: string | number | boolean | undefined): boolean {
@@ -81,7 +107,7 @@ function numericFieldSummaries({
 }
 
 export type FeatureSelectionMode = "replace" | "append";
-export type BasemapMode = "street" | "satellite";
+export type { BasemapMode } from "@hifld/map-core";
 
 interface SelectionLngLat {
   lng: number;
@@ -95,7 +121,6 @@ type PopupLngLat = NonNullable<HoverInfo["lngLat"]>;
 const SELECTION_BOX_SOURCE_ID = "selection-box-source";
 const SELECTION_BOX_FILL_LAYER_ID = "selection-box-fill";
 const SELECTION_BOX_LINE_LAYER_ID = "selection-box-line";
-const OPENMAPTILES_STYLE_URL = "https://tiles.openfreemap.org/styles/bright";
 const OPENMAPTILES_SOURCE_IDS = new Set(["openmaptiles", "openfreemap"]);
 const STREET_BASE_LAYER_ID = "osm-base";
 const STREET_BASE_SOURCE_ID = "osm-tiles";
@@ -105,6 +130,7 @@ const EMPTY_SELECTION_BOX_FEATURES: SelectionBoxFeatureCollection = {
   type: "FeatureCollection",
   features: [],
 };
+const mapsWithInitialStyle = new WeakSet<maplibregl.Map>();
 
 function fallbackBasemapStyle(mode: BasemapMode): maplibregl.StyleSpecification {
   return {
@@ -118,7 +144,7 @@ function fallbackBasemapStyle(mode: BasemapMode): maplibregl.StyleSpecification 
       },
       [SATELLITE_BASE_SOURCE_ID]: {
         type: "raster",
-        tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+        tiles: [ESRI_WORLD_IMAGERY_TILE_URL],
         tileSize: 256,
         attribution: "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
       },
@@ -162,6 +188,9 @@ export function getVectorLayers(metadata: PMTilesMetadata): VectorLayerInfo[] {
 }
 
 export function getVectorLayersForSource(metadata: PMTilesMetadata, source: LoadedMapLayer): VectorLayerInfo[] {
+  if (source.kind === "query_mvt") {
+    return getVectorLayersForQuerySource(source);
+  }
   return getVectorLayers(metadata).map((layer) => ({
     ...layer,
     id: `${source.id}:${layer.id}`,
@@ -175,6 +204,70 @@ export function getVectorLayersForSource(metadata: PMTilesMetadata, source: Load
     }),
     geometryType: source.sourceMetadata?.geometry_type,
   }));
+}
+
+export function getVectorLayersForQuerySource(source: QueryMvtLayer): VectorLayerInfo[] {
+  return [
+    {
+      id: `${source.id}:${source.sourceLayerId}`,
+      sourceLayerId: source.sourceLayerId,
+      loadedLayerId: source.id,
+      mapSourceId: source.mapSourceId,
+      mapLayerBaseId: `${source.mapSourceId}-${source.sourceLayerId}`,
+      fields: source.scalarFields.map((field) => field.name),
+      numericFields: source.scalarFields
+        .filter((field) => isNumericFieldType(field.logicalType) || field.min !== undefined || field.max !== undefined)
+        .map((field) => ({ name: field.name, min: field.min, max: field.max })),
+    },
+  ];
+}
+
+export function queryVectorSourceSpecification(source: QueryMvtLayer): { type: "vector"; tiles: [string] } {
+  return {
+    type: "vector",
+    tiles: [source.tileTemplate],
+  };
+}
+
+export type QueryTileRequest =
+  | { url: string; headers: { "X-HIFLD-Query-Token": string } }
+  | { blocked: true; queryId: string; reason: "unknown_query" };
+
+const QUERY_TILE_PATH = /^\/api\/queries\/([^/]+)\/tiles\/[^/]+\/[^/]+\/[^/]+\.mvt$/;
+
+export function transformQueryTileRequest(
+  requestUrl: string,
+  queryTokens: ReadonlyMap<string, string>,
+): QueryTileRequest | null {
+  let pathname: string;
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(requestUrl, "http://localhost");
+    pathname = parsedUrl.pathname;
+  } catch {
+    return null;
+  }
+  const match = QUERY_TILE_PATH.exec(pathname);
+  if (!match) {
+    return null;
+  }
+  const queryId = match[1];
+  if (!queryId) {
+    return { blocked: true, queryId: "", reason: "unknown_query" };
+  }
+  const token = queryTokens.get(decodeURIComponent(queryId));
+  if (!token) {
+    return { blocked: true, queryId: decodeURIComponent(queryId), reason: "unknown_query" };
+  }
+  parsedUrl.searchParams.delete("token");
+  parsedUrl.searchParams.delete("query_token");
+  parsedUrl.searchParams.delete("queryToken");
+  const isAbsoluteUrl = /^[a-z][a-z\d+.-]*:/i.test(requestUrl);
+  const safeUrl = isAbsoluteUrl ? parsedUrl.toString() : `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`;
+  return {
+    url: safeUrl,
+    headers: { "X-HIFLD-Query-Token": token },
+  };
 }
 
 function sourceLayerForFeature(feature: maplibregl.MapGeoJSONFeature): string | undefined {
@@ -286,22 +379,7 @@ function queryRenderedBoxFeatures({
 }
 
 export function selectionBoxFeature(start: SelectionLngLat, end: SelectionLngLat): SelectionBoxFeature {
-  return {
-    type: "Feature",
-    properties: {},
-    geometry: {
-      type: "Polygon",
-      coordinates: [
-        [
-          [start.lng, start.lat],
-          [end.lng, start.lat],
-          [end.lng, end.lat],
-          [start.lng, end.lat],
-          [start.lng, start.lat],
-        ],
-      ],
-    },
-  };
+  return mapCoreSelectionBoxFeature(start, end);
 }
 
 function selectionBoxFeatureCollection(feature: SelectionBoxFeature | null): SelectionBoxFeatureCollection {
@@ -383,52 +461,58 @@ function addRenderedLayersForVectorLayer(
   const circleId = `${baseId}-circle`;
   const visibility = source.visible ? "visible" : "none";
 
-  map.addLayer({
-    id: fillId,
-    type: "fill",
-    source: source.mapSourceId,
-    "source-layer": sourceLayerId,
-    filter: ["==", "$type", "Polygon"],
-    layout: {
-      visibility,
-    },
-    paint: {
-      "fill-color": "#C5E8FF",
-      "fill-opacity": source.opacity,
-    },
-  });
+  if (!map.getLayer(fillId)) {
+    map.addLayer({
+      id: fillId,
+      type: "fill",
+      source: source.mapSourceId,
+      "source-layer": sourceLayerId,
+      filter: ["==", "$type", "Polygon"],
+      layout: {
+        visibility,
+      },
+      paint: {
+        "fill-color": "#C5E8FF",
+        "fill-opacity": source.opacity,
+      },
+    });
+  }
 
-  map.addLayer({
-    id: lineId,
-    type: "line",
-    source: source.mapSourceId,
-    "source-layer": sourceLayerId,
-    filter: ["==", "$type", "LineString"],
-    layout: {
-      visibility,
-    },
-    paint: {
-      "line-color": "#6D6659",
-      "line-opacity": source.opacity,
-      "line-width": DEFAULT_STYLE.lineWidth,
-    },
-  });
+  if (!map.getLayer(lineId)) {
+    map.addLayer({
+      id: lineId,
+      type: "line",
+      source: source.mapSourceId,
+      "source-layer": sourceLayerId,
+      filter: ["==", "$type", "LineString"],
+      layout: {
+        visibility,
+      },
+      paint: {
+        "line-color": "#6D6659",
+        "line-opacity": source.opacity,
+        "line-width": DEFAULT_STYLE.lineWidth,
+      },
+    });
+  }
 
-  map.addLayer({
-    id: circleId,
-    type: "circle",
-    source: source.mapSourceId,
-    "source-layer": sourceLayerId,
-    filter: ["==", "$type", "Point"],
-    layout: {
-      visibility,
-    },
-    paint: {
-      "circle-color": "#C0E6AA",
-      "circle-opacity": source.opacity,
-      "circle-radius": DEFAULT_STYLE.radius,
-    },
-  });
+  if (!map.getLayer(circleId)) {
+    map.addLayer({
+      id: circleId,
+      type: "circle",
+      source: source.mapSourceId,
+      "source-layer": sourceLayerId,
+      filter: ["==", "$type", "Point"],
+      layout: {
+        visibility,
+      },
+      paint: {
+        "circle-color": "#C0E6AA",
+        "circle-opacity": source.opacity,
+        "circle-radius": DEFAULT_STYLE.radius,
+      },
+    });
+  }
 
   return source.visible ? [fillId, lineId, circleId] : [];
 }
@@ -448,6 +532,23 @@ export function syncExistingRenderedLayers(map: maplibregl.Map, source: LoadedMa
   }
 
   return layerIds;
+}
+
+export function syncRenderedLayerOrder(
+  map: Pick<maplibregl.Map, "getLayer" | "moveLayer">,
+  sources: readonly Pick<LoadedMapLayer, "id">[],
+  vectorLayersBySource: Readonly<VectorLayersBySource>,
+): void {
+  for (const source of sources) {
+    for (const layer of vectorLayersBySource[source.id] ?? []) {
+      const baseId = layer.mapLayerBaseId ?? `${source.id}-${layer.sourceLayerId ?? layer.id}`;
+      for (const styleLayerId of [`${baseId}-fill`, `${baseId}-line`, `${baseId}-circle`]) {
+        if (map.getLayer(styleLayerId)) {
+          map.moveLayer(styleLayerId);
+        }
+      }
+    }
+  }
 }
 
 export function syncBasemapVisibility(map: maplibregl.Map, mode: BasemapMode): void {
@@ -563,26 +664,42 @@ async function loadMapSource(
   protocol: Protocol | null,
   source: LoadedMapLayer,
   shouldContinue: () => boolean,
-): Promise<{ vectorLayers: VectorLayerInfo[]; interactiveLayerIds: string[] } | null> {
-  if (map.getSource(source.mapSourceId)) {
+): Promise<LoadedMapSourceResult | null> {
+  if (source.kind === "query_mvt") {
+    if (map.getSource(source.mapSourceId)) {
+      return {
+        vectorLayers: [],
+        interactiveLayerIds: syncExistingRenderedLayers(map, source),
+      };
+    }
+    const vectorLayers = getVectorLayersForQuerySource(source);
+    if (!shouldContinue()) {
+      return null;
+    }
+    map.addSource(source.mapSourceId, queryVectorSourceSpecification(source));
     return {
-      vectorLayers: [],
-      interactiveLayerIds: syncExistingRenderedLayers(map, source),
+      vectorLayers,
+      interactiveLayerIds: vectorLayers.flatMap((layer) => addRenderedLayersForVectorLayer(map, source, layer)),
     };
   }
 
+  const sourceAlreadyAdded = map.getSource(source.mapSourceId) !== undefined;
   const pmtiles = new PMTiles(source.pmtilesUrl);
-  protocol?.add(pmtiles);
+  if (!sourceAlreadyAdded) {
+    protocol?.add(pmtiles);
+  }
   const metadata = (await pmtiles.getMetadata()) as PMTilesMetadata;
   if (!shouldContinue()) {
     return null;
   }
   const vectorLayers = getVectorLayersForSource(metadata, source);
 
-  map.addSource(source.mapSourceId, {
-    type: "vector",
-    url: `pmtiles://${source.pmtilesUrl}`,
-  });
+  if (!sourceAlreadyAdded) {
+    map.addSource(source.mapSourceId, {
+      type: "vector",
+      url: `pmtiles://${source.pmtilesUrl}`,
+    });
+  }
 
   return {
     vectorLayers,
@@ -590,7 +707,33 @@ async function loadMapSource(
   };
 }
 
-async function syncLoadedMapSources({
+async function loadMapSourceForSync(
+  map: maplibregl.Map,
+  protocol: Protocol | null,
+  source: LoadedMapLayer,
+  shouldContinue: () => boolean,
+): Promise<LoadedMapSourceResult | null> {
+  try {
+    return await loadMapSource(map, protocol, source, shouldContinue);
+  } catch (error) {
+    throw new MapSourceSyncError(
+      source.id,
+      source.kind === "query_mvt" ? source.queryId : undefined,
+      error instanceof Error ? error.message : "Query map layer could not be loaded.",
+    );
+  }
+}
+
+function removeInactiveVectorLayers(
+  vectorLayersBySource: VectorLayersBySource,
+  activeLayerIds: ReadonlySet<string>,
+): void {
+  for (const loadedLayerId of Object.keys(vectorLayersBySource)) {
+    if (!activeLayerIds.has(loadedLayerId)) delete vectorLayersBySource[loadedLayerId];
+  }
+}
+
+export async function syncLoadedMapSources({
   map,
   protocol,
   sources,
@@ -604,7 +747,7 @@ async function syncLoadedMapSources({
   managedSourceIds: Set<string>;
   vectorLayersBySource: VectorLayersBySource;
   shouldContinue: () => boolean;
-}): Promise<{ layers: VectorLayerInfo[]; interactiveLayerIds: string[] } | null> {
+}): Promise<MapSourceSyncResult | null> {
   const nextLayers: VectorLayerInfo[] = [];
   const nextInteractiveLayerIds: string[] = [];
   const activeSourceIds = new Set(sources.map((source) => source.mapSourceId));
@@ -613,7 +756,7 @@ async function syncLoadedMapSources({
   for (const source of sources) {
     if (!shouldContinue()) return null;
     managedSourceIds.add(source.mapSourceId);
-    const loadedSource = await loadMapSource(map, protocol, source, shouldContinue);
+    const loadedSource = await loadMapSourceForSync(map, protocol, source, shouldContinue);
     if (!shouldContinue() || !loadedSource) return null;
     if (loadedSource.vectorLayers.length > 0) {
       vectorLayersBySource[source.id] = loadedSource.vectorLayers;
@@ -624,16 +767,41 @@ async function syncLoadedMapSources({
 
   if (!shouldContinue()) return null;
   removeInactiveMapSources(map, activeSourceIds, managedSourceIds);
-  for (const loadedLayerId of Object.keys(vectorLayersBySource)) {
-    if (!activeLayerIds.has(loadedLayerId)) {
-      delete vectorLayersBySource[loadedLayerId];
-    }
-  }
+  removeInactiveVectorLayers(vectorLayersBySource, activeLayerIds);
+  syncRenderedLayerOrder(map, sources, vectorLayersBySource);
 
   return {
     layers: nextLayers,
     interactiveLayerIds: nextInteractiveLayerIds,
   };
+}
+
+function reportSourceSyncError(
+  error: Error,
+  onSourceLayerError:
+    | ((error: { sourceId: string; queryId?: string | undefined; message: string }) => void)
+    | undefined,
+): void {
+  const message = error.message || "Query map layer could not be loaded.";
+  if (error instanceof MapSourceSyncError) {
+    onSourceLayerError?.({
+      sourceId: error.sourceId,
+      ...(error.queryId === undefined ? {} : { queryId: error.queryId }),
+      message,
+    });
+  }
+}
+
+export function runWhenMapStyleReady(map: maplibregl.Map, callback: () => void): void {
+  if (mapsWithInitialStyle.has(map) || map.isStyleLoaded()) {
+    mapsWithInitialStyle.add(map);
+    callback();
+    return;
+  }
+  map.once("style.load", () => {
+    mapsWithInitialStyle.add(map);
+    callback();
+  });
 }
 
 export function useMultiLayerMapInitialization(
@@ -647,6 +815,10 @@ export function useMultiLayerMapInitialization(
   basemapMode: BasemapMode = "street",
   pinnedPopupLngLat?: PopupLngLat | null,
   pinnedPopupElementRef?: React.RefObject<HTMLDivElement | null>,
+  queryTokens: ReadonlyMap<string, string> = new Map(),
+  onSourceLayerError?:
+    | ((error: { sourceId: string; queryId?: string | undefined; message: string }) => void)
+    | undefined,
 ) {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const currentBasemapModeRef = useRef(basemapMode);
@@ -658,6 +830,8 @@ export function useMultiLayerMapInitialization(
   const onPinnedPopupRef = useRef(onPinnedPopup);
   const pinnedPopupLngLatRef = useRef(pinnedPopupLngLat);
   const pinnedPopupElementRefRef = useRef(pinnedPopupElementRef);
+  const queryTokensRef = useRef(queryTokens);
+  const onSourceLayerErrorRef = useRef(onSourceLayerError);
   const isSelectionActiveRef = useRef(isSelectionActive);
   const boxSelectionStartRef = useRef<{ x: number; y: number } | null>(null);
   const boxSelectionStartLngLatRef = useRef<SelectionLngLat | null>(null);
@@ -695,6 +869,14 @@ export function useMultiLayerMapInitialization(
   useEffect(() => {
     pinnedPopupElementRefRef.current = pinnedPopupElementRef;
   }, [pinnedPopupElementRef]);
+
+  useEffect(() => {
+    queryTokensRef.current = queryTokens;
+  }, [queryTokens]);
+
+  useEffect(() => {
+    onSourceLayerErrorRef.current = onSourceLayerError;
+  }, [onSourceLayerError]);
 
   useEffect(() => {
     isSelectionActiveRef.current = isSelectionActive;
@@ -764,9 +946,24 @@ export function useMultiLayerMapInitialization(
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: OPENMAPTILES_STYLE_URL,
+      style: OPENFREEMAP_BRIGHT_STYLE_URL,
       center: [-98.5795, 39.8283],
       zoom: 4,
+      transformRequest: (url) => {
+        const transformed = transformQueryTileRequest(url, queryTokensRef.current);
+        if (!transformed) {
+          return undefined;
+        }
+        if ("blocked" in transformed) {
+          onSourceLayerErrorRef.current?.({
+            sourceId: `query:${transformed.queryId}`,
+            queryId: transformed.queryId,
+            message: "Query map layer is unavailable.",
+          });
+          return { url: "data:," };
+        }
+        return transformed;
+      },
     });
 
     mapRef.current = map;
@@ -777,6 +974,7 @@ export function useMultiLayerMapInitialization(
         return;
       }
       hasSyncedBasemapAfterStyleLoad = true;
+      mapsWithInitialStyle.add(map);
       syncBasemapVisibilityAfterStyleLoad(map, currentBasemapModeRef);
     };
     map.once("style.load", syncBasemapAfterStyleLoad);
@@ -876,6 +1074,9 @@ export function useMultiLayerMapInitialization(
       map.dragPan.enable();
       updateCursorForCurrentSelectionState();
       suppressNextClickSelectionRef.current = true;
+      window.setTimeout(() => {
+        suppressNextClickSelectionRef.current = false;
+      }, 0);
       const selectedFeatures = queryRenderedBoxFeatures({
         map,
         start,
@@ -915,25 +1116,29 @@ export function useMultiLayerMapInitialization(
     let cancelled = false;
 
     const loadSources = async () => {
-      const result = await syncLoadedMapSources({
-        map,
-        protocol: protocolRef.current,
-        sources,
-        managedSourceIds: managedSourceIds.current,
-        vectorLayersBySource: vectorLayersBySource.current,
-        shouldContinue: () => !cancelled,
-      });
-      if (!result) return;
-      interactiveLayerIds.current = result.interactiveLayerIds;
-      onLayersLoadedRef.current(result.layers);
-      map.resize();
+      try {
+        const result = await syncLoadedMapSources({
+          map,
+          protocol: protocolRef.current,
+          sources,
+          managedSourceIds: managedSourceIds.current,
+          vectorLayersBySource: vectorLayersBySource.current,
+          shouldContinue: () => !cancelled,
+        });
+        if (!result) return;
+        interactiveLayerIds.current = result.interactiveLayerIds;
+        onLayersLoadedRef.current(result.layers);
+        map.resize();
+      } catch (error) {
+        if (cancelled) return;
+        reportSourceSyncError(
+          error instanceof Error ? error : new Error("Query map layer could not be loaded."),
+          onSourceLayerErrorRef.current,
+        );
+      }
     };
 
-    if (map.loaded()) {
-      void loadSources();
-      return;
-    }
-    map.once("load", () => {
+    runWhenMapStyleReady(map, () => {
       void loadSources();
     });
     return () => {

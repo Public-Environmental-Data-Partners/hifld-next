@@ -1,4 +1,4 @@
-import { Eraser, MapIcon, PanelLeft, Satellite, ScanSearch, ZoomIn, ZoomOut } from "lucide-react";
+import { type MapControl, MapControls as SharedMapControls } from "@hifld/map-ui";
 import type maplibregl from "maplibre-gl";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -34,89 +34,36 @@ export function MapControls({
   basemapMode = "street",
   onToggleBasemap,
 }: MapControlsProps) {
-  const selectionLabel = isSelectionActive
-    ? "Turn off region highlighting"
-    : "Highlight a region on the map. You can also hold Shift.";
-  const basemapLabel = basemapMode === "satellite" ? "Switch to street map" : "Switch to satellite imagery";
+  const renderControl = (control: MapControl) => (
+    <MapControlTooltip label={control.label}>
+      <Button
+        variant={control.active ? "default" : "secondary"}
+        size="icon"
+        onClick={control.onClick}
+        className="h-9 w-9 shadow-md"
+        aria-label={control.ariaLabel}
+        aria-pressed={control.active}
+      >
+        {control.icon}
+      </Button>
+    </MapControlTooltip>
+  );
 
   return (
     <TooltipProvider delayDuration={0}>
-      <div className="absolute right-4 top-4 z-[1000] flex flex-col gap-2">
-        {onToggleSettings && (
-          <MapControlTooltip label={isSettingsCollapsed ? "Show map settings" : "Hide map settings"}>
-            <Button
-              variant="secondary"
-              size="icon"
-              onClick={onToggleSettings}
-              className="h-9 w-9 shadow-md"
-              aria-label={isSettingsCollapsed ? "Show map settings" : "Hide map settings"}
-            >
-              <PanelLeft className="h-4 w-4" />
-            </Button>
-          </MapControlTooltip>
-        )}
-        {onToggleSelection && (
-          <MapControlTooltip label={selectionLabel}>
-            <Button
-              variant={isSelectionActive ? "default" : "secondary"}
-              size="icon"
-              onClick={onToggleSelection}
-              className="h-9 w-9 shadow-md"
-              aria-label={isSelectionActive ? "Turn off highlight region" : "Highlight a region"}
-            >
-              <ScanSearch className="h-4 w-4" />
-            </Button>
-          </MapControlTooltip>
-        )}
-        {onClearSelection && (
-          <MapControlTooltip label="Clear the highlighted region and selected features">
-            <Button
-              variant="secondary"
-              size="icon"
-              onClick={onClearSelection}
-              className="h-9 w-9 shadow-md"
-              aria-label="Clear highlighted region"
-            >
-              <Eraser className="h-4 w-4" />
-            </Button>
-          </MapControlTooltip>
-        )}
-        {onToggleBasemap && (
-          <MapControlTooltip label={basemapLabel}>
-            <Button
-              variant="secondary"
-              size="icon"
-              onClick={onToggleBasemap}
-              className="h-9 w-9 shadow-md"
-              aria-label={basemapLabel}
-            >
-              {basemapMode === "satellite" ? <MapIcon className="h-4 w-4" /> : <Satellite className="h-4 w-4" />}
-            </Button>
-          </MapControlTooltip>
-        )}
-        <MapControlTooltip label="Zoom in">
-          <Button
-            variant="secondary"
-            size="icon"
-            onClick={() => mapRef.current?.zoomIn()}
-            className="h-9 w-9 shadow-md"
-            aria-label="Zoom in"
-          >
-            <ZoomIn className="h-4 w-4" />
-          </Button>
-        </MapControlTooltip>
-        <MapControlTooltip label="Zoom out">
-          <Button
-            variant="secondary"
-            size="icon"
-            onClick={() => mapRef.current?.zoomOut()}
-            className="h-9 w-9 shadow-md"
-            aria-label="Zoom out"
-          >
-            <ZoomOut className="h-4 w-4" />
-          </Button>
-        </MapControlTooltip>
-      </div>
+      <SharedMapControls
+        className="absolute right-4 top-4 z-[1000] flex flex-col gap-2"
+        basemapMode={basemapMode}
+        isSelectionActive={Boolean(isSelectionActive)}
+        onToggleSelection={onToggleSelection}
+        onClearSelection={onClearSelection}
+        onToggleBasemap={onToggleBasemap}
+        onZoomIn={() => mapRef.current?.zoomIn()}
+        onZoomOut={() => mapRef.current?.zoomOut()}
+        onToggleSettings={onToggleSettings}
+        isSettingsCollapsed={isSettingsCollapsed}
+        renderControl={renderControl}
+      />
     </TooltipProvider>
   );
 }

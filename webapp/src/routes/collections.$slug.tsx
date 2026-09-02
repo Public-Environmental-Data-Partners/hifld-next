@@ -19,6 +19,7 @@ type CollectionSearch = {
   query?: string;
   limit?: number;
   offset?: number;
+  tag_filters?: string;
 };
 
 interface TagValueLists {
@@ -30,6 +31,7 @@ const collectionSearchSchema = z
     query: z.string().optional(),
     limit: z.coerce.number().int().positive().optional(),
     offset: z.coerce.number().int().nonnegative().optional(),
+    tag_filters: z.string().optional(),
   })
   .catch({});
 
@@ -39,6 +41,14 @@ function parseCollectionSearch(search: z.input<typeof collectionSearchSchema>): 
   if (parsed.query && parsed.query.length > 0) result.query = parsed.query;
   if (parsed.limit !== undefined && parsed.limit !== 100) result.limit = parsed.limit;
   if (parsed.offset !== undefined && parsed.offset > 0) result.offset = parsed.offset;
+  if (parsed.tag_filters) {
+    try {
+      z.record(z.string(), z.union([z.string(), z.array(z.string())])).parse(JSON.parse(parsed.tag_filters));
+      result.tag_filters = parsed.tag_filters;
+    } catch {
+      // Ignore malformed URL filter state and fall back to an unfiltered page.
+    }
+  }
   return result;
 }
 
@@ -60,11 +70,29 @@ function getTagFiltersForAPI(filters: TagFilter[]): DatasetTags {
   return result;
 }
 
+function getTagFiltersFromAPI(filters: DatasetTags | undefined): TagFilter[] {
+  return Object.entries(filters ?? {}).flatMap(([key, values]) =>
+    (Array.isArray(values) ? values : [values]).map((value) => ({ key, value })),
+  );
+}
+
+export function parseTagFiltersParam(value: string | undefined): DatasetTags | undefined {
+  if (!value) return undefined;
+  try {
+    return z.record(z.string(), z.union([z.string(), z.array(z.string())])).parse(JSON.parse(value));
+  } catch {
+    return undefined;
+  }
+}
+
 function buildCollectionSearch(updates: CollectionSearch): CollectionSearch {
   const result: CollectionSearch = {};
   if (updates.query !== undefined && updates.query.length > 0) result.query = updates.query;
   if (updates.limit !== undefined && updates.limit !== 100) result.limit = updates.limit;
   if (updates.offset !== undefined && updates.offset > 0) result.offset = updates.offset;
+  if (updates.tag_filters !== undefined && updates.tag_filters.length > 0) {
+    result.tag_filters = updates.tag_filters;
+  }
   return result;
 }
 
@@ -76,6 +104,8 @@ function mergeCollectionSearch(current: CollectionSearch, updates: CollectionSea
   else if (current.limit !== undefined) merged.limit = current.limit;
   if (updates.offset !== undefined) merged.offset = updates.offset;
   else if (current.offset !== undefined) merged.offset = current.offset;
+  if (updates.tag_filters !== undefined) merged.tag_filters = updates.tag_filters;
+  else if (current.tag_filters !== undefined) merged.tag_filters = current.tag_filters;
   return buildCollectionSearch(merged);
 }
 
@@ -102,11 +132,13 @@ export function collectionPageHref(collectionSlug: string, search: CollectionSea
   const query = trimmedSearchParam(search.query);
   if (query) nextSearchInput.query = query;
   if (search.limit !== undefined) nextSearchInput.limit = search.limit;
+  if (search.tag_filters !== undefined) nextSearchInput.tag_filters = search.tag_filters;
   const nextSearch = buildCollectionSearch(nextSearchInput);
   const params = new URLSearchParams();
   if (nextSearch.query) params.set("query", nextSearch.query);
   if (nextSearch.limit !== undefined) params.set("limit", String(nextSearch.limit));
   if (nextSearch.offset !== undefined) params.set("offset", String(nextSearch.offset));
+  if (nextSearch.tag_filters !== undefined) params.set("tag_filters", nextSearch.tag_filters);
   const queryString = params.toString();
   return `/collections/${encodeURIComponent(collectionSlug)}${queryString ? `?${queryString}` : ""}`;
 }
@@ -298,6 +330,7 @@ export const Route = createFileRoute("/collections/$slug")({
     query: search?.query ?? "",
     limit: search?.limit ?? 100,
     offset: search?.offset ?? 0,
+    tag_filters: search?.tag_filters,
   }),
   // Loader is isomorphic - runs on server (SSR) and client (navigation)
   // Server functions handle RPC automatically when called from client
@@ -323,6 +356,7 @@ export const Route = createFileRoute("/collections/$slug")({
           limit: pageSize,
           offset: offset,
           search: searchQuery || undefined,
+          tagFilters: parseTagFiltersParam(deps.tag_filters),
         },
       });
       return { collection, datasetsResponse, resolvedSearchQuery: searchQuery };
@@ -381,7 +415,9 @@ function CollectionDetailPage() {
   // Use loader data as source of truth - it updates automatically when URL changes
   // Only maintain separate state when tag filters are active (loader doesn't support them)
   const [searchQuery, setSearchQuery] = useState(search.query ?? "");
-  const [selectedTagFilters, setSelectedTagFilters] = useState<TagFilter[]>([]);
+  const [selectedTagFilters, setSelectedTagFilters] = useState<TagFilter[]>(() =>
+    getTagFiltersFromAPI(parseTagFiltersParam(search.tag_filters)),
+  );
   const [filteredDatasets, setFilteredDatasets] = useState<DatasetWithUrls[] | null>(null);
   const [filteredTotal, setFilteredTotal] = useState<number | null>(null);
 
@@ -397,9 +433,9 @@ function CollectionDetailPage() {
   // Use loader data directly - it updates automatically when URL changes and loader re-runs
   // Only use filtered state when tag filters are active (loader doesn't support them)
   const hasTagFilters = selectedTagFilters.length > 0;
-  const datasets = hasTagFilters ? filteredDatasets || [] : initialResponse?.items || [];
+  const datasets = hasTagFilters ? (filteredDatasets ?? initialResponse?.items ?? []) : initialResponse?.items || [];
   const initialTotal = initialResponse?.total ?? 0;
-  const total = hasTagFilters ? (filteredTotal ?? 0) : initialTotal;
+  const total = hasTagFilters ? (filteredTotal ?? initialTotal) : initialTotal;
   const offset = search.offset ?? 0;
   const currentLimit = search.limit ?? 100;
 
@@ -493,6 +529,12 @@ function CollectionDetailPage() {
     }
   }, [search.query, collection.slug, hasTagFilters, initialTotal, resolvedSearchQuery, searchQuery]);
 
+  useEffect(() => {
+    setSelectedTagFilters(getTagFiltersFromAPI(parseTagFiltersParam(search.tag_filters)));
+    setFilteredDatasets(null);
+    setFilteredTotal(null);
+  }, [search.tag_filters]);
+
   // Debounced search handler - wait before updating URL/fetching to avoid
   // firing searches while the user is still typing.
   useEffect(() => {
@@ -571,7 +613,7 @@ function CollectionDetailPage() {
     const newFilters: TagFilter[] = [...otherFilters, ...values.map((value) => ({ key, value }))];
 
     setSelectedTagFilters(newFilters);
-    updateUrlParams({ offset: 0 });
+    updateUrlParams({ offset: 0, tag_filters: JSON.stringify(getTagFiltersForAPI(newFilters)) });
 
     const result = await fetchDatasets(searchQuery, 0, newFilters);
     if (result) {

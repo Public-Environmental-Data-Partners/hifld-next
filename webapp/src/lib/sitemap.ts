@@ -13,6 +13,8 @@ export const STATIC_SITEMAP_PATHS = [
   "/llms.txt",
   "/.well-known/api-catalog",
   "/.well-known/agent-skills/index.json",
+  "/.well-known/mcp/server-card.json",
+  "/.well-known/ai-catalog.json",
 ] as const;
 
 const collectionSchema = z.object({

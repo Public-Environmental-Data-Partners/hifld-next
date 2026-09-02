@@ -60,6 +60,26 @@ describe("FeatureTablePanel", () => {
     expect(screen.getByRole("button", { name: "Clear selected features" })).toHaveClass("h-11", "w-11", "sm:size-9");
   });
 
+  it("renders selected feature properties through the shared table renderer", () => {
+    render(
+      <FeatureTablePanel
+        features={[selectedFeature("v1.0.0", { OBJECTID: "42", NAME: "Shared Renderer Hospital" })]}
+        wasSelectionCapped={false}
+        s2Level={16}
+        onS2LevelChange={() => undefined}
+        onClear={() => undefined}
+      />,
+    );
+
+    const table = document.querySelector('[data-slot="selected-features-table"]');
+    expect(table).toBeInTheDocument();
+    expect(table).toHaveClass("min-w-[640px]", "text-sm");
+    expect(table).toHaveTextContent("Shared Renderer Hospital");
+    expect(table).toContainElement(screen.getByTestId("selected-feature-row"));
+    expect(screen.getByRole("cell", { name: "Shared Renderer Hospital" })).toHaveClass("max-w-56", "break-words");
+    expect(screen.getByRole("button", { name: "Clear selected features" })).toBeInTheDocument();
+  });
+
   it("keeps selected feature controls and table scrolling constrained for narrow panels", () => {
     render(
       <FeatureTablePanel
@@ -73,7 +93,9 @@ describe("FeatureTablePanel", () => {
 
     expect(screen.getByRole("combobox", { name: "Select layer" })).toHaveClass("h-11", "sm:h-8", "w-full");
     expect(screen.getByRole("combobox", { name: "Version" })).toHaveClass("h-11", "sm:h-8", "w-full");
-    expect(screen.getByPlaceholderText("Search selected features...")).toHaveClass("h-11", "sm:h-8");
+    const searchInput = screen.getByPlaceholderText("Search selected features...");
+    expect(searchInput).toHaveClass("h-11", "sm:h-8");
+    expect(searchInput.parentElement).toHaveClass("w-full", "sm:w-80", "sm:flex-none");
     expect(screen.getByTestId("selected-features-scroll")).toHaveClass(
       "overflow-x-auto",
       "sm:overflow-auto",

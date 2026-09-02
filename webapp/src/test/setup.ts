@@ -2,6 +2,30 @@ import { expect, afterEach, beforeEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import * as matchers from '@testing-library/jest-dom/matchers'
 
+class TestResizeObserver implements ResizeObserver {
+  observe(_target: Element, _options?: ResizeObserverOptions): void {}
+  unobserve(_target: Element): void {}
+  disconnect(): void {}
+}
+
+Object.defineProperty(globalThis, "ResizeObserver", {
+  configurable: true,
+  writable: true,
+  value: TestResizeObserver,
+})
+
+Object.defineProperty(window.URL, "createObjectURL", {
+  configurable: true,
+  writable: true,
+  value: () => "blob:test-worker",
+})
+
+Object.defineProperty(window.URL, "revokeObjectURL", {
+  configurable: true,
+  writable: true,
+  value: () => undefined,
+})
+
 // Extend Vitest's expect with jest-dom matchers
 expect.extend(matchers)
 

@@ -1,8 +1,15 @@
+import {
+  isQueryMvtReservedProperty,
+  MAX_SELECTED_FEATURES as mapCoreMaxSelectedFeatures,
+  QUERY_MVT_CENTROID_LAT_PROPERTY,
+  QUERY_MVT_CENTROID_LNG_PROPERTY,
+  QUERY_MVT_FEATURE_KEY_PROPERTY,
+} from "@hifld/map-core";
 import type { Geometry, Position } from "geojson";
 import type maplibregl from "maplibre-gl";
 import type { LoadedMapLayer } from "./multiLayerSources";
 
-export const MAX_SELECTED_FEATURES = 100;
+export const MAX_SELECTED_FEATURES = mapCoreMaxSelectedFeatures;
 
 export type FeatureSelectionMode = "replace" | "append";
 
@@ -10,19 +17,48 @@ export interface SelectedFeatureProperties {
   [propertyName: string]: string;
 }
 
-export interface SelectedMapFeature {
+interface SelectedMapFeatureBase {
   id: string;
   loadedLayerId: string;
   layerName: string;
+  sourceLayerId: string;
+  featureId: string;
+  centroid: { lng: number; lat: number } | null;
+  properties: SelectedFeatureProperties;
+}
+
+export interface CatalogSelectedMapFeature extends SelectedMapFeatureBase {
+  /** Omitted for legacy catalog selections created before the discriminant existed. */
+  sourceKind?: "catalog_pmtiles" | undefined;
   collectionSlug: string;
   datasetSlug: string;
   fileSlug: string;
   version: string;
   sourceId?: number | undefined;
-  sourceLayerId: string;
-  featureId: string;
-  centroid: { lng: number; lat: number } | null;
-  properties: SelectedFeatureProperties;
+}
+
+export interface QuerySelectedMapFeature extends SelectedMapFeatureBase {
+  sourceKind: "query_mvt";
+  queryId: string;
+}
+
+export type SelectedMapFeature = CatalogSelectedMapFeature | QuerySelectedMapFeature;
+
+export function isCatalogSelectedMapFeature(feature: SelectedMapFeature): feature is CatalogSelectedMapFeature {
+  return feature.sourceKind === undefined || feature.sourceKind === "catalog_pmtiles";
+}
+
+/** Version diff is intentionally limited to catalog selections. */
+export function isComparableFeatureDiffSelection(features: SelectedMapFeature[]): boolean {
+  if (features.length === 0 || features.some((feature) => !isCatalogSelectedMapFeature(feature))) {
+    return false;
+  }
+  const catalogFeatures = features.filter(isCatalogSelectedMapFeature);
+  const scopes = new Set(
+    catalogFeatures.map((feature) => [feature.collectionSlug, feature.datasetSlug, feature.fileSlug].join(":")),
+  );
+  const versions = new Set(catalogFeatures.map((feature) => feature.version));
+  return scopes.size === 1 && versions.size === 2;
 }
 
 export interface FeatureSelectionUpdate {
@@ -50,6 +86,15 @@ function featureKey(feature: maplibregl.MapGeoJSONFeature, sourceLayerId: string
   });
 }
 
+function queryFeatureKey(feature: maplibregl.MapGeoJSONFeature): string | null {
+  const value = feature.properties?.[QUERY_MVT_FEATURE_KEY_PROPERTY];
+  if (typeof value !== "string") {
+    return null;
+  }
+  const key = value.trim();
+  return key.length > 0 ? key : null;
+}
+
 function stringifyPropertyValue(value: maplibregl.MapGeoJSONFeature["properties"][string]): string {
   if (value === null || value === undefined) {
     return "";
@@ -65,9 +110,13 @@ function stringifyPropertyValue(value: maplibregl.MapGeoJSONFeature["properties"
 
 function normalizeProperties(
   properties: maplibregl.MapGeoJSONFeature["properties"] | null | undefined,
+  stripQueryMvtReservedProperties = false,
 ): SelectedFeatureProperties {
   const normalized: SelectedFeatureProperties = {};
   for (const [key, value] of Object.entries(properties ?? {})) {
+    if (stripQueryMvtReservedProperties && isQueryMvtReservedProperty(key)) {
+      continue;
+    }
     normalized[key] = stringifyPropertyValue(value);
   }
   return normalized;
@@ -128,6 +177,24 @@ function centroidForGeometry(geometry: maplibregl.MapGeoJSONFeature["geometry"])
   return count > 0 ? { lng: lngTotal / count, lat: latTotal / count } : null;
 }
 
+function queryCentroidForFeature(feature: maplibregl.MapGeoJSONFeature): { lng: number; lat: number } | null {
+  const longitude = feature.properties?.[QUERY_MVT_CENTROID_LNG_PROPERTY];
+  const latitude = feature.properties?.[QUERY_MVT_CENTROID_LAT_PROPERTY];
+  if (
+    typeof longitude === "number" &&
+    typeof latitude === "number" &&
+    Number.isFinite(longitude) &&
+    Number.isFinite(latitude) &&
+    longitude >= -180 &&
+    longitude <= 180 &&
+    latitude >= -90 &&
+    latitude <= 90
+  ) {
+    return { lng: longitude, lat: latitude };
+  }
+  return feature.geometry.type === "Point" ? centroidForGeometry(feature.geometry) : null;
+}
+
 export function normalizeSelectedFeatures({
   features,
   loadedLayers,
@@ -145,20 +212,39 @@ export function normalizeSelectedFeatures({
       continue;
     }
     const sourceLayerId = sourceLayerForFeature(feature);
-    const featureId = featureKey(feature, sourceLayerId);
-    selected.push({
-      id: `${loadedLayer.id}:${sourceLayerId}:${featureId}`,
+    const isQueryMvt = loadedLayer.kind === "query_mvt";
+    const featureId = isQueryMvt ? queryFeatureKey(feature) : featureKey(feature, sourceLayerId);
+    if (featureId === null) {
+      continue;
+    }
+    const common = {
+      id:
+        loadedLayer.kind === "query_mvt"
+          ? `query:${loadedLayer.queryId}:${sourceLayerId}:${featureId}`
+          : `${loadedLayer.id}:${sourceLayerId}:${featureId}`,
       loadedLayerId: loadedLayer.id,
       layerName: loadedLayer.name,
+      sourceLayerId,
+      featureId,
+      centroid: isQueryMvt ? queryCentroidForFeature(feature) : centroidForGeometry(feature.geometry),
+      properties: normalizeProperties(feature.properties, isQueryMvt),
+    };
+    if (isQueryMvt) {
+      // Query results deliberately do not masquerade as catalog datasets.
+      selected.push({
+        ...common,
+        sourceKind: "query_mvt",
+        queryId: loadedLayer.queryId,
+      });
+      continue;
+    }
+    selected.push({
+      ...common,
       collectionSlug: loadedLayer.descriptor.collectionSlug,
       datasetSlug: loadedLayer.descriptor.datasetSlug,
       fileSlug: loadedLayer.descriptor.fileSlug,
       version: String(loadedLayer.descriptor.version),
       sourceId: loadedLayer.descriptor.sourceId,
-      sourceLayerId,
-      featureId,
-      centroid: centroidForGeometry(feature.geometry),
-      properties: normalizeProperties(feature.properties),
     });
   }
 

@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import type maplibregl from "maplibre-gl";
+import { PMTiles } from "pmtiles";
 import { describe, expect, it, vi } from "vitest";
 import {
   type BasemapMode,
@@ -11,7 +12,14 @@ import {
   syncBasemapVisibility,
   syncExistingRenderedLayers,
   syncBasemapVisibilityAfterStyleLoad,
+  queryVectorSourceSpecification,
+  transformQueryTileRequest,
+  getVectorLayersForSource,
+  syncRenderedLayerOrder,
+  syncLoadedMapSources,
+  runWhenMapStyleReady,
 } from "../useMapInitialization";
+import type { CatalogPmtilesLayer, QueryMvtLayer } from "@/components/map/multiLayerSources";
 
 vi.mock("maplibre-gl", () => ({
   default: {
@@ -37,7 +45,9 @@ interface MockMap {
   getLayer: ReturnType<typeof vi.fn>;
   getSource: ReturnType<typeof vi.fn>;
   getStyle: ReturnType<typeof vi.fn>;
+  isStyleLoaded: ReturnType<typeof vi.fn>;
   loaded: ReturnType<typeof vi.fn>;
+  moveLayer: ReturnType<typeof vi.fn>;
   on: ReturnType<typeof vi.fn>;
   once: ReturnType<typeof vi.fn>;
   queryRenderedFeatures: ReturnType<typeof vi.fn>;
@@ -67,7 +77,9 @@ function createMockMap(): MockMap {
         { id: "water", type: "fill", source: "openmaptiles" },
       ],
     })),
+    isStyleLoaded: vi.fn(() => false),
     loaded: vi.fn(() => false),
+    moveLayer: vi.fn(),
     on: vi.fn(),
     once: vi.fn(),
     queryRenderedFeatures: vi.fn(() => []),
@@ -79,6 +91,185 @@ function createMockMap(): MockMap {
 }
 
 describe("useMapInitialization helpers", () => {
+  it("loads data sources as soon as the style is ready without waiting for basemap tiles", () => {
+    const map = createMockMap();
+    const loadSources = vi.fn();
+    map.isStyleLoaded.mockReturnValue(true);
+    map.loaded.mockReturnValue(false);
+
+    runWhenMapStyleReady(map as maplibregl.Map, loadSources);
+
+    expect(loadSources).toHaveBeenCalledOnce();
+    expect(map.once).not.toHaveBeenCalled();
+  });
+
+  it("remembers the initial style event even while map loading APIs remain false", () => {
+    const map = createMockMap();
+    const firstCallback = vi.fn();
+    const secondCallback = vi.fn();
+    runWhenMapStyleReady(map as maplibregl.Map, firstCallback);
+    const styleListener = map.once.mock.calls[0]?.[1] as (() => void) | undefined;
+    styleListener?.();
+    map.isStyleLoaded.mockReturnValue(false);
+    map.loaded.mockReturnValue(false);
+
+    runWhenMapStyleReady(map as maplibregl.Map, secondCallback);
+
+    expect(firstCallback).toHaveBeenCalledOnce();
+    expect(secondCallback).toHaveBeenCalledOnce();
+  });
+
+  it("recovers PMTiles metadata and rendered layers when a cancelled load already added the source", async () => {
+    vi.spyOn(PMTiles.prototype, "getMetadata").mockResolvedValue({
+      vector_layers: [{ id: "stations", fields: { name: "String" } }],
+    });
+    const map = createMockMap();
+    map.getSource.mockReturnValue({});
+    const source: CatalogPmtilesLayer = {
+      kind: "catalog_pmtiles",
+      id: "amtrak",
+      name: "Amtrak",
+      label: "Amtrak",
+      descriptor: {
+        collectionSlug: "hifld",
+        datasetSlug: "amtrak-stations",
+        fileSlug: "amtrak-stations",
+        formatType: "pmtiles",
+        storageLocationId: 2,
+        version: "v1.0.0",
+        sourceId: 8,
+      },
+      pmtilesUrl: "http://localhost:8888/amtrak.pmtiles",
+      mapSourceId: "source-amtrak",
+      visible: true,
+      opacity: 0.82,
+      bounds: null,
+    };
+
+    const result = await syncLoadedMapSources({
+      map: map as maplibregl.Map,
+      protocol: null,
+      sources: [source],
+      managedSourceIds: new Set(),
+      vectorLayersBySource: {},
+      shouldContinue: () => true,
+    });
+
+    expect(result?.layers).toEqual([
+      expect.objectContaining({
+        id: "amtrak:stations",
+        sourceLayerId: "stations",
+      }),
+    ]);
+    expect(map.addSource).not.toHaveBeenCalled();
+    expect(map.addLayer).toHaveBeenCalledTimes(3);
+  });
+
+  it("identifies the catalog layer that failed during source synchronization", async () => {
+    vi.spyOn(PMTiles.prototype, "getMetadata").mockRejectedValue(new Error("PMTiles metadata unavailable"));
+    const map = createMockMap();
+    const source: CatalogPmtilesLayer = {
+      kind: "catalog_pmtiles", id: "amtrak", name: "Amtrak", label: "Amtrak",
+      descriptor: {
+        collectionSlug: "hifld", datasetSlug: "amtrak-stations", fileSlug: "amtrak-stations",
+        formatType: "pmtiles", storageLocationId: 2, version: "v1.0.0", sourceId: 8,
+      },
+      pmtilesUrl: "http://localhost:8888/amtrak.pmtiles", mapSourceId: "source-amtrak",
+      visible: true, opacity: 0.82, bounds: null,
+    };
+    await expect(syncLoadedMapSources({
+      map: map as maplibregl.Map, protocol: null, sources: [source], managedSourceIds: new Set(),
+      vectorLayersBySource: {}, shouldContinue: () => true,
+    })).rejects.toMatchObject({ sourceId: "amtrak", message: "PMTiles metadata unavailable" });
+  });
+
+  it("reorders all rendered style layers in source order without moving the basemap", () => {
+    const map = {
+      getLayer: vi.fn((id: string) => ({
+        "source-query-b-one-fill": true,
+        "source-query-b-one-line": true,
+        "source-query-a-one-fill": true,
+        "source-query-a-one-line": true,
+      })[id]),
+      moveLayer: vi.fn(),
+    };
+    const sources = [
+      { id: "query:b", mapSourceId: "source-query-b", kind: "query_mvt" },
+      { id: "query:a", mapSourceId: "source-query-a", kind: "query_mvt" },
+    ];
+    const vectorLayersBySource = {
+      "query:b": [
+        { id: "query-b:one", mapLayerBaseId: "source-query-b-one", fields: [], numericFields: [] },
+      ],
+      "query:a": [
+        { id: "query-a:one", mapLayerBaseId: "source-query-a-one", fields: [], numericFields: [] },
+      ],
+    };
+
+    syncRenderedLayerOrder(map, sources, vectorLayersBySource);
+
+    expect(map.moveLayer).toHaveBeenCalledWith("source-query-b-one-fill");
+    expect(map.moveLayer).toHaveBeenCalledWith("source-query-b-one-line");
+    expect(map.moveLayer).toHaveBeenCalledWith("source-query-a-one-fill");
+    expect(map.moveLayer).toHaveBeenCalledWith("source-query-a-one-line");
+    expect(map.moveLayer).not.toHaveBeenCalledWith("osm-base");
+  });
+  it("describes query MVT sources from server metadata without exposing tokens", () => {
+    const queryLayer: QueryMvtLayer = {
+      kind: "query_mvt",
+      id: "query:q-123",
+      name: "Query result",
+      label: "Query result",
+      queryId: "q-123",
+      sourceAliases: ["hospitals"],
+      geometryColumn: "geom",
+      tileTemplate: "https://query.example.test/api/queries/q-123/tiles/{z}/{x}/{y}.mvt",
+      sourceLayerId: "hifld",
+      scalarFields: [{ name: "beds", logicalType: "double", nullable: false, min: 1, max: 100 }],
+      bounds: null,
+      status: "ready",
+      mapSourceId: "source-query-q-123",
+      visible: true,
+      opacity: 0.82,
+    };
+
+    expect(queryVectorSourceSpecification(queryLayer)).toEqual({
+      type: "vector",
+      tiles: [queryLayer.tileTemplate],
+    });
+    expect(getVectorLayersForSource({}, queryLayer)).toEqual([
+      expect.objectContaining({
+        id: "query:q-123:hifld",
+        sourceLayerId: "hifld",
+        fields: ["beds"],
+        numericFields: [{ name: "beds", min: 1, max: 100 }],
+      }),
+    ]);
+  });
+
+  it("attaches only the private token for known query tile paths", () => {
+    const tokens = new Map([["q-123", "signed-token"]]);
+    expect(
+      transformQueryTileRequest(
+        "https://query.example.test/api/queries/q-123/tiles/4/5/6.mvt",
+        tokens,
+      ),
+    ).toEqual({
+      url: "https://query.example.test/api/queries/q-123/tiles/4/5/6.mvt",
+      headers: { "X-HIFLD-Query-Token": "signed-token" },
+    });
+    expect(transformQueryTileRequest("https://query.example.test/api/queries/q-999/tiles/4/5/6.mvt", tokens)).toEqual({
+      blocked: true,
+      queryId: "q-999",
+      reason: "unknown_query",
+    });
+    expect(transformQueryTileRequest("https://query.example.test/api/queries/q-123/pages", tokens)).toBeNull();
+    expect(transformQueryTileRequest("https://query.example.test/api/queries/q-123/tiles/4/5/6.mvt?token=secret", tokens)).toEqual({
+      url: "https://query.example.test/api/queries/q-123/tiles/4/5/6.mvt",
+      headers: { "X-HIFLD-Query-Token": "signed-token" },
+    });
+  });
+
   it("extracts vector layer metadata", () => {
     expect(
       getVectorLayers({

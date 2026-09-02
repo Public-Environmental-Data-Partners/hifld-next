@@ -75,12 +75,18 @@ export function schemaSelf(
   collectionSlug: string,
   datasetSlug: string,
   fileSlug: string,
-  opts?: { version?: string | number | null | undefined },
+  opts?: {
+    version?: string | number | null | undefined;
+    column_offset?: number | null | undefined;
+    column_limit?: number | null | undefined;
+  },
 ): string {
   const u = new URL(
     `${origin}/api/collections/${enc(collectionSlug)}/datasets/${enc(datasetSlug)}/files/${enc(fileSlug)}/schema`,
   );
   if (opts?.version != null) u.searchParams.set("version", String(opts.version));
+  if (opts?.column_offset != null) u.searchParams.set("column_offset", String(opts.column_offset));
+  if (opts?.column_limit != null) u.searchParams.set("column_limit", String(opts.column_limit));
   return u.href;
 }
 
@@ -88,7 +94,11 @@ export function schemaPath(
   collectionSlug: string,
   datasetSlug: string,
   fileSlug: string,
-  opts?: { version?: string | number | null | undefined },
+  opts?: {
+    version?: string | number | null | undefined;
+    column_offset?: number | null | undefined;
+    column_limit?: number | null | undefined;
+  },
 ): string {
   const url = new URL(schemaSelf("https://local.invalid", collectionSlug, datasetSlug, fileSlug, opts));
   return `${url.pathname}${url.search}`;

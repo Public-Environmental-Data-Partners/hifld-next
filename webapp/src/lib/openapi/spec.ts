@@ -1,5 +1,6 @@
 import { extendZodWithOpenApi, OpenAPIRegistry, OpenApiGeneratorV31 } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
+import { MAX_QUERY_SQL_BYTES } from "@/lib/query-api";
 
 extendZodWithOpenApi(z);
 
@@ -251,6 +252,10 @@ const DatasetFileSchemaResponse = z
       .passthrough(),
     versions: z.array(z.union([z.string(), z.number()])),
     selected_version: z.union([z.string(), z.number()]).nullable(),
+    total_columns: z.number().int().nonnegative().optional(),
+    column_offset: z.number().int().nonnegative().optional(),
+    column_limit: z.number().int().positive().max(50).optional(),
+    has_more: z.boolean().optional(),
     schema: z
       .object({
         version: z.union([z.string(), z.number()]).nullable(),
@@ -271,11 +276,77 @@ const DatasetFileSchemaResponse = z
           })
           .passthrough(),
         columns: z.array(ColumnSchema),
+        total_columns: z.number().int().nonnegative().optional(),
+        column_offset: z.number().int().nonnegative().optional(),
+        column_limit: z.number().int().positive().max(50).optional(),
+        has_more: z.boolean().optional(),
       })
       .nullable(),
   })
   .passthrough()
   .openapi("DatasetFileSchemaResponse");
+
+// The runtime result schema recursively models arbitrary JSON cells. Keep the
+// generated OpenAPI contract finite while still describing all response fields.
+const QuerySourceDocumentationSchema = z
+  .object({
+    alias: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,62}$/),
+    collection_id: z.number().int().positive(),
+    dataset_id: z.number().int().positive(),
+    file_id: z.number().int().positive(),
+    file_source_id: z.number().int().positive(),
+  })
+  .strict();
+const OpenApiQueryRequestSchema = z
+  .object({
+    sources: z.array(QuerySourceDocumentationSchema).min(1).max(8),
+    sql: z.string().min(1).max(MAX_QUERY_SQL_BYTES),
+    limit: z.number().int().positive().max(1000).default(100),
+    geometry_column: z.string().min(1).optional(),
+    result_crs: z.string().min(1).optional(),
+  })
+  .strict()
+  .openapi("QueryRequest");
+const OpenApiQueryPageRequestSchema = z
+  .object({
+    offset: z.number().int().nonnegative(),
+    page_size: z.number().int().positive().max(1000).default(100),
+  })
+  .strict()
+  .openapi("QueryPageRequest");
+const OpenApiQueryErrorSchema = z
+  .object({ code: z.string().min(1), message: z.string().min(1) })
+  .strict()
+  .openapi("QueryError");
+const QueryResultCellDocumentationSchema = z.union([
+  z.null(),
+  z.boolean(),
+  z.number(),
+  z.string(),
+  z.object({}).passthrough(),
+  z.array(z.object({}).passthrough()),
+]);
+const QueryResultDocumentationSchema = z
+  .object({
+    columns: z.array(z.object({ name: z.string().min(1), type: z.string().min(1), nullable: z.boolean() }).strict()),
+    rows: z.array(z.record(z.string(), QueryResultCellDocumentationSchema)),
+    offset: z.number().int().nonnegative(),
+    limit: z.number().int().positive().max(1000),
+    returned_count: z.number().int().nonnegative(),
+    has_more: z.boolean(),
+    next_offset: z.number().int().nonnegative().optional(),
+    warnings: z.array(z.string()),
+    elapsed_ms: z.number().finite().nonnegative(),
+    bytes_read: z.number().int().nonnegative(),
+    files_read: z.number().int().nonnegative(),
+    response_truncated: z.boolean(),
+    deterministic_order: z.boolean(),
+    query_id: z.string().regex(/^[A-Za-z0-9_-]{20,64}$/),
+    query_token: z.string().min(1),
+    map_configuration: z.object({}).passthrough().optional(),
+  })
+  .strict()
+  .openapi("QueryResult");
 
 const registry = new OpenAPIRegistry();
 
@@ -288,6 +359,10 @@ registry.register("DatasetByIdLinks", DatasetByIdLinks);
 registry.register("DatasetByIdResponse", DatasetByIdResponse);
 registry.register("DatasetFileResponse", DatasetFileResponse);
 registry.register("DatasetFileSchemaResponse", DatasetFileSchemaResponse);
+const OpenApiQueryRequest = registry.register("QueryRequest", OpenApiQueryRequestSchema);
+const OpenApiQueryPageRequest = registry.register("QueryPageRequest", OpenApiQueryPageRequestSchema);
+const OpenApiQueryResult = registry.register("QueryResult", QueryResultDocumentationSchema);
+const OpenApiQueryError = registry.register("QueryError", OpenApiQueryErrorSchema);
 
 registry.registerPath({
   method: "get",
@@ -502,7 +577,7 @@ registry.registerPath({
   path: "/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema",
   summary: "Dataset file schema and data dictionary",
   description:
-    "Focused schema metadata for a dataset file. Returns the best schema-capable source for the requested version, including data dictionary columns. Omit version to use the latest schema-capable version.",
+    "Focused schema metadata for a dataset file. Returns the best schema-capable source for the requested version, including data dictionary columns. Omit version to use the latest schema-capable version. Omit both column paging parameters to preserve the legacy full-column response; supplying either enables paging with a default limit of 25 and a maximum limit of 50.",
   request: {
     params: z.object({
       collectionSlug: z.string(),
@@ -511,6 +586,19 @@ registry.registerPath({
     }),
     query: z.object({
       version: z.string().optional(),
+      column_offset: z.coerce
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe("Column offset when bounded paging is requested"),
+      column_limit: z.coerce
+        .number()
+        .int()
+        .positive()
+        .max(50)
+        .optional()
+        .describe("Column page size; defaults to 25 when either paging parameter is supplied"),
     }),
   },
   responses: {
@@ -522,6 +610,7 @@ registry.registerPath({
         },
       },
     },
+    400: { description: "Invalid schema column paging", content: { "application/problem+json": { schema: Problem } } },
     404: { description: "Not found", content: { "application/problem+json": { schema: Problem } } },
   },
 });
@@ -589,6 +678,66 @@ registry.registerPath({
         },
       },
     },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/queries",
+  summary: "Create a bounded dataset query",
+  description:
+    "Starts a bounded server-side query from catalog source identities. SQL is limited to 8 KiB UTF-8 and the request body is limited to 64 KiB.",
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: OpenApiQueryRequest } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Bounded query result page",
+      content: { "application/json": { schema: OpenApiQueryResult } },
+    },
+    400: { description: "Invalid request", content: { "application/json": { schema: OpenApiQueryError } } },
+    422: {
+      description: "Query cannot be executed as requested",
+      content: { "application/json": { schema: OpenApiQueryError } },
+    },
+    504: { description: "Query timed out", content: { "application/json": { schema: OpenApiQueryError } } },
+    503: { description: "Query service unavailable", content: { "application/json": { schema: OpenApiQueryError } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/queries/{query_id}/pages",
+  summary: "Fetch a bounded query page",
+  description:
+    "Re-executes one bounded query page. The opaque query_id path value must match the signed token sent in X-HIFLD-Query-Token.",
+  request: {
+    params: z.object({
+      query_id: z.string().regex(/^[A-Za-z0-9_-]{20,64}$/),
+    }),
+    headers: z.object({
+      "X-HIFLD-Query-Token": z.string().min(1),
+    }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: OpenApiQueryPageRequest } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Bounded query result page",
+      content: { "application/json": { schema: OpenApiQueryResult } },
+    },
+    400: { description: "Invalid request", content: { "application/json": { schema: OpenApiQueryError } } },
+    422: {
+      description: "Query cannot be executed as requested",
+      content: { "application/json": { schema: OpenApiQueryError } },
+    },
+    504: { description: "Query timed out", content: { "application/json": { schema: OpenApiQueryError } } },
+    503: { description: "Query service unavailable", content: { "application/json": { schema: OpenApiQueryError } } },
   },
 });
 
