@@ -2,6 +2,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "@hifld/map-ui/styles.css";
 import {
   ESRI_WORLD_IMAGERY_TILE_URL,
+  isSelectionDrag,
   OPENFREEMAP_BRIGHT_STYLE_URL,
   type SelectionBoxFeature,
   selectionBoxFeature,
@@ -870,8 +871,17 @@ export function MapView({
         const start = selectionStartRef.current;
         const startLngLat = selectionStartLngLatRef.current;
         if (!start) return;
+        const end = { x: event.point.x, y: event.point.y };
         selectionStartRef.current = null;
         selectionStartLngLatRef.current = null;
+        map.dragPan.enable();
+        setMapSelectionCursor(map, selectionActiveRef.current);
+        if (!isSelectionDrag(start, end)) {
+          setSelectionBoxFeature(map, null);
+          setSelectionBounds(null);
+          setHasSelectionBox(false);
+          return;
+        }
         const endLngLat = { lng: event.lngLat.lng, lat: event.lngLat.lat };
         if (startLngLat) {
           setSelectionBoxFeature(
@@ -879,16 +889,11 @@ export function MapView({
             selectionBoxFeature(startLngLat, endLngLat),
           );
         }
-        map.dragPan.enable();
-        setMapSelectionCursor(map, selectionActiveRef.current);
         suppressNextClickSelectionRef.current = true;
         window.setTimeout(() => {
           suppressNextClickSelectionRef.current = false;
         }, 0);
-        const bounds = selectionScreenBounds(start, {
-          x: event.point.x,
-          y: event.point.y,
-        });
+        const bounds = selectionScreenBounds(start, end);
         const rendered = map.queryRenderedFeatures(bounds, {
           layers: allQueryRenderLayerIds(parsed.data),
         });

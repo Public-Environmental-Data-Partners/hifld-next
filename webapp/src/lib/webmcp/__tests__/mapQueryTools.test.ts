@@ -1,6 +1,7 @@
 import { render, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { QueryApiError } from "@/lib/query-api";
 import { useMapWebMcpTools, type MapWebMcpState } from "../mapTools";
 import { createModelContextFake, installModelContextFake } from "../modelContextFake";
 import { executeQueryPageTool, executeQueryTool, useQueryWebMcpTools } from "../queryTools";
@@ -176,6 +177,54 @@ describe("query WebMCP tools", () => {
     expect(result.ok).toBe(true);
     expect(JSON.stringify(result)).not.toContain(token);
     expect(page).toHaveBeenCalledWith(queryId, { offset: 100, page_size: 100 }, expect.any(AbortSignal));
+  });
+
+  it("does not report catalog failures as query capacity", async () => {
+    const execute = vi.fn().mockRejectedValue(
+      new QueryApiError(503, "catalog_unavailable", "The catalog request could not be completed"),
+    );
+
+    const result = await executeQueryTool(
+      {
+        sources: [{ alias: "hospitals", collection_id: 1, dataset_id: 2, file_id: 3, file_source_id: 4 }],
+        sql: "SELECT name FROM hospitals",
+      },
+      new AbortController().signal,
+      execute,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "upstream_unavailable",
+        message: "The query service is temporarily unavailable.",
+        retryable: true,
+      },
+    });
+  });
+
+  it("reports an unavailable worker as query capacity", async () => {
+    const execute = vi.fn().mockRejectedValue(
+      new QueryApiError(503, "worker_unavailable", "No query worker is available"),
+    );
+
+    const result = await executeQueryTool(
+      {
+        sources: [{ alias: "hospitals", collection_id: 1, dataset_id: 2, file_id: 3, file_source_id: 4 }],
+        sql: "SELECT name FROM hospitals",
+      },
+      new AbortController().signal,
+      execute,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "query_capacity",
+        message: "The query service is temporarily at capacity.",
+        retryable: true,
+      },
+    });
   });
 });
 

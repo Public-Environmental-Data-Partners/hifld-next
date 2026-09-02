@@ -10,6 +10,20 @@ vi.mock("maplibre-gl", () => ({
 }));
 
 describe("useMapWorkspaceCommands", () => {
+  it("fits known bounds once the style is ready even while map tiles are loading", () => {
+    const map = {
+      loaded: () => false,
+      isStyleLoaded: () => true,
+      once: vi.fn(),
+      fitBounds: vi.fn(),
+    };
+
+    fitMapWhenReady(map, [-80, 37, -70, 44]);
+
+    expect(map.fitBounds).toHaveBeenCalledWith([-80, 37, -70, 44], { padding: 48, duration: 0 });
+    expect(map.once).not.toHaveBeenCalled();
+  });
+
   it("resolves missing query bounds before framing a layer target", async () => {
     const layer = buildQueryMvtLayer({
       queryId: "query_12345678901234567890",
@@ -27,18 +41,18 @@ describe("useMapWorkspaceCommands", () => {
   });
 
   it("waits for map readiness before fitting initial or first-layer bounds", () => {
-    let loadListener: (() => void) | undefined;
+    let styleLoadListener: (() => void) | undefined;
     const map = {
-      loaded: () => false,
-      once: (event: "load", listener: () => void) => {
-        if (event === "load") loadListener = listener;
+      isStyleLoaded: () => false,
+      once: (event: "style.load", listener: () => void) => {
+        if (event === "style.load") styleLoadListener = listener;
       },
       fitBounds: vi.fn(),
     };
 
     fitMapWhenReady(map, [-78, 38, -76, 40]);
     expect(map.fitBounds).not.toHaveBeenCalled();
-    loadListener?.();
+    styleLoadListener?.();
     expect(map.fitBounds).toHaveBeenCalledWith([-78, 38, -76, 40], { padding: 48, duration: 0 });
   });
 

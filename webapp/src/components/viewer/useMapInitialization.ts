@@ -1,6 +1,7 @@
 import type { BasemapMode } from "@hifld/map-core";
 import {
   ESRI_WORLD_IMAGERY_TILE_URL,
+  isSelectionDrag,
   selectionBoxFeature as mapCoreSelectionBoxFeature,
   OPENFREEMAP_BRIGHT_STYLE_URL,
 } from "@hifld/map-core";
@@ -292,6 +293,7 @@ export function handleMapClick({
   interactiveLayerIds: string[];
   onPinnedPopup: ((info: HoverInfo | null) => void) | undefined;
 }): void {
+  selectionBoxSource(map)?.setData(selectionBoxFeatureCollection(null));
   if (!onPinnedPopup || interactiveLayerIds.length === 0) {
     return;
   }
@@ -476,6 +478,8 @@ function addRenderedLayersForVectorLayer(
         "fill-opacity": source.opacity,
       },
     });
+  } else {
+    map.setLayoutProperty(fillId, "visibility", visibility);
   }
 
   if (!map.getLayer(lineId)) {
@@ -494,6 +498,8 @@ function addRenderedLayersForVectorLayer(
         "line-width": DEFAULT_STYLE.lineWidth,
       },
     });
+  } else {
+    map.setLayoutProperty(lineId, "visibility", visibility);
   }
 
   if (!map.getLayer(circleId)) {
@@ -512,6 +518,8 @@ function addRenderedLayersForVectorLayer(
         "circle-radius": DEFAULT_STYLE.radius,
       },
     });
+  } else {
+    map.setLayoutProperty(circleId, "visibility", visibility);
   }
 
   return source.visible ? [fillId, lineId, circleId] : [];
@@ -1066,13 +1074,18 @@ export function useMultiLayerMapInitialization(
       const start = boxSelectionStartRef.current;
       const startLngLat = boxSelectionStartLngLatRef.current;
       if (!start) return;
+      const end = { x: event.point.x, y: event.point.y };
       boxSelectionStartRef.current = null;
       boxSelectionStartLngLatRef.current = null;
+      map.dragPan.enable();
+      updateCursorForCurrentSelectionState();
+      if (!isSelectionDrag(start, end)) {
+        setSelectionBoxFeature(map, null);
+        return;
+      }
       if (startLngLat) {
         setSelectionBoxFeature(map, selectionBoxFeature(startLngLat, { lng: event.lngLat.lng, lat: event.lngLat.lat }));
       }
-      map.dragPan.enable();
-      updateCursorForCurrentSelectionState();
       suppressNextClickSelectionRef.current = true;
       window.setTimeout(() => {
         suppressNextClickSelectionRef.current = false;
@@ -1080,7 +1093,7 @@ export function useMultiLayerMapInitialization(
       const selectedFeatures = queryRenderedBoxFeatures({
         map,
         start,
-        end: { x: event.point.x, y: event.point.y },
+        end,
         interactiveLayerIds: interactiveLayerIds.current,
       });
       onFeatureSelectionRef.current?.(selectedFeatures, "replace");

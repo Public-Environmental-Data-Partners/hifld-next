@@ -34,7 +34,10 @@ export function QueryResultPanel({
   const columns = useMemo(() => page.columns.map((column) => column.name), [page.columns]);
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col border-t" aria-label="Query results">
+    <section
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-t"
+      aria-label="Query results"
+    >
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div className="min-w-0">
           <h2 className="text-sm font-medium">Query results</h2>
@@ -57,7 +60,7 @@ export function QueryResultPanel({
         </div>
       </div>
       {result.errorMessage && <p className="px-4 pb-3 text-sm text-destructive">{result.errorMessage}</p>}
-      <div className="flex min-h-48 flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <SelectedFeaturesTable
           features={rows}
           columns={columns}
@@ -76,7 +79,7 @@ export function QueryResultPanel({
               className="h-11 pl-10 sm:h-8"
             />
           )}
-          className="min-w-0 shrink-0 overflow-x-auto sm:min-h-0 sm:flex-1 sm:overflow-auto sm:overscroll-contain"
+          className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain"
           tableClassName="w-full min-w-[640px] text-sm"
           headerClassName="sticky top-0 z-10 bg-background"
           headerRowClassName="border-b text-left text-xs text-muted-foreground"

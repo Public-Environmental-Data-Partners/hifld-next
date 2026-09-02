@@ -13,6 +13,7 @@ def test_development_settings_need_no_secrets_or_storage_configuration(tmp_path:
     assert len(settings.query_token_secret.get_secret_value()) >= 32
     assert settings.duckdb_temp_directory == str(tmp_path / "spill")
     assert settings.duckdb_extension_directory == str(tmp_path / "extensions")
+    assert settings.webapp_origins == ("http://127.0.0.1:3000", "http://localhost:3000")
 
 
 def test_development_settings_use_the_configured_catalog(tmp_path: Path) -> None:

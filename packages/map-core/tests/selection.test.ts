@@ -8,6 +8,7 @@ import {
   getBasemapControlLabel,
   getSelectionControlAriaLabel,
   getSelectionControlLabel,
+  isSelectionDrag,
   selectionBoxFeature,
   selectionScreenBounds,
 } from "../src/index";
@@ -38,6 +39,12 @@ describe("map selection helpers", () => {
       [300, 200],
     ]);
     expect(MAX_SELECTED_FEATURES).toBe(100);
+  });
+
+  it("distinguishes a click from a selection drag", () => {
+    expect(isSelectionDrag({ x: 30, y: 40 }, { x: 30, y: 40 })).toBe(false);
+    expect(isSelectionDrag({ x: 30, y: 40 }, { x: 33, y: 37 })).toBe(false);
+    expect(isSelectionDrag({ x: 30, y: 40 }, { x: 34, y: 40 })).toBe(true);
   });
 
   it("preserves basemap constants and current control labels", () => {

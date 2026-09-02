@@ -846,6 +846,38 @@ describe("MapView", () => {
     expect(updateModelContext).toHaveBeenCalledOnce();
   });
 
+  it("lets a click clear highlights while region highlighting is active", () => {
+    render(<MapView {...baseProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Highlight a region" }));
+    act(() => {
+      mapEvents.mousedown?.({
+        point: { x: 30, y: 40 },
+        lngLat: { lng: -77, lat: 39 },
+        originalEvent: { shiftKey: false },
+        preventDefault: vi.fn(),
+      });
+      mapEvents.mouseup?.({
+        point: { x: 30, y: 40 },
+        lngLat: { lng: -77, lat: 39 },
+      });
+      mapEvents.click?.({ point: { x: 30, y: 40 } });
+    });
+
+    expect(mapQueryRenderedFeatures).toHaveBeenLastCalledWith(
+      { x: 30, y: 40 },
+      {
+        layers: expect.arrayContaining([
+          "hifld-query-roadsquery1234567890ABCD-points",
+        ]),
+      },
+    );
+    expect(mapSetData).toHaveBeenLastCalledWith({
+      type: "FeatureCollection",
+      features: [],
+    });
+  });
+
   it("uses window Shift keys to activate the region control and selection cursor", () => {
     render(<MapView {...baseProps} />);
 

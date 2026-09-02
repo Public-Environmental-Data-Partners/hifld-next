@@ -30,6 +30,10 @@ def development_settings(
             "DATASET_MCP_QUERY_TOKEN_SECRET", _LOCAL_QUERY_TOKEN_SECRET
         ),
         "public_origin": environment.get("DATASET_MCP_PUBLIC_ORIGIN", "http://127.0.0.1:8001"),
+        "webapp_origins": environment.get(
+            "DATASET_MCP_WEBAPP_ORIGINS",
+            "http://127.0.0.1:3000,http://localhost:3000",
+        ),
         "duckdb_temp_directory": str(runtime_root / "spill"),
         "duckdb_extension_directory": str(runtime_root / "extensions"),
     }

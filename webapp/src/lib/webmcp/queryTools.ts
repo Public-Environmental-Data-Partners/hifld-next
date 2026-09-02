@@ -113,7 +113,9 @@ function queryFailure(error: Error): WebMcpResult<WebMcpJsonObject> {
     }
     if (error.status === 404) return failure("not_found", "The requested query was not found.");
     if (error.status === 429) return failure("rate_limited", "The query service is rate limited.");
-    if (error.status === 503) return failure("query_capacity", "The query service is temporarily at capacity.");
+    if (error.status === 503 && error.code === "worker_unavailable") {
+      return failure("query_capacity", "The query service is temporarily at capacity.");
+    }
   }
   return failure("upstream_unavailable", "The query service is temporarily unavailable.");
 }

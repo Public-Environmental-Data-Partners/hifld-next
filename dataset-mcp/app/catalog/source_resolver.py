@@ -1,6 +1,7 @@
 """Fail-closed resolution of catalog source identities into trusted paths."""
 
 from collections.abc import Iterable
+from urllib.parse import urlsplit
 
 from app.catalog.client import CatalogClient, CatalogClientError
 from app.catalog.models import (
@@ -116,4 +117,6 @@ def _unique_non_empty(values: Iterable[str | None]) -> list[str]:
 
 
 def _contains_glob(value: str) -> bool:
-    return any(character in value for character in "*?[")
+    parsed = urlsplit(value)
+    candidate = parsed.path if parsed.scheme and parsed.netloc else value
+    return any(character in candidate for character in "*?[")

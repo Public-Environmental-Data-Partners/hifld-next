@@ -616,6 +616,8 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const pinnedPopupElementRef = useRef<HTMLDivElement>(null);
   const settingsPanelRef = useRef<PanelImperativeHandle | null>(null);
   const dataPanelRef = useRef<PanelImperativeHandle | null>(null);
+  const dataPanelOpenRef = useRef(false);
+  const dataPanelHasOpenedRef = useRef(false);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRequestIdRef = useRef(0);
   const datasetDetailsRequestIdRef = useRef(0);
@@ -1108,14 +1110,23 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   }, [loadedLayers, queryResult, selectedFeatures]);
 
   const hasDataPanel = queryResult !== null || selectedFeatures.length > 0;
+  const dataPanelShouldBeOpen = hasDataPanel && dataPanelState.isOpen;
   useEffect(() => {
-    if (!hasDataPanel) return;
-    if (dataPanelState.isOpen) {
-      dataPanelRef.current?.expand();
+    if (dataPanelOpenRef.current === dataPanelShouldBeOpen) return;
+    dataPanelOpenRef.current = dataPanelShouldBeOpen;
+    const panel = dataPanelRef.current;
+    if (!panel) return;
+    if (dataPanelShouldBeOpen) {
+      if (dataPanelHasOpenedRef.current) {
+        panel.expand();
+      } else {
+        panel.resize(isMobileMapLayout ? "62%" : MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE);
+        dataPanelHasOpenedRef.current = true;
+      }
     } else {
-      dataPanelRef.current?.collapse();
+      panel.collapse();
     }
-  }, [dataPanelState.isOpen, hasDataPanel]);
+  }, [dataPanelShouldBeOpen, isMobileMapLayout]);
 
   useEffect(() => {
     mapRef.current?.resize();
@@ -1547,9 +1558,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const mapWorkspaceContent = (
     <ResizablePanelGroup orientation="vertical" className="min-h-0">
       <ResizablePanel
-        defaultSize={
-          hasDataPanel && dataPanelState.isOpen ? (isMobileMapLayout ? "38%" : MAP_CANVAS_DESKTOP_DEFAULT_SIZE) : "100%"
-        }
+        defaultSize="100%"
         minSize={isMobileMapLayout ? "24%" : "40%"}
         className="min-h-0 overflow-hidden"
         onResize={() => mapRef.current?.resize()}
@@ -1591,62 +1600,61 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
           )}
         </div>
       </ResizablePanel>
-      {hasDataPanel && (
-        <>
-          {dataPanelState.isOpen && <ResizableHandle withHandle />}
-          <ResizablePanel
-            defaultSize={
-              dataPanelState.isOpen ? (isMobileMapLayout ? "62%" : MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE) : "0%"
+      <ResizableHandle
+        withHandle
+        disabled={!dataPanelShouldBeOpen}
+        className={dataPanelShouldBeOpen ? undefined : "hidden"}
+      />
+      <ResizablePanel
+        id="map-data-panel"
+        defaultSize="0%"
+        minSize={isMobileMapLayout ? "42%" : "18%"}
+        collapsible
+        collapsedSize="0%"
+        panelRef={dataPanelRef}
+        className="min-h-0 overflow-hidden"
+        onResize={() => mapRef.current?.resize()}
+      >
+        {dataPanelShouldBeOpen && dataPanelState.mode === "selected" && selectedFeatures.length > 0 ? (
+          <FeatureTablePanel
+            features={selectedFeatures}
+            highlightedFeatureId={highlightedFeatureId}
+            wasSelectionCapped={wasSelectionCapped}
+            s2Level={s2Level}
+            onS2LevelChange={setS2Level}
+            onFeatureClick={zoomToSelectedFeature}
+            onClear={clearSelectedFeatures}
+            panelModeControls={
+              queryResult ? (
+                <MapDataPanelModeControls
+                  mode={dataPanelState.mode}
+                  onModeChange={(mode) =>
+                    dispatchDataPanel({ type: mode === "query" ? "show_query" : "show_selected" })
+                  }
+                />
+              ) : undefined
             }
-            minSize={isMobileMapLayout ? "42%" : "18%"}
-            collapsible
-            collapsedSize="0%"
-            panelRef={dataPanelRef}
-            className="min-h-0 overflow-hidden"
-            onResize={() => mapRef.current?.resize()}
-          >
-            {dataPanelState.isOpen && dataPanelState.mode === "selected" && selectedFeatures.length > 0 ? (
-              <FeatureTablePanel
-                features={selectedFeatures}
-                highlightedFeatureId={highlightedFeatureId}
-                wasSelectionCapped={wasSelectionCapped}
-                s2Level={s2Level}
-                onS2LevelChange={setS2Level}
-                onFeatureClick={zoomToSelectedFeature}
-                onClear={clearSelectedFeatures}
-                panelModeControls={
-                  queryResult ? (
-                    <MapDataPanelModeControls
-                      mode={dataPanelState.mode}
-                      onModeChange={(mode) =>
-                        dispatchDataPanel({ type: mode === "query" ? "show_query" : "show_selected" })
-                      }
-                    />
-                  ) : undefined
-                }
-                onCollapse={() => dispatchDataPanel({ type: "collapse" })}
-              />
-            ) : dataPanelState.isOpen && queryResult ? (
-              <QueryResultPanel
-                result={queryResult}
-                onLoadMore={loadNextQueryPage}
-                isLoadingMore={isLoadingQueryPage}
-                panelModeControls={
-                  selectedFeatures.length > 0 ? (
-                    <MapDataPanelModeControls
-                      mode={dataPanelState.mode}
-                      onModeChange={(mode) =>
-                        dispatchDataPanel({ type: mode === "query" ? "show_query" : "show_selected" })
-                      }
-                    />
-                  ) : undefined
-                }
-                onCollapse={() => dispatchDataPanel({ type: "collapse" })}
-              />
-            ) : null}
-          </ResizablePanel>
-        </>
-      )}
+            onCollapse={() => dispatchDataPanel({ type: "collapse" })}
+          />
+        ) : dataPanelShouldBeOpen && queryResult ? (
+          <QueryResultPanel
+            result={queryResult}
+            onLoadMore={loadNextQueryPage}
+            isLoadingMore={isLoadingQueryPage}
+            panelModeControls={
+              selectedFeatures.length > 0 ? (
+                <MapDataPanelModeControls
+                  mode={dataPanelState.mode}
+                  onModeChange={(mode) =>
+                    dispatchDataPanel({ type: mode === "query" ? "show_query" : "show_selected" })
+                  }
+                />
+              ) : undefined
+            }
+            onCollapse={() => dispatchDataPanel({ type: "collapse" })}
+          />
+        ) : null}
+      </ResizablePanel>
     </ResizablePanelGroup>
   );
 

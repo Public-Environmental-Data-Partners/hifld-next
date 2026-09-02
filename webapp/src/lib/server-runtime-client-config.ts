@@ -1,6 +1,6 @@
 import { DEFAULT_POSTHOG_HOST, type RuntimeClientConfig } from "./runtime-client-config";
 
-interface RuntimeClientConfigEnv {
+export interface RuntimeClientConfigEnv {
   PUBLIC_DATASET_API_URL?: string | undefined;
   PUBLIC_POSTHOG_KEY?: string | undefined;
   PUBLIC_POSTHOG_HOST?: string | undefined;
@@ -31,4 +31,8 @@ export function runtimeClientConfigFromEnv(env: RuntimeClientConfigEnv): Runtime
     runtimeConfig.posthogKey = posthogKey;
   }
   return runtimeConfig;
+}
+
+export function runtimeClientConfigScriptFromEnv(env: RuntimeClientConfigEnv): string {
+  return `window.__HIFLD_CLIENT_CONFIG__=${JSON.stringify(runtimeClientConfigFromEnv(env))};`;
 }

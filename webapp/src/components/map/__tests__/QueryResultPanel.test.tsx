@@ -37,6 +37,16 @@ describe("QueryResultPanel", () => {
   it("renders query rows through the shared selected-features table", () => {
     render(<QueryResultPanel result={result} />);
 
+    expect(screen.getByRole("region", { name: "Query results" })).toHaveClass(
+      "h-full",
+      "min-w-0",
+      "overflow-hidden",
+    );
+    expect(screen.getByTestId("selected-features-scroll")).toHaveClass(
+      "min-h-0",
+      "flex-1",
+      "overflow-auto",
+    );
     expect(screen.getByRole("table", { name: "Query results" })).toHaveAttribute(
       "data-slot",
       "selected-features-table",
