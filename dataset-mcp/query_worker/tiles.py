@@ -27,30 +27,6 @@ MAX_MVT_FEATURE_ID = 2_147_483_647
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _CRS = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,31}:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-_SCALAR_TYPES = (
-    "BIGINT",
-    "BOOLEAN",
-    "DATE",
-    "DECIMAL",
-    "DOUBLE",
-    "ENUM",
-    "FLOAT",
-    "HUGEINT",
-    "INTEGER",
-    "INTERVAL",
-    "SMALLINT",
-    "TIME",
-    "TIMESTAMP",
-    "TINYINT",
-    "UBIGINT",
-    "UHUGEINT",
-    "UINTEGER",
-    "USMALLINT",
-    "UTINYINT",
-    "UUID",
-    "VARCHAR",
-)
-
 type TileCell = None | bool | int | float | str | bytes | bytearray | memoryview
 type TileRow = tuple[TileCell, ...]
 
@@ -104,12 +80,41 @@ def _bbox_bounds_predicate(bbox_identifier: str) -> str:
     )
 
 
-def _is_scalar(logical_type: str) -> bool:
+def _mvt_property_type(logical_type: str) -> str | None:
     normalized = logical_type.upper().strip()
-    return normalized.startswith(_SCALAR_TYPES)
+    if normalized.startswith("BOOLEAN"):
+        return "BOOLEAN"
+    if normalized.startswith("FLOAT"):
+        return "FLOAT"
+    if normalized.startswith("DOUBLE"):
+        return "DOUBLE"
+    if normalized.startswith("DECIMAL"):
+        return "DOUBLE"
+    if normalized.startswith(("TINYINT", "SMALLINT", "INTEGER")):
+        return "INTEGER"
+    if normalized.startswith(("UTINYINT", "USMALLINT", "UINTEGER", "BIGINT")):
+        return "BIGINT"
+    if normalized.startswith(
+        (
+            "UBIGINT",
+            "HUGEINT",
+            "UHUGEINT",
+            "VARCHAR",
+            "ENUM",
+            "UUID",
+            "DATE",
+            "TIME",
+            "TIMESTAMP",
+            "INTERVAL",
+        )
+    ):
+        return "VARCHAR"
+    return None
 
 
-def _properties(columns: tuple[tuple[str, str], ...], geometry_column: str) -> tuple[str, ...]:
+def _properties(
+    columns: tuple[tuple[str, str], ...], geometry_column: str
+) -> tuple[tuple[str, str], ...]:
     internal_columns = {
         geometry_column,
         "bbox",
@@ -119,11 +124,12 @@ def _properties(columns: tuple[tuple[str, str], ...], geometry_column: str) -> t
         MVT_CENTROID_LNG_COLUMN,
         MVT_CENTROID_LAT_COLUMN,
     }
-    return tuple(
-        name
-        for name, logical_type in columns
-        if name not in internal_columns and _is_scalar(logical_type)
-    )
+    properties: list[tuple[str, str]] = []
+    for name, logical_type in columns:
+        mvt_type = _mvt_property_type(logical_type)
+        if name not in internal_columns and mvt_type is not None:
+            properties.append((name, mvt_type))
+    return tuple(properties)
 
 
 def _has_bbox(columns: tuple[tuple[str, str], ...]) -> bool:
@@ -204,8 +210,12 @@ def build_tile_sql(
         raise TileConfigurationError("geometry column is not present in the query result")
 
     properties = _properties(columns, request.geometry_column)
-    selected_properties = ", ".join(_quote_identifier(name) for name in properties)
-    hash_properties = ", ".join(_quote_identifier(name) for name in properties)
+    candidate_properties = ", ".join(
+        f"CAST({_quote_identifier(name)} AS {mvt_type}) AS {_quote_identifier(name)}"
+        for name, mvt_type in properties
+    )
+    selected_properties = ", ".join(_quote_identifier(name) for name, _ in properties)
+    hash_properties = ", ".join(_quote_identifier(name) for name, _ in properties)
     hash_separator = ", " if hash_properties else ""
     predicates: list[str] = []
     if _has_bbox(columns):
@@ -219,8 +229,8 @@ def build_tile_sql(
         y=request.y,
         result_crs=crs,
         validated_query=validated_query_sql,
-        candidate_properties=selected_properties,
-        candidate_separator="," if selected_properties else "",
+        candidate_properties=candidate_properties,
+        candidate_separator="," if candidate_properties else "",
         geometry_column=geometry,
         viewport_predicate=viewport_predicate,
         candidate_limit=request.feature_cap + 1,
