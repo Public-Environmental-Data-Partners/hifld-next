@@ -32,11 +32,10 @@ const config = defineConfig(({ mode }) => ({
   },
   plugins: [
     runtimeClientConfigDevPlugin(),
-    devtools(),
-    nitro(),
+    ...(mode === "test" ? [] : [devtools(), nitro()]),
     // this is the plugin that enables path aliases
     viteTsConfigPaths({
-      projects: ["./tsconfig.json"],
+      projects: [fileURLToPath(new URL("./tsconfig.json", import.meta.url))],
     }),
     tailwindcss(),
     // Route-module behavior tests use Vitest's normal React module graph.
