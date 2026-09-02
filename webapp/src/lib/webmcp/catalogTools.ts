@@ -1,13 +1,6 @@
 import { useCallback } from "react";
 import { z } from "zod";
-import type {
-  Collection,
-  ColumnSchema,
-  Dataset,
-  DatasetTags,
-  DatasetWithUrls,
-  SpatialDatasetFileMetadata,
-} from "@/lib/api-client";
+import type { Collection, ColumnSchema, DatasetTags, SpatialDatasetFileMetadata } from "@/lib/api-client";
 import {
   type CatalogSchemaResponseInput,
   shapeDatasetFileResponse,
@@ -279,11 +272,30 @@ const datasetSchema = z
     formats: z.array(formatSchema).optional(),
   })
   .strict();
+const datasetSummaryResponseSchema = z
+  .object({
+    id: z.number().int().positive(),
+    slug: z.string().min(1),
+    name: z.string(),
+    tags: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(),
+    collection_id: z.number().int().positive().optional(),
+  })
+  .strip();
+const datasetFileSummaryResponseSchema = z
+  .object({
+    id: z.number().int().positive(),
+    slug: z.string().min(1),
+    name: z.string(),
+  })
+  .strip();
+const datasetDetailResponseSchema = datasetSummaryResponseSchema
+  .extend({ files: z.array(datasetFileSummaryResponseSchema).optional() })
+  .strip();
 const collectionPageResponseSchema = z
   .object({
     links: z.record(z.string(), z.string()).optional(),
     collection: collectionSchema,
-    datasets: z.array(datasetSchema),
+    datasets: z.array(datasetSummaryResponseSchema),
     total: z.number().int().nonnegative(),
     limit: z.number().int().positive(),
     offset: z.number().int().nonnegative(),
@@ -294,9 +306,13 @@ const tagsResponseSchema = z
     links: z.record(z.string(), z.string()).optional(),
     tags: z.record(z.string(), z.union([z.string(), z.array(z.string())])),
   })
-  .strict();
+  .strip();
 const datasetResponseSchema = z
-  .object({ links: z.record(z.string(), z.string()).optional(), collection: collectionSchema, dataset: datasetSchema })
+  .object({
+    links: z.record(z.string(), z.string()).optional(),
+    collection: collectionSchema,
+    dataset: datasetDetailResponseSchema,
+  })
   .strict();
 
 const schemaResponseSchema = z
@@ -404,7 +420,7 @@ function tagsSummary(tags: DatasetTags | undefined): { [key: string]: WebMcpJson
   return result;
 }
 
-function datasetSummary(dataset: Dataset | DatasetWithUrls, collectionSlug: string): DatasetSummary {
+function datasetSummary(dataset: z.infer<typeof datasetSummaryResponseSchema>, collectionSlug: string): DatasetSummary {
   return {
     id: dataset.id,
     slug: dataset.slug,

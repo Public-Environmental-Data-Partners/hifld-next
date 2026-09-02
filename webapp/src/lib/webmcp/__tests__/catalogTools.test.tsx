@@ -12,6 +12,17 @@ const collection = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
+const dataset = {
+  id: 2,
+  slug: "roads",
+  name: "Roads",
+  description: "Road network",
+  collection_id: 1,
+  tags: { geometry_type: "LineString" },
+  created_at: collection.created_at,
+  updated_at: collection.updated_at,
+};
+
 describe("global catalog WebMCP tools", () => {
   it("registers exactly six catalog tools", async () => {
     const fake = createModelContextFake();
@@ -76,6 +87,96 @@ describe("global catalog WebMCP tools", () => {
     expect(applySearch).toHaveBeenCalledWith("hifld", {
       query: "roads",
       tag_filters: JSON.stringify({ geometry_type: "LineString" }),
+    });
+  });
+
+  it("accepts linked datasets returned by the collection search route", async () => {
+    const fake = createModelContextFake();
+    installModelContextFake(fake);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          links: { self: "/api/collections/hifld" },
+          collection,
+          datasets: [{ ...dataset, links: { self: "/api/collections/hifld/datasets/roads" } }],
+          total: 1,
+          limit: 20,
+          offset: 0,
+        }),
+      ),
+    );
+    render(<CatalogTools applySearch={vi.fn(async () => undefined)} enabled />);
+    await waitFor(() => expect(fake.toolNames()).toHaveLength(6));
+
+    await expect(fake.execute("search_datasets", { collection: "hifld", query: "roads" })).resolves.toMatchObject({
+      ok: true,
+      data: { datasets: [{ id: 2, slug: "roads", name: "Roads" }] },
+    });
+  });
+
+  it("accepts collection metadata included by the tags route", async () => {
+    const fake = createModelContextFake();
+    installModelContextFake(fake);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string | URL | Request) => {
+        if (String(path).endsWith("/datasets/tags")) {
+          return Response.json({
+            links: { self: "/api/collections/hifld/datasets/tags" },
+            collection: { id: collection.id, slug: collection.slug, name: collection.name },
+            tags: { geometry_type: ["LineString"] },
+          });
+        }
+        return Response.json({ collection, datasets: [], total: 0, limit: 20, offset: 0 });
+      }),
+    );
+    render(<CatalogTools applySearch={vi.fn(async () => undefined)} enabled />);
+    await waitFor(() => expect(fake.toolNames()).toHaveLength(6));
+
+    await expect(fake.execute("get_collection", { slug: "hifld" })).resolves.toMatchObject({
+      ok: true,
+      data: { collection: { slug: "hifld" }, tags: { geometry_type: ["LineString"] } },
+    });
+  });
+
+  it("summarizes dataset files without validating unused detail fields", async () => {
+    const fake = createModelContextFake();
+    installModelContextFake(fake);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          links: { self: "/api/collections/hifld/datasets/roads" },
+          collection,
+          dataset: {
+            ...dataset,
+            files: [
+              {
+                id: 4,
+                dataset_id: dataset.id,
+                slug: "roads",
+                name: "Roads",
+                description: null,
+                layer_name: null,
+                source_file_path: null,
+                file_metadata: null,
+                created_at: collection.created_at,
+                updated_at: collection.updated_at,
+                formats: [{ format_count: 4 }],
+                links: { self: "/api/collections/hifld/datasets/roads/files/roads" },
+              },
+            ],
+          },
+        }),
+      ),
+    );
+    render(<CatalogTools applySearch={vi.fn(async () => undefined)} enabled />);
+    await waitFor(() => expect(fake.toolNames()).toHaveLength(6));
+
+    await expect(fake.execute("get_dataset", { collection: "hifld", dataset: "roads" })).resolves.toMatchObject({
+      ok: true,
+      data: { files: [{ id: 4, slug: "roads", name: "Roads" }] },
     });
   });
 
