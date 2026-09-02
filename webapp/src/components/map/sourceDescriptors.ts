@@ -69,6 +69,26 @@ export function findSourceForDescriptor(file: DatasetFile, descriptor: SourceDes
   return source ?? null;
 }
 
+export function findPmtilesSourceForCatalogSource(file: DatasetFile, sourceId: number): DatasetSource | null {
+  const requestedSource = file.formats?.flatMap((entry) => entry.sources).find((source) => source.id === sourceId);
+  const pmtiles = file.formats?.find((entry) => entry.format.format_type === "pmtiles");
+  if (!requestedSource || !pmtiles) return null;
+
+  const directSource = pmtiles.sources.find((source) => source.id === sourceId);
+  if (directSource) return directSource;
+
+  const requestedLocationId = requestedSource.storage_location?.id;
+  if (requestedLocationId === undefined) return null;
+  const requestedVersion = String(requestedSource.version ?? requestedSource.location.version ?? "1");
+  return (
+    pmtiles.sources.find(
+      (source) =>
+        source.storage_location?.id === requestedLocationId &&
+        String(source.version ?? source.location.version ?? "1") === requestedVersion,
+    ) ?? null
+  );
+}
+
 export function firstSourceDescriptorForFormat({
   collectionSlug,
   datasetSlug,

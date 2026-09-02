@@ -4,6 +4,7 @@ import type { DatasetFile, DatasetFormat, DatasetSource } from "@/lib/api-client
 import {
   decodeSourceDescriptor,
   encodeSourceDescriptor,
+  findPmtilesSourceForCatalogSource,
   findSourceForDescriptor,
   firstSourceDescriptorForFormat,
   sourceDescriptorId,
@@ -104,5 +105,17 @@ describe("source descriptors", () => {
       version: "v1.1.0",
       sourceId: 2,
     });
+  });
+
+  it("selects the same-version PMTiles source for a discovered GeoParquet source", () => {
+    const selected = findPmtilesSourceForCatalogSource(
+      file([
+        format("geoparquet", [source(42, "v1.1.0", 4)]),
+        format("pmtiles", [source(50, "v1.0.0", 4), source(51, "v1.1.0", 4)]),
+      ]),
+      42,
+    );
+
+    expect(selected?.id).toBe(51);
   });
 });

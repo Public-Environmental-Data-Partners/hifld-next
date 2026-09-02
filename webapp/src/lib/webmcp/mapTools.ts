@@ -433,7 +433,8 @@ export function useMapWebMcpTools({
   useWebMcpTool({
     name: "add_dataset_layer",
     title: "Add dataset layer",
-    description: "Add a catalog dataset layer to the map.",
+    description:
+      "Add a catalog dataset layer to the map. Pass a file_source_id returned by get_dataset_file; a GeoParquet query source resolves to its same-version PMTiles map source.",
     schema: catalogLayerInputSchema,
     execute: addLayer,
     enabled,

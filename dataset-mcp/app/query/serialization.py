@@ -40,6 +40,11 @@ def _summary(kind: str, byte_length: int) -> dict[str, JsonValue]:
     return {"$type": kind, "byte_length": byte_length}
 
 
+def _is_geometry_type(logical_type: str) -> bool:
+    normalized = logical_type.strip().upper()
+    return normalized == "GEOMETRY" or normalized.startswith("GEOMETRY(")
+
+
 def _json_string_size(value: str) -> int:
     size = 2
     short_escapes = {'"', "\\", "\b", "\f", "\n", "\r", "\t"}
@@ -73,10 +78,10 @@ def _encoded_json_size(value: object, logical_type: str) -> int:
     if isinstance(value, (timedelta, UUID)):
         return _json_string_size(str(value))
     if isinstance(value, memoryview):
-        kind = "geometry" if logical_type.upper() == "GEOMETRY" else "binary"
+        kind = "geometry" if _is_geometry_type(logical_type) else "binary"
         return _json_size(_summary(kind, value.nbytes))
     if isinstance(value, (bytes, bytearray)):
-        kind = "geometry" if logical_type.upper() == "GEOMETRY" else "binary"
+        kind = "geometry" if _is_geometry_type(logical_type) else "binary"
         return _json_size(_summary(kind, len(value)))
     if isinstance(value, (list, tuple)):
         items = cast(list[object] | tuple[object, ...], value)
@@ -111,10 +116,10 @@ def _encode_unbounded(value: object, logical_type: str) -> JsonValue:
         return str(value)
     if isinstance(value, memoryview):
         raw = value.tobytes()
-        kind = "geometry" if logical_type.upper() == "GEOMETRY" else "binary"
+        kind = "geometry" if _is_geometry_type(logical_type) else "binary"
         return _summary(kind, len(raw))
     if isinstance(value, (bytes, bytearray)):
-        kind = "geometry" if logical_type.upper() == "GEOMETRY" else "binary"
+        kind = "geometry" if _is_geometry_type(logical_type) else "binary"
         return _summary(kind, len(value))
     if isinstance(value, (list, tuple)):
         items = cast(list[object] | tuple[object, ...], value)
