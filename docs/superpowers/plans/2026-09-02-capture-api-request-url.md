@@ -23,7 +23,7 @@
 - Test: `webapp/src/lib/__tests__/server-discovery-analytics.test.ts`
 - Test: `webapp/plugins/__tests__/posthog-discovery-analytics.test.ts`
 
-- [ ] **Step 1: Update the pure event-contract tests**
+- [x] **Step 1: Update the pure event-contract tests**
 
 Add `request_url` to the exact payload assertions. Replace the privacy test that rejects the URL and query string with an assertion that the complete absolute URL is retained while unrelated headers remain excluded:
 
@@ -51,7 +51,7 @@ expect(serialized).not.toContain("elsewhere.example.test");
 
 Add `request_url` to the plugin integration assertion as well.
 
-- [ ] **Step 2: Run the focused tests to verify they fail**
+- [x] **Step 2: Run the focused tests to verify they fail**
 
 Run:
 
@@ -61,7 +61,7 @@ npm test -- src/lib/__tests__/server-discovery-analytics.test.ts plugins/__tests
 
 Expected: FAIL because `request_url` is missing from `DiscoveryRouteCapture.properties` and the emitted payload.
 
-- [ ] **Step 3: Implement the minimal typed payload change**
+- [x] **Step 3: Implement the minimal typed payload change**
 
 Add the field to the interface and payload:
 
@@ -87,7 +87,7 @@ properties: {
 },
 ```
 
-- [ ] **Step 4: Run the focused tests to verify they pass**
+- [x] **Step 4: Run the focused tests to verify they pass**
 
 Run:
 
@@ -97,7 +97,7 @@ npm test -- src/lib/__tests__/server-discovery-analytics.test.ts plugins/__tests
 
 Expected: PASS with the full URL included and unrelated headers absent.
 
-- [ ] **Step 5: Commit the implementation**
+- [x] **Step 5: Commit the implementation**
 
 ```bash
 git add webapp/src/lib/server-discovery-analytics.ts webapp/src/lib/__tests__/server-discovery-analytics.test.ts webapp/plugins/__tests__/posthog-discovery-analytics.test.ts
@@ -109,7 +109,7 @@ git commit -m "feat(webapp): capture API request URLs"
 **Files:**
 - Verify: `webapp/`
 
-- [ ] **Step 1: Run static checks**
+- [x] **Step 1: Run static checks**
 
 Run:
 
@@ -120,7 +120,7 @@ npm run typecheck
 
 Expected: both commands exit successfully.
 
-- [ ] **Step 2: Run the full test suite**
+- [x] **Step 2: Run the full test suite**
 
 Run:
 
@@ -130,7 +130,7 @@ npm test
 
 Expected: all tests pass.
 
-- [ ] **Step 3: Confirm the branch diff is scoped**
+- [x] **Step 3: Confirm the branch diff is scoped**
 
 Run:
 
