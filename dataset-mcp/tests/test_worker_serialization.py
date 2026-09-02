@@ -39,6 +39,10 @@ def test_encode_cell_recurses_and_summarizes_binary_values() -> None:
         "$type": "geometry",
         "byte_length": 3,
     }
+    assert encode_cell(b"wkb", "GEOMETRY('EPSG:4326')") == {
+        "$type": "geometry",
+        "byte_length": 3,
+    }
 
 
 def test_encode_cell_replaces_oversized_values_with_truncated_summary() -> None:

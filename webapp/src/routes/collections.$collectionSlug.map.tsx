@@ -33,6 +33,7 @@ import {
   decodeSourceDescriptor,
   decodeSourceDescriptorList,
   descriptorForSource,
+  findPmtilesSourceForCatalogSource,
   findSourceForDescriptor,
   type SourceDescriptor,
   sourceDescriptorId,
@@ -876,10 +877,9 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
       if (response.dataset.id !== input.dataset_id || response.file.id !== input.file_id) {
         throw new MapWorkspaceCommandError("The requested catalog file could not be verified.");
       }
-      const pmtiles = response.file.formats?.find((entry) => entry.format.format_type === "pmtiles");
-      const source = pmtiles?.sources.find((entry) => entry.id === input.file_source_id);
+      const source = findPmtilesSourceForCatalogSource(response.file, input.file_source_id);
       if (!source) {
-        throw new MapWorkspaceCommandError("The requested PMTiles source is not available.");
+        throw new MapWorkspaceCommandError("A matching PMTiles source is not available.");
       }
       const descriptor = descriptorForSource({
         collectionSlug: resolvedCollection.slug,
