@@ -76,3 +76,15 @@ def test_chart_caps_duckdb_spill_below_the_empty_directory_limit() -> None:
     assert "name: DATASET_MCP_DUCKDB_MAX_TEMP_DIRECTORY_SIZE" in result.stdout
     assert 'value: "3GiB"' in result.stdout
     assert "emptyDir: {sizeLimit: 4Gi}" in result.stdout
+
+
+def test_chart_allows_gke_node_local_dns() -> None:
+    result = subprocess.run(
+        ["helm", "template", "dataset-mcp", str(CHART)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert 'cidr: "169.254.20.10/32"' in result.stdout
+    assert "port: 53" in result.stdout

@@ -9,6 +9,10 @@ spec:
   egress:
     - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}}]
       ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    {{- range .Values.networkPolicy.dnsCidrs }}
+    - to: [{ipBlock: {cidr: {{ . | quote }}}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    {{- end }}
     - to:
         - namespaceSelector:
             matchLabels:
