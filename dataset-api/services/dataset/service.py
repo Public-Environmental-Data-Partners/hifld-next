@@ -56,7 +56,7 @@ DEFAULT_FORMAT_DETAILS: dict[str, dict[str, str | None]] = {
     "file_geodatabase": {
         "name": "File Geodatabase",
         "description": "Esri File Geodatabase dataset format",
-        "mime_type": "application/octet-stream",
+        "mime_type": "application/zip",
     },
 }
 

@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
-import type { DatasetSource } from "@/lib/api-client";
-import { sourceLifecycleDetails } from "../FileFormatTree";
+import type { DatasetFormat, DatasetSource } from "@/lib/api-client";
+import { ArchiveFormatNode, archiveDownloadSource, sourceLifecycleDetails } from "../FileFormatTree";
+
+vi.mock("../DownloadButton", () => ({
+  DownloadButton: ({ url, label }: { url: string; label: string }) => <a href={url}>{label}</a>,
+}));
 
 const createdAt = "2026-05-24T14:30:00Z";
 const updatedAt = "2026-05-29T15:45:00Z";
@@ -31,6 +36,64 @@ function source({
 }
 
 describe("FileFormatTree", () => {
+  it.each(["shapefile", "file_geodatabase"] as const)(
+    "selects only a ZIP archive source for %s downloads",
+    (formatType) => {
+      const zipSource = source({ sourceMetadata: { version: "v1", size_bytes: 1536 } });
+      zipSource.location = { version: "v1", path: `dataset/v1/${formatType}/dataset.zip` };
+      const componentSource = source({ sourceMetadata: { version: "v1", size_bytes: 4096 } });
+      componentSource.id = 20;
+      componentSource.location = { version: "v1", path: `dataset/v1/${formatType}/dataset.shp` };
+
+      expect(archiveDownloadSource([componentSource, zipSource])).toBe(zipSource);
+      expect(archiveDownloadSource([componentSource])).toBeUndefined();
+    },
+  );
+
+  it("renders the archive source URL as the shapefile download target", () => {
+    const zipSource = source({ sourceMetadata: { version: "v1", size_bytes: 1536 } });
+    zipSource.url = "https://objects.example.test/hospitals.zip";
+    zipSource.location = { version: "v1", path: "dataset/v1/shapefile/hospitals.zip" };
+    zipSource.storage_location = {
+      id: 5,
+      name: "archive",
+      backend_type: "s3",
+      created_at: createdAt,
+      updated_at: updatedAt,
+    };
+    const formatEntry: DatasetFormat = {
+      format: {
+        id: 3,
+        format_type: "shapefile",
+        name: "Shapefile",
+        created_at: createdAt,
+        updated_at: updatedAt,
+      },
+      sources: [zipSource],
+    };
+
+    render(
+      <ArchiveFormatNode
+        formatEntry={formatEntry}
+        formatType="shapefile"
+        name="shapefile"
+        icon={<span />}
+        selectedSources={{ shapefile: { storageLocationId: 5, version: "v1.1.0" } }}
+        onSourceChange={vi.fn()}
+        isExpanded
+        onToggle={vi.fn()}
+        collectionSlug="hifld"
+        datasetSlug="hospitals"
+        fileSlug="hospitals"
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Download ZIP" })).toHaveAttribute(
+      "href",
+      "https://objects.example.test/hospitals.zip",
+    );
+  });
+
   it("formats source catalog date and size for source details", () => {
     const details = sourceLifecycleDetails(
       source({ sourceMetadata: { version: "v1", size_bytes: 1536 }, created_at: createdAt, updated_at: updatedAt }),

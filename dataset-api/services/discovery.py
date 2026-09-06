@@ -25,6 +25,7 @@ KNOWN_FORMATS = {
     "geojson",
     "file_geodatabase",
 }
+ZIP_ONLY_FORMATS = {"shapefile", "file_geodatabase"}
 MIN_DISCOVERY_PATH_PARTS = 5
 DATASET_MANIFEST_PARTS = 3
 LAYER_MANIFEST_PARTS = 4
@@ -72,9 +73,11 @@ class DiscoveryService:
     def __init__(self, storage_client: StorageClient) -> None:
         """Create a discovery service."""
         self.storage_client = storage_client
+        self.protected_source_keys: set[tuple[str, str, str, str]] = set()
 
     async def scan(self, prefix: str = "", limit: int | None = None) -> AsyncIterator[DiscoveredVersion]:
         """Scan storage and yield discovered version records."""
+        self.protected_source_keys.clear()
         files = await self.storage_client.list_files(prefix)
         grouped: dict[tuple[str, str, str], dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
         catalog_manifest_paths: dict[tuple[str, str | None], str] = {}
@@ -114,11 +117,16 @@ class DiscoveryService:
                 format_files = sorted(group.get(format_type, []))
                 if not format_files:
                     continue
+                selected_files = self._select_format_files(dataset_slug, file_slug, version, format_type, format_files)
+                if not selected_files:
+                    continue
+                format_files = selected_files
 
                 yielded += 1
                 source_metadata = await self._metadata_with_computed_size(
                     metadata=metadata_result.metadata,
                     version=version,
+                    format_type=format_type,
                     object_paths=format_files,
                 )
 
@@ -138,6 +146,33 @@ class DiscoveryService:
                     file_name=catalog_metadata.file_name,
                     file_description=catalog_metadata.file_description,
                 )
+
+    def _select_format_files(
+        self,
+        dataset_slug: str,
+        file_slug: str,
+        version: str,
+        format_type: str,
+        format_files: list[str],
+    ) -> list[str] | None:
+        """Select the storage objects that represent one format source."""
+        if format_type not in ZIP_ONLY_FORMATS:
+            return format_files
+
+        zip_files = [path for path in format_files if path.lower().endswith(".zip")]
+        if len(zip_files) == 1:
+            return zip_files
+        if len(zip_files) > 1:
+            self.protected_source_keys.add((dataset_slug, file_slug, format_type, version))
+            logger.warning(
+                "Skipping ambiguous %s source %s/%s %s: found %d ZIP archives",
+                format_type,
+                dataset_slug,
+                file_slug,
+                version,
+                len(zip_files),
+            )
+        return None
 
     def _parse_discovery_path(self, path: str) -> tuple[str, str, str, str] | None:
         parts = [part for part in path.split("/") if part]
@@ -218,17 +253,27 @@ class DiscoveryService:
         self,
         metadata: SpatialDatasetFileMetadata | None,
         version: str,
+        format_type: str,
         object_paths: list[str],
     ) -> SpatialDatasetFileMetadata | None:
-        if metadata is not None and metadata.size_bytes is not None:
+        is_zip_only = format_type in ZIP_ONLY_FORMATS
+        if metadata is not None and is_zip_only:
+            metadata = metadata.model_copy(update={"mime_type": "application/zip"})
+        if metadata is not None and metadata.size_bytes is not None and not is_zip_only:
             return metadata
 
         size_bytes = await self._calculate_object_paths_size(object_paths)
         if size_bytes is None:
+            if metadata is not None and is_zip_only:
+                return metadata.model_copy(update={"size_bytes": None})
             return metadata
 
         if metadata is None:
-            return SpatialDatasetFileMetadata(version=version, size_bytes=size_bytes)
+            return SpatialDatasetFileMetadata(
+                version=version,
+                size_bytes=size_bytes,
+                mime_type="application/zip" if is_zip_only else None,
+            )
         return metadata.model_copy(update={"size_bytes": size_bytes})
 
     async def _calculate_object_paths_size(self, object_paths: list[str]) -> int | None:

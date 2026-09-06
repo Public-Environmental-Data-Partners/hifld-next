@@ -12,7 +12,6 @@ import { DownloadButton } from "./DownloadButton";
 import { buildGeoparquetSourceTree, formatGeoparquetGlobLabel, type GeoparquetTreeNode } from "./geoparquetTree";
 import { MarkdownDescription } from "./MarkdownDescription";
 import { type ParquetPreviewOption, parquetPreviewOptionFromSource } from "./parquetPreviewOptions";
-import { ShapefileZipDownloadButton } from "./ShapefileZipDownloadButton";
 import { buildSourceFileUrl, buildSourceStorageUri } from "./sourceUrls";
 import { formatVersionLabel, parseVersionValue } from "./versionLabel";
 
@@ -215,17 +214,6 @@ interface FileFormatTreeProps {
   fileSlug?: string;
 }
 
-interface ShapefileFormatNodeProps {
-  shapefileFormat: DatasetFormat;
-  selectedSources: SelectedFormatSources;
-  onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
-  isExpanded: boolean;
-  onToggle: () => void;
-  collectionSlug?: string | undefined;
-  datasetSlug?: string | undefined;
-  fileSlug?: string | undefined;
-}
-
 interface GeoparquetTreeNodesProps {
   nodes: GeoparquetTreeNode[];
   formatEntry: DatasetFormat;
@@ -241,46 +229,8 @@ interface GeoparquetTreeNodesProps {
 
 type GeoparquetTreeNodeSharedProps = Omit<GeoparquetTreeNodesProps, "nodes">;
 
-interface ShapefileDownloadModel {
-  matchingSources: DatasetSource[];
-  sourcesWithUrls: DatasetSource[];
-  hasGlobPattern: boolean;
-  hasExpandedSources: boolean;
-  originalSource?: DatasetSource | undefined;
-  sizeBytes?: number | null | undefined;
-  zipFilename: string;
-}
-
-function buildShapefileDownloadModel({
-  shapefileFormat,
-  selectedSources,
-  datasetSlug,
-  fileSlug,
-}: {
-  shapefileFormat: DatasetFormat;
-  selectedSources: SelectedFormatSources;
-  datasetSlug?: string | undefined;
-  fileSlug?: string | undefined;
-}): ShapefileDownloadModel {
-  const matchingSources = selectedFormatSources(shapefileFormat, selectedSources, "shapefile");
-  const hasGlobPattern = matchingSources.some((source) =>
-    Boolean(source.glob_pattern || sourcePath(source).includes("*")),
-  );
-  const originalSource = matchingSources.find((source) => source.glob_pattern || sourcePath(source).includes("*"));
-  const sourcesWithUrls = matchingSources.filter((source) => {
-    const sourceUrl = buildSourceFileUrl(source);
-    return Boolean(sourceUrl && !sourceUrl.includes("*"));
-  });
-
-  return {
-    matchingSources,
-    sourcesWithUrls,
-    hasGlobPattern,
-    hasExpandedSources: hasGlobPattern && sourcesWithUrls.length > 0,
-    originalSource,
-    sizeBytes: originalSource?.source_metadata?.size_bytes,
-    zipFilename: datasetSlug && fileSlug ? `${datasetSlug}_${fileSlug}_shapefile.zip` : "shapefile.zip",
-  };
+export function archiveDownloadSource(sources: DatasetSource[]): DatasetSource | undefined {
+  return sources.find((source) => sourcePath(source).toLowerCase().endsWith(".zip"));
 }
 
 export function FileFormatTree({
@@ -538,8 +488,11 @@ export function FileFormatTree({
 
       {/* Shapefile */}
       {shapefileFormat && (
-        <ShapefileFormatNode
-          shapefileFormat={shapefileFormat}
+        <ArchiveFormatNode
+          formatEntry={shapefileFormat}
+          formatType="shapefile"
+          name="shapefile"
+          icon={<File className="h-4 w-4 text-amber-600" />}
           selectedSources={selectedSources}
           onSourceChange={onSourceChange}
           isExpanded={expandedFormats.has("shapefile")}
@@ -594,53 +547,21 @@ export function FileFormatTree({
         })()}
 
       {/* File Geodatabase */}
-      {fileGeodatabaseFormat &&
-        (() => {
-          const selectedFileGeodatabaseSource = selectedFormatSource(
-            fileGeodatabaseFormat,
-            selectedSources,
-            "file_geodatabase",
-          );
-          const fileGeodatabaseSizeBytes = selectedFileGeodatabaseSource?.source_metadata?.size_bytes;
-          const fileGeodatabaseUrl = selectedFileGeodatabaseSource
-            ? buildSourceFileUrl(selectedFileGeodatabaseSource)
-            : null;
-
-          return (
-            <FormatFileNode
-              icon={<Folder className="h-4 w-4 text-indigo-500" />}
-              name="file geodatabase"
-              badge={fileGeodatabaseSizeBytes != null ? formatFileSize(fileGeodatabaseSizeBytes) : undefined}
-              formatType="file_geodatabase"
-              formatEntry={fileGeodatabaseFormat}
-              selectedSources={selectedSources}
-              onSourceChange={onSourceChange}
-              isExpanded={expandedFormats.has("file_geodatabase")}
-              onToggle={() => toggleFormat("file_geodatabase")}
-            >
-              {fileGeodatabaseUrl && (
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground break-all">{fileGeodatabaseUrl}</p>
-                  <div className="flex items-center gap-2">
-                    <CopyButton value={fileGeodatabaseUrl} label="Copy URL" />
-                    <DownloadButton
-                      url={fileGeodatabaseUrl}
-                      label="Download"
-                      analyticsContext={downloadAnalyticsContext({
-                        collectionSlug,
-                        datasetSlug,
-                        fileSlug,
-                        format: "file_geodatabase",
-                        source: selectedFileGeodatabaseSource,
-                        sizeBytes: fileGeodatabaseSizeBytes,
-                      })}
-                    />
-                  </div>
-                </div>
-              )}
-            </FormatFileNode>
-          );
-        })()}
+      {fileGeodatabaseFormat && (
+        <ArchiveFormatNode
+          formatEntry={fileGeodatabaseFormat}
+          formatType="file_geodatabase"
+          name="file geodatabase"
+          icon={<Folder className="h-4 w-4 text-indigo-500" />}
+          selectedSources={selectedSources}
+          onSourceChange={onSourceChange}
+          isExpanded={expandedFormats.has("file_geodatabase")}
+          onToggle={() => toggleFormat("file_geodatabase")}
+          collectionSlug={collectionSlug}
+          datasetSlug={datasetSlug}
+          fileSlug={fileSlug}
+        />
+      )}
 
       {(!file.formats || file.formats.length === 0) && (
         <p className="text-sm text-muted-foreground">No formats available for this file.</p>
@@ -851,8 +772,11 @@ function StorageUriDetails({ storageUri }: { storageUri: string }) {
   );
 }
 
-function ShapefileFormatNode({
-  shapefileFormat,
+export function ArchiveFormatNode({
+  formatEntry,
+  formatType,
+  name,
+  icon,
   selectedSources,
   onSourceChange,
   isExpanded,
@@ -860,141 +784,61 @@ function ShapefileFormatNode({
   collectionSlug,
   datasetSlug,
   fileSlug,
-}: ShapefileFormatNodeProps) {
-  const model = buildShapefileDownloadModel({ shapefileFormat, selectedSources, datasetSlug, fileSlug });
+}: {
+  formatEntry: DatasetFormat;
+  formatType: "shapefile" | "file_geodatabase";
+  name: string;
+  icon: React.ReactNode;
+  selectedSources: SelectedFormatSources;
+  onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
+  isExpanded: boolean;
+  onToggle: () => void;
+  collectionSlug?: string | undefined;
+  datasetSlug?: string | undefined;
+  fileSlug?: string | undefined;
+}) {
+  const source = archiveDownloadSource(selectedFormatSources(formatEntry, selectedSources, formatType));
+  const sizeBytes = source?.source_metadata?.size_bytes;
+  const filename = `${datasetSlug ?? "dataset"}_${fileSlug ?? "file"}_${formatType}.zip`;
+  const downloadUrl = source ? buildSourceFileUrl(source) : null;
 
   return (
     <FormatFileNode
-      icon={<File className="h-4 w-4 text-amber-600" />}
-      name="shapefile"
-      badge={model.sizeBytes != null ? formatFileSize(model.sizeBytes) : undefined}
-      formatType="shapefile"
-      formatEntry={shapefileFormat}
+      icon={icon}
+      name={name}
+      badge={sizeBytes != null ? formatFileSize(sizeBytes) : undefined}
+      formatType={formatType}
+      formatEntry={formatEntry}
       selectedSources={selectedSources}
       onSourceChange={onSourceChange}
       isExpanded={isExpanded}
       onToggle={onToggle}
     >
-      <ShapefileDownloadActions
-        model={model}
-        collectionSlug={collectionSlug}
-        datasetSlug={datasetSlug}
-        fileSlug={fileSlug}
-      />
-    </FormatFileNode>
-  );
-}
-
-function ShapefileSizeLine({ sizeBytes }: { sizeBytes?: number | null | undefined }) {
-  if (sizeBytes == null) {
-    return null;
-  }
-  return (
-    <p className="text-xs text-muted-foreground">
-      Size: {formatFileSize(sizeBytes)} (zip contains all shapefile components)
-    </p>
-  );
-}
-
-function ShapefileDownloadActions({
-  model,
-  collectionSlug,
-  datasetSlug,
-  fileSlug,
-}: {
-  model: ShapefileDownloadModel;
-  collectionSlug?: string | undefined;
-  datasetSlug?: string | undefined;
-  fileSlug?: string | undefined;
-}) {
-  if (model.hasExpandedSources) {
-    const sources = model.sourcesWithUrls.map((source) => {
-      const sourceUrl = buildSourceFileUrl(source);
-      return sourceUrl ? { ...source, url: sourceUrl } : source;
-    });
-
-    return (
-      <div className="space-y-2">
-        <ShapefileSizeLine sizeBytes={model.sizeBytes} />
-        <p className="text-xs text-muted-foreground">
-          Download all shapefile components (.shp, .shx, .dbf, .prj, etc.) as a zip file
-          {` (${model.sourcesWithUrls.length} files)`}
-        </p>
-        <div className="flex items-center gap-2">
-          <ShapefileZipDownloadButton
-            sources={sources}
-            filename={model.zipFilename}
-            label="Download Zip"
-            analyticsContext={downloadAnalyticsContext({
-              collectionSlug,
-              datasetSlug,
-              fileSlug,
-              format: "shapefile",
-              source: model.originalSource,
-              sizeBytes: model.sizeBytes,
-              filename: model.zipFilename,
-            })}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (model.hasGlobPattern && model.originalSource?.id && collectionSlug && datasetSlug && fileSlug) {
-    return (
-      <div className="space-y-2">
-        <ShapefileSizeLine sizeBytes={model.sizeBytes} />
-        <p className="text-xs text-muted-foreground">
-          Download all shapefile components (.shp, .shx, .dbf, .prj, etc.) as a zip file
-        </p>
-        <div className="flex items-center gap-2">
+      {downloadUrl && source && (
+        <div className="space-y-2">
+          {sizeBytes != null && (
+            <p className="text-xs text-muted-foreground">Compressed size: {formatFileSize(sizeBytes)}</p>
+          )}
+          <p className="text-xs text-muted-foreground break-all">{downloadUrl}</p>
+          <CopyButton value={downloadUrl} label="Copy URL" />
           <DownloadButton
-            url={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}/sources/${model.originalSource.id}/download-zip`}
-            label="Download Zip"
-            filename={model.zipFilename}
+            url={downloadUrl}
+            label="Download ZIP"
+            filename={filename}
+            sizeBytes={sizeBytes ?? undefined}
             analyticsContext={downloadAnalyticsContext({
               collectionSlug,
               datasetSlug,
               fileSlug,
-              format: "shapefile",
-              source: model.originalSource,
-              sizeBytes: model.sizeBytes,
-              filename: model.zipFilename,
+              format: formatType,
+              source,
+              sizeBytes,
+              filename,
             })}
           />
         </div>
-      </div>
-    );
-  }
-
-  const singleSource = model.sourcesWithUrls.length === 1 ? model.sourcesWithUrls[0] : undefined;
-  const sourceUrl = singleSource ? buildSourceFileUrl(singleSource) : null;
-  if (!singleSource || !sourceUrl) {
-    return null;
-  }
-
-  return (
-    <div className="space-y-2">
-      {model.sizeBytes != null && (
-        <p className="text-xs text-muted-foreground">Size: {formatFileSize(model.sizeBytes)}</p>
       )}
-      <p className="text-xs text-muted-foreground break-all">{sourceUrl}</p>
-      <div className="flex items-center gap-2">
-        <CopyButton value={sourceUrl} label="Copy URL" />
-        <DownloadButton
-          url={sourceUrl}
-          label="Download"
-          analyticsContext={downloadAnalyticsContext({
-            collectionSlug,
-            datasetSlug,
-            fileSlug,
-            format: "shapefile",
-            source: singleSource,
-            sizeBytes: model.sizeBytes,
-          })}
-        />
-      </div>
-    </div>
+    </FormatFileNode>
   );
 }
 

@@ -428,6 +428,7 @@ async def run_job(
                 request_payload,
                 source_object_count,
             )
+        stats.discovered_source_keys.update(discovery.protected_source_keys)
         if config.discover_prune_stale and not has_failures:
             prune_result = ingest_service.prune_stale_discovered_sources(
                 collection_id=collection_id,
