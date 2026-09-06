@@ -615,11 +615,7 @@ async def get_dataset_with_urls(
 async def download_shapefile_zip(
     context: DatasetFileSourceContextDep,
 ) -> Response:
-    """Download all files in a shapefile folder as a zip file.
-
-    This endpoint is specifically for shapefile formats, which consist of multiple
-    files (.shp, .shx, .dbf, .prj, etc.) that need to be downloaded together.
-    """
+    """Download a ZIP-packaged shapefile or File Geodatabase source."""
     result = await context.service.get_dataset_file_with_urls(
         collection_id=context.collection_id,
         dataset_slug=context.dataset_slug,

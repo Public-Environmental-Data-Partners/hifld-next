@@ -27,7 +27,7 @@ function isConnectionFailure(message: string): boolean {
   );
 }
 
-async function fetchZipFromDatasetApi(fastApiUrl: string, request: Request): Promise<Response> {
+export async function fetchZipFromDatasetApi(fastApiUrl: string, request: Request): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
 
@@ -37,6 +37,7 @@ async function fetchZipFromDatasetApi(fastApiUrl: string, request: Request): Pro
       headers: {
         Accept: request.headers.get("Accept") || "application/zip",
       },
+      redirect: "manual",
       signal: controller.signal,
     });
   } finally {
@@ -69,33 +70,27 @@ async function readFailureDetail(response: Response): Promise<string> {
   return errorJson ? JSON.stringify(errorJson) : response.statusText;
 }
 
-function zipFilename(contentDisposition: string, params: DownloadZipParams): string {
-  const fallback = `${params.datasetSlug}_${params.fileSlug}_shapefile.zip`;
-  const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
-  return filenameMatch?.[1] ?? fallback;
-}
+export async function forwardZipResponse(response: Response, _params: DownloadZipParams): Promise<Response> {
+  if (response.status === 302) {
+    const location = response.headers.get("Location");
+    if (!location) {
+      return jsonProblem(502, "Invalid redirect from dataset API", "The redirect did not include a Location header");
+    }
+    try {
+      const redirectUrl = new URL(location);
+      if (redirectUrl.protocol !== "https:" && redirectUrl.protocol !== "http:") {
+        return jsonProblem(502, "Invalid redirect from dataset API", "The redirect URL is not HTTP or HTTPS");
+      }
+    } catch {
+      return jsonProblem(502, "Invalid redirect from dataset API", "The redirect URL is malformed");
+    }
+    return new Response(null, { status: 302, headers: { Location: location } });
+  }
 
-async function forwardZipResponse(response: Response, params: DownloadZipParams): Promise<Response> {
   if (!response.ok) {
     return jsonProblem(response.status, "Failed to download zip", await readFailureDetail(response));
   }
-
-  if (!response.body) {
-    return jsonProblem(502, "Empty response from dataset API");
-  }
-
-  const contentDisposition =
-    response.headers.get("Content-Disposition") ||
-    `attachment; filename="${params.datasetSlug}_${params.fileSlug}_shapefile.zip"`;
-  const filename = zipFilename(contentDisposition, params);
-
-  return new Response(response.body, {
-    status: 200,
-    headers: {
-      "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-    },
-  });
+  return jsonProblem(502, "Unexpected response from dataset API", "Expected an object-storage redirect");
 }
 
 export const Route = createFileRoute(

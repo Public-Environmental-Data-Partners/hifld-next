@@ -101,7 +101,7 @@ Dataset-specific service logic lives under `services/dataset/`:
 | `service.py` | Main `DatasetService` and catalog mutation helpers |
 | `queries.py` | Dataset search, count, and tag query construction |
 | `shaping.py` | API response shaping for datasets, files, formats, and sources |
-| `downloads.py` | Download and shapefile ZIP response helpers |
+| `downloads.py` | Redirect-only downloads for ZIP-packaged shapefiles and File Geodatabases |
 
 Import the public service from `services.dataset`:
 
