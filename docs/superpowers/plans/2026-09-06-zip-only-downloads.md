@@ -23,3 +23,14 @@
 ## Known exceptions
 
 Two cataloged WBD versions have no GDB objects in either bucket; do not invent archives or delete other formats to reconcile them. Historical tsunami locations has a separate Arrow column-order failure, outside ZIP handling. NHD Waterbody geometry hashes differ from production and require investigation before promotion.
+
+## Execution outcome — 2026-09-06
+
+- Implemented and deployed pipeline commit `3f02375` as `gcr.io/hifld-next/dagster-user:zip-only-20260906`, Dagster Helm revision 52. Full pipeline suite: 308 tests, one skipped.
+- API/discovery and webapp implementation commits: `5358207`, `3f2c583`. API/discovery image `gcr.io/hifld-next/dataset-api:zip-only-v2-20260906` (Helm revisions 31/35); webapp image `gcr.io/hifld-next/webapp:zip-only-20260906` (revision 25).
+- API quality gates passed; 58 pytest tests passed, one skipped. Webapp check/typecheck/build passed; 390 tests passed. Live API archive redirects and the webapp redirect route returned 302; public archive range requests returned 206 with ZIP signatures.
+- All 117 staging GDB archives passed complete ZIP CRC validation and layer-read checks in a temporary cluster job. Removed 6,989 generation-pinned loose objects (35,714,013,188 bytes); retained all 117 ZIPs. Rescan confirmed zero mixed/unpacked GDB versions in staging. Production component copies were untouched. Staging soft-delete recovery is seven days.
+- Durable audits: `gs://hifld-next-staging-prod/_maintenance/zip-only-20260906/gdb-validation.json` and `gdb-component-deletions.json` under the same prefix. Temporary validation job, config map, scratch volume, and leftover local downloads were cleaned up.
+- Production discovery completed without failures or pruning: 117 GDB archives and 376 shapefile archives discovered. All 119 catalog GDB records now reference ZIPs; two preexisting WBD ZIP references remain unavailable in storage.
+- Launched GeoParquet-only retry backfill `uvrvcrcr` for 115 original GDB ambiguity failures. First checkpoint: 42 succeeded; one earthquake dataset exposed the same separate Arrow column-order issue as tsunami data. Remaining runs continue; no promotion launched.
+- New partition-pruned GCS benchmarks (three fresh connections, full geometries): NHD Flowline Miami 41.920→3.080 seconds; NFHL Line Miami 8.183→9.239; NFHL East Miami 61.761→10.277; NFHL West San Francisco 17.376→11.525. All four returned matching geometry hashes. NFHL Line regression remains; production NFHL West contains overlapping legacy/canonical partition families and needs a clean replacement on eventual promotion.
