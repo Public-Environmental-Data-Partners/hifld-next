@@ -35,9 +35,12 @@ def create_client_for_source(file_source: FileSource) -> StorageClient:
     storage_location = file_source.storage_location
     if not storage_location:
         raise HTTPException(status_code=404, detail="Storage location not found")
-    config_model = storage_location.config
-    if not isinstance(config_model, BucketStorageLocationConfig):
+    if storage_location.backend_type != "s3":
         raise HTTPException(status_code=400, detail="Storage location is not bucket-backed")
+    try:
+        config_model = BucketStorageLocationConfig.model_validate(storage_location.config)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Storage location is not bucket-backed") from exc
     storage_type = config_model.type or storage_location.backend_type
     if storage_type == "s3" and config_model.base_url:
         storage_type = "seaweedfs"

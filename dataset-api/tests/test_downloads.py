@@ -92,6 +92,26 @@ def test_archive_download_redirects_zip_sources(
     assert response.headers["location"].endswith("/layer.zip")
 
 
+def test_create_client_accepts_bucket_config_after_database_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Persisted bucket config dictionaries are parsed at the download boundary."""
+    session, source = make_source("shapefile", "dataset/layer/v1.0.0/shapefile/layer.zip")
+    fake_client = FakeStorageClient()
+    factory_calls: list[tuple[str, str | None, str | None]] = []
+
+    def fake_factory(storage_type: str, options: downloads.StorageClientOptions) -> FakeStorageClient:
+        factory_calls.append((storage_type, options.bucket, options.base_url))
+        return fake_client
+
+    monkeypatch.setattr(downloads, "create_storage_client", fake_factory)
+    try:
+        client = downloads.create_client_for_source(source)
+    finally:
+        session.close()
+
+    assert client is fake_client
+    assert factory_calls == [("seaweedfs", "bucket", "http://localhost:8888")]
+
+
 @pytest.mark.parametrize(
     ("format_type", "path"),
     [
