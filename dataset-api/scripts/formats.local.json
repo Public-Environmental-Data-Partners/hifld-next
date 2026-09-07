@@ -33,6 +33,6 @@
     "format_type": "file_geodatabase",
     "name": "File Geodatabase",
     "description": "ESRI File Geodatabase format for geospatial data storage",
-    "mime_type": "application/x-esri-shape"
+    "mime_type": "application/zip"
   }
 ]

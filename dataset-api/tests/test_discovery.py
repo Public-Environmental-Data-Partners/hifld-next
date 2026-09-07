@@ -21,6 +21,7 @@ from models.dataset import (
     Dataset,
     File,
     FileFormat,
+    FileLocation,
     FileSource,
     Format,
     SpatialDatasetFileMetadata,
@@ -30,6 +31,7 @@ from scripts.config_loader import load_json_config
 from scripts.seed_formats import DEFAULT_FORMATS, seed_formats
 from scripts.seed_storage import seed_storage_locations
 from services.catalog_ingest import CatalogIngestService
+from services.dataset.service import DEFAULT_FORMAT_DETAILS
 from services.discovery import DiscoveredVersion, DiscoveryService
 
 
@@ -225,6 +227,12 @@ def test_seed_formats_includes_new_discoverable_formats() -> None:
         format_types = {row.format_type for row in session.exec(select(Format)).all()}
         assert {"geopackage", "shapefile", "geojson", "file_geodatabase"} <= format_types
         assert "geoserver" not in format_types
+        file_gdb = session.exec(select(Format).where(Format.format_type == "file_geodatabase")).one()
+        assert file_gdb.mime_type == "application/zip"
+        assert DEFAULT_FORMAT_DETAILS["file_geodatabase"]["mime_type"] == "application/zip"
+        local_formats = load_json_config(str(Path(__file__).resolve().parents[1] / "scripts/formats.local.json"))
+        local_file_gdb = next(item for item in local_formats if item["format_type"] == "file_geodatabase")
+        assert local_file_gdb["mime_type"] == "application/zip"
 
 
 def test_discovery_service_yields_discovered_versions() -> None:
@@ -415,6 +423,82 @@ def test_discovery_service_ignores_non_semver_and_metadata_only_groups() -> None
     assert all(item.format_type != "unknown_format" for item in discovered_versions)
 
 
+def test_discovery_selects_only_zip_archives_for_shapefile_and_file_geodatabase() -> None:
+    """Archive formats use their sole ZIP and ignore unpacked component objects."""
+    files = {
+        "dataset/layer/v1.0.0/shapefile/layer.zip": b"shapefile-zip",
+        "dataset/layer/v1.0.0/shapefile/layer.shp": b"shape",
+        "dataset/layer/v1.0.0/shapefile/layer.dbf": b"table",
+        "dataset/layer/v1.0.0/file_geodatabase/layer.gdb.zip": b"gdb-zip",
+        "dataset/layer/v1.0.0/file_geodatabase/layer.gdb/a00000001.gdbtable": b"table",
+    }
+    service = DiscoveryService(storage_client=FakeStorageClient(files))
+
+    async def collect_versions() -> list[DiscoveredVersion]:
+        return [item async for item in service.scan()]
+
+    versions = asyncio.run(collect_versions())
+
+    assert [(item.format_type, item.location_path) for item in versions] == [
+        ("file_geodatabase", "dataset/layer/v1.0.0/file_geodatabase/layer.gdb.zip"),
+        ("shapefile", "dataset/layer/v1.0.0/shapefile/layer.zip"),
+    ]
+    assert [item.object_paths for item in versions] == [
+        ["dataset/layer/v1.0.0/file_geodatabase/layer.gdb.zip"],
+        ["dataset/layer/v1.0.0/shapefile/layer.zip"],
+    ]
+
+
+def test_discovery_archive_metadata_uses_zip_mime_type() -> None:
+    """Shared quality metadata cannot label an archive with another format's MIME type."""
+    files = {
+        "dataset/layer/v1.0.0/file_geodatabase/layer.gdb.zip": b"gdb-zip",
+        "dataset/layer/v1.0.0/metadata/quality_manifest.json": json.dumps(
+            {"version": "v1", "mime_type": "application/parquet", "size_bytes": 999999}
+        ).encode("utf-8"),
+    }
+    service = DiscoveryService(storage_client=FakeStorageClient(files))
+
+    async def collect_versions() -> list[DiscoveredVersion]:
+        return [item async for item in service.scan()]
+
+    versions = asyncio.run(collect_versions())
+
+    assert versions[0].metadata is not None
+    assert versions[0].metadata.mime_type == "application/zip"
+    assert versions[0].metadata.size_bytes == len(b"gdb-zip")
+
+
+def test_discovery_does_not_catalog_unpacked_archive_formats() -> None:
+    """Loose shapefile and FileGDB components are not discoverable sources."""
+    files = {
+        "dataset/layer/v1.0.0/shapefile/layer.shp": b"shape",
+        "dataset/layer/v1.0.0/shapefile/layer.dbf": b"table",
+        "dataset/layer/v1.0.0/file_geodatabase/layer.gdb/a00000001.gdbtable": b"table",
+    }
+    service = DiscoveryService(storage_client=FakeStorageClient(files))
+
+    async def collect_versions() -> list[DiscoveredVersion]:
+        return [item async for item in service.scan()]
+
+    assert asyncio.run(collect_versions()) == []
+
+
+def test_discovery_protects_ambiguous_archive_source_from_pruning() -> None:
+    """Multiple ZIPs are rejected without making an existing source look stale."""
+    files = {
+        "dataset/layer/v1.0.0/shapefile/first.zip": b"first",
+        "dataset/layer/v1.0.0/shapefile/second.zip": b"second",
+    }
+    service = DiscoveryService(storage_client=FakeStorageClient(files))
+
+    async def collect_versions() -> list[DiscoveredVersion]:
+        return [item async for item in service.scan()]
+
+    assert asyncio.run(collect_versions()) == []
+    assert service.protected_source_keys == {("dataset", "layer", "shapefile", "v1.0.0")}
+
+
 def test_catalog_ingest_preview_does_not_write() -> None:
     """Verify the expected behavior."""
     with make_session() as session:
@@ -535,6 +619,44 @@ def test_catalog_ingest_upserts_discovered_version() -> None:
         )
         assert metadata["feature_count"] == EXPECTED_UPDATED_FEATURE_COUNT
         assert metadata["geometry_type"] == "Polygon"
+
+
+def test_catalog_ingest_updates_archive_path_on_the_existing_source() -> None:
+    """Migrating an unpacked source to its ZIP keeps the source identity."""
+    with make_session() as session:
+        collection = Collection(slug="target", name="Target Collection")
+        storage_location = make_storage_location()
+        session.add(collection)
+        session.add(storage_location)
+        session.commit()
+        session.refresh(collection)
+        session.refresh(storage_location)
+        ingest = CatalogIngestService(session)
+        created = ingest.upsert_discovered_version(
+            collection_id=collection.id,
+            storage_location_id=storage_location.id,
+            dataset_slug="dataset",
+            file_slug="layer",
+            format_type="file_geodatabase",
+            version="v1.0.0",
+            location_path="dataset/layer/v1.0.0/file_geodatabase/layer.gdb/a00000001.gdbtable",
+        )
+
+        updated = ingest.upsert_discovered_version(
+            collection_id=collection.id,
+            storage_location_id=storage_location.id,
+            dataset_slug="dataset",
+            file_slug="layer",
+            format_type="file_geodatabase",
+            version="v1.0.0",
+            location_path="dataset/layer/v1.0.0/file_geodatabase/layer.gdb.zip",
+        )
+
+        assert updated.file_source_id == created.file_source_id
+        source = session.get(FileSource, created.file_source_id)
+        assert source is not None
+        location = FileLocation.model_validate(source.location)
+        assert location.path.endswith("layer.gdb.zip")
 
 
 def test_catalog_ingest_refreshes_source_updated_at_without_changing_created_at() -> None:
@@ -899,6 +1021,7 @@ def test_discover_job_loads_storage_location_scans_and_upserts_versions(monkeypa
             def __init__(self, storage_client: object) -> None:
                 """Test helper for __init__."""
                 self.storage_client = storage_client
+                self.protected_source_keys: set[tuple[str, str, str, str]] = set()
 
             async def scan(self, prefix: str = "", limit: int | None = None) -> object:
                 """Test helper for scan."""
@@ -985,6 +1108,7 @@ def test_discover_job_logs_dry_run_object_paths_and_summary(
             def __init__(self, storage_client: object) -> None:
                 """Test helper for __init__."""
                 self.storage_client = storage_client
+                self.protected_source_keys: set[tuple[str, str, str, str]] = set()
 
             async def scan(self, prefix: str = "", limit: int | None = None) -> object:
                 """Test helper for scan."""
@@ -1130,6 +1254,7 @@ def test_discover_job_dry_run_logs_stale_source_prune_preview(
             def __init__(self, storage_client: object) -> None:
                 """Test helper for __init__."""
                 self.storage_client = storage_client
+                self.protected_source_keys: set[tuple[str, str, str, str]] = set()
 
             async def scan(self, prefix: str = "", limit: int | None = None) -> object:
                 """Test helper for scan."""
@@ -1176,6 +1301,57 @@ def test_discover_job_dry_run_logs_stale_source_prune_preview(
     assert summary_log["metadata_objects"] == 0
     assert summary_log["format_counts"] == {"geoparquet": 1}
     assert summary_log["written_versions"] == 0
+
+
+def test_discover_job_does_not_prune_ambiguous_archive_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An archive key rejected for multiple ZIPs remains protected during pruning."""
+    discover_job = importlib.import_module("jobs.discover")
+    with make_session() as session:
+        collection = Collection(slug="hifld", name="HIFLD")
+        storage_location = make_storage_location()
+        session.add(collection)
+        session.add(storage_location)
+        session.commit()
+        session.refresh(collection)
+        session.refresh(storage_location)
+        source = CatalogIngestService(session).upsert_discovered_version(
+            collection_id=collection.id,
+            storage_location_id=storage_location.id,
+            dataset_slug="dataset",
+            file_slug="layer",
+            format_type="shapefile",
+            version="v1.0.0",
+            location_path="dataset/layer/v1.0.0/shapefile/previous.zip",
+        )
+
+        class FakeScanner:
+            """Scanner reporting an unsafe, ambiguous source key."""
+
+            def __init__(self, storage_client: object) -> None:
+                self.storage_client = storage_client
+                self.protected_source_keys = {("dataset", "layer", "shapefile", "v1.0.0")}
+
+            async def scan(self, prefix: str = "", limit: int | None = None) -> object:
+                del prefix, limit
+                if False:
+                    yield
+
+        monkeypatch.setattr(discover_job, "DiscoveryService", FakeScanner)
+        monkeypatch.setattr(discover_job, "create_storage_client_from_location", lambda _: object())
+
+        exit_code = asyncio.run(
+            discover_job.run_job(
+                discover_job.DiscoverJobConfig(
+                    storage_location_slug=storage_location.slug,
+                    collection_slug=collection.slug,
+                    discover_prune_stale=True,
+                ),
+                db_session=session,
+            )
+        )
+
+        assert exit_code == 0
+        assert session.get(FileSource, source.file_source_id) is not None
 
 
 def test_discover_job_returns_one_when_storage_location_missing(monkeypatch: pytest.MonkeyPatch) -> None:
