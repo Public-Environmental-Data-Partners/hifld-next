@@ -36,9 +36,12 @@ which adds OGC API - Features over the GeoParquet assets described here.
   PMTiles is its visual derivative.
 - Schema uses the STAC Table extension. Storage replicas use the Alternate
   Assets extension. Dataset versions use the STAC Version extension.
-- HIFLD quality, data-dictionary, source, and conversion details remain typed
-  metadata assets. The initial catalog defines no custom STAC fields or HIFLD
-  STAC extension.
+- Standard descriptive, provider, license, provenance, timestamp, schema-summary,
+  and quality-summary metadata is written directly into standard STAC/Portolan
+  fields and links. Detailed HIFLD quality and data-dictionary documents remain
+  typed metadata assets. `source_manifest.json` is retired, and
+  `geoparquet_layout.json` remains an unlinked pipeline control artifact. The
+  initial catalog defines no custom STAC fields or HIFLD STAC extension.
 - Dagster produces a single stable `_catalog/catalog.sqlite` object. It does not
   retain one database per generation.
 - `_catalog/catalog-state.json` is an HIFLD control-plane file, not Portolan. It
@@ -91,6 +94,16 @@ It writes versioned formats under
 `{dataset_slug}/{file_slug}/{version}/{format}` and writes
 `quality_manifest.json`, `data_dictionary.json`, and `source_manifest.json`
 beside those products.
+
+A 2026-09-07 audit of the production bucket found 1,368
+`source_manifest.json` objects. All 855 dataset/file authoring manifests contain
+only `title`, `description`, and `tags`. The other 513 are resolved version
+copies containing those same values plus manifest-resolution bookkeeping. None
+contains publisher, agency, license, source URL, or date fields. Those richer
+legacy values, when present, are currently duplicated into
+`data_dictionary.json` from the legacy inventory. Consequently, the source
+manifest is a discovery input today, but it is not a necessary independent
+catalog artifact in the target architecture.
 
 `dataset-api` then scans storage, interprets path structure, reads those nested
 metadata files, and upserts PostgreSQL rows for Collections, Datasets, Files,
@@ -179,8 +192,7 @@ AGENTS.md
         metadata/
           quality_manifest.json
           data_dictionary.json
-          source_manifest.json
-          geoparquet_layout.json
+          geoparquet_layout.json  # pipeline-internal; not a STAC asset
 
 _catalog/
   catalog.sqlite
@@ -215,8 +227,39 @@ metadata unless introduced as part of an explicit identity migration.
 | Version history | STAC Version extension and predecessor/latest links |
 | Data dictionary | `table:columns` plus a metadata asset |
 | Quality manifest | Versioned `quality` metadata asset |
+| Source-manifest title and description | Catalog/Collection `title` and `description` |
+| Source-manifest category tags | Catalog/Collection `keywords` |
 | Storage replica | Canonical HTTPS `href` plus Alternate Assets entries |
 | Upstream source | `via` link and, when downloadable, a `source` asset |
+
+The phrase "Portolan catalog metadata" refers to the whole linked STAC tree,
+not only the root `catalog.json`. Intermediate Catalogs carry grouping identity,
+title, description, and links. The leaf `collection.json` is authoritative for
+the richer version-level metadata and assets.
+
+The generator promotes current sidecar values as follows:
+
+| Current field | Canonical Portolan/STAC field |
+| --- | --- |
+| Dataset manifest `title`, `description` | Dataset Catalog `title`, `description` |
+| File manifest `title`, `description` | File Catalog and version Collection `title`, `description` |
+| Dataset/file `tags.categories` and legacy `keywords` | Deduplicated Catalog/Collection `keywords` |
+| `publisher`, `agency`, `office` | Normalized Collection `providers` |
+| `source_url` | Collection `via` link and source-asset `href` when directly downloadable |
+| `license` | Collection `license` and `license` link when required |
+| `date_issued`, `date_modified` | Source link/asset `published`, `updated` timestamps |
+| Quality `feature_count` | `table:row_count` and SQLite quality summary |
+| Quality `bounds` | Collection `extent.spatial.bbox` |
+| Data-dictionary column name, type, description | `table:columns` |
+| Detailed column statistics and HIFLD quality findings | Metadata assets and SQLite |
+
+Date-only source values are normalized deterministically to RFC 3339 midnight
+UTC for STAC date-time fields while retaining only their original day-level
+precision in generated human-readable documentation. `tags.inventory_name` is
+not written into STAC when it duplicates the dataset slug; SQLite and the
+compatibility API derive it from that slug so existing responses and filters do
+not change. Other fields with no consumer or interoperable meaning are dropped
+rather than copied into unprefixed custom fields.
 
 ### IDs and versions
 
@@ -290,18 +333,33 @@ otherwise valid catalog publication.
 
 Portolan requires provider metadata that the current dataset API does not model
 completely. The pipeline's dataset definition must therefore add structured
-provider and license fields before a version can claim Portolan conformance.
+provider and license fields before a version can claim Portolan conformance. A
+one-time migration imports useful legacy values from the dataset/file source
+manifests and version data dictionaries into the normalized publishing record;
+future publications author them directly in that typed record.
 
 Each Collection identifies at least one `producer` and exactly one `host`, with
 the host last as required by Portolan. A provider has a human-readable name and a
 URL or email. The Collection uses a valid SPDX license identifier when possible;
 `other` requires a license link.
 
-The existing source manifest supplies acquisition and conversion provenance. A
-mirror includes a `via` link to the upstream landing page or API and a `source`
-asset when the upstream original is directly downloadable. HIFLD's conversion
-software and the storage operator are recorded separately from the upstream
-producer.
+The normalized publishing record supplies acquisition and conversion
+provenance. A mirror includes a `via` link to the upstream landing page or API
+and a `source` asset when the upstream original is directly downloadable.
+HIFLD's conversion software and the storage operator are recorded separately
+from the upstream producer. Legacy `publisher`, `agency`, and `office` values
+are normalized into provider objects instead of being copied as parallel custom
+fields. Where an organizational subdivision is useful, it is retained in the
+provider name or description.
+
+Legacy `date_issued` and `date_modified` describe the upstream source, not the
+HIFLD catalog publication. When present, `date_issued` becomes the Timestamps
+extension's `published` field and `date_modified` becomes the STAC common
+`updated` field on the `via` link or `source` asset. Portolan's top-level
+`updated` remains the time HIFLD last synchronized the mirror. Legacy
+`metadata_sources`, `metadata_resolved_from`, `manifest_keys`, `manifest_role`,
+`schema_version`, and `inventory_match_type` are migration or pipeline
+bookkeeping and are not published as catalog metadata.
 
 Missing provider, license, or required provenance is a migration error, not a
 value silently invented by the catalog generator. This is one of the material
@@ -331,6 +389,13 @@ available. The existing `data_dictionary.json` remains a `metadata` asset during
 and after migration because it contains richer statistics such as null counts,
 unique counts, examples, ranges, lengths, and possible values.
 
+The Collection is authoritative for title, description, keywords, providers,
+license, source links, and source timestamps. Existing data dictionaries may
+retain duplicate descriptive or provenance fields during the compatibility
+window, but both projections must come from the same normalized record and the
+publishing gate must reject disagreement. A later data-dictionary schema
+revision may remove those duplicates without changing the Portolan contract.
+
 SQLite stores both the standard Table fields and the richer statistics so the
 current paginated schema route does not need to download or parse JSON at request
 time. A `columns_hash` detects schema equality across formats and versions.
@@ -350,18 +415,21 @@ not properties needed to consume the published layer.
 Detailed metadata is attached with ordinary, locally named assets:
 
 - `quality` points to `metadata/quality_manifest.json`;
-- `data_dictionary` points to `metadata/data_dictionary.json`;
-- `source_manifest` points to `metadata/source_manifest.json` when that manifest
-  adds useful provenance beyond standard STAC providers, links, and source
-  assets; and
-- `geoparquet_layout` points to the authoritative layout manifest when it is
-  retained for reproducible conversion or partition discovery.
+- `data_dictionary` points to `metadata/data_dictionary.json`.
 
 These asset keys need no prefix because they are local keys within an `assets`
 map. Each asset has an explicit media type, `metadata` role, title, description,
 and schema/version information inside the referenced document where applicable.
 The metadata documents use their own typed schemas; their internal fields are not
 STAC extension fields.
+
+`source_manifest.json` is neither copied into the canonical collection path nor
+advertised as an asset. Its useful values are represented by standard
+Catalog/Collection fields, providers, links, assets, and timestamps.
+`geoparquet_layout.json` may remain at its existing storage path because the
+pipeline uses it for GeoParquet reuse and audit, but it is not part of the
+Portolan contract, is not listed in `assets`, and is ignored by webapp, MCP, and
+feature-server consumers.
 
 The normalized pipeline record supplies quality summaries directly to SQLite.
 The webapp and feature server therefore do not parse metadata assets at request
@@ -375,7 +443,9 @@ The initial projection targets the current Portolan v0.2.0 profile and pins the
 extension versions that profile identifies: File Info v2.1.0, Web Map Links
 v1.3.0, Version v1.2.0, Table v1.2.0, Alternate Assets v1.2.0, and Partition
 v1.0.0 when partitioned GeoParquet is present. Projection v2.0.0 is included
-when CRS detail beyond core extent metadata is published.
+when CRS detail beyond core extent metadata is published. The generator
+additionally declares Timestamps v1.1.0 when an upstream publication date is
+available.
 
 These pins are updated only through an explicit catalog schema migration and a
 full validation run.
@@ -419,6 +489,13 @@ The pipeline introduces one typed catalog record model at the boundary between
 quality/conversion and publication. It contains the complete identity,
 descriptive metadata, collection namespace, versions, formats, schemas, quality
 summary, provenance, and storage replicas for one file version.
+
+For migrated records, the importer combines dataset/file titles, descriptions,
+and category tags from the existing source manifests with richer provider,
+keyword, source URL, license, and date values available in existing data
+dictionaries. It normalizes and deduplicates those values before creating the
+typed record. Once parity is proven, source manifests are no longer an input for
+new publication.
 
 Both Portolan documents and SQLite rows are projections of this model. The
 publisher must not generate Portolan, then recursively parse its own JSON to
@@ -676,13 +753,18 @@ temporary legacy-field table is required.
 ### Phase 2: dual publication
 
 Add typed Portolan and SQLite projections to `hifld-next-datasets` while keeping
-the current discovery jobs. Copy every existing object from
+the current discovery jobs. Seed the normalized records from existing source
+manifests and data dictionaries, and verify title, description, keyword,
+provider, source-link, license, and date mappings before publication. Copy every
+existing data object and retained metadata object from
 `{dataset_slug}/{file_slug}/{version}/...` to
 `{collection_slug}/{dataset_slug}/{file_slug}/{version}/...` using server-side
 object copies where available, and verify size and checksum before publishing
-any Portolan link to the new key. During this phase, newly published versions are
-written to both the old unprefixed path and the new canonical prefixed path so
-the old discovery job remains a valid rollback source.
+any Portolan link to the new key. Do not copy `source_manifest.json` into the
+canonical prefixed path. During this phase, newly published versions continue to
+write source manifests only to the old unprefixed path while also writing the new
+canonical Portolan metadata, so the old discovery job remains a valid rollback
+source.
 
 The canonical Portolan tree and shadow SQLite database reference only the new
 prefixed keys. Old keys are temporary rollback copies, not Portolan alternate
@@ -708,7 +790,9 @@ for a bounded observation window.
 
 Remove the `dataset-api` and `dataset-discovery` Helm releases, PostgreSQL catalog
 resources, discovery/config CronJobs, database migrations, and deployment
-workflow steps. Remove `DATASET_API_URL` after rollback is formally closed.
+workflow steps. Remove `DATASET_API_URL` after rollback is formally closed. Also
+remove source-manifest generation, resolution, seeding, and maintenance support
+after the canonical Portolan projection has passed parity checks.
 
 Continue dual writes throughout the bounded rollback window so `dataset-api`
 remains a complete rollback target. After rollback formally closes, stop writing
@@ -735,9 +819,15 @@ second writer.
   asset and no exploded component assets.
 - Schema, quality, feature count, bounds, CRS, geometry type, tags, provenance,
   and all storage replicas survive migration.
+- Existing source-manifest titles and descriptions appear at the appropriate
+  Catalog and Collection levels; category tags appear as Catalog/Collection
+  keywords and retain their existing compatibility API behavior.
+- Canonical collection paths contain no `source_manifest.json`, and no Portolan
+  object advertises either a source-manifest or GeoParquet-layout asset.
 - Portolan objects contain no custom HIFLD fields or HIFLD extension declaration;
-  identity comes from the hierarchy and detailed quality/conversion information
-  comes from typed metadata assets.
+  identity comes from the hierarchy, descriptive and provenance metadata use
+  standard fields and links, and detailed quality/schema information comes from
+  typed metadata assets.
 - Search and tag-filter result sets match the current API for the captured
   fixtures; pagination order is deterministic.
 - Every public webapp catalog route preserves its response schema and link
