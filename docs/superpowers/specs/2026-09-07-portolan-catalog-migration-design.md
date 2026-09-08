@@ -36,8 +36,9 @@ which adds OGC API - Features over the GeoParquet assets described here.
   PMTiles is its visual derivative.
 - Schema uses the STAC Table extension. Storage replicas use the Alternate
   Assets extension. Dataset versions use the STAC Version extension.
-- HIFLD-specific quality and compatibility fields use a small, versioned HIFLD
-  STAC extension instead of unvalidated free-form properties.
+- HIFLD quality, data-dictionary, source, and conversion details remain typed
+  metadata assets. The initial catalog defines no custom STAC fields or HIFLD
+  STAC extension.
 - Dagster produces a single stable `_catalog/catalog.sqlite` object. It does not
   retain one database per generation.
 - `_catalog/catalog-state.json` is an HIFLD control-plane file, not Portolan. It
@@ -179,6 +180,7 @@ AGENTS.md
           quality_manifest.json
           data_dictionary.json
           source_manifest.json
+          geoparquet_layout.json
 
 _catalog/
   catalog.sqlite
@@ -212,7 +214,7 @@ metadata unless introduced as part of an explicit identity migration.
 | Partitioned GeoParquet | Collection asset plus Portolan Partition extension |
 | Version history | STAC Version extension and predecessor/latest links |
 | Data dictionary | `table:columns` plus a metadata asset |
-| Quality manifest | Metadata asset plus `hifld:quality` summary |
+| Quality manifest | Versioned `quality` metadata asset |
 | Storage replica | Canonical HTTPS `href` plus Alternate Assets entries |
 | Upstream source | `via` link and, when downloadable, a `source` asset |
 
@@ -259,6 +261,11 @@ GeoJSON derivatives remain collection-level alternate representations. Hosted
 copies of source Shapefiles and File Geodatabases retain their ZIP packaging and
 use the Portolan `source` role when they are the upstream original.
 
+Shapefile and File Geodatabase representations are published as exactly one ZIP
+asset per format for a logical file version. Exploded component files are not
+advertised as separate assets and are not served by the webapp. GeoPackage is a
+single `.gpkg` asset.
+
 Every asset has an `href`, media type, at least one role, human-readable title,
 and, when the pipeline owns the bytes, `file:size` and a multihash
 `file:checksum`. Absolute primary hrefs use HTTPS so browsers can fetch them.
@@ -267,10 +274,11 @@ old unprefixed object and its new prefixed copy are equivalent only when their
 checksums match.
 
 A File Geodatabase or GeoPackage with multiple layers continues to produce one
-HIFLD file slug per layer. Each layer/version Collection can link back to the
-common original through `hifld:source_file_path` and a source asset. This
-preserves the dataset API's current layer model instead of treating a multi-layer
-container as one queryable table.
+HIFLD file slug per published layer. Each layer/version Collection links to the
+common original with a standard `source` asset. The pipeline may retain the
+original input layer name in its conversion/layout manifest so it can reproduce
+the conversion, but neither that name nor a separate source-file path is part of
+the Portolan or SQLite catalog contract.
 
 Portolan recommends a directly usable MapLibre style for vector collections.
 The pipeline generates a conservative default style from geometry type and
@@ -331,31 +339,35 @@ Collection spatial extents are always finite WGS84 bounds even when the stored
 data uses another CRS. The publishing gate rejects sentinel, inverted, or
 out-of-range extents before updating any parent catalog.
 
-### Quality metadata and the HIFLD extension
+### Metadata assets and custom fields
 
-Portolan intentionally defines no `portolan:*` fields and reserves that prefix.
-HIFLD therefore publishes a small STAC extension for fields that have no suitable
-standard extension. Its schema is versioned, source-controlled, and declared in
-the Collection's `stac_extensions` list.
+The initial catalog adds no custom fields to STAC objects and publishes no HIFLD
+STAC extension. Collection, dataset, and file slugs are already encoded in the
+Portolan ID and parent hierarchy; duplicating them as fields would create two
+sources of identity. Input layer names and source paths are conversion concerns,
+not properties needed to consume the published layer.
 
-The initial extension covers:
+Detailed metadata is attached with ordinary, locally named assets:
 
-- `hifld:collection_slug`
-- `hifld:dataset_slug`
-- `hifld:file_slug`
-- `hifld:layer_name`
-- `hifld:source_file_path`
-- `hifld:quality`, containing the quality policy version, pass/fail result,
-  invalid-geometry count, and columns hash
+- `quality` points to `metadata/quality_manifest.json`;
+- `data_dictionary` points to `metadata/data_dictionary.json`;
+- `source_manifest` points to `metadata/source_manifest.json` when that manifest
+  adds useful provenance beyond standard STAC providers, links, and source
+  assets; and
+- `geoparquet_layout` points to the authoritative layout manifest when it is
+  retained for reproducible conversion or partition discovery.
 
-The complete quality report remains `metadata/quality_manifest.json`, linked as
-a `metadata` asset. The extension contains only fields needed for discovery and
-summary display. This lets Portolan carry arbitrary HIFLD metadata without
-pretending those fields are native Portolan behavior.
+These asset keys need no prefix because they are local keys within an `assets`
+map. Each asset has an explicit media type, `metadata` role, title, description,
+and schema/version information inside the referenced document where applicable.
+The metadata documents use their own typed schemas; their internal fields are not
+STAC extension fields.
 
-The extension schema is source-controlled and published at a stable versioned
-URL such as `/_schemas/hifld/v1.0.0/schema.json`. It is a shared schema artifact,
-not a generated file copied into every dataset directory.
+The normalized pipeline record supplies quality summaries directly to SQLite.
+The webapp and feature server therefore do not parse metadata assets at request
+time, and an inline quality property is unnecessary. If a future requirement
+needs interoperable inline metadata, first adopt an established STAC extension;
+creating a new prefixed extension requires a separate schema-design decision.
 
 ### Pinned extension set
 
@@ -363,8 +375,7 @@ The initial projection targets the current Portolan v0.2.0 profile and pins the
 extension versions that profile identifies: File Info v2.1.0, Web Map Links
 v1.3.0, Version v1.2.0, Table v1.2.0, Alternate Assets v1.2.0, and Partition
 v1.0.0 when partitioned GeoParquet is present. Projection v2.0.0 is included
-when CRS detail beyond core extent metadata is published. The HIFLD extension is
-pinned independently.
+when CRS detail beyond core extent metadata is published.
 
 These pins are updated only through an explicit catalog schema migration and a
 full validation run.
@@ -447,8 +458,8 @@ tables rather than serialized API responses:
   dataset-api Collections, including their Portolan hrefs.
 - `datasets`: dataset identity, display metadata, timestamps, and collection
   membership.
-- `files`: file/layer identity, display metadata, source container, and dataset
-  relationship.
+- `files`: file/layer identity, display metadata, and dataset relationship. It
+  does not contain `layer_name` or `source_file_path` columns.
 - `versions`: immutable version identity, Portolan href, timestamps, bounds,
   CRS, geometry type, feature count, and explicit latest flag.
 - `formats`: normalized format definitions and media types.
@@ -570,6 +581,13 @@ compare continue to run in the frontend; the server supplies the same metadata
 and source URLs they use today. Download routes resolve the requested source ID
 through SQLite and redirect only to a trusted catalog asset.
 
+The legacy `layer_name` and `source_file_path` response fields remain nullable
+during the compatibility window. Phase 1 audits PostgreSQL for non-null values.
+If none exist, the webapp returns `null` without adding the fields to SQLite. If
+values do exist, they are copied into a narrow temporary compatibility table,
+not the canonical `files` table, and retained until removing the public fields
+is handled as a separate breaking API change. New records always return `null`.
+
 The server-side `DATASET_API_URL` remains available only during dual-read and
 rollback. The final runtime replaces it with catalog state/storage settings.
 
@@ -635,7 +653,7 @@ Publishing gates run:
 3. Link resolution across the uploaded candidate tree.
 4. Portolan data validation for GeoParquet spatial ordering, row-group sizes,
    spatial statistics, compression, and range-readable hosting.
-5. HIFLD extension validation.
+5. Validation of each typed metadata asset against its own pinned schema.
 6. SQLite schema, integrity, foreign-key, FTS, latest-version, and response-shape
    validation.
 7. HTTP probes for CORS and byte-range support on canonical cloud-native assets.
@@ -651,7 +669,9 @@ quality policy.
 Capture representative `dataset-api` responses for all public routes, including
 multiple files, multiple versions, every supported format, partitioned
 GeoParquet, missing optional metadata, failed quality, and multiple storage
-locations. Export current numeric IDs for compatibility.
+locations. Export current numeric IDs for compatibility and audit whether any
+`layer_name` or `source_file_path` value is non-null before deciding whether the
+temporary legacy-field table is required.
 
 ### Phase 2: dual publication
 
@@ -711,8 +731,13 @@ second writer.
   identical dataset/file/version slugs in different collections remain distinct.
 - Shapefile, GeoPackage, File Geodatabase, GeoJSON, GeoParquet, and PMTiles
   downloads remain available with correct media types and roles.
+- Every Shapefile and File Geodatabase representation exposes exactly one ZIP
+  asset and no exploded component assets.
 - Schema, quality, feature count, bounds, CRS, geometry type, tags, provenance,
   and all storage replicas survive migration.
+- Portolan objects contain no custom HIFLD fields or HIFLD extension declaration;
+  identity comes from the hierarchy and detailed quality/conversion information
+  comes from typed metadata assets.
 - Search and tag-filter result sets match the current API for the captured
   fixtures; pagination order is deterministic.
 - Every public webapp catalog route preserves its response schema and link
