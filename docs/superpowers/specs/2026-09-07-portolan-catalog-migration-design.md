@@ -463,6 +463,35 @@ STAC document construction. Its structural, metadata, data, link, CORS, and
 range-request checks become publishing gates. It does not become a second
 uploader, version registry, scheduler, indexer, or source of catalog truth.
 
+### TypeScript STAC schema handling
+
+The webapp's normal catalog request path reads the generated SQLite projection;
+it does not crawl or parse the Portolan tree and therefore needs no STAC library
+on that path. If TypeScript code reads STAC documents for migration comparison,
+diagnostics, or a future recovery tool, it must not maintain a handwritten copy
+of the STAC schema.
+
+That TypeScript boundary uses the exact pinned STAC 1.1, Portolan profile, and
+declared extension JSON Schemas as its source of truth. A lockfile-pinned
+`stac-node-validator` 2.x release validates each externally loaded document,
+with a pinned schema map for the Portolan profile and extensions. The exact
+schema files are vendored in the repository. TypeScript declarations are
+generated from those same files with a lockfile-pinned
+`json-schema-to-typescript`, checked into the repository, and regenerated only
+as part of an explicit catalog-schema upgrade. The running webapp never fetches
+schema definitions from the internet.
+
+Generated external-document types remain behind a narrow adapter that produces
+the webapp's explicit catalog models. Application code must not bypass runtime
+validation by asserting that `response.json()` is a generated STAC type.
+
+The initial implementation does not use `stac-ts`. Its current public types
+hard-code STAC `1.0.0` and retain older field semantics, while this design pins
+STAC 1.1. It may replace generated base STAC types later only after a version
+supports the pinned STAC release and passes the same Portolan fixture and type
+checks. Even then, runtime validation against the official JSON Schemas remains
+required because TypeScript declarations do not validate external JSON.
+
 ## Generated human and agent documentation
 
 The pipeline renders `README.md` and `AGENTS.md` from versioned templates.
@@ -734,6 +763,9 @@ Publishing gates run:
 6. SQLite schema, integrity, foreign-key, FTS, latest-version, and response-shape
    validation.
 7. HTTP probes for CORS and byte-range support on canonical cloud-native assets.
+8. When a TypeScript STAC reader exists, validation of its generated declarations
+   and adapter against representative Catalog and Collection fixtures carrying
+   every pinned extension.
 
 The existing conversion and quality checks remain authoritative. Portolan's data
 validator adds conformance checks; it does not replace HIFLD's domain-specific
@@ -841,6 +873,9 @@ second writer.
 - GCS production and SeaweedFS local-development catalog refreshes both pass.
 - No runtime component performs a recursive object-storage discovery scan during
   normal startup or refresh.
+- The webapp contains no handwritten duplicate of the STAC or Portolan JSON
+  Schemas; any TypeScript STAC reader validates with the pinned official schemas
+  before adapting a document into application models.
 - Object storage contains one named SQLite index, not an accumulating generation
   directory.
 - No Portolan link or SQLite asset row refers to an unprefixed rollback key after
@@ -910,3 +945,6 @@ fast local indexing, and Dagster is the only normal writer of catalog truth.
 - [Portolan format requirements](https://github.com/portolan-sdi/portolan-spec/blob/main/specs/portolan/formats.md)
 - [Portolan STAC profile](https://github.com/portolan-sdi/portolan-spec/blob/main/stac/README.md)
 - [STAC specification](https://github.com/radiantearth/stac-spec)
+- [STAC Node Validator](https://www.npmjs.com/package/stac-node-validator)
+- [`stac-ts`](https://github.com/blacha/stac-ts)
+- [`json-schema-to-typescript`](https://github.com/bcherny/json-schema-to-typescript)
