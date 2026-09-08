@@ -5,7 +5,7 @@
 Replace the mutable `dataset-api` catalog database and object-storage discovery
 jobs with a Portolan-conformant static catalog plus one generated SQLite search
 projection. Keep the existing webapp, public HIFLD catalog routes, dataset MCP,
-converted data products, version paths, and local SeaweedFS support.
+converted data products, version semantics, and local SeaweedFS support.
 
 The target state has no Portolan browser or Portolan service. HIFLD implements
 the Portolan specification as files in object storage. The webapp owns the
@@ -21,13 +21,16 @@ which adds OGC API - Features over the GeoParquet assets described here.
 - Portolan/STAC JSON is the canonical, portable metadata representation.
 - `hifld-next-datasets` creates catalog metadata during conversion and publish;
   the runtime no longer discovers meaning by recursively inspecting storage.
-- The existing `{dataset_slug}/{file_slug}/{version}/{format}` data paths do not
-  change.
+- Published paths become
+  `{collection_slug}/{dataset_slug}/{file_slug}/{version}/{format}`. Existing
+  unprefixed HIFLD objects are migrated once and retained only for a bounded
+  rollback window.
 - A version is an immutable Portolan Collection with ID
-  `{dataset_slug}/{file_slug}/{version}`. Dataset and file directories above it
-  are Portolan Catalogs.
-- The existing HIFLD `Collection` grouping remains explicit metadata and an
-  indexed relationship; it is not added to the immutable collection ID.
+  `{collection_slug}/{dataset_slug}/{file_slug}/{version}`. The existing
+  dataset-api `Collection` becomes a first-level Portolan Catalog; dataset and
+  file directories below it are nested Portolan Catalogs.
+- The bucket-root Portolan Catalog is an umbrella for one or more current-style
+  Collections, including the initial `hifld` Catalog.
 - Original Shapefile, GeoPackage, File Geodatabase, and GeoJSON outputs remain
   downloadable assets. GeoParquet is the primary cloud-native vector asset and
   PMTiles is its visual derivative.
@@ -52,6 +55,8 @@ which adds OGC API - Features over the GeoParquet assets described here.
 This migration includes:
 
 - Portolan metadata generation in `../hifld-next-datasets`.
+- A one-time namespace migration from unprefixed HIFLD object keys to
+  collection-prefixed canonical keys.
 - A recoverable full catalog build and an idempotent incremental catalog update.
 - A read-only SQLite schema for browse, search, schema, quality, version, asset,
   and storage-location queries.
@@ -66,7 +71,9 @@ This migration does not include:
 
 - Running Portolan Browser, a STAC API, or a HATEOAS proxy.
 - Replacing the HIFLD frontend with Portolan Browser.
-- Moving or duplicating published geospatial data.
+- Permanently duplicating published geospatial data. A bounded one-time copy to
+  collection-prefixed keys is part of migration because object storage has no
+  atomic rename.
 - Moving data-quality checks or file conversion out of
   `../hifld-next-datasets`.
 - Replacing the dataset MCP or its bounded DuckDB analytics and map-tile
@@ -133,39 +140,45 @@ metadata.
 
 ## Object layout
 
-There is no dedicated `portolan/` prefix. The Portolan root is the bucket root,
-and the current data hierarchy becomes the catalog hierarchy:
+There is no dedicated `portolan/` prefix. The Portolan root is an umbrella at
+the bucket root. Each current dataset-api `Collection` is a first-level
+subcatalog and namespace for all of its datasets:
 
 ```text
 catalog.json
 README.md
 AGENTS.md
 
-{dataset_slug}/
+{collection_slug}/
   catalog.json
   README.md
   AGENTS.md
 
-  {file_slug}/
+  {dataset_slug}/
     catalog.json
     README.md
     AGENTS.md
 
-    {version}/
-      collection.json
+    {file_slug}/
+      catalog.json
       README.md
       AGENTS.md
 
-      geoparquet/...
-      pmtiles/...
-      geopackage/...
-      geojson/...
-      shapefile/...
-      file_geodatabase/...
-      metadata/
-        quality_manifest.json
-        data_dictionary.json
-        source_manifest.json
+      {version}/
+        collection.json
+        README.md
+        AGENTS.md
+
+        geoparquet/...
+        pmtiles/...
+        geopackage/...
+        geojson/...
+        shapefile/...
+        file_geodatabase/...
+        metadata/
+          quality_manifest.json
+          data_dictionary.json
+          source_manifest.json
 
 _catalog/
   catalog.sqlite
@@ -174,21 +187,24 @@ _catalog/
 
 Portolan requires `README.md` and `AGENTS.md` in every Catalog and Collection
 directory. These are generated deterministically from the same typed records as
-the JSON. Version directories are Collections and therefore need both files;
-they are not created for individual format subdirectories.
+the JSON. Collection, dataset, and file directories are Catalogs. Version
+directories are Collections and therefore need both files; documentation is not
+created for individual format subdirectories.
 
-The root may have more than Portolan's recommended twenty direct children.
-Keeping dataset slugs at the root preserves current data paths and the agreed
-collection IDs. This is an intentional SHOULD-level deviation, not a structural
-violation. If catalog size later makes grouping necessary, link-defined
-subcatalogs can be introduced without changing asset paths or the HIFLD API.
+The root Catalog has a stable umbrella ID such as `hifld-next`; `hifld` is the
+ID and directory name of the initial first-level Catalog. A collection Catalog
+may have more than Portolan's recommended twenty direct dataset children.
+Keeping the hierarchy aligned with stable application identities is an
+intentional SHOULD-level deviation, not a structural violation. Adding thematic
+directories later would change descendant Portolan IDs, so themes remain
+metadata unless introduced as part of an explicit identity migration.
 
 ## Portolan mapping
 
 | Existing concept | Portolan representation |
 | --- | --- |
-| Catalog root | Root STAC Catalog |
-| HIFLD Collection grouping | Themes plus `hifld:collection_slug` metadata |
+| Entire catalog service | Root umbrella STAC Catalog |
+| dataset-api Collection such as `hifld` | First-level STAC Catalog and ID namespace |
 | Dataset | Intermediate STAC Catalog |
 | File/layer | Intermediate STAC Catalog |
 | Immutable file version | Leaf STAC Collection |
@@ -205,18 +221,26 @@ subcatalogs can be introduced without changing asset paths or the HIFLD API.
 The immutable Portolan Collection ID is:
 
 ```text
-{dataset_slug}/{file_slug}/{version}
+{collection_slug}/{dataset_slug}/{file_slug}/{version}
 ```
 
 For example:
 
 ```text
-electric-substations/substations/v1.0.0
+hifld/electric-substations/substations/v1.0.0
 ```
 
-IDs use the existing slugs and version string without inventing a separate
-opaque identifier. Version strings must use the existing path-safe slug
-character policy, must not equal `.` or `..`, and may not contain `/` or `~`.
+IDs use the existing collection, dataset, and file slugs plus the version string
+without inventing a separate opaque identifier. Every component uses the
+existing path-safe slug character policy, must not equal `.` or `..`, and may
+not contain `/` or `~`. Collection slugs are immutable namespaces: renaming one
+creates a new canonical namespace and requires an explicit migration rather than
+silently changing all descendant IDs.
+
+Dataset slugs need only be unique within a collection, and file slugs need only
+be unique within a dataset. The full four-part path is unique within the
+umbrella Portolan catalog. The first segment also maps directly to the existing
+`/api/collections/{collectionSlug}` route hierarchy.
 
 Each version Collection declares the STAC Version extension. A newly published
 version links to its predecessor and to the latest version. Older documents do
@@ -238,7 +262,9 @@ use the Portolan `source` role when they are the upstream original.
 Every asset has an `href`, media type, at least one role, human-readable title,
 and, when the pipeline owns the bytes, `file:size` and a multihash
 `file:checksum`. Absolute primary hrefs use HTTPS so browsers can fetch them.
-The current object path is preserved even when the metadata document moves.
+The catalog asset path includes the collection namespace. During cutover, an
+old unprefixed object and its new prefixed copy are equivalent only when their
+checksums match.
 
 A File Geodatabase or GeoPackage with multiple layers continues to produce one
 HIFLD file slug per layer. Each layer/version Collection can link back to the
@@ -360,8 +386,10 @@ uploader, version registry, scheduler, indexer, or source of catalog truth.
 
 The pipeline renders `README.md` and `AGENTS.md` from versioned templates.
 
-- Root documentation explains the catalog, licenses, navigation, and preferred
+- Root documentation explains the umbrella catalog, navigation, and preferred
   access methods.
+- Collection documentation uses the current Collection name and description and
+  explains its providers and licensing policy.
 - Dataset and file documentation uses the human-readable names and descriptions
   already maintained by the pipeline.
 - Version documentation includes formats, schema, quality, CRS, bounds, version
@@ -378,8 +406,8 @@ in the published bucket.
 
 The pipeline introduces one typed catalog record model at the boundary between
 quality/conversion and publication. It contains the complete identity,
-descriptive metadata, versions, formats, schemas, quality summary, provenance,
-and storage replicas for one file version.
+descriptive metadata, collection namespace, versions, formats, schemas, quality
+summary, provenance, and storage replicas for one file version.
 
 Both Portolan documents and SQLite rows are projections of this model. The
 publisher must not generate Portolan, then recursively parse its own JSON to
@@ -388,12 +416,13 @@ create SQLite during the normal incremental path.
 Normal publication is incremental:
 
 1. Conversion and quality checks produce a candidate version record.
-2. The publisher writes all data assets and version-level Portolan files.
+2. The publisher writes all data assets and version-level Portolan files under
+   the collection-prefixed path.
 3. It downloads the current SQLite database, or creates it for the first run.
 4. It applies an idempotent transaction for that version and rebuilds affected
    aggregate rows and FTS entries.
-5. It renders affected parent Catalog documents and documentation from the
-   candidate database.
+5. It renders the affected file, dataset, collection, and root Catalog documents
+   and documentation from the candidate database.
 6. It validates the Portolan metadata, database schema, and referential
    integrity.
 7. It overwrites `_catalog/catalog.sqlite`.
@@ -414,7 +443,8 @@ tables rather than serialized API responses:
 
 - `catalog_metadata`: schema version, catalog generation, Portolan profile URI,
   created time, and source root.
-- `collections`: current HIFLD Collection groupings.
+- `collections`: first-level Portolan Catalogs corresponding to current
+  dataset-api Collections, including their Portolan hrefs.
 - `datasets`: dataset identity, display metadata, timestamps, and collection
   membership.
 - `files`: file/layer identity, display metadata, source container, and dataset
@@ -444,8 +474,9 @@ storage policy resolves.
 Slugs remain canonical. The current APIs nevertheless expose numeric collection,
 dataset, file, format, and source IDs, and some compatibility routes accept them.
 A one-time migration exports existing IDs into `legacy_ids`. New identities use
-a deterministic positive 63-bit value derived from the entity kind and canonical
-slug path, with collision detection during publication.
+a deterministic positive 63-bit value derived from the entity kind and full
+collection-scoped canonical slug path, with collision detection during
+publication.
 
 This preserves existing numeric routes for known records without making numeric
 IDs part of Portolan. New consumers should use slug-based links. Numeric routes
@@ -529,6 +560,10 @@ from HTTP calls to the local catalog repository. This includes:
 - sitemap, OpenAPI, agent-discovery, and WebMCP metadata derived from the same
   catalog; and
 - compatibility numeric-ID routes during migration.
+
+The API's collection list is derived from the umbrella root's first-level
+Catalogs, not from leaf objects whose STAC type is `Collection`. This preserves
+the existing meaning of `/api/collections/hifld` despite the terminology overlap.
 
 Response fields and route paths remain stable through the cutover. Select and
 compare continue to run in the frontend; the server supplies the same metadata
@@ -621,8 +656,19 @@ locations. Export current numeric IDs for compatibility.
 ### Phase 2: dual publication
 
 Add typed Portolan and SQLite projections to `hifld-next-datasets` while keeping
-the current published files and discovery jobs. Validate generated catalog
-records against the captured database for completeness and identity parity.
+the current discovery jobs. Copy every existing object from
+`{dataset_slug}/{file_slug}/{version}/...` to
+`{collection_slug}/{dataset_slug}/{file_slug}/{version}/...` using server-side
+object copies where available, and verify size and checksum before publishing
+any Portolan link to the new key. During this phase, newly published versions are
+written to both the old unprefixed path and the new canonical prefixed path so
+the old discovery job remains a valid rollback source.
+
+The canonical Portolan tree and shadow SQLite database reference only the new
+prefixed keys. Old keys are temporary rollback copies, not Portolan alternate
+assets. Validate the generated catalog against the captured database for
+completeness and identity parity, including at least two collection namespaces
+with intentionally repeated dataset and file slugs.
 
 ### Phase 3: webapp dual read
 
@@ -644,6 +690,13 @@ Remove the `dataset-api` and `dataset-discovery` Helm releases, PostgreSQL catal
 resources, discovery/config CronJobs, database migrations, and deployment
 workflow steps. Remove `DATASET_API_URL` after rollback is formally closed.
 
+Continue dual writes throughout the bounded rollback window so `dataset-api`
+remains a complete rollback target. After rollback formally closes, stop writing
+unprefixed keys and remove the old unprefixed objects using an explicit, reviewed
+inventory produced during Phase 2. The prefixed objects are the only durable
+copies, so the temporary migration overlap does not become an ongoing storage
+cost.
+
 The `dataset-api/` source can be deleted in the same retirement change or kept
 for one release as non-deployed reference code. It must not remain an active
 second writer.
@@ -654,6 +707,8 @@ second writer.
   Portolan and STAC versions.
 - Every existing logical dataset/file/version appears exactly once in Portolan
   and SQLite.
+- Every Portolan Collection ID begins with its immutable collection slug, and
+  identical dataset/file/version slugs in different collections remain distinct.
 - Shapefile, GeoPackage, File Geodatabase, GeoJSON, GeoParquet, and PMTiles
   downloads remain available with correct media types and roles.
 - Schema, quality, feature count, bounds, CRS, geometry type, tags, provenance,
@@ -673,6 +728,9 @@ second writer.
   normal startup or refresh.
 - Object storage contains one named SQLite index, not an accumulating generation
   directory.
+- No Portolan link or SQLite asset row refers to an unprefixed rollback key after
+  migration, and every legacy object selected for cleanup has a checksum-matched
+  canonical copy.
 
 ## Risks and mitigations
 
@@ -713,6 +771,15 @@ repository interface.
 Portolan uses string IDs while legacy responses expose integers. Preserve known
 IDs through the one-time export and detect deterministic-ID collisions at
 publish time. New links should prefer slugs.
+
+### Collection-prefix migration
+
+Adding the collection namespace changes every existing object key, and object
+storage implements that change as copy plus later deletion. Use a generated,
+reviewable migration inventory, server-side copies, checksum verification, dual
+publication only during the rollback window, and explicit cleanup approval.
+Never infer deletion targets from a broad bucket prefix. Monitor temporary
+duplicate bytes so the rollback window cannot silently become permanent.
 
 ## Result
 

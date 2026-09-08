@@ -31,9 +31,9 @@ single `_catalog/catalog.sqlite` artifact.
   snapshot registry. New catalog generations are built off the request path and
   swapped without restarting workers.
 - Advertise an immutable OGC collection for every queryable version and a stable
-  latest alias for every logical file.
-- Use `{dataset_slug}~{file_slug}~{version}` for immutable OGC IDs and
-  `{dataset_slug}~{file_slug}` for latest aliases.
+  latest alias for every collection-scoped logical file.
+- Use `{collection_slug}~{dataset_slug}~{file_slug}~{version}` for immutable OGC
+  IDs and `{collection_slug}~{dataset_slug}~{file_slug}` for latest aliases.
 - Pin pygeoapi and DuckDB versions and test the custom application boundary,
   because pygeoapi does not currently expose a supported in-process reload
   factory.
@@ -143,14 +143,21 @@ Portolan and OGC use related but deliberately different identifiers:
 
 | Meaning | Identifier |
 | --- | --- |
-| Portolan immutable Collection | `electric-substations/substations/v1.0.0` |
-| OGC immutable collection | `electric-substations~substations~v1.0.0` |
-| OGC latest alias | `electric-substations~substations` |
+| Portolan immutable Collection | `hifld/electric-substations/substations/v1.0.0` |
+| OGC immutable collection | `hifld~electric-substations~substations~v1.0.0` |
+| OGC latest alias | `hifld~electric-substations~substations` |
 
 The tilde delimiter is URI path-safe and is excluded from current slug and
 version syntax, so the mapping is reversible and collision-free. Current
 pygeoapi supports slash-containing collection IDs, but the flattened form avoids
 depending on hierarchical-ID behavior in general OGC clients.
+
+The first component is the current dataset-api Collection namespace, not the
+STAC Collection type. Including it allows two collection namespaces to reuse the
+same dataset and file slugs without producing the same OGC ID. Collection slugs
+are immutable for the same reason Portolan Collection IDs are immutable; a
+renamed namespace is published as a new identity rather than silently retargeting
+existing OGC URLs.
 
 Every OGC collection response also carries the components separately in links
 or extension metadata:
@@ -184,7 +191,7 @@ startup:
 It contains no generated dataset `resources` section. At refresh time, the
 catalog projector reads typed rows from SQLite and constructs one pygeoapi
 resource definition for each immutable GeoParquet version plus one latest alias
-per file.
+per collection-scoped file.
 
 A projected resource contains:
 
@@ -526,8 +533,10 @@ SQL text, property values, signed URLs, credentials, and raw storage exceptions.
   class.
 - Collection list, collection detail, queryables/schema, item list, hits, and
   item-by-ID work for both immutable IDs and latest aliases.
-- IDs map reversibly to dataset slug, file slug, and version, and tilde is
-  rejected inside each component.
+- IDs map reversibly to collection slug, dataset slug, file slug, and version,
+  and tilde is rejected inside each component.
+- Repeated dataset, file, and version slugs under different collection
+  namespaces produce distinct OGC resources and never share a latest alias.
 - The latest alias follows SQLite's explicit latest record after refresh while
   the prior immutable ID remains unchanged.
 - Publishing a new GeoParquet version becomes queryable on running workers
