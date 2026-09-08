@@ -40,6 +40,9 @@ single `_catalog/catalog.sqlite` artifact.
 - Evaluate the community `pygeoapi-duckdb-geoparquet` provider as source material,
   but do not depend on it unmodified. Adopt, fork, or rewrite only after contract,
   security, and performance tests.
+- Use the catalog migration's four-dataset SeaweedFS fixture suite as a required
+  end-to-end gate, including a new dataset promoted while the feature server is
+  running.
 
 ## Scope
 
@@ -554,6 +557,18 @@ SQL text, property values, signed URLs, credentials, and raw storage exceptions.
   unsupported functions, excessive complexity, and path substitution.
 - GCS and SeaweedFS integration tests return equivalent features for matching
   asset replicas.
+- The shared SeaweedFS acceptance suite queries the initial boundary, hazard
+  line, and hazard polygon resources through DuckDB using only catalog-approved
+  SeaweedFS S3 URIs.
+- After the held-back fueling-stations GeoPackage is promoted and its
+  GeoParquet/catalog generation is published, the already-running feature server
+  advertises and queries its point features within the configured refresh TTL.
+- The hot update changes neither the bytes nor results of the three initial
+  immutable OGC collections, and requests that overlap the swap finish on their
+  captured generation.
+- The acceptance suite checks collection listing and detail, queryables, first
+  page, item-by-ID, bbox filtering, attribute filtering, limits, Portolan links,
+  and `X-Catalog-Generation` for each applicable fixture.
 - Partitioned GeoParquet tests use only catalog-approved objects.
 - Resource, concurrency, timeout, and response-size limits fail closed.
 - Every OGC collection links to the correct Portolan document.
@@ -569,11 +584,21 @@ boundary, feature-ID strategy, GCS and SeaweedFS access, and generation swap.
 Benchmark full OpenAPI projection at the expected catalog cardinality before
 committing to an external provider fork.
 
+The SeaweedFS portion uses the shared manifest and bucket defined by the catalog
+migration design. It must not maintain a separate feature-server fixture catalog
+or bypass the Dagster-generated SQLite database.
+
 ### Phase 2: private deployment
 
 Deploy the service internally, consume the shadow SQLite catalog, and run OGC,
 security, and query-parity tests against representative small, large, and
 partitioned datasets.
+
+Run the complete local acceptance sequence first: start the webapp and feature
+server after the initial three promotions, then publish the held-back fourth
+dataset without stopping either service. This proves real SeaweedFS range reads
+and dynamic resource projection together rather than testing reload with a
+hand-authored SQLite fixture.
 
 ### Phase 3: catalog refresh validation
 

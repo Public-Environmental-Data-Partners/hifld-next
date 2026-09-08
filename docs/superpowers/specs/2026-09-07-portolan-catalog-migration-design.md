@@ -53,6 +53,10 @@ which adds OGC API - Features over the GeoParquet assets described here.
   a compatibility cutover.
 - The dataset MCP remains. Its catalog base URL moves from `dataset-api` to the
   webapp's compatible catalog API.
+- A required local acceptance workflow seeds a small, varied set of production
+  GeoPackages into a dedicated SeaweedFS bucket, promotes them into the new
+  layout with local Dagster, and proves that running consumers observe a later
+  promotion without restarting.
 
 ## Scope
 
@@ -70,6 +74,8 @@ This migration includes:
 - Removal of the production dataset API, PostgreSQL catalog, and discovery
   CronJobs after parity is proven.
 - Portolan structural, metadata, and data validation in the publishing gates.
+- A repeatable, manifest-driven SeaweedFS acceptance environment shared by
+  Dagster, the webapp, and the feature server.
 
 This migration does not include:
 
@@ -151,6 +157,100 @@ different access patterns. Portolan is canonical for interchange and direct
 object-storage browsing. SQLite is canonical only for a particular generated
 index generation and can always be rebuilt from the Portolan tree and pipeline
 metadata.
+
+## Local SeaweedFS acceptance environment
+
+The migration has one required end-to-end acceptance path that uses the same
+local SeaweedFS instance for legacy input, canonical output, catalog metadata,
+and consumer reads. It uses a dedicated `hifld-acceptance` bucket so the test
+can exercise an in-place namespace migration without colliding with the normal
+developer `hifld` bucket or requiring destructive prefix cleanup.
+
+The checked-in fixture manifest lives in `../hifld-next-datasets`. It contains
+metadata only: collection, dataset, file, and version identifiers; the exact
+production GCS GeoPackage URI; object generation; byte size; checksum; expected
+geometry family; and whether the case is promoted in the initial or hot-update
+wave. GeoPackage bytes are never committed to Git. The bootstrap command reads
+production but has no production write capability. It downloads an object only
+when the local cached copy or SeaweedFS object is absent or fails its pinned
+size and checksum. The manifest's complete object key is authoritative; the
+bootstrap must not derive the filename from the file slug because production
+filenames are not uniformly slug-shaped.
+
+The initial fixture suite is deliberately small enough for routine local use but
+varied enough to test meaningful behavior:
+
+| Promotion wave | Dataset/file | Approximate source size | Coverage |
+| --- | --- | ---: | --- |
+| Initial | `12nm-territorial-sea/12nm-territorial-sea` | 1.6 MiB | Small independent boundary dataset and simple hierarchy |
+| Initial | `uniform-hazard-ground-motion/us-pga-10pct50yrs-bc-arc` | 8.7 MiB | Line geometry and first child of a multi-file dataset |
+| Initial | `uniform-hazard-ground-motion/us-pga-10pct50yrs-bc-poly` | 13.6 MiB | Polygon geometry and sibling-file identity/compare behavior |
+| Hot update | `alternative-fueling-stations/alternative-fueling-stations` | 48.3 MiB | Point geometry, higher feature count, and live catalog expansion |
+
+All four are production `v1.0.0` GeoPackages. The manifest pins the observed
+object metadata rather than relying on the approximate sizes above. If a
+production object changes, fixture refresh is an explicit reviewed operation;
+the acceptance bootstrap does not silently bless new bytes.
+
+### In-place layout and promotion
+
+Bootstrap uploads only the source GeoPackages under their current unprefixed
+paths in the dedicated bucket:
+
+```text
+{dataset_slug}/{file_slug}/v1.0.0/geopackage/{name}.gpkg
+```
+
+The acceptance runner registers exactly those manifest entries as Dagster
+publish partitions. It does not recursively discover arbitrary objects. Local
+Dagster reads the unprefixed GeoPackage through SeaweedFS and writes the normal
+quality, schema, conversion, and promotion outputs back to the same bucket under
+the canonical collection-prefixed paths:
+
+```text
+hifld/{dataset_slug}/{file_slug}/v1.0.0/...
+```
+
+The original GeoPackage is preserved as a canonical downloadable asset;
+GeoParquet, PMTiles, Shapefile ZIP, quality metadata, data dictionary, Portolan
+documents, and generated human/agent documentation follow the normal pipeline
+rules. The unprefixed fixture remains only as acceptance input and must never be
+referenced by a Portolan link or SQLite asset row.
+
+`StagingStorageResource` and `PublishedStorageResource` therefore gain a typed
+S3-compatible backend configuration that supports a fixed endpoint, bucket,
+credentials, region, path-style addressing, and HTTP/TLS mode. Existing GCS and
+filesystem configurations remain supported. The local acceptance profile points
+both logical resources at `hifld-acceptance`, but applies their distinct legacy
+input and canonical output path rules. It must exercise object reads, writes,
+listings, conditional replacement, snapshots/checksums, and temporary local
+materialization through SeaweedFS rather than mounting the filer as a local
+directory.
+
+### Acceptance sequence
+
+One repository-level acceptance command orchestrates the flow while still
+allowing each stage to be run independently for diagnosis:
+
+1. Start SeaweedFS and create or verify the dedicated bucket.
+2. Bootstrap all four pinned production GeoPackages into their legacy paths.
+3. Promote the three initial-wave partitions with local Dagster.
+4. Validate every canonical data object and Portolan document, then publish the
+   stable SQLite object and state marker last.
+5. Start the webapp and feature server against the SeaweedFS filer/S3 endpoints
+   and wait for both to report the active catalog generation.
+6. Run initial webapp, catalog API, download, and OGC feature assertions.
+7. While both services remain running, promote the held-back point dataset and
+   publish the next catalog generation.
+8. Verify that both services adopt that generation within their configured TTL,
+   expose the new dataset, and continue serving the initial immutable versions.
+9. Rerun the selected Dagster partitions and catalog publication to prove that
+   promotion is idempotent and does not create duplicate catalog or SQLite rows.
+
+The runner reports generated object paths, catalog generations, checksums, and
+service refresh timings. Cleanup targets only the exact dedicated local bucket
+and is a separate explicit operation; a failed test leaves its objects available
+for inspection.
 
 ## Object layout
 
@@ -804,6 +904,13 @@ assets. Validate the generated catalog against the captured database for
 completeness and identity parity, including at least two collection namespaces
 with intentionally repeated dataset and file slugs.
 
+Before running this against the full production inventory, pass the shared local
+SeaweedFS acceptance workflow. The selected production GeoPackages must travel
+from legacy unprefixed keys through Dagster conversion, quality checks, canonical
+promotion, Portolan generation, SQLite projection, and live consumer refresh.
+This is the executable small-scale proof of the same namespace migration; it is
+not a separate mock publishing path.
+
 ### Phase 3: webapp dual read
 
 Add the SQLite repository behind a runtime switch. In shadow mode, serve existing
@@ -871,6 +978,23 @@ second writer.
 - A corrupt or partially published database never replaces the active
   last-known-good database.
 - GCS production and SeaweedFS local-development catalog refreshes both pass.
+- The SeaweedFS acceptance bootstrap verifies pinned production object
+  generations, sizes, and checksums and requires no production write access.
+- The four default GeoPackage fixtures cover point, line, and polygon data;
+  multiple datasets; and sibling files within one dataset while keeping the
+  downloaded source set below approximately 75 MiB.
+- Local Dagster reads fixture bytes from SeaweedFS and writes canonical
+  GeoPackage, GeoParquet, PMTiles, Shapefile ZIP, metadata, Portolan, SQLite, and
+  state objects back through SeaweedFS storage APIs.
+- After the initial promotion, the webapp can browse, search, compare, inspect
+  schema/quality metadata, download the canonical GeoPackage, and resolve map
+  assets using only the SeaweedFS-backed catalog.
+- Promoting the held-back dataset while the webapp and feature server remain
+  running advances the catalog generation and makes it available within the TTL
+  without a restart; initial immutable versions remain available.
+- Repeating bootstrap and promotion is idempotent, and failed acceptance runs
+  retain their dedicated bucket for inspection rather than deleting broad
+  prefixes.
 - No runtime component performs a recursive object-storage discovery scan during
   normal startup or refresh.
 - The webapp contains no handwritten duplicate of the STAC or Portolan JSON
