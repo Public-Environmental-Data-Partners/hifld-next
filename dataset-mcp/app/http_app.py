@@ -81,6 +81,8 @@ class AssetHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
         if request.url.path.startswith("/assets/"):
+            if request.url.path.endswith("/maplibre-gl-worker.cjs"):
+                response.headers["Content-Type"] = "text/javascript"
             response.headers["Access-Control-Allow-Origin"] = "*"
             response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
         return response

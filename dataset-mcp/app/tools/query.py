@@ -9,6 +9,8 @@ from typing import Annotated, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from app.http.tiles import QUERY_TOKEN_HEADER
+
 type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
 type JSONMapping = Mapping[str, JSONValue]
 type BasemapStyle = Literal["street", "satellite"]
@@ -271,7 +273,47 @@ async def query_geoparquet(
         raise ValueError("every source must have an alias")
     service.validate_sql(sql, aliases)
     payload = await service.query(sources, sql, _limit(limit), geometry_column, result_crs)
-    return _result("GeoParquet query", payload)
+    return _result("Parquet query", payload)
+
+
+async def generate_mvt_tile_url(
+    service: QueryService,
+    sources: Sequence[JSONMapping],
+    sql: str,
+    *,
+    geometry_column: str | None = None,
+    result_crs: str | None = None,
+) -> ToolResult:
+    """Reuse signed query execution and geometry/CRS validation without creating a UI."""
+    result = await query_geoparquet(
+        service,
+        sources,
+        sql,
+        limit=1,
+        geometry_column=geometry_column,
+        result_crs=result_crs,
+    )
+    token = result.structured_content.get("query_token")
+    if not isinstance(token, str):
+        raise ValueError("query result is missing its token")
+    # The application service rejects absent/ambiguous geometry and unknown CRS.
+    map_payload = await service.map_configuration(token)
+    configuration = map_payload.get("map_configuration")
+    if not isinstance(configuration, dict):
+        raise ValueError("tile configuration is invalid")
+    expires_at = service.validate_token(token).get("expires_at")
+    if not isinstance(expires_at, str):
+        raise ValueError("query token metadata is missing its expiration")
+    payload: dict[str, JSONValue] = {
+        "headers": {QUERY_TOKEN_HEADER: token},
+        "expires_at": expires_at,
+    }
+    for field in ("tile_url", "source_layer", "geometry_column", "result_crs"):
+        value = configuration.get(field)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"tile configuration is missing {field}")
+        payload[field] = value
+    return _result("MVT tile access", payload)
 
 
 async def get_query_page(

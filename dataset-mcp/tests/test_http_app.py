@@ -148,7 +148,7 @@ def test_map_argument_diagnostics_correlate_http_and_validation_without_values(
                     },
                 )
         assert response.status_code == 200
-        assert ('"isError":true' in response.text) is stringify
+        assert '"isError":true' not in response.text
         events = [
             json.loads(record.message)
             for record in caplog.records
@@ -167,6 +167,64 @@ def test_map_argument_diagnostics_correlate_http_and_validation_without_values(
             assert secret not in diagnostic_text
 
     asyncio.run(assert_diagnostics())
+
+
+@pytest.mark.parametrize(
+    "layers, camera",
+    [
+        ("not-json", None),
+        ("{}", None),
+        ('"[]"', None),
+        ("[]", None),
+        ("[{}]", None),
+        ("[{}]", '{"center":[1000,40],"zoom":11}'),
+    ],
+)
+def test_map_json_compatibility_does_not_bypass_validation(layers, camera) -> None:
+    async def check() -> None:
+        mcp = create_mcp_server(_dependencies(), ui_html="<html/>")
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "view_query_map",
+                {
+                    "title": "Invalid map",
+                    "layers": layers,
+                    "camera": camera,
+                },
+                raise_on_error=False,
+            )
+        assert result.is_error
+
+    asyncio.run(check())
+
+
+def test_query_parquet_and_tile_url_are_callable_without_opening_ui() -> None:
+    async def check() -> None:
+        mcp = create_mcp_server(_dependencies(), ui_html="<html/>")
+        async with Client(mcp) as client:
+            sources = [{"alias": "roads"}]
+            query_result = await client.call_tool(
+                "query_parquet",
+                {
+                    "sources": sources,
+                    "sql": "SELECT geometry FROM roads",
+                },
+            )
+            assert not query_result.is_error
+            tile_result = await client.call_tool(
+                "generate_mvt_tile_url",
+                {
+                    "sources": sources,
+                    "sql": "SELECT geometry FROM roads",
+                },
+            )
+            assert not tile_result.is_error
+            assert "tile_url" in tile_result.structured_content
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            assert tools["view_query_map"].inputSchema["properties"]["layers"]["type"] == "array"
+            assert "ui" not in (tools["generate_mvt_tile_url"].meta or {})
+
+    asyncio.run(check())
 
 
 def test_only_view_query_map_opens_the_app_resource() -> None:
@@ -190,7 +248,8 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
                 "get_dataset_file",
                 "get_dataset_file_schema",
                 "read_geoparquet_rows",
-                "query_geoparquet",
+                "query_parquet",
+                "generate_mvt_tile_url",
                 "get_query_page",
                 "view_query_map",
                 "refresh_query_map",
@@ -216,7 +275,8 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
                 "get_dataset_file",
                 "get_dataset_file_schema",
                 "read_geoparquet_rows",
-                "query_geoparquet",
+                "query_parquet",
+                "generate_mvt_tile_url",
                 "get_query_page",
             }:
                 assert by_name[name].meta is None or "ui" not in by_name[name].meta
@@ -294,6 +354,7 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
             assert resources[0].meta["ui"]["csp"] == {
                 "connectDomains": [
                     "https://tiles.example.test",
+                    "https://assets.example.test",
                     "https://tiles.openfreemap.org",
                     "https://services.arcgisonline.com",
                 ],
@@ -497,9 +558,10 @@ def test_http_app_wires_query_resources_to_the_shared_query_service() -> None:
     asyncio.run(assert_query_route())
 
 
-def test_worker_asset_allows_cross_origin_module_loading(tmp_path: Path) -> None:
+@pytest.mark.parametrize("extension", ["mjs", "cjs"])
+def test_worker_asset_allows_cross_origin_loading(tmp_path: Path, extension: str) -> None:
     async def assert_asset_headers() -> None:
-        (tmp_path / "maplibre-gl-worker.mjs").write_text("export {};", encoding="utf-8")
+        (tmp_path / f"maplibre-gl-worker.{extension}").write_text("/* worker */", encoding="utf-8")
         app = create_http_app(
             _dependencies(),
             ui_html="<html><body>dataset explorer</body></html>",
@@ -509,13 +571,14 @@ def test_worker_asset_allows_cross_origin_module_loading(tmp_path: Path) -> None
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get(
-                    "/assets/maplibre-gl-worker.mjs",
+                    f"/assets/maplibre-gl-worker.{extension}",
                     headers={"Origin": "https://sandbox.example.test"},
                 )
 
         assert response.status_code == 200
         assert response.headers["access-control-allow-origin"] == "*"
         assert response.headers["cross-origin-resource-policy"] == "cross-origin"
+        assert "javascript" in response.headers["content-type"]
 
     asyncio.run(assert_asset_headers())
 
