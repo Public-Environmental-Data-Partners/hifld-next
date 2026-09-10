@@ -11,6 +11,7 @@ from fastmcp.apps import AppConfig, ResourceCSP
 from fastmcp.tools import ToolResult as FastMCPToolResult
 from mcp.types import TextContent
 
+from app.argument_diagnostics import ArgumentToolDiagnostics
 from app.catalog.client import CatalogClientError
 from app.errors import AppError
 from app.tools import discovery, query
@@ -120,6 +121,7 @@ def create_mcp_server(
     than the constructor; ``http_app.py`` supplies that setting.
     """
     mcp = FastMCP("HIFLD Dataset Explorer")
+    mcp.add_middleware(ArgumentToolDiagnostics())
     query_map_app = _app_config(visibility=["model"])
     query_map_refresh_app = _app_config(visibility=["app"])
 

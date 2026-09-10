@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.argument_diagnostics import ArgumentIngressDiagnostics
 from app.http.queries import QueryHttpService, create_query_router
 from app.http.tiles import TileService, create_tile_router
 from app.mcp_server import AppDependencies, UIResourceConfig, create_mcp_server
@@ -152,6 +153,7 @@ def create_http_app(
     app.add_middleware(ConcurrencyLimiter, maximum=max_concurrency)
     app.add_middleware(McpPathCanonicalizer)
     app.add_middleware(AssetHeadersMiddleware)
+    app.add_middleware(ArgumentIngressDiagnostics)
 
     async def invalid_request(_: Request, __: Exception) -> JSONResponse:
         return JSONResponse(

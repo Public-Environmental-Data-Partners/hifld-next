@@ -115,6 +115,37 @@ HIFLD webapp and also supports its Esri World Imagery satellite mode. Arbitrary
 style URLs, raw MapLibre expressions, partial maps, GeoJSON conversion, and
 alternate tile fallbacks are not accepted.
 
+## Temporary map argument diagnostics
+
+`view_query_map` HTTP calls emit `mcp_argument_types` JSON log records at
+`http_ingress` (decoded HTTP JSON) and `tool_dispatch` (FastMCP's public middleware
+hook before tool-specific Pydantic validation). Match the generated `request_id`
+across both records. The Helm chart sets `DATASET_MCP_BUILD_REVISION` from the image
+tag; local runs report `unknown` unless this environment variable is set.
+
+Only the fixed tool name, stage, generated ID, revision, and the types of `layers`
+and `camera` are logged. `missing` differs from `null`. No argument values, SQL,
+client request IDs, or headers are added to these records. Existing framework
+validation warnings are unchanged and may still include invalid input values.
+
+After deployment through the normal workflow, retry a simple Claude map and a
+direct MCP call, then inspect:
+
+```bash
+kubectl -n hifld-next logs deployment/dataset-mcp --since=10m | rg mcp_argument_types
+```
+
+A string at ingress places the conversion upstream of the application. An array
+at ingress and string at dispatch places it between those boundaries. Arrays at
+both boundaries require investigating the remaining dispatch/validation path;
+the dispatch hook is not instrumentation inside Pydantic itself.
+
+Capture tees incoming chunks unchanged and is capped at 1 MiB per request. Invalid
+or oversized JSON skips the ingress record without changing normal processing;
+a missing ingress record is not evidence of conversion. Non-map tools are not
+logged. Remove the two diagnostic middleware registrations, their module, and
+the chart revision variable after the investigation.
+
 ## Opt-in storage acceptance tests
 
 The normal test suite does not require network access. To exercise a real
