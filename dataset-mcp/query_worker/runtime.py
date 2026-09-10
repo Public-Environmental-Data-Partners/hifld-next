@@ -138,9 +138,11 @@ class WorkerRuntime:
             self.connection.execute(f"DROP SECRET IF EXISTS {_quoted_identifier(secret_name)}")
 
     def _create_source_views(
-        self, request: WorkerQuery | WorkerBoundsQuery | WorkerTileQuery
-    ) -> dict[str, str]:
-        aliases: dict[str, str] = {}
+        self,
+        request: WorkerQuery | WorkerBoundsQuery | WorkerTileQuery,
+        aliases: dict[str, str],
+    ) -> None:
+        # Register incrementally so the caller can clean up even if a later source fails.
         for source in request.sources:
             if source.alias in aliases:
                 raise ValueError("duplicate source alias")
@@ -152,7 +154,6 @@ class WorkerRuntime:
             relation = self.connection.read_parquet(list(source.object_uris), union_by_name=True)
             relation.create_view(view_name)
             aliases[source.alias] = view_name
-        return aliases
 
     def _drop_source_views(self, aliases: dict[str, str]) -> None:
         for view_name in aliases.values():
@@ -168,7 +169,7 @@ class WorkerRuntime:
         secret_names: tuple[str, ...] = ()
         try:
             secret_names = self._create_request_secrets(request)
-            aliases = self._create_source_views(request)
+            self._create_source_views(request, aliases)
             rewritten_sql = _rewrite_source_aliases(request.canonical_sql, aliases)
             if isinstance(request, WorkerTileQuery):
                 from query_worker.tiles import execute_tile
