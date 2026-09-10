@@ -317,7 +317,7 @@ class QueryApplicationService:
             "tile_url": (
                 f"{self._public_origin}/api/queries/{query_id}/tiles/{{z}}/{{x}}/{{y}}.mvt"
             ),
-            "worker_url": f"{self._public_origin}/assets/maplibre-gl-worker.mjs",
+            "worker_url": f"{self._public_origin}/assets/maplibre-gl-worker.cjs",
             "source_layer": "hifld",
             "geometry_column": geometry_column,
             "result_crs": result_crs,

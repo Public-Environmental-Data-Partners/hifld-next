@@ -10,6 +10,7 @@ from app.query.models import JsonValue, ResolvedSource
 from app.query.service import QueryService
 from app.query.token_codec import QueryTokenCodec
 from app.storage.resolver import StorageResolver
+from app.tools.query import generate_mvt_tile_url
 from query_worker.protocol import (
     WorkerBounds,
     WorkerBoundsQuery,
@@ -206,7 +207,7 @@ async def test_query_builds_map_contract_with_explicit_crs_and_preserves_token()
         "tile_url": (
             f"https://mcp.example.test/base/api/queries/{query_id}/tiles/{{z}}/{{x}}/{{y}}.mvt"
         ),
-        "worker_url": "https://mcp.example.test/base/assets/maplibre-gl-worker.mjs",
+        "worker_url": "https://mcp.example.test/base/assets/maplibre-gl-worker.cjs",
         "source_layer": "hifld",
         "geometry_column": "geometry",
         "result_crs": "EPSG:4326",
@@ -304,7 +305,7 @@ async def test_query_uses_crs_declared_by_the_result_geometry_type() -> None:
         "tile_url": (
             f"https://mcp.example.test/base/api/queries/{query_id}/tiles/{{z}}/{{x}}/{{y}}.mvt"
         ),
-        "worker_url": "https://mcp.example.test/base/assets/maplibre-gl-worker.mjs",
+        "worker_url": "https://mcp.example.test/base/assets/maplibre-gl-worker.cjs",
         "source_layer": "hifld",
         "geometry_column": "geometry",
         "result_crs": "EPSG:3857",
@@ -337,6 +338,48 @@ async def test_map_configuration_rejects_a_non_spatial_query_token() -> None:
         await service.map_configuration(result["query_token"])
 
     assert caught.value.code is ErrorCode.GEOMETRY_AMBIGUOUS
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "executor, sql, geometry_column, expected",
+    [
+        (NonSpatialExecutor(), "SELECT id FROM roads", None, ErrorCode.GEOMETRY_AMBIGUOUS),
+        (Executor(), "SELECT geometry FROM roads", None, ErrorCode.GEOMETRY_CRS_REQUIRED),
+        (Executor(), "SELECT geometry FROM roads", "missing", ErrorCode.MAP_NOT_SUPPORTED),
+    ],
+)
+async def test_tile_url_tool_requires_selected_geometry_and_known_crs(
+    executor: Executor,
+    sql: str,
+    geometry_column: str | None,
+    expected: ErrorCode,
+) -> None:
+    service = _service(Resolver(), executor)
+    with pytest.raises(AppError) as caught:
+        await generate_mvt_tile_url(service, [_source()], sql, geometry_column=geometry_column)
+    assert caught.value.code is expected
+
+
+@pytest.mark.asyncio
+async def test_tile_url_tool_reuses_full_signed_query_and_sandbox_safe_route() -> None:
+    executor = CrsTypedGeometryExecutor()
+    service = _service(Resolver(), executor)
+    sql = "SELECT geometry FROM roads"
+    result = await generate_mvt_tile_url(service, [_source()], sql)
+    headers = result.structured_content["headers"]
+    assert isinstance(headers, dict)
+    token = headers["X-HIFLD-Query-Token"]
+    assert isinstance(token, str)
+    payload = service._decode_token(token)
+    assert payload.canonical_sql == sql
+    assert result.structured_content["result_crs"] == "EPSG:3857"
+    assert result.structured_content["tile_url"] == (
+        f"https://mcp.example.test/base/tiles/{payload.query_id}/{{z}}/{{x}}/{{y}}.mvt"
+    )
+    assert len(executor.calls) == 1
+    assert isinstance(executor.calls[0], WorkerQuery)
+    assert executor.calls[0].limit == 1
 
 
 @pytest.mark.asyncio

@@ -37,6 +37,8 @@ jobs:
       - run: npm run --workspace @hifld/dataset-mcp-ui typecheck
       - run: npm run --workspace @hifld/dataset-mcp-ui test
       - run: npm run --workspace @hifld/dataset-mcp-ui build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run --workspace @hifld/dataset-mcp-ui test:browser
   map-core:
     runs-on: ubuntu-latest
     steps:

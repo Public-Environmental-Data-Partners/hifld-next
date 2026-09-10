@@ -1,6 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
+from app.tools import query as query_tools
 from app.tools.query import (
     MapCameraInput,
     MapDefinitionInput,
@@ -82,6 +83,31 @@ class Service:
                 "initial_bounds": [-80.0, 35.0, -75.0, 40.0],
             },
         }
+
+
+@pytest.mark.asyncio
+async def test_generate_mvt_tile_url_returns_only_tile_access_contract() -> None:
+    class BoundedService(Service):
+        async def query(self, sources, sql, limit, geometry_column, result_crs):
+            assert limit == 1
+            assert sql == "SELECT geometry, name FROM roads"
+            return await super().query(sources, sql, limit, geometry_column, result_crs)
+
+    generate = getattr(query_tools, "generate_mvt_tile_url", None)
+    assert generate is not None
+    result = await generate(
+        BoundedService(), [{"alias": "roads"}], "SELECT geometry, name FROM roads"
+    )
+    assert result.structured_content == {
+        "tile_url": "https://maps.example/tiles/roadsquery1234567890ABCD/{z}/{x}/{y}.mvt",
+        "headers": {"X-HIFLD-Query-Token": "signed-roads"},
+        "expires_at": "2026-09-01T18:00:00+00:00",
+        "source_layer": "hifld",
+        "geometry_column": "geometry",
+        "result_crs": "EPSG:4326",
+    }
+    assert "secret-bucket" not in result.text
+    assert result.meta is None
 
 
 @pytest.mark.asyncio

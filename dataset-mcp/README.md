@@ -89,7 +89,7 @@ Regular discovery, metadata, row, and query tools return text and structured
 content without opening an app. `view_query_map` opens the map-only MCP App and
 accepts one through eight named spatial query layers. Each layer contains the
 same trusted `sources`, safe read-only `sql`, optional geometry/CRS selection,
-and constrained style accepted by `query_geoparquet`. The agent must provide a
+and constrained style accepted by `query_parquet`. The agent must provide a
 meaningful map title and unique layer names; query-ID labels are never
 generated.
 
@@ -115,6 +115,55 @@ HIFLD webapp and also supports its Esri World Imagery satellite mode. Arbitrary
 style URLs, raw MapLibre expressions, partial maps, GeoJSON conversion, and
 alternate tile fallbacks are not accepted.
 
+The app uses a bundled classic worker (`maplibre-gl-worker.cjs`) because module
+Blob workers fail to initialize in opaque-origin sandboxed iframes. The existing
+module-worker assets remain available. Browser tests exercise the built UI,
+worker, MVT decoding, token headers, and point selection in both sandbox modes:
+
+```bash
+npm run --workspace @hifld/dataset-mcp-ui build
+npx playwright install chromium
+npm run --workspace @hifld/dataset-mcp-ui test:browser
+```
+
+### Query tools without the map UI
+
+`query_parquet` replaces the MCP tool name `query_geoparquet`; reconnect clients
+to refresh tool discovery. Its arguments and paginated response are unchanged.
+Raw geometry values remain size summaries. For bounded geometry output, select
+`ST_AsGeoJSON(geometry)` (a JSON string) and transform to EPSG:4326 first when
+needed. Cell and response byte limits still apply. Catalog source resolution
+and the list of supported catalog formats are unchanged by this rename.
+
+`generate_mvt_tile_url(sources, sql, geometry_column?, result_crs?)` returns only:
+
+```json
+{
+  "tile_url": "https://example.org/tiles/query-id/{z}/{x}/{y}.mvt",
+  "headers": {"X-HIFLD-Query-Token": "signed-query-token"},
+  "expires_at": "2026-09-10T22:00:00Z",
+  "source_layer": "hifld",
+  "geometry_column": "geometry",
+  "result_crs": "EPSG:3857"
+}
+```
+
+The SQL must return a GEOMETRY column. CRS-tagged geometry is inferred; otherwise
+provide the SQL result's CRS explicitly. This tool does not guess CRS from source
+coordinates or convert GeoJSON text back into geometry. Specify geometry_column
+when more than one geometry is returned. Send the returned headers on tile GETs
+and regenerate the URL after expiry. The token is a capability: keep it out of
+logs and do not append it to the URL. A one-row validation probe preserves the
+full SQL for per-tile execution; it does not impose SQL LIMIT 1 on the tiles.
+No full result cache, global bounds scan, or feature collection is created.
+Existing SQL restrictions, tile feature/byte caps, deadlines, source
+revalidation, and worker memory limits apply.
+
+Examples: `SELECT NAME, geometry FROM hospitals WHERE COUNTYFIPS = '36061'`
+with EPSG:3857 for source 21101; `SELECT geometry FROM roads WHERE class = 'primary'`
+with that result's CRS; or a spatial join that selects one named geometry from
+the joined tables. Use query_parquet instead for scalar aggregates.
+
 ## Temporary map argument diagnostics
 
 `view_query_map` HTTP calls emit `mcp_argument_types` JSON log records at
@@ -139,6 +188,13 @@ A string at ingress places the conversion upstream of the application. An array
 at ingress and string at dispatch places it between those boundaries. Arrays at
 both boundaries require investigating the remaining dispatch/validation path;
 the dispatch hook is not instrumentation inside Pydantic itself.
+
+At validation, view_query_map now also accepts one JSON-encoded layers or camera
+parameter for connector compatibility. Correctly typed values are unchanged;
+decoded values still undergo the same shape, range, and query checks. Malformed
+JSON, double encoding, and invalid layer/camera shapes remain errors. The
+advertised schemas still ask clients for actual arrays/objects. Diagnostics
+observe the original input types before this compatibility decoding.
 
 Capture tees incoming chunks unchanged and is capped at 1 MiB per request. Invalid
 or oversized JSON skips the ingress record without changing normal processing;

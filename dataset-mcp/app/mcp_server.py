@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastmcp import FastMCP
 from fastmcp.apps import AppConfig, ResourceCSP
 from fastmcp.tools import ToolResult as FastMCPToolResult
 from mcp.types import TextContent
+from pydantic import BeforeValidator
 
 from app.argument_diagnostics import ArgumentToolDiagnostics
 from app.catalog.client import CatalogClientError
 from app.errors import AppError
+from app.tool_inputs import decode_json_parameter
 from app.tools import discovery, query
 
 type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
@@ -40,7 +42,14 @@ class UIResourceConfig:
     def csp(self) -> ResourceCSP:
         return ResourceCSP(
             connect_domains=list(
-                dict.fromkeys([self.tile_origin, self.basemap_origin, self.satellite_origin])
+                dict.fromkeys(
+                    [
+                        self.tile_origin,
+                        *([self.worker_asset_origin] if self.worker_asset_origin != "self" else []),
+                        self.basemap_origin,
+                        self.satellite_origin,
+                    ]
+                )
             ),
             resource_domains=list(
                 dict.fromkeys(
@@ -238,7 +247,7 @@ def create_mcp_server(
 
     mcp.tool()(read_geoparquet_rows)
 
-    async def query_geoparquet(
+    async def query_parquet(
         sources: list[dict[str, JSONValue]],
         sql: str,
         limit: int = 100,
@@ -251,8 +260,9 @@ def create_mcp_server(
         their aliases as SQL tables. SELECTs, joins, CTEs, aggregates, and the
         allowlisted spatial functions are supported. The limit bounds the
         returned first page, not the relational meaning of SQL LIMIT clauses.
-        For map output, return a DuckDB GEOMETRY column and identify both its
-        column name and output CRS; tile rendering reprojects it server-side.
+        Raw GEOMETRY values return size summaries, not coordinates. For bounded
+        GeoJSON use ST_AsGeoJSON, transforming to EPSG:4326 if necessary; its
+        result is a JSON string. For scalable map data use generate_mvt_tile_url.
         """
         try:
             return _result(
@@ -268,7 +278,42 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool()(query_geoparquet)
+    mcp.tool()(query_parquet)
+
+    async def generate_mvt_tile_url(
+        sources: list[dict[str, JSONValue]],
+        sql: str,
+        geometry_column: str | None = None,
+        result_crs: str | None = None,
+    ) -> FastMCPToolResult:
+        """Generate an MVT tile URL template for a geometry-returning SQL query.
+
+        Copy catalog source references from get_dataset_file.query_sources.
+        SQL must SELECT a GEOMETRY column, not ST_AsGeoJSON or geometry text.
+        Set geometry_column when more than one geometry is returned. Set
+        result_crs to the SQL output CRS if it cannot be inferred; it does not
+        transform your SQL. Tiles reproject and clip geometry server-side.
+
+        Returns tile_url with {z}/{x}/{y}, required headers, expires_at,
+        source_layer, geometry_column, and result_crs. Send the returned headers
+        on each tile GET. Regenerate after expiry. No features or map UI are
+        returned. The initial one-row probe does not limit the tiled result;
+        each tile retains existing query time, memory, and density limits.
+        """
+        try:
+            return _result(
+                await query.generate_mvt_tile_url(
+                    dependencies.query,
+                    sources,
+                    sql,
+                    geometry_column=geometry_column,
+                    result_crs=result_crs,
+                )
+            )
+        except Exception as error:
+            return _error_result(error)
+
+    mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})(generate_mvt_tile_url)
 
     async def get_query_page(
         query_token: str, offset: int, page_size: int = 100
@@ -285,9 +330,11 @@ def create_mcp_server(
 
     async def view_query_map(
         title: query.MapTitle,
-        layers: list[query.MapQueryLayerInput],
+        layers: Annotated[list[query.MapQueryLayerInput], BeforeValidator(decode_json_parameter)],
         basemap: query.BasemapStyle = "street",
-        camera: query.MapCameraInput | None = None,
+        camera: Annotated[
+            query.MapCameraInput | None, BeforeValidator(decode_json_parameter)
+        ] = None,
     ) -> FastMCPToolResult:
         """Execute and map up to eight named spatial GeoParquet queries.
 
