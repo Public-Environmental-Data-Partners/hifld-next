@@ -12,6 +12,117 @@ from query_worker.protocol import WorkerFailure, WorkerPage, WorkerQuery
 from query_worker.runtime import WorkerRuntimeConfig
 
 
+@pytest.mark.asyncio
+async def test_identical_slow_queries_leave_a_worker_for_another_query(tmp_path: Path) -> None:
+    pool = WorkerPool(
+        WorkerPoolConfig(worker_count=2, soft_timeout_seconds=5, hard_timeout_seconds=5),
+        WorkerRuntimeConfig(
+            threads=1, memory_limit="256MiB", temp_directory=str(tmp_path), load_extensions=False
+        ),
+    )
+    await pool.start()
+    slow = _request("SELECT sum(i) FROM range(100000000000) AS values(i)")
+    first = asyncio.create_task(pool.execute(slow))
+    second = asyncio.create_task(pool.execute(slow))
+    try:
+        await asyncio.sleep(0.1)
+        fast = await asyncio.wait_for(pool.execute(_request("SELECT 42 AS answer")), 2)
+        assert isinstance(fast, WorkerPage)
+        assert fast.rows == ({"answer": 42},)
+        assert not first.done()
+        assert not second.done()
+    finally:
+        first.cancel()
+        second.cancel()
+        await asyncio.gather(first, second, return_exceptions=True)
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_admission_wait_is_bounded_without_replacing_busy_worker(tmp_path: Path) -> None:
+    pool = WorkerPool(
+        WorkerPoolConfig(
+            worker_count=1,
+            soft_timeout_seconds=5,
+            hard_timeout_seconds=5,
+            queue_timeout_seconds=0.05,
+        ),
+        WorkerRuntimeConfig(
+            threads=1, memory_limit="256MiB", temp_directory=str(tmp_path), load_extensions=False
+        ),
+    )
+    await pool.start()
+    pids = pool.worker_pids
+    first = asyncio.create_task(
+        pool.execute(_request("SELECT sum(i) FROM range(100000000000) AS values(i)"))
+    )
+    try:
+        await asyncio.sleep(0.1)
+        result = await asyncio.wait_for(pool.execute(_request("SELECT 42")), 1)
+        assert result == WorkerFailure("query_timeout", "The query exceeded its queue wait limit")
+        assert pool.worker_pids == pids
+        assert not first.done()
+    finally:
+        first.cancel()
+        await asyncio.gather(first, return_exceptions=True)
+        await pool.close()
+    assert pool._admissions == {}
+
+
+@pytest.mark.asyncio
+async def test_cancelling_same_query_waiter_cleans_admission_state(tmp_path: Path) -> None:
+    pool = _pool(tmp_path, timeout=5)
+    await pool.start()
+    slow = _request("SELECT sum(i) FROM range(100000000000) AS values(i)")
+    first = asyncio.create_task(pool.execute(slow))
+    second = asyncio.create_task(pool.execute(slow))
+    try:
+        await asyncio.sleep(0.1)
+        pids = pool.worker_pids
+        second.cancel()
+        await asyncio.gather(second, return_exceptions=True)
+        assert pool.worker_pids == pids
+        assert not first.done()
+    finally:
+        first.cancel()
+        await asyncio.gather(first, return_exceptions=True)
+        await pool.close()
+    assert pool._admissions == {}
+
+
+@pytest.mark.asyncio
+async def test_same_query_queue_timeout_leaves_running_query_untouched(tmp_path: Path) -> None:
+    pool = WorkerPool(
+        WorkerPoolConfig(
+            worker_count=2,
+            soft_timeout_seconds=5,
+            hard_timeout_seconds=5,
+            queue_timeout_seconds=0.05,
+        ),
+        WorkerRuntimeConfig(
+            threads=1,
+            memory_limit="256MiB",
+            temp_directory=str(tmp_path),
+            load_extensions=False,
+        ),
+    )
+    await pool.start()
+    slow = _request("SELECT sum(i) FROM range(100000000000) AS values(i)")
+    first = asyncio.create_task(pool.execute(slow))
+    try:
+        await asyncio.sleep(0.1)
+        result = await asyncio.wait_for(pool.execute(slow), 1)
+        assert result == WorkerFailure("query_timeout", "The query exceeded its queue wait limit")
+        fast = await pool.execute(_request("SELECT 42 AS answer"))
+        assert isinstance(fast, WorkerPage)
+        assert not first.done()
+    finally:
+        first.cancel()
+        await asyncio.gather(first, return_exceptions=True)
+        await pool.close()
+    assert pool._admissions == {}
+
+
 def _request(sql: str, *, limit: int = 10) -> WorkerQuery:
     return WorkerQuery(
         canonical_sql=sql,
@@ -21,6 +132,34 @@ def _request(sql: str, *, limit: int = 10) -> WorkerQuery:
         deadline=datetime.now(tz=UTC) + timedelta(seconds=30),
         deterministic_order=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_workers_have_separate_spill_directories_cleaned_on_close(tmp_path: Path) -> None:
+    pool = WorkerPool(
+        WorkerPoolConfig(worker_count=2),
+        WorkerRuntimeConfig(
+            threads=1,
+            memory_limit="256MiB",
+            temp_directory=str(tmp_path),
+            load_extensions=False,
+        ),
+    )
+    await pool.start()
+    try:
+        first = await pool.execute(_request("SELECT current_setting('temp_directory') AS path"))
+        second = await pool.execute(_request("SELECT current_setting('temp_directory') AS path"))
+        assert isinstance(first, WorkerPage)
+        assert isinstance(second, WorkerPage)
+        first_path = first.rows[0]["path"]
+        second_path = second.rows[0]["path"]
+        assert isinstance(first_path, str) and isinstance(second_path, str)
+        assert first_path != second_path
+        assert Path(first_path).parent == tmp_path
+        assert Path(second_path).parent == tmp_path
+    finally:
+        await pool.close()
+    assert not list(tmp_path.iterdir())
 
 
 def _pool(tmp_path: Path, *, timeout: float = 2.0) -> WorkerPool:

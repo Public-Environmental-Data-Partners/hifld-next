@@ -150,7 +150,7 @@ def create_query_router(
 ) -> APIRouter:
     """Adapt query application methods to stable REST resources without SQL logic."""
     if tile_timeout_seconds <= 0 or tile_timeout_seconds > DEFAULT_TILE_TIMEOUT_SECONDS:
-        raise ValueError("tile timeout must be greater than zero and at most 10 seconds")
+        raise ValueError("tile timeout must be greater than zero and at most 30 seconds")
     router = APIRouter()
     allowed_origins = frozenset(webapp_origins)
 

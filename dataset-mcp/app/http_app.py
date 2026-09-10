@@ -28,7 +28,7 @@ class HttpDependencies:
     startup: tuple[LifecycleAction, ...] = ()
     shutdown: tuple[LifecycleAction, ...] = ()
     tile_service: TileService | None = None
-    tile_timeout_seconds: float = 10.0
+    tile_timeout_seconds: float = 30.0
     query_service: QueryHttpService | None = None
     webapp_origins: tuple[str, ...] = ()
     mcp_allowed_hosts: tuple[str, ...] | None = None

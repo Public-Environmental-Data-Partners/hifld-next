@@ -75,7 +75,9 @@ def test_chart_caps_duckdb_spill_below_the_empty_directory_limit() -> None:
 
     assert "name: DATASET_MCP_DUCKDB_MAX_TEMP_DIRECTORY_SIZE" in result.stdout
     assert 'value: "3GiB"' in result.stdout
-    assert "emptyDir: {sizeLimit: 4Gi}" in result.stdout
+    # Both workers can spill up to 3 GiB independently.
+    assert "emptyDir: {sizeLimit: 8Gi}" in result.stdout
+    assert "ephemeral-storage: 8Gi" in result.stdout
 
 
 def test_chart_allows_gke_node_local_dns() -> None:
