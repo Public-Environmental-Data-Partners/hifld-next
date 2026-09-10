@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -97,6 +99,74 @@ class QueryStub:
 
 def _dependencies() -> AppDependencies:
     return AppDependencies(catalog=CatalogStub(), query=QueryStub())
+
+
+@pytest.mark.parametrize("stringify", [False, True])
+def test_map_argument_diagnostics_correlate_http_and_validation_without_values(
+    stringify: bool,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATASET_MCP_BUILD_REVISION", "test-revision")
+    caplog.set_level(logging.INFO, logger="uvicorn.error.argument_diagnostics")
+
+    async def assert_diagnostics() -> None:
+        app = create_http_app(_dependencies(), ui_html="<html/>", assets_directory=tmp_path)
+        layers = [
+            {
+                "layer_name": "private-layer-name",
+                "sources": [{"alias": "roads"}],
+                "sql": "SELECT geometry FROM private_table",
+            }
+        ]
+        camera = {"center": [-74, 40], "zoom": 10}
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                response = await client.post(
+                    "/mcp/",
+                    headers={
+                        "Accept": "application/json, text/event-stream",
+                        "Authorization": "Bearer private-credential",
+                        "X-Request-ID": "untrusted-client-id",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "view_query_map",
+                            "arguments": {
+                                "title": "private-title",
+                                "layers": json.dumps(layers) if stringify else layers,
+                                "camera": json.dumps(camera) if stringify else camera,
+                            },
+                        },
+                    },
+                )
+        assert response.status_code == 200
+        assert ('"isError":true' in response.text) is stringify
+        events = [
+            json.loads(record.message)
+            for record in caplog.records
+            if record.name == "uvicorn.error.argument_diagnostics"
+        ]
+        assert [event["stage"] for event in events] == ["http_ingress", "tool_dispatch"]
+        assert events[0]["request_id"] == events[1]["request_id"]
+        assert len(events[0]["request_id"]) == 32
+        for event in events:
+            assert event["layers_type"] == ("string" if stringify else "array")
+            assert event["camera_type"] == ("string" if stringify else "object")
+            assert event["revision"] == "test-revision"
+            assert event["tool"] == "view_query_map"
+        diagnostic_text = json.dumps(events)
+        for secret in ["private", "SELECT", "Bearer", "untrusted-client-id", "-74"]:
+            assert secret not in diagnostic_text
+
+    asyncio.run(assert_diagnostics())
 
 
 def test_only_view_query_map_opens_the_app_resource() -> None:
