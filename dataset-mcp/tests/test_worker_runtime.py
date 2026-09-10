@@ -231,6 +231,48 @@ def test_runtime_removes_unique_views_and_isolates_sequential_requests(tmp_path:
     assert views_after_second == []
 
 
+@pytest.mark.parametrize("failure_mode", ["missing_file", "empty_objects", "duplicate_alias"])
+def test_runtime_cleans_partial_source_setup_after_repeated_failures(
+    tmp_path: Path, failure_mode: str
+) -> None:
+    path = tmp_path / "valid.parquet"
+    _write_parquet(path, "SELECT 1 AS id")
+    source = WorkerSourceSpec(alias="source", object_uris=(str(path),))
+    invalid = WorkerSourceSpec(alias="invalid", object_uris=(str(tmp_path / "missing.parquet"),))
+    expected_code = "storage_unavailable"
+    if failure_mode == "empty_objects":
+        invalid = WorkerSourceSpec(alias="invalid", object_uris=())
+        expected_code = "query_execution_failed"
+    elif failure_mode == "duplicate_alias":
+        invalid = source
+        expected_code = "query_execution_failed"
+
+    runtime = _runtime(tmp_path)
+    try:
+        for _ in range(3):
+            failure = runtime.execute(_request("SELECT * FROM source", (source, invalid)))
+            assert isinstance(failure, WorkerFailure)
+            assert failure.code == expected_code
+            assert (
+                runtime.connection.execute(
+                    "SELECT view_name FROM duckdb_views() WHERE view_name LIKE '_mcp_source_%'"
+                ).fetchall()
+                == []
+            )
+
+        recovered = runtime.execute(_request("SELECT * FROM source", (source,)))
+        assert not isinstance(recovered, WorkerFailure)
+        assert recovered.rows == ({"id": 1},)
+        assert (
+            runtime.connection.execute(
+                "SELECT view_name FROM duckdb_views() WHERE view_name LIKE '_mcp_source_%'"
+            ).fetchall()
+            == []
+        )
+    finally:
+        runtime.close()
+
+
 def test_metrics_profile_uses_stable_typed_output(tmp_path: Path) -> None:
     connection = duckdb.connect()
     try:
