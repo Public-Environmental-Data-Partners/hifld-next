@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 from multiprocessing.process import BaseProcess
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Protocol
 
 from query_worker.protocol import (
@@ -16,6 +19,7 @@ from query_worker.protocol import (
     WorkerQuery,
     WorkerResult,
     WorkerRuntimeConfig,
+    WorkerSourceSpec,
     WorkerTile,
     WorkerTileQuery,
 )
@@ -38,6 +42,7 @@ class WorkerPoolConfig:
     soft_timeout_seconds: float = 30.0
     hard_timeout_seconds: float = 60.0
     recycle_after_requests: int = 100
+    queue_timeout_seconds: float = 30.0
 
     def __post_init__(self) -> None:
         if self.worker_count < 1:
@@ -48,6 +53,14 @@ class WorkerPoolConfig:
             raise ValueError("hard timeout must not be shorter than soft timeout")
         if self.recycle_after_requests < 1:
             raise ValueError("recycle_after_requests must be positive")
+        if self.queue_timeout_seconds <= 0:
+            raise ValueError("queue_timeout_seconds must be positive")
+
+
+@dataclass(slots=True)
+class _QueryAdmission:
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    references: int = 0
 
 
 @dataclass(slots=True, eq=False)
@@ -55,6 +68,7 @@ class _WorkerSlot:
     process: BaseProcess
     connection: _Pipe
     completed_requests: int = 0
+    spill_directory: TemporaryDirectory[str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,32 +131,37 @@ class WorkerPool:
         self._lifecycle_lock = asyncio.Lock()
         self._started = False
         self._closed = False
+        self._admissions: dict[tuple[str, tuple[WorkerSourceSpec, ...]], _QueryAdmission] = {}
 
     @property
     def worker_pids(self) -> tuple[int, ...]:
         return tuple(slot.process.pid or 0 for slot in self._workers)
 
     async def _spawn_worker(self) -> _WorkerSlot:
+        Path(self._runtime_config.temp_directory).mkdir(parents=True, exist_ok=True)
+        spill = TemporaryDirectory(prefix="worker-", dir=self._runtime_config.temp_directory)
         parent_connection, child_connection = self._context.Pipe(duplex=True)
         process = self._context.Process(
             target=_worker_main,
-            args=(child_connection, self._runtime_config),
+            args=(child_connection, replace(self._runtime_config, temp_directory=spill.name)),
             daemon=True,
         )
         process.start()
         child_connection.close()
-        slot = _WorkerSlot(process=process, connection=parent_connection)
+        slot = _WorkerSlot(process=process, connection=parent_connection, spill_directory=spill)
         ready = await asyncio.to_thread(parent_connection.poll, self._config.hard_timeout_seconds)
         if not ready:
             process.terminate()
             await asyncio.to_thread(process.join, 1.0)
             parent_connection.close()
+            spill.cleanup()
             raise RuntimeError("query worker did not become ready")
         message: object = await asyncio.to_thread(parent_connection.recv)
         if not isinstance(message, _WorkerReady):
             process.terminate()
             await asyncio.to_thread(process.join, 1.0)
             parent_connection.close()
+            spill.cleanup()
             raise RuntimeError("query worker failed during startup")
         self._workers.append(slot)
         return slot
@@ -172,6 +191,8 @@ class WorkerPool:
             slot.process.kill()
             await asyncio.to_thread(slot.process.join, 1.0)
         slot.connection.close()
+        if slot.spill_directory is not None:
+            slot.spill_directory.cleanup()
 
     async def _replace(self, slot: _WorkerSlot) -> None:
         await self._retire(slot, graceful=False)
@@ -184,16 +205,55 @@ class WorkerPool:
         *,
         timeout_seconds: float | None = None,
     ) -> WorkerResult:
+        timeout = (
+            timeout_seconds if timeout_seconds is not None else self._config.soft_timeout_seconds
+        )
+        if timeout <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        if request.deadline <= datetime.now(tz=UTC):
+            return WorkerFailure(code="query_timeout", message="The query deadline expired")
         if not self._started:
             await self.start()
         if self._closed:
             return WorkerFailure(code="worker_unavailable", message="The worker pool is closed")
 
-        slot = await self._available.get()
-        timeout = timeout_seconds or self._config.soft_timeout_seconds
-        if timeout <= 0:
-            self._available.put_nowait(slot)
-            raise ValueError("timeout_seconds must be positive")
+        # Wait for this query's turn BEFORE acquiring a worker: a flood layer's
+        # tile fan-out must not occupy the slot another layer needs.
+        key = (request.canonical_sql, request.sources)
+        admission = self._admissions.setdefault(key, _QueryAdmission())
+        admission.references += 1
+        acquired = False
+        try:
+            try:
+                async with asyncio.timeout(self._config.queue_timeout_seconds):
+                    await admission.lock.acquire()
+                    acquired = True
+                    slot = await self._available.get()
+            except TimeoutError:
+                return WorkerFailure(
+                    code="query_timeout", message="The query exceeded its queue wait limit"
+                )
+            if self._closed:
+                return WorkerFailure(code="worker_unavailable", message="The worker pool is closed")
+            # Queue admission has its own budget; give admitted work the full
+            # execution budget instead of sending an already-expired deadline.
+            admitted_request = replace(
+                request, deadline=datetime.now(tz=UTC) + timedelta(seconds=timeout)
+            )
+            return await self._execute_slot(slot, admitted_request, timeout)
+        finally:
+            if acquired:
+                admission.lock.release()
+            admission.references -= 1
+            if admission.references == 0:
+                del self._admissions[key]
+
+    async def _execute_slot(
+        self,
+        slot: _WorkerSlot,
+        request: WorkerQuery | WorkerBoundsQuery | WorkerTileQuery,
+        timeout: float,
+    ) -> WorkerResult:
         replacement_task: asyncio.Task[None] | None = None
 
         async def replace_once() -> None:

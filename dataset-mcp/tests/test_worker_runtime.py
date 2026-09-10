@@ -98,6 +98,59 @@ def test_runtime_executes_complex_join_and_extracts_schema(tmp_path: Path) -> No
     assert result.has_more is False
 
 
+def test_runtime_prunes_hive_partitions_and_preserves_leading_zero_keys(
+    tmp_path: Path,
+) -> None:
+    paths: list[str] = []
+    for state_number in range(1, 31):
+        partition_path = tmp_path / f"state_fips={state_number:02d}" / "data.parquet"
+        partition_path.parent.mkdir()
+        _write_parquet(partition_path, f"SELECT {state_number} AS value")
+        paths.append(str(partition_path))
+
+    runtime = _runtime(tmp_path)
+    aliases: dict[str, str] = {}
+    request = _request(
+        "SELECT state_fips, value FROM states WHERE state_fips = '01'",
+        (WorkerSourceSpec(alias="states", object_uris=tuple(paths)),),
+    )
+    try:
+        runtime._create_source_views(request, aliases)
+        view_name = aliases["states"]
+        plan_rows = runtime.connection.execute(
+            f"EXPLAIN SELECT * FROM {view_name} WHERE state_fips = '01'"
+        ).fetchall()
+        result = runtime.execute(request)
+    finally:
+        runtime._drop_source_views(aliases)
+        runtime.close()
+
+    plan = "\n".join(str(value) for row in plan_rows for value in row)
+    assert "Scanning Files: 1/30" in plan
+    assert not isinstance(result, WorkerFailure)
+    assert result.rows == ({"state_fips": "01", "value": 1},)
+
+
+def test_runtime_reads_unpartitioned_sources_with_hive_partitioning_enabled(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "plain.parquet"
+    _write_parquet(path, "SELECT '01' AS state_fips, 1 AS value")
+    runtime = _runtime(tmp_path)
+    try:
+        result = runtime.execute(
+            _request(
+                "SELECT state_fips, value FROM states",
+                (WorkerSourceSpec(alias="states", object_uris=(str(path),)),),
+            )
+        )
+    finally:
+        runtime.close()
+
+    assert not isinstance(result, WorkerFailure)
+    assert result.rows == ({"state_fips": "01", "value": 1},)
+
+
 @pytest.mark.skipif(
     not os.environ.get("DUCKDB_EXTENSION_DIRECTORY"),
     reason="spatial extension directory is not configured",

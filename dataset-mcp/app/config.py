@@ -15,9 +15,9 @@ class Settings(BaseSettings):
     query_max_limit: int = Field(default=1_000, ge=1, le=1_000)
     query_max_offset: int = Field(default=50_000, ge=0)
     query_timeout_seconds: float = Field(default=30.0, gt=0)
-    tile_timeout_seconds: float = Field(default=10.0, gt=0, le=10.0)
-    worker_count: int = Field(default=1, ge=1, le=8)
-    duckdb_threads: int = Field(default=2, ge=1, le=8)
+    tile_timeout_seconds: float = Field(default=30.0, gt=0, le=30.0)
+    worker_count: int = Field(default=2, ge=1, le=8)
+    duckdb_threads: int = Field(default=1, ge=1, le=8)
     duckdb_memory_limit: str = "1GiB"
     duckdb_temp_directory: str = "/tmp/dataset-mcp"
     duckdb_max_temp_directory_size: str = "3GiB"

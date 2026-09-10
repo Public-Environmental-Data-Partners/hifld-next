@@ -101,6 +101,12 @@ def _dependencies() -> AppDependencies:
     return AppDependencies(catalog=CatalogStub(), query=QueryStub())
 
 
+def test_http_dependencies_default_to_thirty_second_tile_timeout() -> None:
+    dependencies = HttpDependencies(tools=_dependencies())
+
+    assert dependencies.tile_timeout_seconds == 30
+
+
 @pytest.mark.parametrize("stringify", [False, True])
 def test_map_argument_diagnostics_correlate_http_and_validation_without_values(
     stringify: bool,

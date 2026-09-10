@@ -159,6 +159,24 @@ No full result cache, global bounds scan, or feature collection is created.
 Existing SQL restrictions, tile feature/byte caps, deadlines, source
 revalidation, and worker memory limits apply.
 
+### Query scheduling and tile budgets
+
+Tile execution allows up to 30 seconds. Worker admission has a separate,
+bounded 30-second queue wait; expired queue entries do not execute. The default
+pool has two workers with one DuckDB thread and a 1 GiB DuckDB memory limit each.
+Only one request for the same canonical SQL and source identity runs at once,
+so one layer's tile fan-out cannot occupy both workers. Different queries can
+execute concurrently, but two distinct slow queries can still occupy the pool.
+The Helm chart requests 2 GiB and allows 4 GiB for both workers and overhead.
+Workers use separate spill directories, removed when the worker is retired.
+Each allows 3 GiB of spill; the shared volume and pod ephemeral-storage limit
+are 8 GiB, with a 1 GiB ephemeral-storage request.
+
+Trusted Parquet source lists explicitly enable Hive partitioning. Predicates
+such as `state_fips = '36'` can therefore prune partition files, in addition to
+the row-group pruning enabled by explicit `bbox` predicates. These settings do
+not eliminate object-storage reads or guarantee a particular tile latency.
+
 Examples: `SELECT NAME, geometry FROM hospitals WHERE COUNTYFIPS = '36061'`
 with EPSG:3857 for source 21101; `SELECT geometry FROM roads WHERE class = 'primary'`
 with that result's CRS; or a spatial join that selects one named geometry from

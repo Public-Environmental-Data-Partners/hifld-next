@@ -10,13 +10,25 @@ def test_settings_require_catalog_and_token_secret() -> None:
     assert str(settings.catalog_base_url) == "http://dataset-api:8000/"
     assert settings.query_default_limit == 100
     assert settings.query_max_limit == 1_000
-    assert settings.worker_count == 1
+    assert settings.tile_timeout_seconds == 30
+    assert settings.worker_count == 2
+    assert settings.duckdb_threads == 1
+    assert settings.duckdb_memory_limit == "1GiB"
     assert settings.duckdb_max_temp_directory_size == "3GiB"
 
 
 def test_settings_reject_short_token_secret() -> None:
     with pytest.raises(ValidationError):
         Settings(catalog_base_url="http://dataset-api:8000", query_token_secret="short")
+
+
+def test_settings_reject_tile_timeout_over_thirty_seconds() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            catalog_base_url="http://dataset-api:8000",
+            query_token_secret="x" * 32,
+            tile_timeout_seconds=30.1,
+        )
 
 
 def test_settings_reject_token_ttl_longer_than_codec_contract() -> None:

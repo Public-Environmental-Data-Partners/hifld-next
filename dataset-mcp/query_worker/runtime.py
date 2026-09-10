@@ -151,7 +151,9 @@ class WorkerRuntime:
             view_name = f"_mcp_source_{token_hex(16)}"
             # The relation API passes the exact trusted object list through
             # DuckDB's binding layer; no URI is interpolated into SQL.
-            relation = self.connection.read_parquet(list(source.object_uris), union_by_name=True)
+            relation = self.connection.read_parquet(
+                list(source.object_uris), hive_partitioning=True, union_by_name=True
+            )
             relation.create_view(view_name)
             aliases[source.alias] = view_name
 
