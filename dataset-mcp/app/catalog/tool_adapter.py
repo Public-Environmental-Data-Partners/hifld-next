@@ -126,6 +126,7 @@ class CatalogToolAdapter:
         for source in shaped["query_sources"]:
             query_sources.append(_dump_model(source))
         payload["query_sources"] = query_sources
+        payload["query_hints"] = list(shaped["query_hints"])
         map_sources: list[JSONValue] = []
         for format_entry in response.file.formats:
             if format_entry.format.format_type != "pmtiles":

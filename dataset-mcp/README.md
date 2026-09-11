@@ -193,6 +193,22 @@ npm run --workspace @hifld/dataset-mcp-ui test:browser
 
 ### Query tools without the map UI
 
+Before building spatial SQL, call `inspect_query_source(source)` with one
+`get_dataset_file.query_sources` reference. It uses the existing bounded worker
+to inspect actual Parquet columns with `SELECT * LIMIT 0`, including generated
+Hive fields absent from older catalog statistics. Geometry CRS is returned when
+DuckDB reports it; unknown CRS remains null. Numeric bbox structs are candidates,
+not verified GeoParquet covering metadata. No feature rows or query tokens are
+returned. Metadata/object listing can still require remote reads.
+
+`get_dataset_file.query_hints` summarizes partition names and observed string
+values from catalog paths; these may not be exhaustive. Query references are
+deduplicated by source ID. Match hints to inspected columns, then use partition
+and scalar bbox filters before exact spatial joins. Camera bounds do not filter
+SQL. Prefer transforming the small query region/point set into the source CRS
+over transforming every large-source geometry in the initial predicate. These
+are generic, metadata-driven hints, not dataset-specific SQL rewrites.
+
 `query_parquet` replaces the MCP tool name `query_geoparquet`; reconnect clients
 to refresh tool discovery. Its arguments and paginated response are unchanged.
 Raw geometry values remain size summaries. For bounded geometry output, select

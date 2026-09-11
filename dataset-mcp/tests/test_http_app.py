@@ -248,6 +248,7 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
             tools = await client.list_tools()
             by_name = {tool.name: tool for tool in tools}
             expected_model_tools = {
+                "inspect_query_source",
                 "list_collections",
                 "get_collection",
                 "search_datasets",
@@ -281,6 +282,9 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
             assert "map_sources" in discovery_guidance
             assert "query_sources" in discovery_guidance
             assert "prebuilt" in (by_name["generate_mvt_tile_url"].description or "")
+            for name in ("query_parquet", "view_map", "view_query_map", "generate_mvt_tile_url"):
+                assert "inspect_query_source" in (by_name[name].description or "")
+                assert "scalar bbox" in (by_name[name].description or "")
             assert by_name["view_query_map"].meta is not None
             assert by_name["view_query_map"].meta["ui"] == {
                 "resourceUri": "ui://hifld/dataset-explorer.html",
