@@ -17,13 +17,19 @@ function runtimeConfiguration(result: MapResult): MapConfiguration {
     basemap: result.basemap,
     worker_url: result.worker_url,
     ...(result.camera === undefined ? {} : { camera: result.camera }),
-    layers: result.layers.map(({ expires_at: _expiresAt, ...layer }) => layer),
+    layers: result.layers.map((layer) => {
+      if (!("expires_at" in layer)) return layer;
+      const { expires_at: _expiresAt, ...configuration } = layer;
+      return configuration;
+    }),
   };
 }
 
 function earliestExpiration(result: MapResult): number {
   return Math.min(
-    ...result.layers.map((layer) => Date.parse(layer.expires_at)),
+    ...result.layers.flatMap((layer) =>
+      "expires_at" in layer ? [Date.parse(layer.expires_at)] : [],
+    ),
   );
 }
 
@@ -71,10 +77,13 @@ export function useMcpApp(): McpMapState {
         setMapConfiguration(runtimeConfiguration(result));
         setQueryTokens(
           Object.fromEntries(
-            result.layers.map((layer) => [layer.query_id, layer.query_token]),
+            result.layers.flatMap((layer) =>
+              "query_id" in layer ? [[layer.query_id, layer.query_token]] : [],
+            ),
           ),
         );
         setBridgeError(null);
+        if (!Number.isFinite(expiresAt)) return;
         const refreshDelay = Math.max(
           0,
           expiresAt - Date.now() - TOKEN_REFRESH_LEAD_MS,
@@ -90,7 +99,9 @@ export function useMcpApp(): McpMapState {
         if (sequence !== mapSequenceRef.current) return;
         try {
           const response = await created.callServerTool({
-            name: "refresh_query_map",
+            name: mapSpec.layers.some((layer) => "source" in layer)
+              ? "refresh_map"
+              : "refresh_query_map",
             arguments: { map_spec: mapSpec },
           });
           if (sequence !== mapSequenceRef.current) return;

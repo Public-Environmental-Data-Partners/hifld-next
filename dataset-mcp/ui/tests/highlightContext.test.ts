@@ -65,6 +65,27 @@ describe("highlight model context", () => {
     expect(app.sendMessage).not.toHaveBeenCalled();
   });
 
+  it("describes external selection provenance without fabricating a query ID", () => {
+    const external: MapHighlightSnapshot = {
+      ...snapshot,
+      selected_features: [
+        {
+          id: "external:external-2:roads:id:42",
+          layer_id: "external-2",
+          layer_name: "Public roads",
+          source_layer_id: "roads",
+          feature_id: "id:42",
+          centroid: null,
+          properties: { name: "Broadway" },
+        },
+      ],
+    };
+
+    const text = highlightContextText(external);
+    expect(text).toContain('layer_id: "external-2"');
+    expect(text).not.toContain("query_id:");
+  });
+
   it("reports unsupported hosts without calling an update", async () => {
     const updateModelContext = vi.fn();
     const app = {

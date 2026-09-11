@@ -33,7 +33,7 @@ export function highlightContextText(snapshot: MapHighlightSnapshot): string {
     `Map highlight selection: ${snapshot.selected_feature_count} ${countLabel} selected.`,
     `map_title: ${JSON.stringify(snapshot.map_title)}`,
     ...(snapshot.was_capped
-      ? ["The selection was capped at 100 features per query layer."]
+      ? ["The selection was capped at 100 features per map layer."]
       : []),
     ...(snapshot.selection_bounds
       ? [`Selection bounds: [${snapshot.selection_bounds.join(", ")}].`]
@@ -42,7 +42,12 @@ export function highlightContextText(snapshot: MapHighlightSnapshot): string {
   for (const feature of snapshot.selected_features) {
     lines.push("- selected_feature:");
     lines.push(`  id: ${JSON.stringify(feature.id)}`);
-    lines.push(`  query_id: ${JSON.stringify(feature.query_id)}`);
+    if (feature.query_id !== undefined) {
+      lines.push(`  query_id: ${JSON.stringify(feature.query_id)}`);
+    }
+    if (feature.layer_id !== undefined) {
+      lines.push(`  layer_id: ${JSON.stringify(feature.layer_id)}`);
+    }
     lines.push(`  layer_name: ${JSON.stringify(feature.layer_name)}`);
     lines.push(`  source_layer_id: ${JSON.stringify(feature.source_layer_id)}`);
     lines.push(`  feature_id: ${JSON.stringify(feature.feature_id)}`);

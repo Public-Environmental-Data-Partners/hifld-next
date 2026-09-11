@@ -36,31 +36,58 @@ class HttpDependencies:
 
 
 class ConcurrencyLimiter:
-    """One process-wide bound shared only by expensive query execution."""
+    """Fail-fast bounds for tile and non-tile query execution."""
 
     def __init__(self, app: ASGIApp, maximum: int) -> None:
         self._app = app
-        self._semaphore = asyncio.Semaphore(maximum)
+        self._tile_semaphore = asyncio.Semaphore(maximum)
+        self._query_semaphore = asyncio.Semaphore(maximum)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if self._is_expensive_request(scope):
-            async with self._semaphore:
+        semaphore = self._semaphore_for(scope)
+        if semaphore is not None:
+            if semaphore.locked():
+                response = JSONResponse(
+                    status_code=503,
+                    content={
+                        "code": "server_overloaded",
+                        "message": "The server is handling too many expensive requests.",
+                    },
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "no-store",
+                        "Retry-After": "1",
+                    },
+                )
+                await response(scope, receive, send)
+                return
+            await semaphore.acquire()
+            try:
                 await self._app(scope, receive, send)
+            finally:
+                semaphore.release()
             return
         await self._app(scope, receive, send)
 
-    @staticmethod
-    def _is_expensive_request(scope: Scope) -> bool:
+    def _semaphore_for(self, scope: Scope) -> asyncio.Semaphore | None:
         if scope["type"] != "http" or scope.get("method") == "OPTIONS":
-            return False
+            return None
         path = scope.get("path", "")
-        return (
+        path_parts = path.split("/")
+        if path.startswith("/tiles/") or (
+            len(path_parts) > 5
+            and path_parts[1:3] == ["api", "queries"]
+            and path_parts[4] == "tiles"
+        ):
+            return self._tile_semaphore
+        if (
             path == "/mcp"
             or path.startswith("/mcp/")
             or path == "/api/queries"
             or path.startswith("/api/queries/")
-            or path.startswith("/tiles/")
-        )
+        ):
+            return self._query_semaphore
+        return None
 
 
 class McpPathCanonicalizer:

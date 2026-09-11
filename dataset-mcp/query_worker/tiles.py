@@ -11,6 +11,9 @@ import re
 from time import monotonic
 from typing import Protocol
 
+from sqlglot import exp, parse_one
+from sqlglot.errors import ParseError, TokenError
+
 from query_worker.protocol import WorkerFailure, WorkerTile, WorkerTileQuery
 
 MAX_TILE_BYTES = 1024 * 1024
@@ -137,6 +140,105 @@ def _has_bbox(columns: tuple[tuple[str, str], ...]) -> bool:
         name == "bbox" and logical_type.upper().startswith("STRUCT")
         for name, logical_type in columns
     )
+
+
+def _quoted_table_name(table: exp.Table) -> str:
+    """Quote a parsed, unqualified table name for trusted schema inspection."""
+
+    return f'"{table.name.replace(chr(34), chr(34) * 2)}"'
+
+
+def _valid_bbox_type(logical_type: str) -> bool:
+    try:
+        expression = parse_one(f"CAST(NULL AS {logical_type})", dialect="duckdb")
+    except (ParseError, TokenError):
+        return False
+    data_type = expression.find(exp.DataType)
+    if data_type is None or str(data_type.this) != "DType.STRUCT":
+        return False
+    numeric_types = {
+        "BIGINT",
+        "DECIMAL",
+        "DOUBLE",
+        "FLOAT",
+        "HUGEINT",
+        "INT",
+        "SMALLINT",
+        "TINYINT",
+        "UBIGINT",
+        "UHUGEINT",
+        "UINT",
+        "USMALLINT",
+        "UTINYINT",
+    }
+    fields: dict[str, str] = {}
+    for field in data_type.expressions:
+        if not isinstance(field, exp.ColumnDef) or not isinstance(field.kind, exp.DataType):
+            return False
+        fields[field.name.casefold()] = str(field.kind.this).removeprefix("DType.")
+    return all(fields.get(name) in numeric_types for name in ("xmin", "ymin", "xmax", "ymax"))
+
+
+def _bbox_retention_candidate(
+    validated_query_sql: str, geometry_column: str
+) -> tuple[exp.Select, exp.Table] | None:
+    """Return a simple select and its sole base table when bbox carry-through is safe."""
+
+    try:
+        expression = parse_one(validated_query_sql, dialect="duckdb")
+    except (ParseError, TokenError):
+        return None
+    if not isinstance(expression, exp.Select):
+        return None
+    if any(
+        expression.args.get(key) is not None
+        for key in ("with_", "distinct", "group", "having", "qualify", "limit", "offset")
+    ):
+        return None
+    if expression.find(exp.AggFunc) is not None or expression.find(exp.Window) is not None:
+        return None
+    from_expression = expression.args.get("from_")
+    if not isinstance(from_expression, exp.From) or not isinstance(from_expression.this, exp.Table):
+        return None
+    table = from_expression.this
+    if table.catalog or table.db or expression.args.get("joins"):
+        return None
+    if len(list(expression.find_all(exp.Table))) != 1:
+        return None
+    if any(
+        selected.alias_or_name.casefold() == "bbox" or selected.find(exp.Star) is not None
+        for selected in expression.expressions
+    ):
+        return None
+    expected_qualifier = table.alias_or_name.casefold()
+    raw_geometry = any(
+        isinstance(selected, exp.Column)
+        and selected.name.casefold() == geometry_column.casefold()
+        and selected.alias_or_name.casefold() == geometry_column.casefold()
+        and (not selected.table or selected.table.casefold() == expected_qualifier)
+        for selected in expression.expressions
+    )
+    if not raw_geometry:
+        return None
+    return expression, table
+
+
+def _retain_source_bbox(
+    connection: TileConnection, validated_query_sql: str, geometry_column: str
+) -> str:
+    candidate = _bbox_retention_candidate(validated_query_sql, geometry_column)
+    if candidate is None:
+        return validated_query_sql
+    expression, table = candidate
+    source_columns = _describe_columns(connection, f"SELECT * FROM {_quoted_table_name(table)}")
+    bbox_types = [
+        logical_type for name, logical_type in source_columns if name.casefold() == "bbox"
+    ]
+    if len(bbox_types) != 1 or not _valid_bbox_type(bbox_types[0]):
+        return validated_query_sql
+    qualifier = table.alias_or_name if table.alias else None
+    expression = expression.select(exp.column("bbox", table=qualifier), append=True)
+    return expression.sql(dialect="duckdb", pretty=False, comments=False)
 
 
 # Adapted from ../geoparquet-duckdb-partitioning/server.py:_TILE_SQL_TEMPLATE.
@@ -277,8 +379,11 @@ def execute_tile(
 
     started = monotonic()
     try:
-        columns = _describe_columns(connection, validated_query_sql)
-        sql = build_tile_sql(validated_query_sql, request, columns=columns)
+        tile_query_sql = _retain_source_bbox(
+            connection, validated_query_sql, request.geometry_column
+        )
+        columns = _describe_columns(connection, tile_query_sql)
+        sql = build_tile_sql(tile_query_sql, request, columns=columns)
     except TileConfigurationError:
         code = "geometry_crs_required" if request.result_crs is None else "map_not_supported"
         message = (

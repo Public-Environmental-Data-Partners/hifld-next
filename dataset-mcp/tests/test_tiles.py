@@ -252,6 +252,120 @@ class FakeConnection:
         return FakeRows(self.rows)
 
 
+class BboxRetentionConnection:
+    def __init__(
+        self,
+        bbox_type: str = "STRUCT(xmin DOUBLE, ymin DOUBLE, xmax DOUBLE, ymax DOUBLE)",
+    ) -> None:
+        self.sql: list[str] = []
+        self.bbox_type = bbox_type
+
+    def execute(self, sql: str) -> FakeRows:
+        self.sql.append(sql)
+        if sql == 'DESCRIBE SELECT * FROM (SELECT * FROM "flood") AS _mcp_describe':
+            return FakeRows(
+                [
+                    ("FLD_ZONE", "VARCHAR"),
+                    ("SFHA_TF", "VARCHAR"),
+                    ("geometry", "GEOMETRY"),
+                    ("bbox", self.bbox_type),
+                ]
+            )
+        if sql.startswith("DESCRIBE"):
+            description = [
+                ("FLD_ZONE", "VARCHAR"),
+                ("SFHA_TF", "VARCHAR"),
+                ("geometry", "GEOMETRY"),
+            ]
+            if ", bbox FROM flood" in sql:
+                description.append(
+                    ("bbox", "STRUCT(xmin DOUBLE, ymin DOUBLE, xmax DOUBLE, ymax DOUBLE)")
+                )
+            return FakeRows(description)
+        return FakeRows([(b"tile", 1)])
+
+
+def test_execute_tile_retains_source_bbox_for_simple_raw_geometry_select() -> None:
+    connection = BboxRetentionConnection()
+
+    result = execute_tile(
+        connection,
+        "SELECT FLD_ZONE, SFHA_TF, geometry FROM flood WHERE DFIRM_ID = '12086C'",
+        tile_request(),
+    )
+
+    assert isinstance(result, WorkerTile)
+    assert connection.sql[0] == ('DESCRIBE SELECT * FROM (SELECT * FROM "flood") AS _mcp_describe')
+    assert "SELECT FLD_ZONE, SFHA_TF, geometry, bbox FROM flood" in connection.sql[1]
+    assert "SELECT FLD_ZONE, SFHA_TF, geometry, bbox FROM flood" in connection.sql[2]
+    assert 'CAST("bbox"' not in connection.sql[2]
+    assert '"bbox".xmax >= b.xmin' in connection.sql[2]
+
+
+@pytest.mark.parametrize(
+    "bbox_type",
+    [
+        "STRUCT(xmin DOUBLE, ymin DOUBLE, xmax DOUBLE)",
+        "STRUCT(xmin DOUBLE, ymin DOUBLE, xmax DOUBLE, ymax VARCHAR)",
+        "VARCHAR",
+    ],
+)
+def test_execute_tile_requires_a_complete_numeric_source_bbox(bbox_type: str) -> None:
+    connection = BboxRetentionConnection(bbox_type)
+
+    result = execute_tile(
+        connection,
+        "SELECT FLD_ZONE, SFHA_TF, geometry FROM flood WHERE DFIRM_ID = '12086C'",
+        tile_request(),
+    )
+
+    assert isinstance(result, WorkerTile)
+    assert "bbox FROM flood" not in connection.sql[-1]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT geometry, bbox FROM flood",
+        "SELECT geometry, {'xmin': 0.0} AS bbox FROM flood",
+        "SELECT *, geometry FROM flood",
+    ],
+)
+def test_execute_tile_does_not_duplicate_an_explicit_or_star_bbox(query: str) -> None:
+    connection = BboxRetentionConnection()
+
+    result = execute_tile(connection, query, tile_request())
+
+    assert isinstance(result, WorkerTile)
+    assert all('SELECT * FROM "flood"' not in sql for sql in connection.sql)
+    assert query in connection.sql[0]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "WITH selected AS (SELECT geometry FROM flood) SELECT geometry FROM selected",
+        "SELECT geometry FROM flood JOIN zones ON flood.id = zones.id",
+        "SELECT ST_Transform(geometry, 'EPSG:4326', 'EPSG:3857') AS geometry FROM flood",
+        "SELECT COUNT(*), geometry FROM flood GROUP BY geometry",
+        "SELECT DISTINCT geometry FROM flood",
+        "SELECT geometry FROM flood LIMIT 10",
+        "SELECT geometry FROM flood OFFSET 10",
+        "SELECT geometry, ROW_NUMBER() OVER () AS row_number FROM flood",
+        "SELECT geometry FROM flood UNION ALL SELECT geometry FROM flood",
+    ],
+)
+def test_execute_tile_conservatively_bypasses_bbox_retention(query: str) -> None:
+    connection = BboxRetentionConnection()
+
+    result = execute_tile(connection, query, tile_request())
+
+    assert isinstance(result, WorkerTile)
+    assert connection.sql[0].startswith("DESCRIBE SELECT * FROM (")
+    assert all('SELECT * FROM "flood"' not in sql for sql in connection.sql)
+    assert "bbox FROM flood" not in connection.sql[-1]
+
+
 def test_execute_tile_returns_dense_failure_for_feature_or_byte_cap() -> None:
     description = [("geometry", "GEOMETRY"), ("name", "VARCHAR")]
     too_many = execute_tile(

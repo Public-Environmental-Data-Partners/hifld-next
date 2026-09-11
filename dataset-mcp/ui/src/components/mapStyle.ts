@@ -11,6 +11,11 @@ import {
 import type { ExpressionSpecification, Map as MapLibreMap } from "maplibre-gl";
 import type { MapLayerConfiguration } from "../mcp/contracts";
 
+export type StyledMapLayer = Pick<
+  MapLayerConfiguration,
+  "columns" | "source_layer" | "style"
+>;
+
 export type ColorPaintValue = string | ExpressionSpecification;
 export type NumericPaintValue = number | ExpressionSpecification;
 export type NumericScale = MapCoreNumericScale;
@@ -34,7 +39,7 @@ export function isNumericColumn(logicalType: string): boolean {
 
 function sampledValues(
   map: MapLibreMap,
-  layer: MapLayerConfiguration,
+  layer: StyledMapLayer,
   sourceId: string,
   property: string,
 ): Array<string | number | boolean> {
@@ -58,7 +63,7 @@ function sampledValues(
 
 export function dataDrivenSize(
   map: MapLibreMap,
-  layer: MapLayerConfiguration,
+  layer: StyledMapLayer,
   sourceId: string,
   property: string | null,
   scale: NumericScale,
@@ -97,7 +102,7 @@ export interface DataDrivenColor {
 
 export function dataDrivenColor(
   map: MapLibreMap,
-  layer: MapLayerConfiguration,
+  layer: StyledMapLayer,
   sourceId: string,
   property: string | null,
   scheme: ColorScheme,

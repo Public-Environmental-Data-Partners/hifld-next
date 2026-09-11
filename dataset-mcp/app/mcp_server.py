@@ -16,7 +16,7 @@ from app.argument_diagnostics import ArgumentToolDiagnostics
 from app.catalog.client import CatalogClientError
 from app.errors import AppError
 from app.tool_inputs import decode_json_parameter
-from app.tools import discovery, query
+from app.tools import discovery, maps, query
 
 type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
 
@@ -48,6 +48,8 @@ class UIResourceConfig:
                         *([self.worker_asset_origin] if self.worker_asset_origin != "self" else []),
                         self.basemap_origin,
                         self.satellite_origin,
+                        # Explicit public tile sources are fetched by the widget, not the server.
+                        "https:",
                     ]
                 )
             ),
@@ -133,6 +135,15 @@ def create_mcp_server(
     mcp.add_middleware(ArgumentToolDiagnostics())
     query_map_app = _app_config(visibility=["model"])
     query_map_refresh_app = _app_config(visibility=["app"])
+    config = resource_config or UIResourceConfig(tile_origin="self")
+
+    def configured_worker_url() -> str:
+        origin = config.worker_asset_origin
+        if origin == "self":
+            origin = config.tile_origin
+        if origin == "self":
+            raise ValueError("a public worker asset origin is required for external map sources")
+        return f"{origin.rstrip('/')}/assets/maplibre-gl-worker.cjs"
 
     async def list_collections() -> FastMCPToolResult:
         """List catalog collections as the starting point for dataset discovery."""
@@ -361,6 +372,39 @@ def create_mcp_server(
 
     mcp.tool(app=query_map_app)(view_query_map)
 
+    async def view_map(
+        title: query.MapTitle,
+        layers: Annotated[list[maps.MapLayerInput], BeforeValidator(decode_json_parameter)],
+        basemap: query.BasemapStyle = "street",
+        camera: Annotated[
+            query.MapCameraInput | None, BeforeValidator(decode_json_parameter)
+        ] = None,
+    ) -> FastMCPToolResult:
+        """Configure a map from query, catalog PMTiles, or public HTTPS vector sources.
+
+        Each layer has a layer_name, a discriminated source, shared styling fields,
+        and visibility. Query sources contain inputs and SQL. Catalog sources copy a
+        map_sources reference from get_dataset_file. Explicit pmtiles and tilejson
+        sources use a public HTTPS URL; vector_tiles uses public HTTPS XYZ templates
+        and requires source_layer. The server never fetches explicit source URLs.
+        """
+        try:
+            return _result(
+                await maps.view_map(
+                    dependencies.query,
+                    dependencies.catalog,
+                    title=title,
+                    layers=layers,
+                    basemap=basemap,
+                    camera=camera,
+                    worker_url=configured_worker_url(),
+                )
+            )
+        except Exception as error:
+            return _error_result(error)
+
+    mcp.tool(app=query_map_app)(view_map)
+
     async def refresh_query_map(map_spec: query.MapDefinitionInput) -> FastMCPToolResult:
         """Refresh runtime map tokens from a durable map definition.
 
@@ -374,7 +418,21 @@ def create_mcp_server(
 
     mcp.tool(app=query_map_refresh_app)(refresh_query_map)
 
-    config = resource_config or UIResourceConfig(tile_origin="self")
+    async def refresh_map(map_spec: maps.MapDefinitionInput) -> FastMCPToolResult:
+        """Refresh query tokens and catalog resolution from a durable mixed map spec."""
+        try:
+            return _result(
+                await maps.refresh_map(
+                    dependencies.query,
+                    dependencies.catalog,
+                    map_spec,
+                    worker_url=configured_worker_url(),
+                )
+            )
+        except Exception as error:
+            return _error_result(error)
+
+    mcp.tool(app=query_map_refresh_app)(refresh_map)
 
     def query_map() -> str:
         return ui_html if ui_html is not None else default_ui_html()

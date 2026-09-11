@@ -10,6 +10,7 @@ import {
 const roads: HighlightedQueryLayer = {
   mapSourceId: "hifld-query-0",
   queryId: "roadsquery1234567890ABCD",
+  layerId: "query-0",
   layerName: "Roads",
   sourceLayerId: "hifld",
 };
@@ -17,6 +18,7 @@ const roads: HighlightedQueryLayer = {
 const bridges: HighlightedQueryLayer = {
   mapSourceId: "hifld-query-1",
   queryId: "bridgesquery123456789AB",
+  layerId: "query-1",
   layerName: "Bridges",
   sourceLayerId: "hifld",
 };
@@ -289,5 +291,82 @@ describe("map selection helpers", () => {
     expect(JSON.stringify(snapshot)).not.toContain("geometry");
     expect(JSON.stringify(snapshot)).not.toContain("query_token");
     expect(JSON.stringify(snapshot)).not.toContain("tile_url");
+  });
+
+  it("selects external features by their source feature ID without a query ID", () => {
+    const external = {
+      mapSourceId: "hifld-external-2",
+      layerId: "external-2",
+      layerName: "Public roads",
+      sourceLayerId: "roads",
+    };
+    const selected = normalizeHighlightedFeatures({
+      features: [
+        feature({
+          id: 42,
+          source: external.mapSourceId,
+          sourceLayer: "roads",
+          properties: { name: "Broadway" },
+        }),
+      ],
+      layers: [external],
+    });
+
+    expect(selected.features).toEqual([
+      {
+        id: "external:external-2:roads:id:42",
+        layerId: "external-2",
+        layerName: "Public roads",
+        sourceLayerId: "roads",
+        featureId: "id:42",
+        centroid: null,
+        properties: { name: "Broadway" },
+      },
+    ]);
+    expect(
+      snapshotMapHighlights({
+        mapTitle: "Mixed",
+        features: selected.features,
+        wasCapped: false,
+        selectionBounds: null,
+      }).selected_features[0],
+    ).toMatchObject({ layer_id: "external-2" });
+    expect(
+      snapshotMapHighlights({
+        mapTitle: "Mixed",
+        features: selected.features,
+        wasCapped: false,
+        selectionBounds: null,
+      }).selected_features[0],
+    ).not.toHaveProperty("query_id");
+  });
+
+  it("uses an honest stable tile-fragment identity for external features without IDs", () => {
+    const external = {
+      mapSourceId: "hifld-external-2",
+      layerId: "external-2",
+      layerName: "Public roads",
+      sourceLayerId: "roads",
+    };
+    const first = feature({
+      id: undefined,
+      source: external.mapSourceId,
+      properties: { class: "primary", name: "Broadway" },
+    });
+    const reordered = feature({
+      id: undefined,
+      source: external.mapSourceId,
+      properties: { name: "Broadway", class: "primary" },
+    });
+
+    const selected = normalizeHighlightedFeatures({
+      features: [first, reordered],
+      layers: [external],
+    });
+
+    expect(selected.features).toHaveLength(1);
+    expect(selected.features[0]?.featureId).toMatch(
+      /^tile-fragment:[0-9a-f]{8}$/,
+    );
   });
 });

@@ -245,7 +245,7 @@ const baseConfiguration: MapConfiguration = {
   ],
 };
 const primaryLayer = baseConfiguration.layers[0];
-if (primaryLayer === undefined)
+if (primaryLayer === undefined || !("query_id" in primaryLayer))
   throw new Error("primary layer fixture is missing");
 
 const selectableFeature = (
@@ -277,6 +277,7 @@ const baseProps: MapViewProps = {
 };
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   cleanup();
   mapConstructor.mockClear();
   mapStop.mockClear();
@@ -313,6 +314,109 @@ afterEach(() => {
 });
 
 describe("MapView", () => {
+  it("does not render polygon vertices as point features", () => {
+    render(<MapView {...baseProps} />);
+    const overlay = mapAddLayer.mock.calls
+      .map(([layer]) => layer)
+      .filter((layer) => layer.id.startsWith("hifld-query-"));
+    for (const layer of overlay) {
+      expect("filter" in layer ? layer.filter : undefined).toEqual([
+        "==",
+        ["geometry-type"],
+        layer.type === "fill"
+          ? "Polygon"
+          : layer.type === "line"
+            ? "LineString"
+            : "Point",
+      ]);
+    }
+  });
+  it("keeps query layers available when an external metadata request fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("Metadata unavailable")),
+    );
+    render(
+      <MapView
+        {...baseProps}
+        configuration={{
+          ...baseConfiguration,
+          layers: [
+            {
+              layer_id: "external-0",
+              layer_name: "Broken source",
+              visible: true,
+              source: {
+                type: "tilejson",
+                url: "https://tiles.example.com/tiles.json",
+              },
+            },
+            primaryLayer,
+          ],
+        }}
+      />,
+    );
+    await act(async () => {});
+    expect(
+      mapAddSource.mock.calls.some(([id]) => id === `hifld-query-${roadsId}`),
+    ).toBe(true);
+    expect(
+      screen.getByText("Broken source: Metadata unavailable"),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Hide Roads" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show Roads" }));
+    expect(mapSetLayoutProperty).toHaveBeenLastCalledWith(
+      `hifld-query-${roadsId}-points`,
+      "visibility",
+      "visible",
+    );
+  });
+
+  it("does not send a query token to an external host with the same tile path", () => {
+    const url = `https://external.example.com/tiles/${roadsId}/1/0/0.mvt`;
+    expect(mapTileRequest(url, queryTokens, [primaryLayer.tile_url])).toEqual({
+      url,
+    });
+  });
+
+  it("renders an XYZ layer alongside a query layer without query credentials", async () => {
+    render(
+      <MapView
+        {...baseProps}
+        configuration={{
+          ...baseConfiguration,
+          layers: [
+            primaryLayer,
+            {
+              layer_id: "external-1",
+              layer_name: "Prebuilt flood",
+              visible: true,
+              source: {
+                type: "vector_tiles",
+                tiles: ["https://tiles.example.com/{z}/{x}/{y}.pbf"],
+                source_layer: "flood",
+                maxzoom: 12,
+              },
+            },
+          ],
+        }}
+      />,
+    );
+    await act(async () => {});
+    expect(mapAddSource).toHaveBeenCalledWith("hifld-query-external-1", {
+      type: "vector",
+      tiles: ["https://tiles.example.com/{z}/{x}/{y}.pbf"],
+      minzoom: 0,
+      maxzoom: 12,
+    });
+    expect(
+      mapAddLayer.mock.calls.some(
+        ([layer]) =>
+          "source-layer" in layer && layer["source-layer"] === "flood",
+      ),
+    ).toBe(true);
+  });
+
   it("reports the stable tile error body instead of the generic AJAX error", async () => {
     const error = new AJAXError(
       422,
@@ -390,7 +494,7 @@ describe("MapView", () => {
       "hifld-query-roadsquery1234567890ABCD",
       {
         type: "vector",
-        tiles: [baseConfiguration.layers[0]?.tile_url],
+        tiles: [`https://maps.example/tiles/${roadsId}/{z}/{x}/{y}.mvt`],
         minzoom: 0,
         maxzoom: 22,
       },
@@ -400,7 +504,7 @@ describe("MapView", () => {
       "hifld-query-bridgesquery123456789AB",
       {
         type: "vector",
-        tiles: [baseConfiguration.layers[1]?.tile_url],
+        tiles: [`https://maps.example/tiles/${bridgesId}/{z}/{x}/{y}.mvt`],
         minzoom: 0,
         maxzoom: 22,
       },
