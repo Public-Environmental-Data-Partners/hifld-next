@@ -83,6 +83,53 @@ when needed, `storage.allowedPorts`) for the object-store network ranges; use
 `networkPolicy.extraEgress` for an in-cluster S3-compatible endpoint. Do not
 allow arbitrary egress or pass storage URLs through tool arguments.
 
+## Mixed-source maps
+
+`view_map(title, layers, basemap="street", camera=None)` accepts explicitly typed
+layer sources. Common styling (`color`, `color_property`, `opacity`,
+`point_radius`, etc.) and `visible` remain on each layer.
+
+- `query`: `inputs` contains catalog references and SQL aliases; `sql` is required.
+  Optional `geometry_column` and `result_crs` describe the query's output.
+- `catalog`: `collection_id`, `dataset_id`, `file_id`, and `file_source_id` select
+  an exact published PMTiles source. `get_dataset_file` returns `map_sources`
+  alongside all existing file formats and GeoParquet `query_sources`.
+- `pmtiles`: a public HTTPS archive `url` and optional `source_layer`.
+- `tilejson`: a public HTTPS metadata `url` and optional `source_layer`.
+- `vector_tiles`: public HTTPS XYZ `tiles` templates, required `source_layer`,
+  and optional `minzoom`, `maxzoom`, and `bounds`.
+
+For example, the following layer sources can be mixed in one map:
+
+```json
+{"type":"pmtiles","url":"https://example.org/data.pmtiles","source_layer":"flood"}
+```
+
+```json
+{"type":"tilejson","url":"https://example.org/tiles.json","source_layer":"roads"}
+```
+
+```json
+{"type":"vector_tiles","tiles":["https://example.org/{z}/{x}/{y}.pbf"],"source_layer":"hospitals","maxzoom":14}
+```
+
+Only query sources invoke DuckDB. Other sources load directly in the browser and
+must allow cross-origin requests; PMTiles hosting must support HTTP byte ranges.
+`source_layer` is inferred only when metadata declares exactly one vector layer.
+Metadata failures are reported per layer without blocking other layers. Rendering
+uses geometry-type filters so polygon vertices are not displayed as points.
+
+The widget declares public HTTPS connections in its MCP resource CSP; script and
+frame permissions are not broadened. Hosts may impose stricter network policies.
+External sources never receive HIFLD query tokens. Local/private URLs, embedded
+credentials, non-vector PMTiles, and invalid metadata are rejected. URLs are not
+server-side fetch instructions or DuckDB inputs.
+
+The result includes a durable `map_spec`; `refresh_map` refreshes query tokens and
+re-resolves catalog sources. External-only maps do not schedule token refreshes.
+"Configured map" means configuration was accepted, not that tiles have rendered.
+Existing `view_query_map` and `refresh_query_map` remain supported.
+
 ## Interactive query maps
 
 Regular discovery, metadata, row, and query tools return text and structured

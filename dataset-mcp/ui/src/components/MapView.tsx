@@ -30,6 +30,7 @@ import {
 } from "react";
 import { z } from "zod";
 import {
+  type ExternalTileSource,
   type MapConfiguration,
   MapConfigurationSchema,
   type MapLayerConfiguration,
@@ -54,8 +55,49 @@ import {
   type NumericScale,
 } from "./mapStyle";
 import { ResizableSelectedFeaturesPanel } from "./ResizableSelectedFeaturesPanel";
+import {
+  pmtilesProtocol,
+  resolveTileSource,
+  validatePublicTileUrl,
+} from "./tileSources";
 
 export type { MapConfiguration } from "../mcp/contracts";
+
+type RenderLayer = Pick<
+  MapLayerConfiguration,
+  | "layer_name"
+  | "visible"
+  | "style"
+  | "columns"
+  | "source_layer"
+  | "initial_bounds"
+> & {
+  id: string;
+  query_id?: string;
+  tile_url?: string;
+  source?: ExternalTileSource;
+};
+type RenderConfiguration = Omit<MapConfiguration, "layers"> & {
+  layers: RenderLayer[];
+};
+
+function renderConfiguration(
+  configuration: MapConfiguration,
+): RenderConfiguration {
+  return {
+    ...configuration,
+    layers: configuration.layers.map((layer) =>
+      "query_id" in layer
+        ? { ...layer, id: layer.query_id }
+        : {
+            ...layer,
+            id: layer.layer_id,
+            source_layer: layer.source.source_layer ?? "",
+            columns: [],
+          },
+    ),
+  };
+}
 
 type McpMapApp = Pick<
   McpApp,
@@ -135,6 +177,16 @@ export function normalizeMapConfiguration(
   const parsed = MapConfigurationSchema.safeParse(configuration);
   if (!parsed.success || !parsedHttpUrl(parsed.data.worker_url)) return null;
   for (const layer of parsed.data.layers) {
+    if ("source" in layer) {
+      try {
+        if (layer.source.type === "vector_tiles")
+          layer.source.tiles.forEach(validatePublicTileUrl);
+        else validatePublicTileUrl(layer.source.url);
+      } catch {
+        return null;
+      }
+      continue;
+    }
     if (
       !parsedHttpUrl(layer.tile_url) ||
       tileQueryId(layer.tile_url) !== layer.query_id
@@ -148,9 +200,17 @@ export function normalizeMapConfiguration(
 export function mapTileRequest(
   url: string,
   queryTokens: Record<string, string>,
+  trustedTileUrls?: readonly string[],
 ): TileRequest {
   const queryId = tileQueryId(url);
-  const token = queryId ? queryTokens[queryId] : undefined;
+  const origin = parsedHttpUrl(url)?.origin;
+  const trusted =
+    trustedTileUrls === undefined ||
+    trustedTileUrls.some(
+      (tile) =>
+        parsedHttpUrl(tile)?.origin === origin && tileQueryId(tile) === queryId,
+    );
+  const token = trusted && queryId ? queryTokens[queryId] : undefined;
   return token ? { url, headers: { "X-HIFLD-Query-Token": token } } : { url };
 }
 
@@ -187,7 +247,7 @@ export async function mapErrorMessage(error: Error): Promise<string> {
 }
 
 function combinedBounds(
-  layers: MapLayerConfiguration[],
+  layers: Pick<MapLayerConfiguration, "initial_bounds">[],
 ): [number, number, number, number] | null {
   const available = layers.flatMap((layer) =>
     layer.initial_bounds ? [layer.initial_bounds] : [],
@@ -206,7 +266,7 @@ function combinedBounds(
 }
 
 export function initialMapView(
-  configuration: MapConfiguration,
+  configuration: MapConfiguration | RenderConfiguration,
 ): Partial<MapOptions> {
   const camera = configuration.camera;
   const orientation = {
@@ -227,7 +287,11 @@ export function initialMapView(
       ...orientation,
     };
   }
-  const bounds = combinedBounds(configuration.layers);
+  const bounds = combinedBounds(
+    configuration.layers.flatMap((layer) =>
+      "initial_bounds" in layer ? [layer] : [],
+    ),
+  );
   if (bounds) {
     return {
       bounds,
@@ -247,7 +311,7 @@ function queryRenderLayerIds(queryId: string): [string, string, string] {
   return [`${sourceId}-polygons`, `${sourceId}-lines`, `${sourceId}-points`];
 }
 
-function initialLayerStyle(layer: MapLayerConfiguration): LayerStyleState {
+function initialLayerStyle(layer: RenderLayer): LayerStyleState {
   return {
     color: layer.style?.color ?? DEFAULT_QUERY_COLOR,
     colorProperty: layer.style?.color_property ?? null,
@@ -264,20 +328,14 @@ function initialLayerStyle(layer: MapLayerConfiguration): LayerStyleState {
 }
 
 function initialLayerVisibility(
-  configuration: MapConfiguration | null,
+  configuration: RenderConfiguration | null,
 ): Record<string, boolean> {
   return Object.fromEntries(
-    (configuration?.layers ?? []).map((layer) => [
-      layer.query_id,
-      layer.visible,
-    ]),
+    (configuration?.layers ?? []).map((layer) => [layer.id, layer.visible]),
   );
 }
 
-function layersForQuery(
-  queryId: string,
-  layer: MapLayerConfiguration,
-): AddLayerObject[] {
+function layersForQuery(queryId: string, layer: RenderLayer): AddLayerObject[] {
   const source = querySourceId(queryId);
   const [polygons, lines, points] = queryRenderLayerIds(queryId);
   const color = layer.style?.color ?? DEFAULT_QUERY_COLOR;
@@ -290,6 +348,7 @@ function layersForQuery(
       type: "fill",
       source,
       "source-layer": layer.source_layer,
+      filter: ["==", ["geometry-type"], "Polygon"],
       layout,
       paint: {
         "fill-color": color,
@@ -302,6 +361,7 @@ function layersForQuery(
       type: "line",
       source,
       "source-layer": layer.source_layer,
+      filter: ["==", ["geometry-type"], "LineString"],
       layout,
       paint: {
         "line-color": color,
@@ -314,6 +374,7 @@ function layersForQuery(
       type: "circle",
       source,
       "source-layer": layer.source_layer,
+      filter: ["==", ["geometry-type"], "Point"],
       layout,
       paint: {
         "circle-color": color,
@@ -328,7 +389,7 @@ function layersForQuery(
 
 function applyLayerStyle(
   map: MapLibreMap,
-  layer: MapLayerConfiguration,
+  layer: RenderLayer,
   queryId: string,
   style: LayerStyleState,
 ): LegendItem[] {
@@ -431,31 +492,24 @@ function configureBasemap(
   );
 }
 
-function addQueryOverlays(
+function addLayerOverlay(
   map: MapLibreMap,
-  configuration: MapConfiguration,
+  layer: RenderLayer,
+  source: maplibregl.VectorSourceSpecification,
+  before?: string,
 ): void {
   const firstLabel = map
     .getStyle()
     .layers?.find((layer) => layer.type === "symbol")?.id;
-  configuration.layers.forEach((layer) => {
-    const sourceId = querySourceId(layer.query_id);
-    map.addSource(sourceId, {
-      type: "vector",
-      tiles: [layer.tile_url],
-      minzoom: 0,
-      maxzoom: 22,
-    });
-    for (const renderLayer of layersForQuery(layer.query_id, layer)) {
-      map.addLayer(renderLayer, firstLabel);
-    }
-  });
+  const sourceId = querySourceId(layer.id);
+  map.addSource(sourceId, source);
+  for (const renderLayer of layersForQuery(layer.id, layer)) {
+    map.addLayer(renderLayer, before ?? firstLabel);
+  }
 }
 
-function allQueryRenderLayerIds(configuration: MapConfiguration): string[] {
-  return configuration.layers.flatMap((layer) =>
-    queryRenderLayerIds(layer.query_id),
-  );
+function allQueryRenderLayerIds(configuration: RenderConfiguration): string[] {
+  return configuration.layers.flatMap((layer) => queryRenderLayerIds(layer.id));
 }
 
 function selectionBoxCollection(
@@ -509,10 +563,11 @@ function setMapSelectionCursor(map: MapLibreMap, active: boolean): void {
   map.getCanvas().style.cursor = active ? "crosshair" : "";
 }
 
-function highlightedLayers(configuration: MapConfiguration) {
+function highlightedLayers(configuration: RenderConfiguration) {
   return configuration.layers.map((layer) => ({
-    mapSourceId: querySourceId(layer.query_id),
+    mapSourceId: querySourceId(layer.id),
     queryId: layer.query_id,
+    layerId: layer.id,
     layerName: layer.layer_name,
     sourceLayerId: layer.source_layer,
   }));
@@ -531,7 +586,10 @@ export function MapView({
         : (() => {
             const normalized = normalizeMapConfiguration(configuration);
             return normalized
-              ? { success: true as const, data: normalized }
+              ? {
+                  success: true as const,
+                  data: renderConfiguration(normalized),
+                }
               : { success: false as const };
           })(),
     [configuration],
@@ -546,7 +604,7 @@ export function MapView({
   const suppressNextClickSelectionRef = useRef(false);
   const contextRequestSequenceRef = useRef(0);
   const hasPublishedHighlightContextRef = useRef(false);
-  const lastParsedConfigurationRef = useRef<MapConfiguration | null>(null);
+  const lastParsedConfigurationRef = useRef<RenderConfiguration | null>(null);
   const currentMapTitleRef = useRef<string | null>(null);
   const publishHighlightContextRef = useRef<
     (
@@ -577,7 +635,7 @@ export function MapView({
   );
   const [layerVisibility, setLayerVisibility] = useState<
     Record<string, boolean>
-  >(() => initialLayerVisibility(configuration));
+  >(() => initialLayerVisibility(parsed.success ? parsed.data : null));
   const [legendItems, setLegendItems] = useState<Record<string, LegendItem[]>>(
     {},
   );
@@ -738,45 +796,79 @@ export function MapView({
       setIsMapLoading(true);
       setMessage(null);
       maplibregl.setWorkerUrl(parsed.data.worker_url);
+      if (
+        parsed.data.layers.some((layer) => layer.source?.type === "pmtiles")
+      ) {
+        maplibregl.addProtocol("pmtiles", pmtilesProtocol.tile);
+      }
       map = new maplibregl.Map({
         container: mapNode.current,
         ...initialMapView(parsed.data),
         style: OPENFREEMAP_BRIGHT_STYLE_URL,
-        transformRequest: (url) => mapTileRequest(url, queryTokens),
+        transformRequest: (url) =>
+          mapTileRequest(
+            url,
+            queryTokens,
+            parsed.data.layers.flatMap((layer) =>
+              layer.tile_url ? [layer.tile_url] : [],
+            ),
+          ),
       });
       mapRef.current = map;
       const initializeQueryLayers = () => {
         if (disposed) return;
         try {
           configureBasemap(map, parsed.data.basemap);
-          addQueryOverlays(map, parsed.data);
-          const items = Object.fromEntries(
-            parsed.data.layers.map((layer) => [
-              layer.query_id,
-              applyLayerStyle(
+          const addReadyLayer = (
+            layer: RenderLayer,
+            source: maplibregl.VectorSourceSpecification,
+          ) => {
+            if (disposed) return;
+            const laterLayers = parsed.data.layers.slice(
+              parsed.data.layers.indexOf(layer) + 1,
+            );
+            const before = laterLayers
+              .flatMap((candidate) => queryRenderLayerIds(candidate.id))
+              .find((id) => map.getLayer(id));
+            addLayerOverlay(map, layer, source, before);
+            const updateStyle = () => {
+              if (disposed) return;
+              const items = applyLayerStyle(
                 map,
                 layer,
-                layer.query_id,
+                layer.id,
                 initialLayerStyle(layer),
-              ),
-            ]),
-          );
-          setLegendItems(items);
-          map.once("idle", () => {
-            setLegendItems(
-              Object.fromEntries(
-                parsed.data.layers.map((layer) => [
-                  layer.query_id,
-                  applyLayerStyle(
-                    map,
-                    layer,
-                    layer.query_id,
-                    initialLayerStyle(layer),
-                  ),
-                ]),
-              ),
-            );
-          });
+              );
+              setLegendItems((previous) => ({
+                ...previous,
+                [layer.id]: items,
+              }));
+            };
+            updateStyle();
+            map.once("idle", updateStyle);
+          };
+          for (const layer of parsed.data.layers) {
+            if (layer.source) {
+              void resolveTileSource(layer.source)
+                .then((resolved) => {
+                  if (disposed) return;
+                  layer.source_layer = resolved.sourceLayer;
+                  layer.columns = resolved.columns;
+                  addReadyLayer(layer, resolved.source);
+                })
+                .catch((error: Error) => {
+                  if (!disposed)
+                    setMessage(`${layer.layer_name}: ${error.message}`);
+                });
+            } else if (layer.tile_url) {
+              addReadyLayer(layer, {
+                type: "vector",
+                tiles: [layer.tile_url],
+                minzoom: 0,
+                maxzoom: 22,
+              });
+            }
+          }
           setIsMapLoading(false);
         } catch (error) {
           setIsMapLoading(false);
@@ -804,7 +896,9 @@ export function MapView({
           return;
         }
         const rendered = map.queryRenderedFeatures(event.point, {
-          layers: allQueryRenderLayerIds(parsed.data),
+          layers: allQueryRenderLayerIds(parsed.data).filter((id) =>
+            map.getLayer(id),
+          ),
         });
         const normalized = normalizeHighlightedFeatures({
           features: rendered,
@@ -895,7 +989,9 @@ export function MapView({
         }, 0);
         const bounds = selectionScreenBounds(start, end);
         const rendered = map.queryRenderedFeatures(bounds, {
-          layers: allQueryRenderLayerIds(parsed.data),
+          layers: allQueryRenderLayerIds(parsed.data).filter((id) =>
+            map.getLayer(id),
+          ),
         });
         const normalized = normalizeHighlightedFeatures({
           features: rendered,
@@ -972,9 +1068,14 @@ export function MapView({
       [queryId]: nextVisible,
     }));
     if (!parsed.success) return;
+    const layer = parsed.data.layers.find(
+      (candidate) => candidate.id === queryId,
+    );
+    if (layer) layer.visible = nextVisible;
     const map = mapRef.current;
     if (!map) return;
     for (const layerId of queryRenderLayerIds(queryId)) {
+      if (!map.getLayer(layerId)) continue;
       map.setLayoutProperty(
         layerId,
         "visibility",
@@ -1063,13 +1164,13 @@ export function MapView({
           groups={parsed.data.layers.map((layer) => {
             const style = initialLayerStyle(layer);
             return {
-              id: layer.query_id,
+              id: layer.id,
               title: layer.layer_name,
               field: style.colorProperty,
-              items: legendItems[layer.query_id] ?? [
+              items: legendItems[layer.id] ?? [
                 { color: style.color, label: "All values" },
               ],
-              layerVisible: layerVisibility[layer.query_id] ?? layer.visible,
+              layerVisible: layerVisibility[layer.id] ?? layer.visible,
             };
           })}
           visible={legendVisible}

@@ -15,6 +15,7 @@ from app.query.serialization import (
     RowTooLargeError,
     serialize_rows,
 )
+from query_worker.diagnostics import duckdb_diagnostic
 from query_worker.metrics import init_connection, measure
 from query_worker.protocol import (
     WorkerBounds,
@@ -236,17 +237,27 @@ class WorkerRuntime:
                 code="row_too_large",
                 message="A result row exceeds the response size limit",
             )
-        except duckdb.OutOfMemoryException:
+        except duckdb.OutOfMemoryException as error:
             return WorkerFailure(
                 code="query_memory_limit",
-                message="The query exceeded its memory limit",
+                message=duckdb_diagnostic(error, self._config, request.sources, aliases),
             )
-        except duckdb.IOException:
+        except duckdb.IOException as error:
             return WorkerFailure(
                 code="storage_unavailable",
-                message="A query source could not be read",
+                message=duckdb_diagnostic(error, self._config, request.sources, aliases),
             )
-        except (duckdb.Error, ValueError, TypeError):
+        except duckdb.InternalException:
+            return WorkerFailure(
+                code="query_execution_failed",
+                message="An internal query engine error occurred",
+            )
+        except duckdb.Error as error:
+            return WorkerFailure(
+                code="query_execution_failed",
+                message=duckdb_diagnostic(error, self._config, request.sources, aliases),
+            )
+        except (ValueError, TypeError):
             return WorkerFailure(
                 code="query_execution_failed",
                 message="The bounded query could not be executed",

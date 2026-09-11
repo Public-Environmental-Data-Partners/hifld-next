@@ -17,6 +17,7 @@ from query_worker.protocol import (
     WorkerSeaweedCredentials,
     WorkerSeaweedSource,
     WorkerSourceSpec,
+    WorkerTileQuery,
 )
 from query_worker.runtime import WorkerRuntime, _rewrite_source_aliases
 
@@ -64,6 +65,82 @@ def _runtime(tmp_path: Path) -> WorkerRuntime:
             load_extensions=False,
         )
     )
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT missing_column FROM data", "Candidate bindings"),
+        ("SELECT nonexistent_function(id) FROM data", "nonexistent_function"),
+        ("SELECT CAST('not-an-integer' AS INTEGER) FROM data", "Conversion Error"),
+    ],
+)
+def test_runtime_preserves_duckdb_diagnostics(tmp_path: Path, sql: str, expected: str) -> None:
+    path = tmp_path / "private-source.parquet"
+    _write_parquet(path, "SELECT 1 AS id")
+    runtime = _runtime(tmp_path)
+    try:
+        result = runtime.execute(_request(sql, (WorkerSourceSpec("data", (str(path),)),)))
+    finally:
+        runtime.close()
+    assert isinstance(result, WorkerFailure)
+    assert result.code == "query_execution_failed"
+    assert expected in result.message
+    assert "_mcp_" not in result.message
+    assert str(tmp_path) not in result.message
+
+
+def test_runtime_storage_diagnostic_redacts_path(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    try:
+        result = runtime.execute(
+            _request(
+                "SELECT * FROM data",
+                (WorkerSourceSpec("data", (str(tmp_path / "missing.parquet"),)),),
+            )
+        )
+    finally:
+        runtime.close()
+    assert isinstance(result, WorkerFailure)
+    assert result.code == "storage_unavailable"
+    assert "No files found" in result.message
+    assert str(tmp_path) not in result.message
+
+
+def test_map_query_preserves_missing_column_diagnostic(tmp_path: Path) -> None:
+    path = tmp_path / "source.parquet"
+    _write_parquet(path, "SELECT 1 AS id")
+    runtime = _runtime(tmp_path)
+    try:
+        result = runtime.execute(
+            WorkerTileQuery(
+                canonical_sql="SELECT missing_geometry FROM data",
+                sources=(WorkerSourceSpec("data", (str(path),)),),
+                z=0,
+                x=0,
+                y=0,
+                geometry_column="missing_geometry",
+                result_crs="EPSG:4326",
+                feature_cap=100,
+                deadline=datetime.now(tz=UTC) + timedelta(seconds=5),
+            )
+        )
+    finally:
+        runtime.close()
+    assert isinstance(result, WorkerFailure)
+    assert "missing_geometry" in result.message
+    assert "Candidate bindings" in result.message
+    assert "_mcp_" not in result.message
+
+
+def test_runtime_keeps_python_configuration_errors_private(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    try:
+        result = runtime.execute(_request("SELECT * FROM data", (WorkerSourceSpec("data", ()),)))
+    finally:
+        runtime.close()
+    assert isinstance(result, WorkerFailure)
+    assert result.message == "The bounded query could not be executed"
 
 
 def test_runtime_executes_complex_join_and_extracts_schema(tmp_path: Path) -> None:

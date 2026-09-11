@@ -126,7 +126,38 @@ class CatalogToolAdapter:
         for source in shaped["query_sources"]:
             query_sources.append(_dump_model(source))
         payload["query_sources"] = query_sources
+        map_sources: list[JSONValue] = []
+        for format_entry in response.file.formats:
+            if format_entry.format.format_type != "pmtiles":
+                continue
+            for source in format_entry.sources:
+                if source.url is None:
+                    continue
+                map_sources.append(
+                    {
+                        "type": "catalog",
+                        "collection_id": response.collection.id,
+                        "dataset_id": response.dataset.id,
+                        "file_id": response.file.id,
+                        "file_source_id": source.id,
+                    }
+                )
+        payload["map_sources"] = map_sources
         return payload
+
+    async def resolve_map_source(
+        self, collection_id: int, dataset_id: int, file_id: int, file_source_id: int
+    ) -> JSONMapping:
+        response = await self._catalog.get_dataset_file(collection_id, dataset_id, file_id)
+        if response.dataset.id != dataset_id or response.file.id != file_id:
+            raise ValueError("catalog map source does not match the requested dataset file")
+        for format_entry in response.file.formats:
+            if format_entry.format.format_type != "pmtiles":
+                continue
+            for source in format_entry.sources:
+                if source.id == file_source_id and source.url is not None:
+                    return {"type": "pmtiles", "url": source.url}
+        raise ValueError("catalog map source must reference an existing PMTiles asset")
 
     async def get_dataset_file_schema(
         self, collection: str, dataset: str, identity: str, version: str | None

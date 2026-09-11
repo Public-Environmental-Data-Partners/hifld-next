@@ -109,6 +109,48 @@ describe("useMcpApp", () => {
     expect(useHostStyles).toHaveBeenCalled();
   });
 
+  it("accepts an external-only map without scheduling a token refresh", () => {
+    vi.useFakeTimers();
+    try {
+      const app = fakeApp();
+      const { result, unmount } = connect(app);
+      const source = {
+        type: "pmtiles",
+        url: "https://tiles.example.com/flood.pmtiles",
+      };
+      act(() =>
+        app.ontoolresult?.({
+          content: [],
+          structuredContent: {
+            ...validResult,
+            layers: [
+              {
+                layer_id: "external-0",
+                layer_name: "Flood",
+                visible: true,
+                source,
+              },
+            ],
+            map_spec: {
+              title: "Flood",
+              basemap: "street",
+              layers: [{ layer_name: "Flood", visible: true, source }],
+            },
+          },
+        }),
+      );
+      expect(result.current.mapConfiguration?.layers[0]?.layer_name).toBe(
+        "Flood",
+      );
+      expect(result.current.queryTokens).toEqual({});
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(app.callServerTool).not.toHaveBeenCalled();
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects a map layer missing its query token", () => {
     const app = fakeApp();
     const { result } = connect(app);

@@ -82,10 +82,11 @@ describe("MCP multi-layer map contracts", () => {
       "Roads",
       "Bridges",
     ]);
-    expect(result.layers.map((layer) => layer.query_token)).toEqual([
-      "signed-roads",
-      "signed-bridges",
-    ]);
+    expect(
+      result.layers.flatMap((layer) =>
+        "query_token" in layer ? [layer.query_token] : [],
+      ),
+    ).toEqual(["signed-roads", "signed-bridges"]);
   });
 
   it("rejects a layer without its query token", () => {

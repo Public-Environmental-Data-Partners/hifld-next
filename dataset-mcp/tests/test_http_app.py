@@ -20,6 +20,7 @@ from app.mcp_server import (
     create_mcp_server,
 )
 from app.observability import InMemoryMetricSink, InMemoryStructuredLogSink, QueryObservability
+from query_worker.protocol import WorkerTile
 
 
 class CatalogStub:
@@ -259,10 +260,22 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
                 "get_query_page",
                 "view_query_map",
                 "refresh_query_map",
+                "view_map",
+                "refresh_map",
             }
             assert set(by_name) == expected_model_tools
             for name in expected_model_tools:
                 assert by_name[name].description
+            map_guidance = by_name["view_map"].description or ""
+            assert "Prefer published PMTiles" in map_guidance
+            assert "Choose independently for each layer" in map_guidance
+            assert "simplified" in map_guidance
+            assert "joins" in map_guidance
+            assert "view_map" in (by_name["view_query_map"].description or "")
+            discovery_guidance = by_name["get_dataset_file"].description or ""
+            assert "map_sources" in discovery_guidance
+            assert "query_sources" in discovery_guidance
+            assert "prebuilt" in (by_name["generate_mvt_tile_url"].description or "")
             assert by_name["view_query_map"].meta is not None
             assert by_name["view_query_map"].meta["ui"] == {
                 "resourceUri": "ui://hifld/dataset-explorer.html",
@@ -363,6 +376,7 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
                     "https://assets.example.test",
                     "https://tiles.openfreemap.org",
                     "https://services.arcgisonline.com",
+                    "https:",
                 ],
                 "resourceDomains": [
                     "https://assets.example.test",
@@ -518,6 +532,172 @@ def test_health_and_assets_bypass_expensive_request_concurrency(
         assert query_response.status_code == 200
 
     asyncio.run(assert_bypass())
+
+
+def test_saturated_tile_admission_does_not_block_mcp() -> None:
+    async def assert_isolation() -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class BlockingTileService:
+            def validate_query_identity(self, token: str, query_id: str) -> None:
+                del token, query_id
+
+            async def render_tile(
+                self,
+                token: str,
+                z: int,
+                x: int,
+                y: int,
+                *,
+                timeout_seconds: float,
+            ) -> WorkerTile:
+                del token, z, x, y, timeout_seconds
+                entered.set()
+                await release.wait()
+                return WorkerTile(b"mvt", 1.0, 0, 0)
+
+        app = create_http_app(
+            HttpDependencies(tools=_dependencies(), tile_service=BlockingTileService()),
+            ui_html="<html><body>dataset explorer</body></html>",
+            max_concurrency=1,
+        )
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                tile_request = asyncio.create_task(
+                    client.get(
+                        "/tiles/0/0/0.mvt",
+                        headers={"X-HIFLD-Query-Token": "signed-token"},
+                    )
+                )
+                await asyncio.wait_for(entered.wait(), timeout=1)
+                mcp_response = await asyncio.wait_for(client.get("/mcp"), timeout=0.25)
+                release.set()
+                tile_response = await tile_request
+
+        assert mcp_response.status_code == 405
+        assert tile_response.status_code == 200
+
+    asyncio.run(assert_isolation())
+
+
+def test_saturated_admission_returns_cors_overload_and_releases_slot() -> None:
+    async def assert_overload() -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class BlockingTileService:
+            def validate_query_identity(self, token: str, query_id: str) -> None:
+                del token, query_id
+
+            async def render_tile(
+                self,
+                token: str,
+                z: int,
+                x: int,
+                y: int,
+                *,
+                timeout_seconds: float,
+            ) -> WorkerTile:
+                del token, z, x, y, timeout_seconds
+                entered.set()
+                await release.wait()
+                return WorkerTile(b"mvt", 1.0, 0, 0)
+
+        app = create_http_app(
+            HttpDependencies(tools=_dependencies(), tile_service=BlockingTileService()),
+            ui_html="<html><body>dataset explorer</body></html>",
+            max_concurrency=1,
+        )
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                first_request = asyncio.create_task(
+                    client.get(
+                        "/tiles/0/0/0.mvt",
+                        headers={"X-HIFLD-Query-Token": "signed-token"},
+                    )
+                )
+                await asyncio.wait_for(entered.wait(), timeout=1)
+                overloaded = await asyncio.wait_for(
+                    client.get(
+                        "/tiles/0/0/1.mvt",
+                        headers={"X-HIFLD-Query-Token": "signed-token"},
+                    ),
+                    timeout=0.25,
+                )
+                release.set()
+                first_response = await first_request
+                admitted_after_release = await client.get(
+                    "/tiles/0/0/0.mvt",
+                    headers={"X-HIFLD-Query-Token": "signed-token"},
+                )
+
+        assert overloaded.status_code == 503
+        assert overloaded.json() == {
+            "code": "server_overloaded",
+            "message": "The server is handling too many expensive requests.",
+        }
+        assert overloaded.headers["access-control-allow-origin"] == "*"
+        assert overloaded.headers["cache-control"] == "no-store"
+        assert overloaded.headers["retry-after"] == "1"
+        assert first_response.status_code == 200
+        assert admitted_after_release.status_code == 200
+
+    asyncio.run(assert_overload())
+
+
+def test_saturated_query_resource_tile_admission_does_not_block_mcp() -> None:
+    async def assert_isolation() -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class BlockingQueryTileService(QueryStub):
+            def validate_query_identity(self, token: str, query_id: str) -> None:
+                del token, query_id
+
+            async def render_tile(
+                self,
+                token: str,
+                z: int,
+                x: int,
+                y: int,
+                *,
+                timeout_seconds: float,
+            ) -> WorkerTile:
+                del token, z, x, y, timeout_seconds
+                entered.set()
+                await release.wait()
+                return WorkerTile(b"mvt", 1.0, 0, 0)
+
+        query = BlockingQueryTileService()
+        app = create_http_app(
+            HttpDependencies(
+                tools=AppDependencies(catalog=CatalogStub(), query=query),
+                query_service=query,
+            ),
+            ui_html="<html><body>dataset explorer</body></html>",
+            max_concurrency=1,
+        )
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                tile_request = asyncio.create_task(
+                    client.get(
+                        "/api/queries/query123/tiles/0/0/0.mvt",
+                        headers={"X-HIFLD-Query-Token": "signed-token"},
+                    )
+                )
+                await asyncio.wait_for(entered.wait(), timeout=1)
+                mcp_response = await asyncio.wait_for(client.get("/mcp"), timeout=0.25)
+                release.set()
+                tile_response = await tile_request
+
+        assert mcp_response.status_code == 405
+        assert tile_response.status_code == 200
+
+    asyncio.run(assert_isolation())
 
 
 def test_http_app_wires_query_resources_to_the_shared_query_service() -> None:

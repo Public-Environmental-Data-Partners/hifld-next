@@ -12,14 +12,16 @@ export { MAX_SELECTED_FEATURES as MAX_HIGHLIGHTED_FEATURES };
 
 export interface HighlightedQueryLayer {
   mapSourceId: string;
-  queryId: string;
+  queryId?: string;
+  layerId: string;
   layerName: string;
   sourceLayerId: string;
 }
 
 export interface HighlightedMapFeature {
   id: string;
-  queryId: string;
+  queryId?: string;
+  layerId?: string;
   layerName: string;
   sourceLayerId: string;
   featureId: string;
@@ -29,7 +31,8 @@ export interface HighlightedMapFeature {
 
 export interface MapHighlightSnapshotFeature {
   id: string;
-  query_id: string;
+  query_id?: string;
+  layer_id?: string;
   layer_name: string;
   source_layer_id: string;
   feature_id: string;
@@ -161,6 +164,24 @@ function sourceLayerForFeature(
   return feature.sourceLayer ?? layer.sourceLayerId;
 }
 
+function stableExternalFeatureId(feature: MapGeoJSONFeature): string {
+  if (feature.id !== undefined && feature.id !== null) {
+    return `id:${String(feature.id)}`;
+  }
+  const identity = JSON.stringify([
+    feature.geometry,
+    Object.entries(normalizeProperties(feature.properties)).sort(
+      ([left], [right]) => left.localeCompare(right),
+    ),
+  ]);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < identity.length; index += 1) {
+    hash ^= identity.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `tile-fragment:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
 export function normalizeHighlightedFeatures({
   features,
   layers,
@@ -173,28 +194,37 @@ export function normalizeHighlightedFeatures({
   );
   const selected: HighlightedMapFeature[] = [];
   const seen = new Set<string>();
-  const countByQueryId = new Map<string, number>();
+  const countByLayer = new Map<string, number>();
   let wasCapped = false;
 
   for (const feature of features) {
     const layer = layersByMapSourceId.get(feature.source);
     if (!layer) continue;
-    if (feature.id === undefined || feature.id === null) continue;
-    const featureId = internalFeatureKey(feature.properties);
-    if (!featureId) continue;
     const sourceLayerId = sourceLayerForFeature(feature, layer);
-    const id = `query:${layer.queryId}:${sourceLayerId}:${featureId}`;
+    const isQueryLayer = layer.queryId !== undefined;
+    if (isQueryLayer && (feature.id === undefined || feature.id === null))
+      continue;
+    const featureId = isQueryLayer
+      ? internalFeatureKey(feature.properties)
+      : stableExternalFeatureId(feature);
+    if (!featureId) continue;
+    const id = isQueryLayer
+      ? `query:${layer.queryId}:${sourceLayerId}:${featureId}`
+      : `external:${layer.layerId}:${sourceLayerId}:${featureId}`;
     if (seen.has(id)) continue;
     seen.add(id);
-    const currentCount = countByQueryId.get(layer.queryId) ?? 0;
+    const countKey = layer.queryId ?? layer.layerId;
+    const currentCount = countByLayer.get(countKey) ?? 0;
     if (currentCount >= MAX_SELECTED_FEATURES) {
       wasCapped = true;
       continue;
     }
-    countByQueryId.set(layer.queryId, currentCount + 1);
+    countByLayer.set(countKey, currentCount + 1);
     selected.push({
       id,
-      queryId: layer.queryId,
+      ...(layer.queryId === undefined
+        ? { layerId: layer.layerId }
+        : { queryId: layer.queryId }),
       layerName: layer.layerName,
       sourceLayerId,
       featureId,
@@ -224,7 +254,9 @@ export function snapshotMapHighlights({
     selection_bounds: selectionBounds,
     selected_features: features.map((feature) => ({
       id: feature.id,
-      query_id: feature.queryId,
+      ...(feature.queryId === undefined
+        ? { layer_id: feature.layerId }
+        : { query_id: feature.queryId }),
       layer_name: feature.layerName,
       source_layer_id: feature.sourceLayerId,
       feature_id: feature.featureId,
