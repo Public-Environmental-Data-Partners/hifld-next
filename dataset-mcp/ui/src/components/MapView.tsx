@@ -10,6 +10,7 @@ import {
 } from "@hifld/map-core";
 import { SelectedFeaturesSummary, SelectedFeaturesTable } from "@hifld/map-ui";
 import type { App as McpApp } from "@modelcontextprotocol/ext-apps";
+import { X } from "lucide-react";
 import type {
   AddLayerObject,
   GeoJSONSource,
@@ -620,6 +621,9 @@ export function MapView({
   >(async () => ({ status: "unsupported", isLatest: true }));
   const [isMapLoading, setIsMapLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [dismissedMessages, setDismissedMessages] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const [highlightedFeatures, setHighlightedFeatures] = useState<
     HighlightedMapFeature[]
   >([]);
@@ -790,6 +794,7 @@ export function MapView({
   }, [cancelActiveBoxSelection, resetShiftSelectionOnBlur]);
 
   useEffect(() => {
+    setDismissedMessages(new Set());
     if (!parsed.success) {
       setIsMapLoading(false);
       setMessage("Map configuration is missing absolute tile or worker URLs.");
@@ -1244,6 +1249,8 @@ export function MapView({
   const mapViewStyle: MapViewStyle = {
     "--selected-features-panel-height": `${selectedFeaturesPanelHeight}%`,
   };
+  const visibleMessage =
+    message && !dismissedMessages.has(message) ? message : null;
   return (
     <section
       className={`map-view${hasHighlight ? " map-view-has-selection" : ""}`}
@@ -1261,9 +1268,32 @@ export function MapView({
           <span>Loading map…</span>
         </div>
       ) : null}
-      {message ? (
-        <div className="map-message" role="alert">
-          {message}
+      {visibleMessage || selectionContextStatus === "rejected" ? (
+        <div className="map-notification-stack">
+          {visibleMessage ? (
+            <div className="map-message" role="alert">
+              <span>{visibleMessage}</span>
+              <button
+                type="button"
+                className="map-message-dismiss"
+                aria-label="Dismiss map error"
+                onClick={() =>
+                  setDismissedMessages(
+                    (current) => new Set([...current, visibleMessage]),
+                  )
+                }
+              >
+                <X aria-hidden="true" />
+              </button>
+            </div>
+          ) : null}
+          {selectionContextStatus === "rejected" ? (
+            <div className="map-selection-status" role="status">
+              {!hasHighlight && selectionBounds === null
+                ? "Highlight cleared locally, but the host context could not be cleared. The prior selection may remain available to the agent."
+                : "Selection context could not be updated."}
+            </div>
+          ) : null}
         </div>
       ) : null}
       <MapControls
@@ -1277,13 +1307,6 @@ export function MapView({
         onClearSelection={hasClearableSelection ? clearSelection : undefined}
         onFullscreen={canFullscreen ? requestFullscreen : undefined}
       />
-      {selectionContextStatus === "rejected" ? (
-        <div className="map-selection-status" role="status">
-          {!hasHighlight && selectionBounds === null
-            ? "Highlight cleared locally, but the host context could not be cleared. The prior selection may remain available to the agent."
-            : "Selection context could not be updated."}
-        </div>
-      ) : null}
       {parsed.success ? (
         <MapLegend
           groups={parsed.data.layers.map((layer) => {

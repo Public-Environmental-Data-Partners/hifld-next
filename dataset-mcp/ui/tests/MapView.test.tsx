@@ -382,6 +382,73 @@ describe("MapView", () => {
     );
     expect(JSON.stringify(onStatus.mock.calls)).not.toContain("private-token");
   });
+  it("keeps every dismissed map error hidden until the lifecycle resets", async () => {
+    const onStatus = vi.fn().mockResolvedValue(undefined);
+    render(<MapView {...baseProps} onStatus={onStatus} />);
+
+    act(() =>
+      runtimeEvents.get("error")?.({
+        sourceId: `hifld-query-${roadsId}`,
+        error: new Error("First tile error"),
+      }),
+    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("First tile error");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss map error" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    act(() =>
+      runtimeEvents.get("error")?.({
+        sourceId: `hifld-query-${roadsId}`,
+        error: new Error("First tile error"),
+      }),
+    );
+    await act(async () => {});
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    act(() =>
+      runtimeEvents.get("error")?.({
+        sourceId: `hifld-query-${roadsId}`,
+        error: new Error("Second tile error"),
+      }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Second tile error",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss map error" }));
+
+    act(() =>
+      runtimeEvents.get("error")?.({
+        sourceId: `hifld-query-${roadsId}`,
+        error: new Error("First tile error"),
+      }),
+    );
+    await act(async () => {});
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: "partial" }),
+      ),
+    );
+  });
+
+  it("shows a dismissed error again after the map lifecycle resets", async () => {
+    const { rerender } = render(<MapView {...baseProps} />);
+    act(() => runtimeEvents.get("error")?.({ error: new Error("Map failed") }));
+    await screen.findByText("Map failed");
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss map error" }));
+
+    rerender(
+      <MapView
+        {...baseProps}
+        configuration={{ ...baseConfiguration, title: "Replacement map" }}
+      />,
+    );
+    act(() => runtimeEvents.get("error")?.({ error: new Error("Map failed") }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Map failed");
+  });
   it("does not render polygon vertices as point features", () => {
     render(<MapView {...baseProps} />);
     const overlay = mapAddLayer.mock.calls
