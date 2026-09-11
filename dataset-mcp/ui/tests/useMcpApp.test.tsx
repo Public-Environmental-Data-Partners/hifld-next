@@ -170,6 +170,9 @@ describe("useMcpApp", () => {
     expect(result.current.mapConfiguration).toBeNull();
     expect(result.current.queryTokens).toEqual({});
     expect(result.current.error).toMatch(/invalid map result/i);
+    expect(result.current.error).toContain("layers.0.query_token");
+    expect(result.current.error).toContain("not a SQL execution error");
+    expect(result.current.error).not.toContain("signed-capitols");
   });
 
   it("clears a stale map when a later tool result is an error", () => {
@@ -240,6 +243,33 @@ describe("useMcpApp", () => {
         [refreshedId]: "signed-refreshed",
       });
     });
+  });
+
+  it("reports validation paths for malformed refreshed results without values", async () => {
+    const app = fakeApp();
+    app.callServerTool.mockResolvedValue({
+      content: [],
+      structuredContent: {
+        ...validResult,
+        layers: [{ ...validLayer, result_crs: { secret: "private-value" } }],
+      },
+    });
+    const { result } = connect(app);
+    act(() => {
+      app.ontoolresult?.({
+        content: [],
+        structuredContent: {
+          ...validResult,
+          layers: [{ ...validLayer, expires_at: "2020-01-01T00:00:00.000Z" }],
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(result.current.error).toContain("layers.0.result_crs");
+    });
+    expect(result.current.error).not.toContain("private-value");
+    expect(result.current.error).not.toContain("signed-capitols");
+    expect(result.current.mapConfiguration).toBeNull();
   });
 
   it("awaits the registered resource teardown handler", async () => {

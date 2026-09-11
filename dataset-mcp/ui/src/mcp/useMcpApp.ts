@@ -1,6 +1,7 @@
 import type { App as McpApp } from "@modelcontextprotocol/ext-apps";
 import { useApp, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { z } from "zod";
 import {
   ErrorResultSchema,
   type MapConfiguration,
@@ -10,6 +11,26 @@ import {
 } from "./contracts";
 
 const TOKEN_REFRESH_LEAD_MS = 30_000;
+
+function invalidMapMessage(issues: readonly z.core.$ZodIssue[]): string {
+  const fields = (
+    items: readonly z.core.$ZodIssue[],
+    prefix: readonly PropertyKey[] = [],
+  ): string[] =>
+    items.flatMap((issue) => {
+      const path = [...prefix, ...issue.path];
+      return issue.code === "invalid_union"
+        ? issue.errors.flatMap((branch) => fields(branch, path))
+        : [`${path.join(".") || "structuredContent"} (${issue.code})`];
+    });
+  // Only schema paths and codes: never echo SQL, tokens, or rejected values.
+  const details = [...new Set(fields(issues))].slice(0, 8).join(", ");
+  return (
+    `Invalid map result: the widget could not validate the map configuration. ${details}. ` +
+    "This is not a SQL execution error. Reopen the map with the current MCP connection; " +
+    "if it persists, report these field paths. Do not rewrite SQL to fix this error."
+  );
+}
 
 function runtimeConfiguration(result: MapResult): MapConfiguration {
   return {
@@ -116,7 +137,7 @@ export function useMcpApp(): McpMapState {
           failMap(
             stable.success
               ? stable.data.error.message
-              : "The server returned an invalid refreshed map.",
+              : invalidMapMessage(parsed.error.issues),
           );
         } catch {
           if (sequence === mapSequenceRef.current) {
@@ -138,7 +159,7 @@ export function useMcpApp(): McpMapState {
         failMap(
           stable.success
             ? stable.data.error.message
-            : "The host returned an invalid map result.",
+            : invalidMapMessage(parsed.error.issues),
         );
       };
       created.onerror = (event) => {

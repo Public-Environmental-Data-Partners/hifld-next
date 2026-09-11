@@ -364,6 +364,13 @@ def create_mcp_server(
         Check get_dataset_file.map_sources before querying only to display data.
         This legacy tool always executes SQL for every layer.
 
+        Success prepares a map configuration; it does not confirm that the host
+        rendered it or loaded every layer. Do not claim visual success without
+        confirmation from the widget or user. For an invalid map result, report
+        the widget's validation field paths as a configuration/host problem.
+        Do not change SQL or switch to expensive query layers to fix validation
+        errors. Tile-fetch errors are separate and require their own diagnosis.
+
         Copy source objects from get_dataset_file.query_sources into each
         layer and provide its safe read-only SQL. Always supply a meaningful
         map title and unique layer names. For data-driven styling, select the
@@ -412,6 +419,13 @@ def create_mcp_server(
         map_sources reference from get_dataset_file. Explicit pmtiles and tilejson
         sources use a public HTTPS URL; vector_tiles uses public HTTPS XYZ templates
         and requires source_layer. The server never fetches explicit source URLs.
+
+        Success prepares a map configuration; it does not confirm that the host
+        rendered it or loaded every layer. Do not claim visual success without
+        confirmation from the widget or user. For an invalid map result, report
+        the widget's validation field paths as a configuration/host problem.
+        Do not change SQL or switch to expensive query layers to fix validation
+        errors. Tile-fetch errors are separate and require their own diagnosis.
         """
         try:
             return _result(
