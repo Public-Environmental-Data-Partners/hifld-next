@@ -197,7 +197,14 @@ def create_mcp_server(
     mcp.tool()(get_dataset)
 
     async def get_dataset_file(collection: str, dataset: str, identity: str) -> FastMCPToolResult:
-        """Get file metadata and ready-to-copy GeoParquet query source references."""
+        """Get all available file formats and ready-to-copy source references.
+
+        Prefer map_sources (published PMTiles) for displaying existing data in
+        view_map without SQL. Use query_sources for filtering, joins, aggregation,
+        calculations, or exact analysis. Choose sources independently per layer;
+        a map can combine prebuilt tiles with query results. Inspect schema and
+        available formats rather than assuming a dataset has prebuilt tiles.
+        """
         try:
             return _result(
                 await discovery.get_dataset_file(
@@ -299,6 +306,10 @@ def create_mcp_server(
     ) -> FastMCPToolResult:
         """Generate an MVT tile URL template for a geometry-returning SQL query.
 
+        Use this when SQL-derived tiles are needed. For displaying existing data,
+        prefer prebuilt map_sources from get_dataset_file with view_map; do not
+        regenerate tiles merely to display or style an existing tiled dataset.
+
         Copy catalog source references from get_dataset_file.query_sources.
         SQL must SELECT a GEOMETRY column, not ST_AsGeoJSON or geometry text.
         Set geometry_column when more than one geometry is returned. Set
@@ -349,6 +360,10 @@ def create_mcp_server(
     ) -> FastMCPToolResult:
         """Execute and map up to eight named spatial GeoParquet queries.
 
+        Prefer view_map for ordinary visualization or mixed prebuilt/query maps.
+        Check get_dataset_file.map_sources before querying only to display data.
+        This legacy tool always executes SQL for every layer.
+
         Copy source objects from get_dataset_file.query_sources into each
         layer and provide its safe read-only SQL. Always supply a meaningful
         map title and unique layer names. For data-driven styling, select the
@@ -381,6 +396,16 @@ def create_mcp_server(
         ] = None,
     ) -> FastMCPToolResult:
         """Configure a map from query, catalog PMTiles, or public HTTPS vector sources.
+
+        Prefer published PMTiles through a catalog source for displaying existing
+        data, including viewport navigation and styling existing properties.
+        Inspect get_dataset_file.map_sources first. Use a query source when SQL
+        is needed for filtering, joins, aggregation, or calculated properties,
+        or when no suitable prebuilt tiles exist. Camera bounds only position
+        the map; they do not filter the dataset. Choose independently for each layer:
+        prebuilt tiles and query results can be combined in the same map.
+        Tiles may contain simplified geometries or omit features at some zooms;
+        use query_parquet against the underlying data for exact analysis, not tiles.
 
         Each layer has a layer_name, a discriminated source, shared styling fields,
         and visibility. Query sources contain inputs and SQL. Catalog sources copy a

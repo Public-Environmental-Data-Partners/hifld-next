@@ -266,6 +266,16 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
             assert set(by_name) == expected_model_tools
             for name in expected_model_tools:
                 assert by_name[name].description
+            map_guidance = by_name["view_map"].description or ""
+            assert "Prefer published PMTiles" in map_guidance
+            assert "Choose independently for each layer" in map_guidance
+            assert "simplified" in map_guidance
+            assert "joins" in map_guidance
+            assert "view_map" in (by_name["view_query_map"].description or "")
+            discovery_guidance = by_name["get_dataset_file"].description or ""
+            assert "map_sources" in discovery_guidance
+            assert "query_sources" in discovery_guidance
+            assert "prebuilt" in (by_name["generate_mvt_tile_url"].description or "")
             assert by_name["view_query_map"].meta is not None
             assert by_name["view_query_map"].meta["ui"] == {
                 "resourceUri": "ui://hifld/dataset-explorer.html",
