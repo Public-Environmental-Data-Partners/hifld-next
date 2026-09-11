@@ -244,7 +244,10 @@ async def test_view_query_map_returns_only_the_map_contract() -> None:
         },
     }
     assert result.meta is None
-    assert result.text == ("Opened map 'Transportation comparison' with 2 layers: Roads, Bridges.")
+    assert result.text.startswith(
+        "Prepared map configuration 'Transportation comparison' with 2 layers: Roads, Bridges."
+    )
+    assert "Rendering is pending" in result.text
     assert "signed" not in result.text
     assert result.structured_content["layers"][0]["query_token"] == "signed-roads"
 

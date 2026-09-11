@@ -74,7 +74,8 @@ async def test_view_map_combines_query_catalog_and_explicit_sources() -> None:
         worker_url="https://assets.example/worker.mjs",
     )
 
-    assert result.text.startswith("Configured map 'Mixed sources'")
+    assert result.text.startswith("Prepared map configuration 'Mixed sources'")
+    assert "Rendering is pending" in result.text
     assert result.structured_content["worker_url"] == (
         "https://maps.example/assets/maplibre-gl-worker.mjs"
     )
@@ -120,7 +121,8 @@ async def test_external_only_map_uses_configured_worker_url_and_refreshes() -> N
         Service(), Catalog(), spec, worker_url="https://assets.example/worker.mjs"
     )
     assert result.structured_content["worker_url"] == "https://assets.example/worker.mjs"
-    assert result.text == "Configured map 'External' with 1 layer: Roads."
+    assert result.text.startswith("Prepared map configuration 'External' with 1 layer: Roads.")
+    assert "Rendering is pending" in result.text
 
 
 @pytest.mark.asyncio

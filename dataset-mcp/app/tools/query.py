@@ -535,9 +535,12 @@ async def _query_map_from_definition(
     if camera is not None:
         presented_payload["camera"] = _camera_payload(camera)
     layer_names = ", ".join(layer.layer_name for layer in layers)
-    verb = "Refreshed" if refreshed else "Opened"
+    verb = "Refreshed" if refreshed else "Prepared"
     return ToolResult(
-        text=f"{verb} map '{title}' with {len(layers)} layers: {layer_names}.",
+        text=(
+            f"{verb} map configuration '{title}' with {len(layers)} layers: {layer_names}. "
+            "Rendering is pending in the host widget; this does not confirm that layers loaded."
+        ),
         structured_content=presented_payload,
     )
 

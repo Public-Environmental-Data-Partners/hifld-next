@@ -310,7 +310,10 @@ async def _map_from_definition(
     count = len(map_spec.layers)
     noun = "layer" if count == 1 else "layers"
     return query.ToolResult(
-        text=f"Configured map '{map_spec.title}' with {count} {noun}: {names_text}.",
+        text=(
+            f"Prepared map configuration '{map_spec.title}' with {count} {noun}: {names_text}. "
+            "Rendering is pending in the host widget; this does not confirm that layers loaded."
+        ),
         structured_content=payload,
     )
 
