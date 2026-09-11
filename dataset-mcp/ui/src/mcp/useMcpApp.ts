@@ -9,6 +9,11 @@ import {
   type MapResult,
   MapResultSchema,
 } from "./contracts";
+import {
+  FEEDBACK_UNAVAILABLE,
+  type MapStatus,
+  publishMapStatus,
+} from "./mapStatus";
 
 const TOKEN_REFRESH_LEAD_MS = 30_000;
 
@@ -55,6 +60,8 @@ function earliestExpiration(result: MapResult): number {
 }
 
 export interface McpMapState {
+  reportStatus: (status: MapStatus) => Promise<void>;
+  feedbackNotice: string | null;
   app: McpApp | null;
   error: string | null;
   mapConfiguration: MapConfiguration | null;
@@ -63,6 +70,7 @@ export interface McpMapState {
 }
 
 export function useMcpApp(): McpMapState {
+  const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
   const teardownHandlerRef = useRef<(() => Promise<void>) | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapSequenceRef = useRef(0);
@@ -81,11 +89,23 @@ export function useMcpApp(): McpMapState {
           refreshTimerRef.current = null;
         }
       };
-      const failMap = (message: string) => {
+      const failMap = (message: string, validation = false) => {
         clearRefreshTimer();
         setMapConfiguration(null);
         setQueryTokens({});
         setBridgeError(message);
+        const sequence = mapSequenceRef.current;
+        void publishMapStatus(created, {
+          status: "failed",
+          layers: [],
+          error: validation
+            ? `validation_failed: ${message}`
+            : "map_failed: the widget could not open or refresh the map. Inspect the widget error.",
+        }).then((status) => {
+          if (status !== "updated" && sequence === mapSequenceRef.current) {
+            setBridgeError(`${message} ${FEEDBACK_UNAVAILABLE}`);
+          }
+        });
       };
       const acceptMapResult = (result: MapResult, sequence: number) => {
         if (sequence !== mapSequenceRef.current) return;
@@ -138,6 +158,7 @@ export function useMcpApp(): McpMapState {
             stable.success
               ? stable.data.error.message
               : invalidMapMessage(parsed.error.issues),
+            !stable.success,
           );
         } catch {
           if (sequence === mapSequenceRef.current) {
@@ -160,6 +181,7 @@ export function useMcpApp(): McpMapState {
           stable.success
             ? stable.data.error.message
             : invalidMapMessage(parsed.error.issues),
+          !stable.success,
         );
       };
       created.onerror = (event) => {
@@ -182,6 +204,16 @@ export function useMcpApp(): McpMapState {
     [],
   );
   useHostStyles(app, app?.getHostContext());
+  const reportStatus = useCallback(
+    async (status: MapStatus) => {
+      const sequence = mapSequenceRef.current;
+      const delivery = await publishMapStatus(app, status);
+      if (sequence === mapSequenceRef.current) {
+        setFeedbackNotice(delivery === "updated" ? null : FEEDBACK_UNAVAILABLE);
+      }
+    },
+    [app],
+  );
   const registerTeardownHandler = useCallback(
     (handler: (() => Promise<void>) | null) => {
       teardownHandlerRef.current = handler;
@@ -191,6 +223,8 @@ export function useMcpApp(): McpMapState {
 
   return useMemo(
     () => ({
+      reportStatus,
+      feedbackNotice,
       app,
       error: bridgeError ?? error?.message ?? null,
       mapConfiguration,
@@ -198,6 +232,8 @@ export function useMcpApp(): McpMapState {
       registerTeardownHandler,
     }),
     [
+      reportStatus,
+      feedbackNotice,
       app,
       bridgeError,
       error,

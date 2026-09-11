@@ -364,6 +364,13 @@ def create_mcp_server(
         Check get_dataset_file.map_sources before querying only to display data.
         This legacy tool always executes SQL for every layer.
 
+        The widget sends asynchronous map_status model-context updates when the
+        host supports them: loading, loaded, partial, or failed, with per-layer
+        status and sanitized errors. Loaded applies only to the current viewport,
+        not the entire dataset or proof that features are present. Use these
+        updates to report failures and partial success. Missing feedback is not
+        success; ask the user for the widget error if updates are unavailable.
+
         Success prepares a map configuration; it does not confirm that the host
         rendered it or loaded every layer. Do not claim visual success without
         confirmation from the widget or user. For an invalid map result, report
@@ -419,6 +426,13 @@ def create_mcp_server(
         map_sources reference from get_dataset_file. Explicit pmtiles and tilejson
         sources use a public HTTPS URL; vector_tiles uses public HTTPS XYZ templates
         and requires source_layer. The server never fetches explicit source URLs.
+
+        The widget sends asynchronous map_status model-context updates when the
+        host supports them: loading, loaded, partial, or failed, with per-layer
+        status and sanitized errors. Loaded applies only to the current viewport,
+        not the entire dataset or proof that features are present. Use these
+        updates to report failures and partial success. Missing feedback is not
+        success; ask the user for the widget error if updates are unavailable.
 
         Success prepares a map configuration; it does not confirm that the host
         rendered it or loaded every layer. Do not claim visual success without

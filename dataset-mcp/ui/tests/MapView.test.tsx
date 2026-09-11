@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import type {
   AddLayerObject,
@@ -86,6 +87,10 @@ const mapEvents = vi.hoisted(
       mouseup: ((event: MockMapEvent) => void) | null;
     },
 );
+const runtimeEvents = vi.hoisted(
+  () =>
+    new Map<string, (event: { sourceId?: string; error?: Error }) => void>(),
+);
 
 vi.mock("maplibre-gl", () => ({
   AJAXError: class AJAXError extends Error {
@@ -113,7 +118,15 @@ vi.mock("maplibre-gl", () => ({
     isStyleLoaded() {
       return mapIsStyleLoaded();
     }
-    on(event: string, listener: (event: MockMapEvent) => void) {
+    on(
+      event: string,
+      listener: (
+        event: MockMapEvent & { sourceId?: string; error?: Error },
+      ) => void,
+    ) {
+      runtimeEvents.set(event, (payload) =>
+        listener({ point: { x: 0, y: 0 }, ...payload }),
+      );
       if (event === "click") mapEvents.click = listener;
       if (event === "mousedown") mapEvents.mousedown = listener;
       if (event === "mousemove") mapEvents.mousemove = listener;
@@ -133,6 +146,9 @@ vi.mock("maplibre-gl", () => ({
       return mapAddSource.mock.calls.some(([sourceId]) => sourceId === id)
         ? {}
         : undefined;
+    }
+    isSourceLoaded() {
+      return true;
     }
     getLayer(id: string) {
       return mapAddLayer.mock.calls.some(([layer]) => layer.id === id)
@@ -314,6 +330,58 @@ afterEach(() => {
 });
 
 describe("MapView", () => {
+  it("reports invalid runtime URLs instead of silently withholding feedback", async () => {
+    const onStatus = vi.fn().mockResolvedValue(undefined);
+    render(
+      <MapView
+        {...baseProps}
+        configuration={{
+          ...baseConfiguration,
+          worker_url: "/relative-worker.js",
+        }}
+        onStatus={onStatus}
+      />,
+    );
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "failed",
+          error: expect.stringContaining("validation_failed"),
+        }),
+      ),
+    );
+  });
+  it("reports viewport loading, per-layer failures, and does not hide errors on idle", async () => {
+    const onStatus = vi.fn().mockResolvedValue(undefined);
+    render(<MapView {...baseProps} onStatus={onStatus} />);
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ status: "loading" }),
+      ),
+    );
+    act(() => runtimeEvents.get("idle")?.({}));
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          status: "loaded",
+          scope: "current_viewport",
+        }),
+      ),
+    );
+    act(() =>
+      runtimeEvents.get("error")?.({
+        sourceId: `hifld-query-${roadsId}`,
+        error: new Error("private-token"),
+      }),
+    );
+    act(() => runtimeEvents.get("idle")?.({}));
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: "partial" }),
+      ),
+    );
+    expect(JSON.stringify(onStatus.mock.calls)).not.toContain("private-token");
+  });
   it("does not render polygon vertices as point features", () => {
     render(<MapView {...baseProps} />);
     const overlay = mapAddLayer.mock.calls

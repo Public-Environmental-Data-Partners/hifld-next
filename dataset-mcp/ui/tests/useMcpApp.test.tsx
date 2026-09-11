@@ -1,5 +1,5 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JsonValue } from "../src/mcp/contracts";
 import { useMcpApp } from "../src/mcp/useMcpApp";
 
@@ -58,7 +58,11 @@ type FakeApp = {
   onerror: ((event: { message: string }) => void) | null;
   onteardown: (() => Promise<Record<string, never>>) | null;
   getHostContext: () => undefined;
-  getHostCapabilities: () => { serverTools: Record<string, never> };
+  getHostCapabilities: () => {
+    serverTools: Record<string, never>;
+    updateModelContext?: { text: Record<string, never> };
+  };
+  updateModelContext: ReturnType<typeof vi.fn>;
   callServerTool: ReturnType<typeof vi.fn>;
 };
 
@@ -70,6 +74,7 @@ function fakeApp(): FakeApp {
     getHostContext: () => undefined,
     getHostCapabilities: () => ({ serverTools: {} }),
     callServerTool: vi.fn(),
+    updateModelContext: vi.fn().mockResolvedValue({}),
   };
 }
 
@@ -84,6 +89,7 @@ function connect(app: FakeApp) {
 }
 
 describe("useMcpApp", () => {
+  afterEach(cleanup);
   beforeEach(() => {
     useApp.mockReset();
     useHostStyles.mockReset();
@@ -153,6 +159,10 @@ describe("useMcpApp", () => {
 
   it("rejects a map layer missing its query token", () => {
     const app = fakeApp();
+    app.getHostCapabilities = () => ({
+      serverTools: {},
+      updateModelContext: { text: {} },
+    });
     const { result } = connect(app);
     const { query_token: omittedToken, ...layerWithoutToken } = validLayer;
     expect(omittedToken).toBe("signed-capitols");
@@ -173,6 +183,11 @@ describe("useMcpApp", () => {
     expect(result.current.error).toContain("layers.0.query_token");
     expect(result.current.error).toContain("not a SQL execution error");
     expect(result.current.error).not.toContain("signed-capitols");
+    expect(app.updateModelContext).toHaveBeenCalledWith({
+      content: [
+        { type: "text", text: expect.stringContaining("validation_failed") },
+      ],
+    });
   });
 
   it("clears a stale map when a later tool result is an error", () => {
