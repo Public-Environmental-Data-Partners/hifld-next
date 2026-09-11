@@ -130,6 +130,24 @@ re-resolves catalog sources. External-only maps do not schedule token refreshes.
 "Configured map" means configuration was accepted, not that tiles have rendered.
 Existing `view_query_map` and `refresh_query_map` remain supported.
 
+### Runtime feedback to the agent
+
+The widget publishes `map_status` through the host's `updateModelContext`
+capability. It reports `loading`, `loaded`, `partial`, or `failed`, with named
+per-layer outcomes (including `hidden`) and sanitized error guidance. `loaded`
+means sources loaded for the current viewport, not that the entire dataset was
+read or that any particular features are present. Failed layers are not marked
+loaded merely because MapLibre becomes idle. Unchanged snapshots are deduplicated
+and delivery is serialized.
+
+Validation failures are reported before map initialization. Tile error updates
+include HTTP status when available, but never raw error bodies, SQL, or query
+tokens. If the host does not support context updates or rejects them, the widget
+asks the user to share its status with the agent. Context updates do not force a
+new agent turn or retroactively change the original tool response. An older
+cached widget must be reloaded to receive this behavior; the resource URI is
+unchanged.
+
 ## Interactive query maps
 
 Regular discovery, metadata, row, and query tools return text and structured

@@ -274,6 +274,7 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
             for name in ("view_map", "view_query_map"):
                 guidance = by_name[name].description or ""
                 assert "does not confirm" in guidance
+                assert "map_status" in guidance
                 assert "Do not change SQL" in guidance
             assert "view_map" in (by_name["view_query_map"].description or "")
             discovery_guidance = by_name["get_dataset_file"].description or ""

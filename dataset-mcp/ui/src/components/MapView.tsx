@@ -39,6 +39,7 @@ import {
   type HighlightContextUpdateResult,
   updateHighlightContext,
 } from "../mcp/highlightContext";
+import type { LayerStatus, MapStatus } from "../mcp/mapStatus";
 import { MapControls } from "./MapControls";
 import { MapLegend } from "./MapLegend";
 import {
@@ -107,6 +108,7 @@ type McpMapApp = Pick<
 };
 
 export interface MapViewProps {
+  onStatus?: (status: MapStatus) => Promise<void>;
   configuration: MapConfiguration | null;
   queryTokens: Record<string, string>;
   app: McpMapApp | null;
@@ -574,6 +576,7 @@ function highlightedLayers(configuration: RenderConfiguration) {
 }
 
 export function MapView({
+  onStatus,
   configuration,
   queryTokens,
   app,
@@ -596,6 +599,9 @@ export function MapView({
   );
   const mapNode = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const visibilityStatusRef = useRef<(id: string, visible: boolean) => void>(
+    () => {},
+  );
   const selectionActiveRef = useRef(false);
   const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
   const selectionStartLngLatRef = useRef<{ lng: number; lat: number } | null>(
@@ -787,11 +793,74 @@ export function MapView({
     if (!parsed.success) {
       setIsMapLoading(false);
       setMessage("Map configuration is missing absolute tile or worker URLs.");
+      void onStatus?.({
+        status: "failed",
+        layers: [],
+        error:
+          "validation_failed: map configuration is missing absolute tile or worker URLs.",
+      });
       return;
     }
     if (!mapNode.current) return;
     let map: MapLibreMap;
     let disposed = false;
+    const statuses = new Map<string, LayerStatus>(
+      parsed.data.layers.map((layer) => [
+        layer.id,
+        {
+          layer_name: layer.layer_name,
+          status: layer.visible ? "loading" : "hidden",
+        },
+      ]),
+    );
+    let lastStatus = "";
+    let globalError: string | undefined;
+    let feedback = Promise.resolve();
+    const report = () => {
+      const layers = [...statuses.values()].map((layer) => ({ ...layer }));
+      const failures = layers.filter(
+        (layer) => layer.status === "failed",
+      ).length;
+      const snapshot: MapStatus = {
+        map_title: parsed.data.title,
+        scope: "current_viewport",
+        layers,
+        status: globalError
+          ? "failed"
+          : failures
+            ? failures === layers.length
+              ? "failed"
+              : "partial"
+            : layers.some((layer) => layer.status === "loading")
+              ? "loading"
+              : "loaded",
+        ...(globalError ? { error: globalError } : {}),
+      };
+      const serialized = JSON.stringify(snapshot);
+      if (serialized === lastStatus) return;
+      lastStatus = serialized;
+      // Serialize delivery; a slower loading notification must not replace a later failure.
+      feedback = feedback
+        .then(async () => {
+          if (!disposed) await onStatus?.(snapshot);
+        })
+        .catch(() => {});
+    };
+    const failLayer = (id: string, error: string) => {
+      const layer = statuses.get(id);
+      if (layer) statuses.set(id, { ...layer, status: "failed", error });
+      report();
+    };
+    visibilityStatusRef.current = (id, visible) => {
+      const layer = statuses.get(id);
+      if (layer)
+        statuses.set(id, {
+          layer_name: layer.layer_name,
+          status: visible ? "loading" : "hidden",
+        });
+      report();
+    };
+    report();
     try {
       setIsMapLoading(true);
       setMessage(null);
@@ -815,6 +884,30 @@ export function MapView({
           ),
       });
       mapRef.current = map;
+      const reportLoadedSources = () => {
+        if (disposed) return;
+        for (const [id, layer] of statuses) {
+          if (layer.status !== "loading") continue;
+          const sourceId = querySourceId(id);
+          if (map.getSource(sourceId) && map.isSourceLoaded(sourceId)) {
+            statuses.set(id, { ...layer, status: "loaded" });
+          }
+        }
+        report();
+      };
+      map.on("render", reportLoadedSources);
+      map.on("idle", reportLoadedSources);
+      map.on("sourcedataloading", (event) => {
+        for (const [id, layer] of statuses) {
+          if (
+            querySourceId(id) === event.sourceId &&
+            layer.status === "loaded"
+          ) {
+            statuses.set(id, { ...layer, status: "loading" });
+          }
+        }
+        report();
+      });
       const initializeQueryLayers = () => {
         if (disposed) return;
         try {
@@ -857,6 +950,11 @@ export function MapView({
                   addReadyLayer(layer, resolved.source);
                 })
                 .catch((error: Error) => {
+                  if (disposed) return;
+                  failLayer(
+                    layer.id,
+                    "source_metadata_failed: verify the tile URL is reachable, allows cross-origin requests, and names a valid vector layer.",
+                  );
                   if (!disposed)
                     setMessage(`${layer.layer_name}: ${error.message}`);
                 });
@@ -871,6 +969,9 @@ export function MapView({
           }
           setIsMapLoading(false);
         } catch (error) {
+          globalError =
+            "map_initialization_failed: the widget could not initialize map sources or styles.";
+          report();
           setIsMapLoading(false);
           setMessage(
             error instanceof Error
@@ -883,6 +984,25 @@ export function MapView({
       else map.once("style.load", initializeQueryLayers);
       map.on("error", (event) => {
         if (disposed) return;
+        const provenance = z.object({ sourceId: z.string() }).safeParse(event);
+        const layer = parsed.data.layers.find(
+          (candidate) =>
+            provenance.success &&
+            querySourceId(candidate.id) === provenance.data.sourceId,
+        );
+        const detail =
+          event.error instanceof maplibregl.AJAXError
+            ? ` HTTP status ${event.error.status}.`
+            : "";
+        if (layer)
+          failLayer(
+            layer.id,
+            `tile_load_failed:${detail} Check tile access, CORS, query expiry, or server errors. Other layers may still load.`,
+          );
+        else {
+          globalError = `map_resource_failed:${detail} Check basemap, worker, and network access.`;
+          report();
+        }
         setIsMapLoading(false);
         if (event.error instanceof Error) {
           void mapErrorMessage(event.error).then(setMessage);
@@ -1017,6 +1137,9 @@ export function MapView({
         );
       });
     } catch (error) {
+      globalError =
+        "map_initialization_failed: check WebGL support and worker access.";
+      report();
       setIsMapLoading(false);
       setMessage(
         error instanceof Error
@@ -1026,6 +1149,7 @@ export function MapView({
     }
     return () => {
       disposed = true;
+      visibilityStatusRef.current = () => {};
       if (selectionStartRef.current !== null) map?.dragPan.enable();
       mapRef.current = null;
       selectionStartRef.current = null;
@@ -1036,7 +1160,7 @@ export function MapView({
         // MapLibre can fail to tear down an uninitialized WebGL context.
       }
     };
-  }, [parsed, publishHighlightContext, queryTokens]);
+  }, [parsed, publishHighlightContext, queryTokens, onStatus]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -1063,6 +1187,7 @@ export function MapView({
     if (map) configureBasemap(map, nextBasemap);
   };
   const changeLayerVisibility = (queryId: string, nextVisible: boolean) => {
+    visibilityStatusRef.current(queryId, nextVisible);
     setLayerVisibility((current) => ({
       ...current,
       [queryId]: nextVisible,
