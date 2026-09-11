@@ -14,9 +14,10 @@ from pydantic import BeforeValidator
 
 from app.argument_diagnostics import ArgumentToolDiagnostics
 from app.catalog.client import CatalogClientError
+from app.catalog.models import QuerySourceRef
 from app.errors import AppError
 from app.tool_inputs import decode_json_parameter
-from app.tools import discovery, maps, query
+from app.tools import discovery, inspection, maps, query
 
 type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
 
@@ -204,6 +205,10 @@ def create_mcp_server(
         calculations, or exact analysis. Choose sources independently per layer;
         a map can combine prebuilt tiles with query results. Inspect schema and
         available formats rather than assuming a dataset has prebuilt tiles.
+        query_hints summarizes observed Hive partition fields and values from
+        catalog paths, not an exhaustive inventory. References are deduplicated;
+        rename aliases when combining sources or self-joining. Before spatial
+        SQL, call inspect_query_source for actual Parquet columns and geometry CRS.
         """
         try:
             return _result(
@@ -224,7 +229,11 @@ def create_mcp_server(
         column_offset: int = 0,
         column_limit: int = 100,
     ) -> FastMCPToolResult:
-        """Get a bounded page of file schema columns and their provenance."""
+        """Get a bounded page of catalog schema columns and their provenance.
+
+        These may predate generated Parquet fields or reflect only a sample.
+        Use inspect_query_source for actual Parquet columns and typed geometry CRS.
+        """
         try:
             return _result(
                 await discovery.get_dataset_file_schema(
@@ -296,7 +305,25 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool()(query_parquet)
+    mcp.tool(description=f"{query_parquet.__doc__}\n{inspection.QUERY_GUIDANCE}")(query_parquet)
+
+    async def inspect_query_source(source: QuerySourceRef) -> FastMCPToolResult:
+        """Inspect actual Parquet columns and geometry CRS using a zero-row query.
+
+        Copy one query_sources reference from get_dataset_file. Uses the existing
+        bounded worker with SELECT * LIMIT 0: may list objects/read metadata but
+        does not scan feature rows. Returns columns, geometry_fields with CRS
+        when available, and numeric bbox_candidates. Candidates alone do not
+        prove bbox CRS or geometry association. Combine with query_hints to find
+        usable Hive partitions. Unknown CRS stays null; do not guess it.
+        No query tokens, tile URLs, or feature rows are returned.
+        """
+        try:
+            return _result(await inspection.inspect_query_source(dependencies.query, source))
+        except Exception as error:
+            return _error_result(error)
+
+    mcp.tool()(inspect_query_source)
 
     async def generate_mvt_tile_url(
         sources: list[dict[str, JSONValue]],
@@ -335,7 +362,10 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False})(generate_mvt_tile_url)
+    mcp.tool(
+        annotations={"readOnlyHint": True, "destructiveHint": False},
+        description=f"{generate_mvt_tile_url.__doc__}\n{inspection.QUERY_GUIDANCE}",
+    )(generate_mvt_tile_url)
 
     async def get_query_page(
         query_token: str, offset: int, page_size: int = 100
@@ -399,7 +429,9 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool(app=query_map_app)(view_query_map)
+    mcp.tool(
+        app=query_map_app, description=f"{view_query_map.__doc__}\n{inspection.QUERY_GUIDANCE}"
+    )(view_query_map)
 
     async def view_map(
         title: query.MapTitle,
@@ -456,7 +488,9 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool(app=query_map_app)(view_map)
+    mcp.tool(app=query_map_app, description=f"{view_map.__doc__}\n{inspection.QUERY_GUIDANCE}")(
+        view_map
+    )
 
     async def refresh_query_map(map_spec: query.MapDefinitionInput) -> FastMCPToolResult:
         """Refresh runtime map tokens from a durable map definition.

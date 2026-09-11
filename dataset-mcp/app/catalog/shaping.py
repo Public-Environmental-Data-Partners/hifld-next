@@ -5,6 +5,7 @@ from typing import TypedDict
 from pydantic import TypeAdapter
 
 from app.catalog.models import DatasetFileResponse, QuerySourceRef
+from app.catalog.query_hints import catalog_query_hints
 
 type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
 
@@ -12,6 +13,7 @@ type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, J
 class FileMetadataShape(TypedDict):
     metadata: dict[str, JSONValue] | None
     query_sources: list[QuerySourceRef]
+    query_hints: list[dict[str, JSONValue]]
 
 
 _metadata_adapter: TypeAdapter[dict[str, JSONValue]] = TypeAdapter(dict[str, JSONValue])
@@ -34,12 +36,16 @@ def shape_file_metadata(
         metadata["columns_available"] = columns is not None
     refs: list[QuerySourceRef] = []
     index = 0
+    seen: set[int] = set()
     for format_entry in response.file.formats:
         if format_entry.format.format_type != "geoparquet":
             continue
         for source in format_entry.sources:
             if source.source_type != "file" or source.storage_location is None:
                 continue
+            if source.id in seen:
+                continue
+            seen.add(source.id)
             refs.append(
                 QuerySourceRef(
                     alias=f"{alias_prefix}_{index}",
@@ -50,4 +56,8 @@ def shape_file_metadata(
                 )
             )
             index += 1
-    return {"metadata": metadata, "query_sources": refs}
+    return {
+        "metadata": metadata,
+        "query_sources": refs,
+        "query_hints": catalog_query_hints(response),
+    }
