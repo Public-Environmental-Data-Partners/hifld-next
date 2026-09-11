@@ -259,10 +259,9 @@ async def test_pool_reuses_worker_after_nonfatal_query_failure(tmp_path: Path) -
     finally:
         await pool.close()
 
-    assert failed == WorkerFailure(
-        code="query_execution_failed",
-        message="The bounded query could not be executed",
-    )
+    assert isinstance(failed, WorkerFailure)
+    assert failed.code == "query_execution_failed"
+    assert "Table with name missing_table does not exist" in failed.message
     assert isinstance(follow_up, WorkerPage)
     assert follow_up.rows == ({"value": 9},)
     assert reused_pid == original_pid
