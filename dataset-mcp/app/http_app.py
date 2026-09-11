@@ -15,6 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.argument_diagnostics import ArgumentIngressDiagnostics
+from app.http.disconnect import serve_connected_tile
 from app.http.queries import QueryHttpService, create_query_router
 from app.http.tiles import TileService, create_tile_router
 from app.mcp_server import AppDependencies, UIResourceConfig, create_mcp_server
@@ -63,7 +64,10 @@ class ConcurrencyLimiter:
                 return
             await semaphore.acquire()
             try:
-                await self._app(scope, receive, send)
+                if semaphore is self._tile_semaphore and scope.get("method") == "GET":
+                    await serve_connected_tile(self._app, scope, receive, send)
+                else:
+                    await self._app(scope, receive, send)
             finally:
                 semaphore.release()
             return
@@ -179,9 +183,12 @@ def create_http_app(
                     await shutdown()
 
     app = FastAPI(lifespan=lifespan)
-    app.add_middleware(ConcurrencyLimiter, maximum=max_concurrency)
     app.add_middleware(McpPathCanonicalizer)
     app.add_middleware(AssetHeadersMiddleware)
+    # Cancel the whole response-wrapper task on disconnect. Putting the limiter
+    # inside BaseHTTPMiddleware makes intentional cancellation look like a
+    # missing response to that middleware.
+    app.add_middleware(ConcurrencyLimiter, maximum=max_concurrency)
     app.add_middleware(ArgumentIngressDiagnostics)
 
     async def invalid_request(_: Request, __: Exception) -> JSONResponse:

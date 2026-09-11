@@ -193,6 +193,17 @@ npm run --workspace @hifld/dataset-mcp-ui test:browser
 
 ### Query tools without the map UI
 
+Tile GET requests monitor HTTP disconnects: abandoned work is cancelled through
+the worker pool, and its HTTP concurrency slot is released only after cleanup.
+This covers both `/tiles/...` routes and `/api/queries/.../tiles/...`; POST bodies
+are unaffected. Browser cancellation must reach the application through any
+proxy for this to take effect. MapLibre's existing cancellation behavior is
+retained; no additional frontend debounce is imposed.
+
+Map errors have a dismiss button at the standard top-left inset. Dismissing a
+message hides repeated copies for the current map, not the underlying failed
+layer status or agent feedback. Distinct errors can still appear.
+
 Before building spatial SQL, call `inspect_query_source(source)` with one
 `get_dataset_file.query_sources` reference. It uses the existing bounded worker
 to inspect actual Parquet columns with `SELECT * LIMIT 0`, including generated

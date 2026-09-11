@@ -277,8 +277,6 @@ button:focus-visible {
 }
 
 .map-controls,
-.map-message,
-.map-selection-status,
 .feature-panel,
 .map-legend,
 .map-legend-toggle {
@@ -325,22 +323,62 @@ button:focus-visible {
   background: var(--color-primary, #2563eb);
 }
 
-.map-message {
-  top: 4rem;
+.map-notification-stack {
+  position: absolute;
+  z-index: 2;
+  top: 0.75rem;
   left: 0.75rem;
-  max-width: min(28rem, calc(100% - 1.5rem));
+  display: flex;
+  width: min(28rem, calc(100% - 1.5rem));
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.map-message,
+.map-selection-status {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
   padding: 0.55rem 0.75rem;
+  border: var(--border-width-regular, 1px) solid
+    var(--color-border-primary, #d4cbbf);
+  border-radius: var(--border-radius-sm, 0);
+  color: var(--color-text-primary, #42413d);
+  background: var(--color-background-primary, #fffff8);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgb(66 65 61 / 0.12));
   font-size: var(--font-text-sm-size, 0.875rem);
   line-height: var(--font-text-sm-line-height, 1.25rem);
 }
 
-.map-selection-status {
-  top: 0.75rem;
-  left: 0.75rem;
-  max-width: min(28rem, calc(100% - 1.5rem));
-  padding: 0.55rem 0.75rem;
-  font-size: var(--font-text-sm-size, 0.875rem);
-  line-height: var(--font-text-sm-line-height, 1.25rem);
+.map-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.map-message span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.map-message-dismiss {
+  display: grid;
+  width: 1.5rem;
+  height: 1.5rem;
+  min-height: 1.5rem;
+  flex: 0 0 1.5rem;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  color: currentColor;
+  background: transparent;
+  box-shadow: none;
+}
+
+.map-message-dismiss svg {
+  width: 1rem;
+  height: 1rem;
 }
 
 .map-selection-status span {

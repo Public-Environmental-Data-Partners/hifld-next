@@ -43,7 +43,7 @@ for (const opaqueOrigin of [false, true]) {
   for (const tileFailure of [false, true]) {
     test(`reports actual MVT outcome (opaque origin: ${opaqueOrigin}, tile failure: ${tileFailure})`, async ({
       page,
-    }) => {
+    }, testInfo) => {
       const html = await readFile(
         new URL("../dist/index.html", import.meta.url),
         "utf8",
@@ -229,7 +229,32 @@ for (const opaqueOrigin of [false, true]) {
         await page.locator("body").getAttribute("data-runtime-statuses"),
       ).not.toContain("test-query-token");
       if (tileFailure) {
-        await expect(frame.getByText(/500/)).toBeVisible();
+        const map = frame.locator(".map-canvas");
+        const banner = frame.getByRole("alert");
+        await expect(banner).toContainText("500");
+        const mapBox = await map.boundingBox();
+        const bannerBox = await banner.boundingBox();
+        expect(mapBox).not.toBeNull();
+        expect(bannerBox).not.toBeNull();
+        if (!mapBox || !bannerBox)
+          throw new Error("map banner was not laid out");
+        expect(bannerBox.x - mapBox.x).toBeCloseTo(12, 0);
+        expect(bannerBox.y - mapBox.y).toBeCloseTo(12, 0);
+        await page.screenshot({
+          path: testInfo.outputPath("tile-error-before-dismiss.png"),
+          fullPage: true,
+        });
+
+        await frame.getByRole("button", { name: "Dismiss map error" }).click();
+        await expect(banner).toBeHidden();
+        await expect(page.locator("body")).toHaveAttribute(
+          "data-runtime-statuses",
+          /"status":"failed"/,
+        );
+        await page.screenshot({
+          path: testInfo.outputPath("tile-error-after-dismiss.png"),
+          fullPage: true,
+        });
         expect(errors).toEqual([]);
         return;
       }
