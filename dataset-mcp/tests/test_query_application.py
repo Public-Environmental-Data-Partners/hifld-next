@@ -8,6 +8,7 @@ from app.errors import AppError, ErrorCode
 from app.query.application import QueryApplicationService
 from app.query.models import JsonValue, ResolvedSource
 from app.query.service import QueryService
+from app.query.tile_cache import TileCache
 from app.query.token_codec import QueryTokenCodec
 from app.storage.resolver import StorageResolver
 from app.tools.query import generate_mvt_tile_url
@@ -18,6 +19,7 @@ from query_worker.protocol import (
     WorkerPage,
     WorkerQuery,
     WorkerResult,
+    WorkerTile,
     WorkerTileQuery,
 )
 
@@ -162,6 +164,20 @@ class UnexpectedTileExecutor(Executor):
         return await super().execute(request, timeout_seconds=timeout_seconds)
 
 
+class TileExecutor(Executor):
+    async def execute(
+        self,
+        request: WorkerQuery | WorkerTileQuery,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> WorkerResult:
+        if isinstance(request, WorkerTileQuery):
+            del timeout_seconds
+            self.calls.append(request)
+            return WorkerTile(content=b"tile", elapsed_ms=1, bytes_read=2, files_read=1)
+        return await super().execute(request, timeout_seconds=timeout_seconds)
+
+
 def _source(alias: str = "roads") -> dict[str, JsonValue]:
     return QuerySourceRef(
         alias=alias,
@@ -172,7 +188,12 @@ def _source(alias: str = "roads") -> dict[str, JsonValue]:
     ).model_dump()
 
 
-def _service(resolver: Resolver, executor: Executor) -> QueryApplicationService:
+def _service(
+    resolver: Resolver,
+    executor: Executor,
+    *,
+    tile_cache: TileCache | None = None,
+) -> QueryApplicationService:
     storage = StorageResolver()
     return QueryApplicationService(
         source_resolver=resolver,
@@ -183,7 +204,36 @@ def _service(resolver: Resolver, executor: Executor) -> QueryApplicationService:
         token_ttl_seconds=7_200,
         tile_timeout_seconds=5,
         public_origin="https://mcp.example.test/base/",
+        tile_cache=tile_cache,
     )
+
+
+@pytest.mark.parametrize("expired", [False, True])
+def test_token_error_distinguishes_expiration_from_invalid_signature(expired):
+    from datetime import UTC, datetime, timedelta
+
+    from app.query.models import QueryTokenPayload
+
+    codec = QueryTokenCodec(b"a-production-test-secret-at-least-32-bytes")
+    now = datetime.now(UTC)
+    token = (
+        codec.encode(
+            QueryTokenPayload(
+                canonical_sql="SELECT id FROM roads",
+                sources=(QuerySourceRef.model_validate(_source()),),
+                issued_at=now - timedelta(hours=1),
+                expires_at=now - timedelta(seconds=1),
+            )
+        )
+        if expired
+        else "invalid-token"
+    )
+    service = _service(Resolver(), Executor())
+    with pytest.raises(AppError) as failure:
+        service.validate_token(token)
+    message = str(failure.value)
+    assert "invalid or expired" not in message
+    assert ("expired" in message.lower()) == expired
 
 
 @pytest.mark.asyncio
@@ -482,3 +532,48 @@ async def test_render_tile_reports_unexpected_worker_result_as_protocol_error() 
     assert result == WorkerFailure(
         "worker_protocol_invalid", "The query worker returned an unexpected result"
     )
+
+
+@pytest.mark.asyncio
+async def test_render_tile_caches_by_resolved_source_identity_not_query_id() -> None:
+    resolver = Resolver()
+    executor = TileExecutor()
+    service = _service(resolver, executor, tile_cache=TileCache(max_bytes=10_000, ttl_seconds=60))
+    initial = await service.query(
+        (_source(),), "SELECT id, geometry FROM roads ORDER BY id", 1, None, None
+    )
+    token = initial["query_token"]
+    assert isinstance(token, str)
+    repeated = await service.query(
+        (_source(),), "SELECT id, geometry FROM roads ORDER BY id", 1, None, None
+    )
+    repeated_token = repeated["query_token"]
+    assert isinstance(repeated_token, str)
+    assert repeated["query_id"] != initial["query_id"]
+
+    assert await service.render_tile(token, 0, 0, 0, timeout_seconds=5) == WorkerTile(
+        content=b"tile", elapsed_ms=1, bytes_read=2, files_read=1
+    )
+    assert await service.render_tile(repeated_token, 0, 0, 0, timeout_seconds=5) == WorkerTile(
+        content=b"tile", elapsed_ms=1, bytes_read=2, files_read=1
+    )
+    assert len([call for call in executor.calls if isinstance(call, WorkerTileQuery)]) == 1
+
+
+@pytest.mark.asyncio
+async def test_render_tile_revalidates_sources_before_a_cache_hit() -> None:
+    resolver = Resolver()
+    executor = TileExecutor()
+    service = _service(resolver, executor, tile_cache=TileCache(max_bytes=10_000, ttl_seconds=60))
+    initial = await service.query(
+        (_source(),), "SELECT id, geometry FROM roads ORDER BY id", 1, None, None
+    )
+    token = initial["query_token"]
+    assert isinstance(token, str)
+    await service.render_tile(token, 0, 0, 0, timeout_seconds=5)
+    resolver.changed = True
+
+    with pytest.raises(AppError) as caught:
+        await service.render_tile(token, 0, 0, 0, timeout_seconds=5)
+    assert caught.value.code is ErrorCode.SOURCE_CHANGED
+    assert len([call for call in executor.calls if isinstance(call, WorkerTileQuery)]) == 1

@@ -55,6 +55,7 @@ def test_tile_sql_preserves_bbox_order_and_exact_clipping_shape() -> None:
     sql = build_tile_sql(
         "SELECT geometry, bbox, name, details FROM roads",
         tile_request(),
+        bbox_column="bbox",
         columns=(
             ("geometry", "GEOMETRY"),
             ("bbox", "STRUCT(xmin DOUBLE, ymin DOUBLE, xmax DOUBLE, ymax DOUBLE)"),
@@ -64,12 +65,9 @@ def test_tile_sql_preserves_bbox_order_and_exact_clipping_shape() -> None:
     )
 
     assert "ST_TileEnvelope(4, 3, 6)" in sql
-    assert "ST_Transform(env, 'EPSG:3857', 'EPSG:4326', always_xy := true)" in sql
-    assert (
-        '"bbox".xmax >= b.xmin AND "bbox".xmin <= b.xmax\n'
-        '      AND "bbox".ymax >= b.ymin AND "bbox".ymin <= b.ymax'
-    ) in sql
-    assert 'ST_Intersects("geometry", b.env)' in sql
+    assert "bounds AS" not in sql
+    assert '"bbox".xmax >= ST_XMin(ST_Transform(ST_TileEnvelope(4, 3, 6)' in sql
+    assert 'ST_Intersects("geometry", ST_Transform(ST_TileEnvelope(4, 3, 6)' in sql
     assert "ST_AsMVTGeom(" in sql
     assert "ST_Transform(source_geometry, 'EPSG:4326', 'EPSG:3857', always_xy := true)" in sql
     assert "ST_AsMVT(f, 'hifld', 4096, 'geom', '_mcp_feature_id')" in sql
@@ -285,7 +283,7 @@ class BboxRetentionConnection:
         return FakeRows([(b"tile", 1)])
 
 
-def test_execute_tile_retains_source_bbox_for_simple_raw_geometry_select() -> None:
+def test_execute_tile_does_not_guess_covering_from_bbox_name() -> None:
     connection = BboxRetentionConnection()
 
     result = execute_tile(
@@ -295,11 +293,9 @@ def test_execute_tile_retains_source_bbox_for_simple_raw_geometry_select() -> No
     )
 
     assert isinstance(result, WorkerTile)
-    assert connection.sql[0] == ('DESCRIBE SELECT * FROM (SELECT * FROM "flood") AS _mcp_describe')
-    assert "SELECT FLD_ZONE, SFHA_TF, geometry, bbox FROM flood" in connection.sql[1]
-    assert "SELECT FLD_ZONE, SFHA_TF, geometry, bbox FROM flood" in connection.sql[2]
-    assert 'CAST("bbox"' not in connection.sql[2]
-    assert '"bbox".xmax >= b.xmin' in connection.sql[2]
+    assert len(connection.sql) == 2
+    assert "geometry FROM flood" in connection.sql[0]
+    assert '"bbox".xmax' not in connection.sql[1]
 
 
 @pytest.mark.parametrize(

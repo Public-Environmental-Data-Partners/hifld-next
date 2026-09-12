@@ -9,6 +9,39 @@ from tests.test_http_app import _dependencies
 
 
 @pytest.mark.asyncio
+async def test_one_tile_query_cannot_exclude_another_query():
+    started = asyncio.Event()
+    release = asyncio.Event()
+    paths = []
+    responses = []
+
+    async def receive():
+        await asyncio.Event().wait()
+
+    async def send(message):
+        responses.append(message)
+
+    async def app(scope, receive, send):
+        paths.append(scope["path"])
+        if "flood" in scope["path"]:
+            started.set()
+            await release.wait()
+
+    limiter = ConcurrencyLimiter(app, 1)
+    scope = {"type": "http", "method": "GET", "path": "/tiles/flood/1/0/0.mvt"}
+    task = asyncio.create_task(limiter(scope, receive, send))
+    try:
+        await started.wait()
+        await limiter({**scope, "path": "/tiles/hospitals/1/0/0.mvt"}, receive, send)
+        assert "/tiles/hospitals/1/0/0.mvt" in paths
+        await limiter(scope, receive, send)
+        assert responses[-2]["status"] == 503
+    finally:
+        release.set()
+        await task
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "path", ["/tiles/1/0/0.mvt", "/tiles/id/1/0/0.mvt", "/api/queries/id/tiles/1/0/0.mvt"]
 )
