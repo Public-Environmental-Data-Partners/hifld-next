@@ -41,13 +41,22 @@ class ConcurrencyLimiter:
 
     def __init__(self, app: ASGIApp, maximum: int) -> None:
         self._app = app
-        self._tile_semaphore = asyncio.Semaphore(maximum)
+        # Bound HTTP waiters independently of execution. One map query gets at
+        # most `maximum` slots, leaving room for seven other query identities.
+        # Actual SQL remains bounded by the worker pool and tile-cache admission.
+        self._tile_semaphore = asyncio.Semaphore(maximum * 8)
         self._query_semaphore = asyncio.Semaphore(maximum)
+        self._maximum_per_tile_query = maximum
+        self._tile_queries: dict[str, int] = {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         semaphore = self._semaphore_for(scope)
         if semaphore is not None:
-            if semaphore.locked():
+            tile_key = self._tile_query_key(scope) if semaphore is self._tile_semaphore else None
+            if semaphore.locked() or (
+                tile_key is not None
+                and self._tile_queries.get(tile_key, 0) >= self._maximum_per_tile_query
+            ):
                 response = JSONResponse(
                     status_code=503,
                     content={
@@ -63,6 +72,8 @@ class ConcurrencyLimiter:
                 await response(scope, receive, send)
                 return
             await semaphore.acquire()
+            if tile_key is not None:
+                self._tile_queries[tile_key] = self._tile_queries.get(tile_key, 0) + 1
             try:
                 if semaphore is self._tile_semaphore and scope.get("method") == "GET":
                     await serve_connected_tile(self._app, scope, receive, send)
@@ -70,8 +81,23 @@ class ConcurrencyLimiter:
                     await self._app(scope, receive, send)
             finally:
                 semaphore.release()
+                if tile_key is not None:
+                    remaining = self._tile_queries[tile_key] - 1
+                    if remaining:
+                        self._tile_queries[tile_key] = remaining
+                    else:
+                        del self._tile_queries[tile_key]
             return
         await self._app(scope, receive, send)
+
+    @staticmethod
+    def _tile_query_key(scope: Scope) -> str:
+        parts = scope.get("path", "").split("/")
+        if len(parts) == 6 and parts[1] == "tiles":
+            return parts[2]
+        if len(parts) == 8 and parts[1:3] == ["api", "queries"]:
+            return parts[3]
+        return "legacy"
 
     def _semaphore_for(self, scope: Scope) -> asyncio.Semaphore | None:
         if scope["type"] != "http" or scope.get("method") == "OPTIONS":

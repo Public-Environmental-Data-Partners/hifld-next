@@ -165,13 +165,14 @@ durable map definition. Before the earliest token expires, the component calls
 the app-only `refresh_query_map` tool to re-run that definition and replace all
 runtime query IDs and tokens. This also restores maps from saved conversations
 when the host restores the MCP App result and supports proxied server-tool
-calls. Nothing is stored in memory, Valkey, or a result registry.
+calls. Tokens remain stateless and do not require a query registry. Successfully
+encoded tiles can be reused from a bounded per-process cache.
 
 Each layer receives an absolute sandbox-compatible
 `${publicOrigin}/tiles/{query_id}/{z}/{x}/{y}.mvt` URL. The component matches
 that query ID to its layer token and sends `X-HIFLD-Query-Token`; the server
 verifies that the path ID matches the signed token before re-running the
-bounded DuckDB tile query. The component renders independent MapLibre sources
+bounded DuckDB tile query on a cache miss. The component renders independent MapLibre sources
 in input order, fits their combined bounds unless the agent supplies a camera,
 and displays one named solid-color legend group per layer.
 
@@ -264,10 +265,43 @@ Workers use separate spill directories, removed when the worker is retired.
 Each allows 3 GiB of spill; the shared volume and pod ephemeral-storage limit
 are 8 GiB, with a 1 GiB ephemeral-storage request.
 
+HTTP tile admission is separate from execution: `DATASET_MCP_MAX_CONCURRENCY`
+(default 8) bounds simultaneous HTTP requests per query ID, with a global tile
+allowance eight times that value. Non-tile MCP/query requests retain their own
+allowance. Cancellation holds capacity until cleanup finishes.
+
+Production enables a per-process successful-tile cache:
+
+- `DATASET_MCP_TILE_CACHE_MAX_BYTES`: 268435456 (256 MiB, with estimated key overhead).
+- `DATASET_MCP_TILE_CACHE_MAX_ENTRIES`: 4096, also bounding empty tiles.
+- `DATASET_MCP_TILE_CACHE_TTL_SECONDS`: 60 seconds, independent of token lifetime.
+- `DATASET_MCP_TILE_CACHE_MAX_IN_FLIGHT`: 64 distinct computations, including retirement.
+
+Keys include canonical SQL, resolved source version/URIs/storage endpoint,
+geometry/CRS, XYZ, and feature cap. New tokens can reuse tiles. Every hit still
+validates the token and resolves its sources. Failures are not cached. Concurrent
+requests share one computation; cancelling the last waiter cancels and awaits
+cleanup. Replicas do not share cached tiles, but can execute the same stateless
+token with the same signing secret and source access.
+
 Trusted Parquet source lists explicitly enable Hive partitioning. Predicates
 such as `state_fips = '36'` can therefore prune partition files, in addition to
 the row-group pruning enabled by explicit `bbox` predicates. These settings do
 not eliminate object-storage reads or guarantee a particular tile latency.
+
+Simple unchanged-geometry selections use GeoParquet `covering` declarations from
+every source object, carrying their numeric field paths as hidden scalar columns.
+Inline tile bounds allow statistics pushdown; rebuilding the fields with
+`struct_pack` prevents the desired simple predicates. Discovery uses a 32-entry,
+60-second per-worker cache, separated by object list, geometry, and storage endpoint.
+Missing/inconsistent declarations, ambiguous geometry, modified stars, joins,
+aggregates, limits, and transformed geometry disable automatic carry-through.
+The worker does not guess a covering from a column named `bbox`.
+
+Automatic covering supports EPSG:4326, EPSG:3857, and tested NAD83 EPSG:4269.
+Other CRSs use exact intersection in the rendering CRS without unsafe
+corner-derived prefilters. Explicit source filters remain useful for complex
+queries. Existing feature/byte limits still apply to encoded tiles.
 
 Examples: `SELECT NAME, geometry FROM hospitals WHERE COUNTYFIPS = '36061'`
 with EPSG:3857 for source 21101; `SELECT geometry FROM roads WHERE class = 'primary'`

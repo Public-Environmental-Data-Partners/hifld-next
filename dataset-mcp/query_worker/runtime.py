@@ -15,6 +15,7 @@ from app.query.serialization import (
     RowTooLargeError,
     serialize_rows,
 )
+from query_worker.covering import CoveringMetadataCache, GeometryCovering
 from query_worker.diagnostics import duckdb_diagnostic
 from query_worker.metrics import init_connection, measure
 from query_worker.protocol import (
@@ -101,6 +102,7 @@ class WorkerRuntime:
     def __init__(self, config: WorkerRuntimeConfig) -> None:
         self._config = config
         self.connection = get_connection(config)
+        self._covering_metadata = CoveringMetadataCache()
 
     def close(self) -> None:
         self.connection.close()
@@ -175,9 +177,25 @@ class WorkerRuntime:
             self._create_source_views(request, aliases)
             rewritten_sql = _rewrite_source_aliases(request.canonical_sql, aliases)
             if isinstance(request, WorkerTileQuery):
-                from query_worker.tiles import execute_tile
+                from query_worker.tiles import bbox_retention_candidate, execute_tile
 
-                return execute_tile(self.connection, rewritten_sql, request)
+                coverings: dict[str, GeometryCovering | None] = {}
+                candidate = bbox_retention_candidate(
+                    rewritten_sql, request.geometry_column, declared=True
+                )
+                if candidate is not None:
+                    table = candidate[1].name
+                    for source in request.sources:
+                        if aliases[source.alias] == table:
+                            coverings[table] = self._covering_metadata.resolve(
+                                self.connection,
+                                source.object_uris,
+                                request.geometry_column,
+                                storage=source.seaweedfs,
+                            )
+                return execute_tile(
+                    self.connection, rewritten_sql, request, source_coverings=coverings
+                )
             if isinstance(request, WorkerBoundsQuery):
                 from query_worker.bounds import execute_bounds
 

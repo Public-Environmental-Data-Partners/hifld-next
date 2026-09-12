@@ -20,6 +20,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with: {python-version: "3.12", enable-cache: true}
       - run: uv sync --frozen
+      - name: Install official DuckDB extensions for spatial regression tests
+        run: uv run python -c "import duckdb; c = duckdb.connect(); c.execute('INSTALL spatial; INSTALL httpfs'); c.close()"
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pyright

@@ -68,6 +68,22 @@ def test_token_encoding_is_deterministic_and_round_trips() -> None:
     assert decoded["issued_at"] == int(NOW.timestamp())
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT IF(id > 1, 'T', 'F') AS flag FROM roads",
+        "SELECT BOOL_OR(id > 1) AS flag FROM roads",
+    ],
+)
+def test_normalized_conditional_query_token_round_trips(sql: str) -> None:
+    from app.query.sql_policy import SqlPolicy
+
+    codec = QueryTokenCodec(SECRET)
+    canonical = SqlPolicy.validate(sql, frozenset({"roads"})).canonical_sql
+    original = payload(canonical_sql=canonical)
+    assert codec.decode(codec.encode(original), now=NOW) == original
+
+
 def test_token_round_trips_url_safe_query_identity() -> None:
     codec = QueryTokenCodec(SECRET)
 

@@ -12,6 +12,7 @@ from app.http_app import HttpDependencies, create_http_app
 from app.mcp_server import AppDependencies, UIResourceConfig
 from app.query.application import QueryApplicationService
 from app.query.service import QueryService
+from app.query.tile_cache import TileCache
 from app.query.token_codec import QueryTokenCodec
 from app.storage.resolver import StorageResolver
 from query_worker.pool import WorkerPool, WorkerPoolConfig
@@ -66,6 +67,12 @@ def create_production_app(
         token_ttl_seconds=configured.query_token_ttl_seconds,
         tile_timeout_seconds=configured.tile_timeout_seconds,
         public_origin=public_origin,
+        tile_cache=TileCache(
+            max_bytes=configured.tile_cache_max_bytes,
+            ttl_seconds=configured.tile_cache_ttl_seconds,
+            max_entries=configured.tile_cache_max_entries,
+            max_in_flight=configured.tile_cache_max_in_flight,
+        ),
     )
     tools = AppDependencies(
         catalog=CatalogToolAdapter(catalog),

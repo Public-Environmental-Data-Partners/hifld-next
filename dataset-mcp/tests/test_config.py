@@ -11,6 +11,10 @@ def test_settings_require_catalog_and_token_secret() -> None:
     assert settings.query_default_limit == 100
     assert settings.query_max_limit == 1_000
     assert settings.tile_timeout_seconds == 30
+    assert settings.tile_cache_max_bytes == 256 * 1024 * 1024
+    assert settings.tile_cache_ttl_seconds == 60
+    assert settings.tile_cache_max_in_flight == 64
+    assert settings.tile_cache_max_entries == 4_096
     assert settings.worker_count == 2
     assert settings.duckdb_threads == 1
     assert settings.duckdb_memory_limit == "1GiB"

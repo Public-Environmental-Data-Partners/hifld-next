@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     query_max_offset: int = Field(default=50_000, ge=0)
     query_timeout_seconds: float = Field(default=30.0, gt=0)
     tile_timeout_seconds: float = Field(default=30.0, gt=0, le=30.0)
+    tile_cache_max_bytes: int = Field(default=256 * 1024 * 1024, ge=1)
+    tile_cache_ttl_seconds: float = Field(default=60.0, gt=0)
+    tile_cache_max_in_flight: int = Field(default=64, ge=1, le=256)
+    tile_cache_max_entries: int = Field(default=4_096, ge=1, le=65_536)
     worker_count: int = Field(default=2, ge=1, le=8)
     duckdb_threads: int = Field(default=1, ge=1, le=8)
     duckdb_memory_limit: str = "1GiB"
