@@ -38,7 +38,7 @@ def test_public_gcs_uri_is_restricted_to_configured_bucket() -> None:
         object_uris=("gs://demo/roads.parquet",),
     )
     spec = resolver.resolve(source)
-    assert spec.object_uris == ("https://storage.googleapis.com/demo/roads.parquet",)
+    assert spec.object_uris == ("gs://demo/roads.parquet",)
     assert spec.seaweedfs is None
 
 

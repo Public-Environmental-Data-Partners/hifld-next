@@ -26,6 +26,8 @@ type Longitude = Annotated[float, Field(ge=-180, le=180)]
 type Latitude = Annotated[float, Field(ge=-90, le=90)]
 type Zoom = Annotated[float, Field(ge=0, le=22)]
 
+_RESULT_STATUSES = frozenset({"rows_returned", "empty_result", "empty_page", "indeterminate"})
+
 
 class MapLayerStyleInput(BaseModel):
     """Data-driven styling equivalent to the web map's approved style vocabulary."""
@@ -42,7 +44,9 @@ class MapLayerStyleInput(BaseModel):
         default=None,
         description=(
             "Query result column used for data-driven color. Numeric columns use breaks; "
-            "string columns use categorical colors. The column must be selected by the SQL."
+            "string columns use categorical colors. Inspect the query preview's actual distinct "
+            "values before choosing categorical styling; do not assume dataset-specific values. "
+            "The column must be selected by the SQL."
         ),
     )
     color_scheme: ColorScheme | None = Field(
@@ -243,6 +247,32 @@ def _result(label: str, payload: JSONMapping) -> ToolResult:
     )
 
 
+def _result_status(payload: JSONMapping) -> str:
+    status = payload.get("result_status")
+    if isinstance(status, str) and status in _RESULT_STATUSES:
+        return status
+    returned_count = payload.get("returned_count")
+    offset = payload.get("offset")
+    has_more = payload.get("has_more")
+    response_truncated = payload.get("response_truncated")
+    if (
+        not isinstance(returned_count, int)
+        or isinstance(returned_count, bool)
+        or not isinstance(offset, int)
+        or isinstance(offset, bool)
+        or not isinstance(has_more, bool)
+        or not isinstance(response_truncated, bool)
+    ):
+        return "indeterminate"
+    if returned_count > 0:
+        return "rows_returned"
+    if response_truncated:
+        return "indeterminate"
+    if offset == 0 and not has_more:
+        return "empty_result"
+    return "empty_page"
+
+
 async def read_geoparquet_rows(
     service: QueryService,
     source: JSONMapping,
@@ -308,6 +338,7 @@ async def generate_mvt_tile_url(
         "headers": {QUERY_TOKEN_HEADER: token},
         "expires_at": expires_at,
     }
+    payload["result_status"] = _result_status(result.structured_content)
     for field in ("tile_url", "source_layer", "geometry_column", "result_crs"):
         value = configuration.get(field)
         if not isinstance(value, str) or not value:
@@ -450,6 +481,7 @@ async def _query_map_from_definition(
         raise ValueError("map layer names must be unique")
 
     presented_layers: list[JSONValue] = []
+    empty_layer_names: list[str] = []
     worker_url: str | None = None
     configuration_fields = (
         "tile_url",
@@ -495,6 +527,10 @@ async def _query_map_from_definition(
             "layer_name": layer.layer_name,
             "visible": layer.visible,
         }
+        result_status = _result_status(query_result.structured_content)
+        presented_layer["result_status"] = result_status
+        if result_status == "empty_result":
+            empty_layer_names.append(layer.layer_name)
         columns, column_types = _result_columns(query_result.structured_content.get("columns"))
         if layer_style is not None:
             style_properties = (
@@ -536,9 +572,13 @@ async def _query_map_from_definition(
         presented_payload["camera"] = _camera_payload(camera)
     layer_names = ", ".join(layer.layer_name for layer in layers)
     verb = "Refreshed" if refreshed else "Prepared"
+    empty_layers_text = (
+        f"Empty layers: {', '.join(empty_layer_names)}. " if empty_layer_names else ""
+    )
     return ToolResult(
         text=(
             f"{verb} map configuration '{title}' with {len(layers)} layers: {layer_names}. "
+            f"{empty_layers_text}"
             "Rendering is pending in the host widget; this does not confirm that layers loaded."
         ),
         structured_content=presented_payload,

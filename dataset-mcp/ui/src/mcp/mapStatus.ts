@@ -1,6 +1,12 @@
 import type { App } from "@modelcontextprotocol/ext-apps";
 
-export type LayerLoadStatus = "loading" | "loaded" | "failed" | "hidden";
+export type LayerLoadStatus =
+  | "preparing"
+  | "loading"
+  | "loaded"
+  | "failed"
+  | "hidden"
+  | "empty_result";
 export type LayerStatus = {
   layer_name: string;
   status: LayerLoadStatus;

@@ -28,7 +28,8 @@ from schemas.types import APIDict, APIList, APIValue, api_dict, json_dict, model
 
 logger = logging.getLogger(__name__)
 
-GLOB_FORMAT_TYPES = {"geoparquet", "pmtiles"}
+EXPANDED_GLOB_FORMAT_TYPES = {"pmtiles"}
+LOGICAL_GLOB_FORMAT_TYPES = {"geoparquet"}
 EXPANDED_PATH_LOG_LIMIT = 5
 
 
@@ -166,15 +167,47 @@ async def _detail_format_response(
         format_obj.format_type,
         len(format_sources),
     )
-    if format_obj.format_type not in GLOB_FORMAT_TYPES:
+    if format_obj.format_type in LOGICAL_GLOB_FORMAT_TYPES:
+        sources = _logical_glob_format_sources(file_obj, format_sources, context.storage_locations_by_id)
+    elif format_obj.format_type in EXPANDED_GLOB_FORMAT_TYPES:
+        sources = await _glob_format_sources(file_obj, format_sources, context.storage_locations_by_id)
+    else:
         return _plain_format_response(file_format, format_obj, context)
-
-    sources = await _glob_format_sources(file_obj, format_sources, context.storage_locations_by_id)
     return {
         "format": model_json_dict(format_obj),
         "file_format": model_json_dict(file_format),
         "sources": sources,
     }
+
+
+def _logical_glob_format_sources(
+    file_obj: File,
+    format_sources: list[FileSource],
+    storage_locations_by_id: dict[int, StorageLocation],
+) -> APIList:
+    """Keep catalog-owned glob sources intact for native query-engine discovery."""
+    source_responses: APIList = []
+    file_sources = [source for source in format_sources if source.source_type == "file"]
+    for group_key, grouped_sources in _sources_by_location_version(file_sources).items():
+        location_id, version = group_key
+        source_storage = storage_locations_by_id.get(location_id)
+        glob_pattern = _glob_pattern_for_group(grouped_sources, source_storage, location_id, version)
+        source_responses.extend(
+            _safe_group_source_response(
+                file_obj,
+                source,
+                source_storage,
+                storage_locations_by_id,
+                glob_pattern,
+            )
+            for source in grouped_sources
+        )
+    source_responses.extend(
+        _safe_source_response(source, storage_locations_by_id)
+        for source in format_sources
+        if source.source_type != "file"
+    )
+    return source_responses
 
 
 async def _glob_format_sources(

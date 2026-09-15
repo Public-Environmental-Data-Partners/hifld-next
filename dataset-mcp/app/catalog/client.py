@@ -1,6 +1,11 @@
 """Typed client for the internal dataset catalog API."""
 
+import logging
 import re
+from collections.abc import Generator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from time import perf_counter
 from urllib.parse import quote
 
 import httpx
@@ -31,6 +36,24 @@ class CatalogClientError(RuntimeError):
 
 
 _SLUG_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
+_LOGGER = logging.getLogger("uvicorn.error.catalog")
+
+type _ReadKey = tuple[httpx.AsyncClient, str, type[BaseModel], tuple[tuple[str, str | int], ...]]
+_request_reads: ContextVar[dict[_ReadKey, BaseModel] | None] = ContextVar(
+    "catalog_request_reads", default=None
+)
+
+
+@contextmanager
+def catalog_request_scope() -> Generator[None]:
+    """Reuse validated reads in one request, never across token revalidations."""
+    reads: dict[_ReadKey, BaseModel] = {}
+    token = _request_reads.set(reads)
+    try:
+        yield
+    finally:
+        reads.clear()
+        _request_reads.reset(token)
 
 
 def _path_slug(value: str, field: str) -> str:
@@ -57,16 +80,36 @@ class CatalogClient:
     async def _get_model(
         self, path: str, model: type[BaseModel], params: dict[str, str | int] | None = None
     ) -> BaseModel:
+        reads = _request_reads.get() if model in (Collection, DatasetFilePayload) else None
+        key: _ReadKey = (
+            self._client,
+            f"{self._base_url}{path}",
+            model,
+            tuple(sorted((params or {}).items())),
+        )
+        if reads is not None and key in reads:
+            _LOGGER.info("catalog_read model=%s cache_hit=true elapsed_ms=0", model.__name__)
+            return reads[key].model_copy(deep=True)
+        started = perf_counter()
         try:
             response = await self._client.get(f"{self._base_url}{path}", params=params)
         except httpx.HTTPError as exc:
             raise CatalogClientError("catalog_unavailable", "catalog request failed") from exc
+        finally:
+            _LOGGER.info(
+                "catalog_read model=%s cache_hit=false elapsed_ms=%.2f",
+                model.__name__,
+                (perf_counter() - started) * 1000,
+            )
         if response.status_code == 404:
             raise CatalogClientError("catalog_not_found", "catalog resource was not found")
         if response.is_error:
             raise CatalogClientError("catalog_unavailable", "catalog request failed")
         try:
-            return model.model_validate(response.json())
+            validated = model.model_validate(response.json())
+            if reads is not None and len(reads) < 32:
+                reads[key] = validated.model_copy(deep=True)
+            return validated
         except (ValueError, ValidationError) as exc:
             raise CatalogClientError(
                 "catalog_contract_invalid", "catalog response did not match its contract"

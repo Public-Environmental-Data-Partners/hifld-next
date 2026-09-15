@@ -9,6 +9,7 @@ import maplibregl from "maplibre-gl";
 import { type RefObject, useCallback, useEffect, useRef } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { PMTiles, Protocol } from "pmtiles";
+import { z } from "zod";
 import type { LoadedMapLayer, QueryMvtLayer } from "@/components/map/multiLayerSources";
 import type { ColumnSchema } from "@/lib/api-client";
 import type { HoverInfo, NumericFieldSummary, VectorLayerInfo } from "./types";
@@ -21,12 +22,70 @@ interface PMTilesVectorLayerMetadata {
   };
 }
 
+const RuntimeTileSchema = z.object({ tileID: z.object({ key: z.string() }) });
+const RuntimeSourceErrorSchema = z.object({
+  sourceId: z.string(),
+  error: z.instanceof(Error),
+  tile: RuntimeTileSchema.optional(),
+});
+const RuntimeSourceDataEventSchema = z.object({
+  sourceId: z.string(),
+  isSourceLoaded: z.boolean(),
+  tile: RuntimeTileSchema.extend({ state: z.literal("loaded") }).optional(),
+});
+
+function reportRuntimeSourceError(
+  event: maplibregl.ErrorEvent,
+  sources: readonly LoadedMapLayer[],
+  report: ((error: { sourceId: string; queryId?: string; message: string }) => void) | undefined,
+): boolean {
+  const parsed = RuntimeSourceErrorSchema.safeParse(event);
+  if (!parsed.success) return false;
+  const source = sources.find((candidate) => candidate.mapSourceId === parsed.data.sourceId);
+  if (!source) return false;
+  if (parsed.data.error.name === "AbortError") return true;
+  report?.({
+    sourceId: source.id,
+    ...(source.kind === "query_mvt" ? { queryId: source.queryId } : {}),
+    message: Array.from(parsed.data.error.message || "The map layer could not load its tiles.")
+      .slice(0, 500)
+      .join(""),
+  });
+  return true;
+}
+
+function recoverRuntimeSource(
+  event: maplibregl.MapSourceDataEvent,
+  sources: readonly LoadedMapLayer[],
+  failuresBySource: Map<string, RuntimeSourceFailures>,
+): { sourceId: string; queryId?: string | undefined } | null {
+  const sourceData = RuntimeSourceDataEventSchema.safeParse(event);
+  if (!sourceData.success) return null;
+  const source = sources.find((candidate) => candidate.mapSourceId === sourceData.data.sourceId);
+  if (!source) return null;
+  const failures = failuresBySource.get(source.id);
+  if (!failures) return null;
+  const loadedTileKey = sourceData.data.tile?.tileID.key;
+  if (loadedTileKey) failures.tileKeys.delete(loadedTileKey);
+  if (failures.hasUnidentifiedFailure || failures.tileKeys.size > 0 || !sourceData.data.isSourceLoaded) return null;
+  failuresBySource.delete(source.id);
+  return {
+    sourceId: source.id,
+    ...(source.kind === "query_mvt" ? { queryId: source.queryId } : {}),
+  };
+}
+
 interface PMTilesMetadata {
   vector_layers?: PMTilesVectorLayerMetadata[];
 }
 
 interface VectorLayersBySource {
   [sourceId: string]: VectorLayerInfo[] | undefined;
+}
+
+interface RuntimeSourceFailures {
+  tileKeys: Set<string>;
+  hasUnidentifiedFailure: boolean;
 }
 
 class MapSourceSyncError extends Error {
@@ -827,6 +886,7 @@ export function useMultiLayerMapInitialization(
   onSourceLayerError?:
     | ((error: { sourceId: string; queryId?: string | undefined; message: string }) => void)
     | undefined,
+  onSourceLayerRecovered?: ((source: { sourceId: string; queryId?: string | undefined }) => void) | undefined,
 ) {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const currentBasemapModeRef = useRef(basemapMode);
@@ -840,6 +900,10 @@ export function useMultiLayerMapInitialization(
   const pinnedPopupElementRefRef = useRef(pinnedPopupElementRef);
   const queryTokensRef = useRef(queryTokens);
   const onSourceLayerErrorRef = useRef(onSourceLayerError);
+  const onSourceLayerRecoveredRef = useRef(onSourceLayerRecovered);
+  const runtimeSourceFailuresRef = useRef<Map<string, RuntimeSourceFailures>>(new Map());
+  const sourcesRef = useRef(sources);
+  sourcesRef.current = sources;
   const isSelectionActiveRef = useRef(isSelectionActive);
   const boxSelectionStartRef = useRef<{ x: number; y: number } | null>(null);
   const boxSelectionStartLngLatRef = useRef<SelectionLngLat | null>(null);
@@ -885,6 +949,10 @@ export function useMultiLayerMapInitialization(
   useEffect(() => {
     onSourceLayerErrorRef.current = onSourceLayerError;
   }, [onSourceLayerError]);
+
+  useEffect(() => {
+    onSourceLayerRecoveredRef.current = onSourceLayerRecovered;
+  }, [onSourceLayerRecovered]);
 
   useEffect(() => {
     isSelectionActiveRef.current = isSelectionActive;
@@ -986,13 +1054,33 @@ export function useMultiLayerMapInitialization(
       syncBasemapVisibilityAfterStyleLoad(map, currentBasemapModeRef);
     };
     map.once("style.load", syncBasemapAfterStyleLoad);
-    map.on("error", () => {
+    map.on("error", (event) => {
+      const runtimeError = RuntimeSourceErrorSchema.safeParse(event);
+      if (
+        reportRuntimeSourceError(event, sourcesRef.current, (error) => {
+          const tileKey = runtimeError.success ? runtimeError.data.tile?.tileID.key : undefined;
+          const failures = runtimeSourceFailuresRef.current.get(error.sourceId) ?? {
+            tileKeys: new Set<string>(),
+            hasUnidentifiedFailure: false,
+          };
+          if (tileKey) failures.tileKeys.add(tileKey);
+          else failures.hasUnidentifiedFailure = true;
+          runtimeSourceFailuresRef.current.set(error.sourceId, failures);
+          onSourceLayerErrorRef.current?.(error);
+        })
+      ) {
+        return;
+      }
       if (hasSyncedBasemapAfterStyleLoad || hasAppliedFallbackBasemapStyle) {
         return;
       }
       hasAppliedFallbackBasemapStyle = true;
       map.setStyle(fallbackBasemapStyle(currentBasemapModeRef.current));
       map.once("style.load", syncBasemapAfterStyleLoad);
+    });
+    map.on("sourcedata", (event) => {
+      const recovered = recoverRuntimeSource(event, sourcesRef.current, runtimeSourceFailuresRef.current);
+      if (recovered) onSourceLayerRecoveredRef.current?.(recovered);
     });
 
     const updateCursorForCurrentSelectionState = () => {

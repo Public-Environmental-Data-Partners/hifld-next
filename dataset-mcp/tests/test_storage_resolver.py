@@ -28,19 +28,35 @@ def test_public_gcs_is_resolved_from_catalog_storage_config() -> None:
 
     spec = StorageResolver().resolve(source(config, "gs://hifld/geo/roads.parquet"))
 
-    assert spec.object_uris == ("https://storage.googleapis.com/hifld/geo/roads.parquet",)
+    assert spec.object_uris == ("gs://hifld/geo/roads.parquet",)
     assert spec.seaweedfs is None
 
 
-def test_public_gcs_rejects_wildcard_object_uri() -> None:
+def test_public_gcs_preserves_catalog_glob_for_duckdb() -> None:
     config = BucketStorageConfig(
         type="gcs",
         base_url="https://storage.googleapis.com/hifld",
         bucket="hifld",
     )
 
-    with pytest.raises(StorageResolutionError, match="concrete objects"):
-        StorageResolver().resolve(source(config, "gs://hifld/geo/%2A.parquet"))
+    result = StorageResolver().resolve(source(config, "gs://hifld/geo/%2A.parquet"))
+    assert result.object_uris == ("gs://hifld/geo/*.parquet",)
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "gs://other/data/*.parquet",
+        "gs://hifld/data/%2e%2e/*.parquet",
+        "https://evil.test/hifld/*.parquet",
+    ],
+)
+def test_gcs_glob_cannot_escape_catalog_scope(uri: str) -> None:
+    config = BucketStorageConfig(
+        type="gcs", bucket="hifld", base_url="https://storage.googleapis.com/hifld"
+    )
+    with pytest.raises(StorageResolutionError):
+        StorageResolver().resolve(source(config, uri))
 
 
 def test_local_seaweed_is_resolved_from_catalog_storage_config() -> None:

@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
-import type maplibregl from "maplibre-gl";
+import maplibregl from "maplibre-gl";
+import { act, renderHook } from "@testing-library/react";
 import { PMTiles } from "pmtiles";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -18,8 +19,10 @@ import {
   syncRenderedLayerOrder,
   syncLoadedMapSources,
   runWhenMapStyleReady,
+  useMultiLayerMapInitialization,
 } from "../useMapInitialization";
 import type { CatalogPmtilesLayer, QueryMvtLayer } from "@/components/map/multiLayerSources";
+import { buildLoadedMapLayer, buildQueryMvtLayer } from "@/components/map/multiLayerSources";
 
 vi.mock("maplibre-gl", () => ({
   default: {
@@ -47,6 +50,7 @@ interface MockMap {
   getSource: ReturnType<typeof vi.fn>;
   getStyle: ReturnType<typeof vi.fn>;
   isStyleLoaded: ReturnType<typeof vi.fn>;
+  isSourceLoaded: ReturnType<typeof vi.fn>;
   loaded: ReturnType<typeof vi.fn>;
   moveLayer: ReturnType<typeof vi.fn>;
   on: ReturnType<typeof vi.fn>;
@@ -79,6 +83,7 @@ function createMockMap(): MockMap {
       ],
     })),
     isStyleLoaded: vi.fn(() => false),
+    isSourceLoaded: vi.fn(() => false),
     loaded: vi.fn(() => false),
     moveLayer: vi.fn(),
     on: vi.fn(),
@@ -92,6 +97,77 @@ function createMockMap(): MockMap {
 }
 
 describe("useMapInitialization helpers", () => {
+  it("routes asynchronous tile errors to their query or catalog layer", () => {
+    const map = createMockMap();
+    vi.mocked(maplibregl.Map).mockImplementation(function () { return map as maplibregl.Map; });
+    const sources = [
+      buildQueryMvtLayer({ queryId: "q-123", label: "Hospitals", sourceAliases: ["h"], geometryColumn: "geometry", tileTemplate: "https://query.test/tiles/{z}/{x}/{y}.mvt" }),
+      buildLoadedMapLayer({ descriptor: { collectionSlug: "c", datasetSlug: "d", fileSlug: "f", formatType: "pmtiles", storageLocationId: 1, version: "v1", sourceId: 2 }, name: "Flood", pmtilesUrl: "https://tiles.test/flood.pmtiles" }),
+    ];
+    const onError = vi.fn();
+    const container = { current: document.createElement("div") };
+    const { unmount } = renderHook(() => useMultiLayerMapInitialization(
+      container, sources, vi.fn(), vi.fn(), undefined, undefined, false, "street", undefined, undefined, new Map(), onError,
+    ));
+    const styleReady = map.once.mock.calls.find(([event]) => event === "style.load")?.[1] as (() => void);
+    act(() => styleReady());
+    const fail = map.on.mock.calls.find(([event]) => event === "error")?.[1] as ((event: { sourceId: string; error: Error }) => void);
+    for (const source of sources) {
+      act(() => fail({ sourceId: source.mapSourceId, error: new Error("Tile download failed") }));
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ sourceId: source.id, message: "Tile download failed" }));
+    }
+    unmount();
+  });
+
+  it("reports recovery only when the failed source genuinely finishes loading", () => {
+    const map = createMockMap();
+    vi.mocked(maplibregl.Map).mockImplementation(function () { return map as maplibregl.Map; });
+    const source = buildQueryMvtLayer({ queryId: "q-123", label: "Hospitals", sourceAliases: ["h"], geometryColumn: "geometry", tileTemplate: "https://query.test/tiles/{z}/{x}/{y}.mvt" });
+    const onError = vi.fn();
+    const onRecovered = vi.fn();
+    const container = { current: document.createElement("div") };
+    const { unmount } = renderHook(() => useMultiLayerMapInitialization(
+      container, [source], vi.fn(), vi.fn(), undefined, undefined, false, "street", undefined, undefined, new Map(), onError, onRecovered,
+    ));
+    const fail = map.on.mock.calls.find(([event]) => event === "error")?.[1] as ((event: { sourceId: string; error: Error; tile: { tileID: { key: string } } }) => void);
+    const sourceData = map.on.mock.calls.find(([event]) => event === "sourcedata")?.[1] as ((event: { sourceId: string; isSourceLoaded: boolean; sourceDataType?: "idle"; tile?: { state: "loaded"; tileID: { key: string } } }) => void);
+
+    act(() => sourceData({ sourceId: "unrelated-source", isSourceLoaded: true, tile: { state: "loaded", tileID: { key: "tile-a" } } }));
+    act(() => sourceData({ sourceId: source.mapSourceId, isSourceLoaded: true, sourceDataType: "idle" }));
+    expect(onRecovered).not.toHaveBeenCalled();
+
+    act(() => fail({ sourceId: source.mapSourceId, error: new Error("Tile download failed"), tile: { tileID: { key: "tile-a" } } }));
+    act(() => fail({ sourceId: source.mapSourceId, error: new Error("Tile download failed"), tile: { tileID: { key: "tile-b" } } }));
+    expect(onError).toHaveBeenCalledTimes(2);
+    act(() => sourceData({ sourceId: source.mapSourceId, isSourceLoaded: false, tile: { state: "loaded", tileID: { key: "tile-a" } } }));
+    expect(onRecovered).not.toHaveBeenCalled();
+
+    act(() => sourceData({ sourceId: source.mapSourceId, isSourceLoaded: true, tile: { state: "loaded", tileID: { key: "tile-b" } } }));
+    expect(onRecovered).toHaveBeenCalledOnce();
+    expect(onRecovered).toHaveBeenCalledWith({ sourceId: source.id, queryId: source.queryId });
+    unmount();
+  });
+
+  it("does not infer recovery when a source also has an unidentified runtime failure", () => {
+    const map = createMockMap();
+    vi.mocked(maplibregl.Map).mockImplementation(function () { return map as maplibregl.Map; });
+    const source = buildQueryMvtLayer({ queryId: "q-123", label: "Hospitals", sourceAliases: ["h"], geometryColumn: "geometry", tileTemplate: "https://query.test/tiles/{z}/{x}/{y}.mvt" });
+    const onRecovered = vi.fn();
+    const container = { current: document.createElement("div") };
+    const { unmount } = renderHook(() => useMultiLayerMapInitialization(
+      container, [source], vi.fn(), vi.fn(), undefined, undefined, false, "street", undefined, undefined, new Map(), vi.fn(), onRecovered,
+    ));
+    const fail = map.on.mock.calls.find(([event]) => event === "error")?.[1] as ((event: { sourceId: string; error: Error; tile?: { tileID: { key: string } } }) => void);
+    const sourceData = map.on.mock.calls.find(([event]) => event === "sourcedata")?.[1] as ((event: { sourceId: string; isSourceLoaded: boolean; tile: { state: "loaded"; tileID: { key: string } } }) => void);
+
+    act(() => fail({ sourceId: source.mapSourceId, error: new Error("Metadata failed") }));
+    act(() => fail({ sourceId: source.mapSourceId, error: new Error("Tile failed"), tile: { tileID: { key: "tile-a" } } }));
+    act(() => sourceData({ sourceId: source.mapSourceId, isSourceLoaded: true, tile: { state: "loaded", tileID: { key: "tile-a" } } }));
+
+    expect(onRecovered).not.toHaveBeenCalled();
+    unmount();
+  });
+
   it("loads data sources as soon as the style is ready without waiting for basemap tiles", () => {
     const map = createMockMap();
     const loadSources = vi.fn();

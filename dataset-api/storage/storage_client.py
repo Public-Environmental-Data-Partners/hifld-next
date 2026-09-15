@@ -30,6 +30,31 @@ HTTP_NO_CONTENT = 204
 HTTP_NOT_FOUND = 404
 
 
+def format_storage_public_url(storage_type: str, bucket: str, base_url: str, path: str) -> str | None:
+    """Format a public object URL without initializing a storage client."""
+    clean_path = path.lstrip("/")
+    clean_base_url = base_url.rstrip("/")
+    if storage_type == "gcs":
+        return (
+            f"{clean_base_url}/{clean_path}"
+            if clean_base_url
+            else f"https://storage.googleapis.com/{bucket}/{clean_path}"
+        )
+    if storage_type == "seaweedfs" and clean_base_url:
+        return f"{clean_base_url}/buckets/{bucket}/{clean_path}"
+    return None
+
+
+def format_storage_uri(storage_type: str, bucket: str, base_url: str, path: str) -> str | None:
+    """Format a backend-native object URI without initializing a storage client."""
+    clean_path = path.lstrip("/")
+    if storage_type == "gcs":
+        return f"gs://{bucket}/{clean_path}"
+    if storage_type == "seaweedfs" and base_url:
+        return f"s3://{bucket}/{clean_path}?endpoint_url={_seaweedfs_s3_url(base_url.rstrip('/'))}"
+    return None
+
+
 @dataclass(frozen=True)
 class StorageClientOptions:
     """Optional storage client factory settings."""
@@ -281,8 +306,11 @@ class SeaweedFSFilerClient(StorageClient):
 
     def get_public_url(self, remote_path: str) -> str:
         """Get the public URL for a file (via filer HTTP endpoint)."""
-        key = remote_path.lstrip("/")
-        return f"{self.filer_url}/buckets/{self.bucket}/{key}"
+        public_url = format_storage_public_url("seaweedfs", self.bucket, self.filer_url, remote_path)
+        if public_url is None:
+            msg = "SeaweedFS filer URL is required for public URL formatting"
+            raise ValueError(msg)
+        return public_url
 
     async def list_files(self, prefix: str = "") -> list[str]:
         """List all files in SeaweedFS with the given prefix recursively."""
@@ -564,11 +592,11 @@ class GCSStorageClient(StorageClient):
 
     def get_public_url(self, remote_path: str) -> str:
         """Get the public URL for a file."""
-        clean_path = remote_path.lstrip("/")
-        if self.base_url:
-            # Load balancer: base_url/storage -> backend receives path only (no bucket in URL)
-            return f"{self.base_url}/{clean_path}"
-        return f"https://storage.googleapis.com/{self.bucket_name}/{clean_path}"
+        public_url = format_storage_public_url("gcs", self.bucket_name, self.base_url or "", remote_path)
+        if public_url is None:
+            msg = "GCS bucket is required for public URL formatting"
+            raise ValueError(msg)
+        return public_url
 
     async def list_files(self, prefix: str = "") -> list[str]:
         """List all files in a GCS bucket with the given prefix."""

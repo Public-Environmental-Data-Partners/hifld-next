@@ -258,13 +258,22 @@ for (const opaqueOrigin of [false, true]) {
         expect(errors).toEqual([]);
         return;
       }
-      // Clicking the rendered center point verifies rendering, not merely successful fetches.
+      const requestsBeforeToggle = tileHeaders.length;
+      await frame
+        .getByRole("button", { name: "Hide Hospitals", exact: true })
+        .click();
+      await frame
+        .getByRole("button", { name: "Show Hospitals", exact: true })
+        .click();
+      // Picking verifies rendering after restoring visibility. Do this once:
+      // opening the selection table resizes the viewport and moves its center.
       await expect(async () => {
         await frame.locator("canvas.maplibregl-canvas").click();
         await expect(
           frame.getByText("Test Hospital", { exact: true }),
         ).toBeVisible();
       }).toPass({ timeout: 10_000 });
+      expect(tileHeaders).toHaveLength(requestsBeforeToggle);
       expect(errors).toEqual([]);
     });
   }

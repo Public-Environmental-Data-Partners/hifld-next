@@ -30,11 +30,6 @@ def _decoded_key(value: str) -> str:
     return decoded.lstrip("/")
 
 
-def _reject_wildcard(key: str) -> None:
-    if any(character in key for character in "*?["):
-        raise StorageResolutionError("public GCS sources must name concrete objects")
-
-
 def _key_for_scope(bucket: str, configured_bucket: str, configured_prefix: str, key: str) -> str:
     if bucket != configured_bucket:
         raise StorageResolutionError("source bucket is outside configured storage scope")
@@ -54,7 +49,7 @@ def _s3_parts(uri: str) -> tuple[str, str]:
 
 def _source_uris(source: ResolvedSource) -> tuple[str, ...]:
     # ResolvedSource is deliberately the only accepted caller input. It contains
-    # catalog-produced exact objects, never agent-provided URL components.
+    # catalog-produced objects/patterns, never agent-provided URL components.
     uris = tuple(source.object_uris)
     if not uris:
         raise StorageResolutionError("catalog source has no objects")
@@ -76,7 +71,11 @@ class StorageResolver:
         result: list[str] = []
         for uri in uris:
             parsed = urlparse(uri)
-            if parsed.scheme == "gs":
+            if parsed.query or parsed.fragment or parsed.params or parsed.username:
+                raise StorageResolutionError(
+                    "storage URI must not contain credentials or URL parameters"
+                )
+            if parsed.scheme in {"gs", "gcs"}:
                 bucket, key = parsed.netloc, parsed.path.lstrip("/")
             elif parsed.scheme == "https" and parsed.netloc in {
                 "storage.googleapis.com",
@@ -89,8 +88,7 @@ class StorageResolver:
             else:
                 raise StorageResolutionError("public GCS source must be gs:// or GCS HTTPS")
             safe_key = _key_for_scope(bucket, configured_bucket, "", key)
-            _reject_wildcard(safe_key)
-            result.append(f"https://storage.googleapis.com/{bucket}/{safe_key}")
+            result.append(f"gs://{bucket}/{safe_key}")
         return tuple(result)
 
     @staticmethod

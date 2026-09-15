@@ -99,16 +99,19 @@ class CoveringMetadataCache:
         rows = cast(
             list[tuple[object, ...]],
             connection.execute(
-                "SELECT file_name, value FROM parquet_kv_metadata(?) WHERE key = 'geo'",
-                [list(uris)],
+                "SELECT f.file_name, k.value FROM parquet_file_metadata(?) f "
+                "LEFT JOIN parquet_kv_metadata(?) k ON f.file_name = k.file_name AND k.key = 'geo'",
+                [list(uris), list(uris)],
             ).fetchall(),
         )
         declarations: dict[str, GeometryCovering | None] = {}
         for row in rows:
-            if len(row) == 2 and isinstance(row[0], str) and isinstance(row[1], (str, bytes)):
-                declarations[row[0]] = parse_covering(row[1], geometry)
+            if len(row) == 2 and isinstance(row[0], str):
+                declarations[row[0]] = (
+                    parse_covering(row[1], geometry) if isinstance(row[1], (str, bytes)) else None
+                )
         # Do not pick the first file's covering for a heterogeneous union.
-        values = [declarations.get(uri) for uri in uris]
+        values = list(declarations.values())
         covering = values[0] if values and all(value == values[0] for value in values) else None
         self._entries[key] = (now + 60.0, covering)
         self._entries.move_to_end(key)
