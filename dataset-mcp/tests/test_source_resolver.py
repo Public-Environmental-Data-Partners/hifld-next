@@ -71,9 +71,7 @@ def _response_with_sources(
 
 
 @pytest.mark.asyncio
-async def test_resolver_prefers_concrete_multipart_gcs_objects_over_incompatible_glob_pattern() -> (
-    None
-):
+async def test_resolver_prefers_catalog_glob_without_expanding_in_application() -> None:
     response = _response_with_sources(
         glob_pattern="gs://catalog/roads/**/*.parquet",
         storage_uris=(
@@ -86,10 +84,7 @@ async def test_resolver_prefers_concrete_multipart_gcs_objects_over_incompatible
     resolved = await resolver.resolve(
         QuerySourceRef(collection_id=1, dataset_id=12, file_id=99, file_source_id=88, alias="roads")
     )
-    assert resolved.object_uris == (
-        "gs://catalog/roads/a.parquet",
-        "gs://catalog/roads/b.parquet",
-    )
+    assert resolved.object_uris == ("gs://catalog/roads/**/*.parquet",)
     assert resolved.storage_config.type == "gcs"
 
 
@@ -107,6 +102,18 @@ async def test_resolver_collects_concrete_storage_uris_for_expanded_sources() ->
         "gs://catalog/roads/a.parquet",
         "gs://catalog/roads/b.parquet",
     )
+
+
+@pytest.mark.asyncio
+async def test_resolver_does_not_duplicate_glob_with_legacy_expanded_entries() -> None:
+    response = _response_with_sources(
+        glob_pattern=None,
+        storage_uris=("gs://catalog/roads/**/*.parquet", "gs://catalog/roads/a.parquet"),
+    )
+    resolved = await SourceResolver(FakeCatalog(response)).resolve(
+        QuerySourceRef(collection_id=1, dataset_id=12, file_id=99, file_source_id=88, alias="roads")
+    )
+    assert resolved.object_uris == ("gs://catalog/roads/**/*.parquet",)
 
 
 @pytest.mark.asyncio

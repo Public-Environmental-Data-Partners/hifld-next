@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import ipaddress
+import json
+import logging
 import re
-from collections.abc import Awaitable, Mapping
+from collections.abc import Awaitable, Generator, Mapping
+from contextlib import contextmanager
+from time import perf_counter
 from typing import Annotated, Literal, Protocol, Self
 from urllib.parse import urlsplit
 
@@ -28,6 +32,28 @@ type SourceLayer = Annotated[
 _DECIMAL_INTEGER = re.compile(r"^[0-9]+$")
 _OCTAL_INTEGER = re.compile(r"^0[0-7]+$")
 _HEX_INTEGER = re.compile(r"^0[xX][0-9A-Fa-f]+$")
+_LOGGER = logging.getLogger("uvicorn.error.maps")
+
+
+@contextmanager
+def _preparation_duration(stage: Literal["configuration", "query_layer"]) -> Generator[None]:
+    """Log only stage, elapsed time, and outcome; never attach input or exception data."""
+    started = perf_counter()
+    outcome = "failed"
+    try:
+        yield
+        outcome = "ready"
+    finally:
+        _LOGGER.info(
+            json.dumps(
+                {
+                    "event": "map_preparation",
+                    "stage": stage,
+                    "duration_ms": round((perf_counter() - started) * 1000, 3),
+                    "outcome": outcome,
+                }
+            )
+        )
 
 
 def _browser_ipv4_address(hostname: str) -> ipaddress.IPv4Address | None:
@@ -253,6 +279,19 @@ async def _runtime_query_layer(
     return runtime[0], worker_url
 
 
+async def prepare_map_layer(service: query.QueryService, layer: MapLayerInput) -> query.ToolResult:
+    """Prepare one query layer using the existing SQL, source, and geometry validation."""
+    with _preparation_duration("query_layer"):
+        runtime, worker_url = await _runtime_query_layer(service, layer)
+        return query.ToolResult(
+            text=(
+                f"Prepared query layer '{layer.layer_name}'; "
+                "rendering is pending in the host widget."
+            ),
+            structured_content={"layer": runtime, "worker_url": worker_url},
+        )
+
+
 async def _map_from_definition(
     service: query.QueryService,
     catalog: CatalogMapResolver,
@@ -265,17 +304,22 @@ async def _map_from_definition(
         raise ValueError("map layer names must be unique")
     configured_worker_url = _configured_worker_url(worker_url)
     runtime_layers: list[JSONValue] = []
-    empty_layer_names: list[str] = []
-    query_worker_url: str | None = None
     for index, layer in enumerate(map_spec.layers):
         if isinstance(layer.source, QueryMapSourceInput):
-            runtime, layer_worker_url = await _runtime_query_layer(service, layer)
-            if query_worker_url is not None and query_worker_url != layer_worker_url:
-                raise ValueError("map layers must use the same worker URL")
-            query_worker_url = layer_worker_url
-            runtime_layers.append(runtime)
-            if runtime.get("result_status") == "empty_result":
-                empty_layer_names.append(layer.layer_name)
+            aliases = tuple(str(source.get("alias", "")) for source in layer.source.inputs)
+            if any(not alias for alias in aliases):
+                raise ValueError("every source must have an alias")
+            service.validate_sql(layer.source.sql, aliases)
+            pending: dict[str, JSONValue] = {
+                "layer_id": f"preparing-{index}",
+                "layer_name": layer.layer_name,
+                "preparation_status": "preparing",
+                "visible": layer.visible,
+            }
+            style = _style(layer)
+            if style is not None:
+                pending["style"] = _style_payload(style)
+            runtime_layers.append(pending)
             continue
         if isinstance(layer.source, CatalogMapSourceInput):
             resolved = await catalog.resolve_map_source(
@@ -299,11 +343,10 @@ async def _map_from_definition(
         if style is not None:
             external["style"] = _style_payload(style)
         runtime_layers.append(external)
-    effective_worker_url = query_worker_url or configured_worker_url
     payload: dict[str, JSONValue] = {
         "title": map_spec.title,
         "basemap": map_spec.basemap,
-        "worker_url": effective_worker_url,
+        "worker_url": configured_worker_url,
         "layers": runtime_layers,
         "map_spec": map_spec.model_dump(mode="json", exclude_none=True),
     }
@@ -312,13 +355,9 @@ async def _map_from_definition(
     names_text = ", ".join(layer.layer_name for layer in map_spec.layers)
     count = len(map_spec.layers)
     noun = "layer" if count == 1 else "layers"
-    empty_layers_text = (
-        f"Empty layers: {', '.join(empty_layer_names)}. " if empty_layer_names else ""
-    )
     return query.ToolResult(
         text=(
             f"Prepared map configuration '{map_spec.title}' with {count} {noun}: {names_text}. "
-            f"{empty_layers_text}"
             "Rendering is pending in the host widget; this does not confirm that layers loaded."
         ),
         structured_content=payload,
@@ -335,12 +374,13 @@ async def view_map(
     camera: query.MapCameraInput | None = None,
     worker_url: str,
 ) -> query.ToolResult:
-    return await _map_from_definition(
-        service,
-        catalog,
-        MapDefinitionInput(title=title, layers=layers, basemap=basemap, camera=camera),
-        worker_url=worker_url,
-    )
+    with _preparation_duration("configuration"):
+        return await _map_from_definition(
+            service,
+            catalog,
+            MapDefinitionInput(title=title, layers=layers, basemap=basemap, camera=camera),
+            worker_url=worker_url,
+        )
 
 
 async def refresh_map(
@@ -350,4 +390,5 @@ async def refresh_map(
     *,
     worker_url: str,
 ) -> query.ToolResult:
-    return await _map_from_definition(service, catalog, map_spec, worker_url=worker_url)
+    with _preparation_duration("configuration"):
+        return await _map_from_definition(service, catalog, map_spec, worker_url=worker_url)

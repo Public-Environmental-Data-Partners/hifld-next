@@ -46,13 +46,17 @@ type ModelContextUpdateResult = Awaited<
 
 const mapConstructor = vi.hoisted(() => vi.fn());
 const mapStop = vi.hoisted(() => vi.fn());
+const mapRemove = vi.hoisted(() => vi.fn());
 const mapAddSource = vi.hoisted(() => vi.fn());
+const mapRemoveSource = vi.hoisted(() => vi.fn());
+const mapRemoveLayer = vi.hoisted(() => vi.fn());
 const mapAddLayer = vi.hoisted(() => vi.fn());
 const mapSetLayoutProperty = vi.hoisted(() => vi.fn());
 const mapSetPaintProperty = vi.hoisted(() => vi.fn());
 const mapZoomIn = vi.hoisted(() => vi.fn());
 const mapZoomOut = vi.hoisted(() => vi.fn());
 const mapEaseTo = vi.hoisted(() => vi.fn());
+const mapFitBounds = vi.hoisted(() => vi.fn());
 const mapGetZoom = vi.hoisted(() => vi.fn(() => 6));
 const mapQuerySourceFeatures = vi.hoisted(() =>
   vi.fn(
@@ -91,6 +95,7 @@ const runtimeEvents = vi.hoisted(
   () =>
     new Map<string, (event: { sourceId?: string; error?: Error }) => void>(),
 );
+const deferredIdle = vi.hoisted(() => [] as Array<() => void>);
 
 vi.mock("maplibre-gl", () => ({
   AJAXError: class AJAXError extends Error {
@@ -113,6 +118,7 @@ vi.mock("maplibre-gl", () => ({
     }
     once(event: string, listener: () => void) {
       if (mapAutoEvents.has(event)) listener();
+      else if (event === "idle") deferredIdle.push(listener);
       return this;
     }
     isStyleLoaded() {
@@ -139,6 +145,14 @@ vi.mock("maplibre-gl", () => ({
     }
     addLayer(layer: AddLayerObject, before?: string) {
       mapAddLayer(layer, before);
+      return this;
+    }
+    removeSource(id: string) {
+      mapRemoveSource(id);
+      return this;
+    }
+    removeLayer(id: string) {
+      mapRemoveLayer(id);
       return this;
     }
     getSource(id: string) {
@@ -178,7 +192,16 @@ vi.mock("maplibre-gl", () => ({
         ],
       };
     }
-    remove() {}
+    fitBounds(
+      bounds: [number, number, number, number],
+      options?: { padding?: number },
+    ) {
+      mapFitBounds(bounds, options);
+      return this;
+    }
+    remove() {
+      mapRemove();
+    }
     stop() {
       mapStop();
     }
@@ -293,17 +316,22 @@ const baseProps: MapViewProps = {
 };
 
 afterEach(() => {
+  deferredIdle.length = 0;
   vi.unstubAllGlobals();
   cleanup();
   mapConstructor.mockClear();
   mapStop.mockClear();
+  mapRemove.mockClear();
   mapAddSource.mockClear();
+  mapRemoveSource.mockClear();
+  mapRemoveLayer.mockClear();
   mapAddLayer.mockClear();
   mapSetLayoutProperty.mockClear();
   mapSetPaintProperty.mockClear();
   mapZoomIn.mockClear();
   mapZoomOut.mockClear();
   mapEaseTo.mockClear();
+  mapFitBounds.mockClear();
   mapGetZoom.mockReset();
   mapGetZoom.mockReturnValue(6);
   mapQuerySourceFeatures.mockReset();
@@ -330,6 +358,197 @@ afterEach(() => {
 });
 
 describe("MapView", () => {
+  it("applies an authoritative basemap change without rebuilding ready sources", () => {
+    const view = render(<MapView {...baseProps} />);
+    mapSetLayoutProperty.mockClear();
+    view.rerender(
+      <MapView
+        {...baseProps}
+        configuration={{ ...baseConfiguration, basemap: "satellite" }}
+      />,
+    );
+    expect(mapSetLayoutProperty).toHaveBeenCalledWith(
+      "satellite-base",
+      "visibility",
+      "visible",
+    );
+    expect(
+      screen.getByRole("button", { name: "Switch to street map" }),
+    ).toBeVisible();
+    expect(mapConstructor).toHaveBeenCalledTimes(1);
+    expect(
+      mapAddSource.mock.calls.filter(([id]) => id === `hifld-query-${roadsId}`),
+    ).toHaveLength(1);
+    view.rerender(
+      <MapView
+        {...baseProps}
+        configuration={{ ...baseConfiguration, basemap: "street" }}
+      />,
+    );
+    expect(mapSetLayoutProperty).toHaveBeenLastCalledWith(
+      "satellite-base",
+      "visibility",
+      "none",
+    );
+    expect(
+      screen.getByRole("button", { name: "Switch to satellite imagery" }),
+    ).toBeVisible();
+  });
+  it("keeps a reconciled layer hidden when its earlier idle style callback runs", () => {
+    mapAutoEvents.delete("idle");
+    const view = render(<MapView {...baseProps} />);
+    view.rerender(
+      <MapView
+        {...baseProps}
+        configuration={{ ...baseConfiguration, layers: [primaryLayer] }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hide Roads" }));
+    mapSetPaintProperty.mockClear();
+    act(() =>
+      deferredIdle.forEach((callback) => {
+        callback();
+      }),
+    );
+    expect(mapSetPaintProperty).not.toHaveBeenCalledWith(
+      `hifld-query-${roadsId}-points`,
+      "circle-opacity",
+      0.8,
+    );
+    expect(mapSetPaintProperty).toHaveBeenCalledWith(
+      `hifld-query-${roadsId}-points`,
+      "circle-opacity",
+      0,
+    );
+  });
+  it("fits deferred query bounds once without resetting the map on refresh", () => {
+    const pending: MapConfiguration = {
+      ...baseConfiguration,
+      layers: [
+        {
+          layer_id: "preparing-0",
+          layer_name: "Roads",
+          preparation_status: "preparing",
+          visible: true,
+        },
+      ],
+    };
+    const ready: MapConfiguration = {
+      ...baseConfiguration,
+      layers: [primaryLayer],
+    };
+    const view = render(<MapView {...baseProps} configuration={pending} />);
+    expect(mapFitBounds).not.toHaveBeenCalled();
+    view.rerender(<MapView {...baseProps} configuration={ready} />);
+    expect(mapFitBounds).toHaveBeenCalledExactlyOnceWith(
+      primaryLayer.initial_bounds,
+      { padding: 24 },
+    );
+    view.rerender(
+      <MapView
+        {...baseProps}
+        configuration={{ ...ready }}
+        queryTokens={{ [roadsId]: "refreshed" }}
+      />,
+    );
+    expect(mapConstructor).toHaveBeenCalledTimes(1);
+    expect(mapFitBounds).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves an explicit camera when deferred query bounds arrive", () => {
+    const configuration: MapConfiguration = {
+      ...baseConfiguration,
+      camera: { center: [10, 20], zoom: 5 },
+      layers: [
+        {
+          layer_id: "preparing-0",
+          layer_name: "Roads",
+          preparation_status: "preparing",
+          visible: true,
+        },
+      ],
+    };
+    const view = render(
+      <MapView {...baseProps} configuration={configuration} />,
+    );
+    view.rerender(
+      <MapView
+        {...baseProps}
+        configuration={{ ...configuration, layers: [primaryLayer] }}
+      />,
+    );
+    expect(mapFitBounds).not.toHaveBeenCalled();
+    expect(mapConstructor).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts a fresh camera lifecycle only when the explicit camera changes", () => {
+    const view = render(<MapView {...baseProps} />);
+    view.rerender(
+      <MapView
+        {...baseProps}
+        configuration={{
+          ...baseConfiguration,
+          camera: { center: [10, 20], zoom: 5 },
+        }}
+      />,
+    );
+    expect(mapConstructor).toHaveBeenCalledTimes(2);
+    expect(mapConstructor).toHaveBeenLastCalledWith(
+      expect.objectContaining({ center: [10, 20], zoom: 5 }),
+    );
+  });
+
+  it("removes the map on host teardown even before React unmounts", async () => {
+    let teardown: (() => Promise<void>) | null = null;
+    const view = render(
+      <MapView
+        {...baseProps}
+        registerTeardownHandler={(handler) => {
+          teardown = handler;
+        }}
+      />,
+    );
+    await act(async () => {
+      await teardown?.();
+    });
+    expect(mapRemove).toHaveBeenCalledTimes(1);
+    view.unmount();
+    expect(mapRemove).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports confirmed empty queries without requesting tiles", async () => {
+    const onStatus = vi.fn().mockResolvedValue(undefined);
+    render(
+      <MapView
+        {...baseProps}
+        onStatus={onStatus}
+        configuration={{
+          ...baseConfiguration,
+          layers: baseConfiguration.layers.map((layer) => ({
+            ...layer,
+            result_status: "empty_result" as const,
+          })),
+        }}
+      />,
+    );
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          layers: expect.arrayContaining([
+            expect.objectContaining({
+              layer_name: "Roads",
+              status: "empty_result",
+            }),
+          ]),
+        }),
+      ),
+    );
+    expect(
+      mapAddSource.mock.calls.filter(([id]) => id.startsWith("hifld-query-")),
+    ).toHaveLength(0);
+    expect(screen.getAllByText("No rows returned")).toHaveLength(2);
+  });
+
   it("reports invalid runtime URLs instead of silently withholding feedback", async () => {
     const onStatus = vi.fn().mockResolvedValue(undefined);
     render(
@@ -466,6 +685,175 @@ describe("MapView", () => {
       ]);
     }
   });
+  it("retains the map and external source when a preparing query resolves", async () => {
+    const fetchMetadata = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        tiles: ["https://tiles.example.com/{z}/{x}/{y}.pbf"],
+        vector_layers: [{ id: "roads" }],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMetadata);
+    const external = {
+      layer_id: "external-0",
+      layer_name: "External",
+      visible: true,
+      source: {
+        type: "tilejson" as const,
+        url: "https://tiles.example.com/tiles.json",
+        source_layer: "roads",
+      },
+    };
+    const view = render(
+      <MapView
+        {...baseProps}
+        configuration={{
+          ...baseConfiguration,
+          layers: [
+            external,
+            {
+              layer_id: "preparing-0",
+              layer_name: "Roads",
+              visible: true,
+              preparation_status: "preparing",
+            },
+          ],
+        }}
+      />,
+    );
+    await act(async () => {});
+    expect(
+      mapAddSource.mock.calls.filter(([id]) => id === "hifld-query-external-0"),
+    ).toHaveLength(1);
+    expect(screen.getByText(/Preparing query/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Hide Roads" }));
+    // MapLibre reports false while an existing source fetches tiles, even
+    // though the initial style loaded and it is safe to add another source.
+    mapIsStyleLoaded.mockReturnValue(false);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Switch to satellite imagery" }),
+    );
+    mapSetLayoutProperty.mockClear();
+    view.rerender(
+      <MapView
+        {...baseProps}
+        configuration={{
+          ...baseConfiguration,
+          layers: [external, primaryLayer],
+        }}
+      />,
+    );
+    await act(async () => {});
+    expect(mapAddSource).toHaveBeenCalledWith(
+      `hifld-query-${roadsId}`,
+      expect.objectContaining({ type: "vector" }),
+    );
+    expect(mapConstructor).toHaveBeenCalledTimes(1);
+    expect(mapSetLayoutProperty).not.toHaveBeenCalledWith(
+      "satellite-base",
+      "visibility",
+      "none",
+    );
+    expect(
+      mapAddSource.mock.calls.filter(([id]) => id === "hifld-query-external-0"),
+    ).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Show Roads" })).toBeVisible();
+    view.rerender(
+      <MapView
+        {...baseProps}
+        queryTokens={{ [roadsId]: "refreshed" }}
+        configuration={{
+          ...baseConfiguration,
+          layers: [external, primaryLayer],
+        }}
+      />,
+    );
+    const options: MapOptions = mapConstructor.mock.calls[0]?.[0];
+    expect(options.transformRequest?.(primaryLayer.tile_url)).toEqual({
+      url: primaryLayer.tile_url,
+      headers: { "X-HIFLD-Query-Token": "refreshed" },
+    });
+    expect(fetchMetadata).toHaveBeenCalledTimes(1);
+    expect(mapConstructor).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <MapView
+        {...baseProps}
+        configuration={{ ...baseConfiguration, layers: [external] }}
+      />,
+    );
+    expect(mapRemoveSource).toHaveBeenCalledWith(`hifld-query-${roadsId}`);
+    expect(mapRemoveLayer).toHaveBeenCalledTimes(3);
+    expect(mapRemoveSource).not.toHaveBeenCalledWith("hifld-query-external-0");
+  });
+
+  it("preserves preparing and failed status across visibility toggles", async () => {
+    const onStatus = vi.fn().mockResolvedValue(undefined);
+    const pending = {
+      layer_id: "preparing-0",
+      layer_name: "Pending",
+      visible: true,
+      preparation_status: "preparing" as const,
+    };
+    const view = render(
+      <MapView
+        {...baseProps}
+        onStatus={onStatus}
+        configuration={{
+          ...baseConfiguration,
+          layers: [primaryLayer, pending],
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Hide Pending" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show Pending" }));
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          layers: expect.arrayContaining([
+            { layer_name: "Pending", status: "preparing" },
+          ]),
+        }),
+      ),
+    );
+    view.rerender(
+      <MapView
+        {...baseProps}
+        onStatus={onStatus}
+        configuration={{
+          ...baseConfiguration,
+          layers: [
+            primaryLayer,
+            {
+              ...pending,
+              preparation_status: "failed",
+              preparation_error: "Query failed. Retry with a smaller filter.",
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Pending: Query failed. Retry with a smaller filter.",
+    );
+    await waitFor(() =>
+      expect(onStatus).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          status: "partial",
+          layers: expect.arrayContaining([
+            expect.objectContaining({
+              layer_name: "Pending",
+              status: "failed",
+            }),
+          ]),
+        }),
+      ),
+    );
+    expect(mapConstructor).toHaveBeenCalledTimes(1);
+    expect(
+      mapAddSource.mock.calls.filter(([id]) => id === `hifld-query-${roadsId}`),
+    ).toHaveLength(1);
+  });
+
   it("keeps query layers available when an external metadata request fails", async () => {
     vi.stubGlobal(
       "fetch",
@@ -500,10 +888,10 @@ describe("MapView", () => {
     ).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Hide Roads" }));
     fireEvent.click(screen.getByRole("button", { name: "Show Roads" }));
-    expect(mapSetLayoutProperty).toHaveBeenLastCalledWith(
+    expect(mapSetPaintProperty).toHaveBeenCalledWith(
       `hifld-query-${roadsId}-points`,
-      "visibility",
-      "visible",
+      "circle-stroke-opacity",
+      1,
     );
   });
 
@@ -656,7 +1044,11 @@ describe("MapView", () => {
       expect.objectContaining({
         id: "hifld-query-bridgesquery123456789AB-points",
         source: "hifld-query-bridgesquery123456789AB",
-        layout: { visibility: "none" },
+        layout: { visibility: "visible" },
+        paint: expect.objectContaining({
+          "circle-opacity": 0,
+          "circle-stroke-opacity": 0,
+        }),
       }),
       "place-label",
     );
@@ -712,18 +1104,23 @@ describe("MapView", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Hide Roads" }));
-    expect(mapSetLayoutProperty).toHaveBeenCalledWith(
+    expect(mapSetPaintProperty).toHaveBeenCalledWith(
       "hifld-query-roadsquery1234567890ABCD-points",
-      "visibility",
-      "none",
+      "circle-opacity",
+      0,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Show Bridges" }));
-    expect(mapSetLayoutProperty).toHaveBeenCalledWith(
+    expect(mapSetPaintProperty).toHaveBeenCalledWith(
       "hifld-query-bridgesquery123456789AB-points",
-      "visibility",
-      "visible",
+      "circle-stroke-opacity",
+      1,
     );
+    expect(
+      mapSetLayoutProperty.mock.calls.filter(([id]) =>
+        id.startsWith("hifld-query-"),
+      ),
+    ).toHaveLength(0);
     expect(screen.queryByLabelText("Color Roads by")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Roads opacity")).not.toBeInTheDocument();
   });
@@ -816,6 +1213,18 @@ describe("MapView", () => {
       screen.getByRole("region", { name: "Dataset map" }),
     ).toContainElement(table);
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+  });
+
+  it("excludes hidden layers from click picking without unloading their sources", () => {
+    render(<MapView {...baseProps} />);
+    fireEvent.click(screen.getByRole("button", { name: "Hide Roads" }));
+    act(() => {
+      mapEvents.click?.({ point: { x: 1, y: 1 } });
+    });
+    expect(mapQueryRenderedFeatures).toHaveBeenLastCalledWith(
+      { x: 1, y: 1 },
+      { layers: [] },
+    );
   });
 
   it("opens selected features in a larger resizable drawer", () => {

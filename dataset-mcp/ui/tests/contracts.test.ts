@@ -75,6 +75,17 @@ const mapResult = {
 };
 
 describe("MCP multi-layer map contracts", () => {
+  it("accepts a validated empty query outcome on a layer", () => {
+    const result = MapResultSchema.safeParse({
+      ...mapResult,
+      layers: mapResult.layers.map((layer) => ({
+        ...layer,
+        result_status: "empty_result",
+      })),
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("accepts named query layers with self-contained query tokens", () => {
     const result = MapResultSchema.parse(mapResult);
 

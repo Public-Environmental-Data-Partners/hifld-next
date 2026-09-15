@@ -190,6 +190,9 @@ export const MapLayerConfigurationSchema = z
     geometry_column: z.string(),
     result_crs: z.string(),
     columns: z.array(MapColumnSchema),
+    result_status: z
+      .enum(["rows_returned", "empty_result", "empty_page", "indeterminate"])
+      .optional(),
     style: MapLayerStyleSchema.optional(),
     visible: z.boolean(),
     initial_bounds: z
@@ -208,6 +211,17 @@ export const ExternalMapLayerSchema = z
   })
   .strict();
 
+export const PendingMapLayerSchema = z
+  .object({
+    layer_id: z.string().regex(/^preparing-\d+$/),
+    layer_name: z.string().trim().min(1).max(200),
+    preparation_status: z.enum(["preparing", "failed"]),
+    preparation_error: z.string().optional(),
+    style: MapLayerStyleSchema.optional(),
+    visible: z.boolean(),
+  })
+  .strict();
+
 export const MapConfigurationSchema = z
   .object({
     title: z.string().trim().min(1).max(200),
@@ -215,7 +229,13 @@ export const MapConfigurationSchema = z
     worker_url: z.string(),
     camera: MapCameraSchema.optional(),
     layers: z
-      .array(z.union([MapLayerConfigurationSchema, ExternalMapLayerSchema]))
+      .array(
+        z.union([
+          MapLayerConfigurationSchema,
+          ExternalMapLayerSchema,
+          PendingMapLayerSchema,
+        ]),
+      )
       .min(1)
       .max(8),
   })
@@ -242,6 +262,13 @@ const MapResultLayerSchema = MapLayerConfigurationSchema.extend({
   expires_at: z.string().datetime({ offset: true }),
 }).strict();
 
+export const PreparedMapLayerResultSchema = z
+  .object({
+    layer: MapResultLayerSchema,
+    worker_url: z.string().url(),
+  })
+  .strict();
+
 export const MapResultSchema = z
   .object({
     title: z.string().trim().min(1).max(200),
@@ -249,7 +276,13 @@ export const MapResultSchema = z
     worker_url: z.string(),
     camera: MapCameraSchema.optional(),
     layers: z
-      .array(z.union([MapResultLayerSchema, ExternalMapLayerSchema]))
+      .array(
+        z.union([
+          MapResultLayerSchema,
+          ExternalMapLayerSchema,
+          PendingMapLayerSchema,
+        ]),
+      )
       .min(1)
       .max(8),
     map_spec: MapDefinitionSchema,

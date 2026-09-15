@@ -459,6 +459,11 @@ def create_mcp_server(
         sources use a public HTTPS URL; vector_tiles uses public HTTPS XYZ templates
         and requires source_layer. The server never fetches explicit source URLs.
 
+        Query layers prepare independently in the widget after this tool returns;
+        published tiles can render while SQL previews are still running. A query
+        preparation failure affects that layer only. The widget reports preparing
+        and empty_result as distinct per-layer outcomes.
+
         The widget sends asynchronous map_status model-context updates when the
         host supports them: loading, loaded, partial, or failed, with per-layer
         status and sanitized errors. Loaded applies only to the current viewport,
@@ -505,8 +510,21 @@ def create_mcp_server(
 
     mcp.tool(app=query_map_refresh_app)(refresh_query_map)
 
+    async def prepare_map_layer(layer: maps.MapLayerInput) -> FastMCPToolResult:
+        """Prepare one query layer independently for the map widget.
+
+        This app-only tool validates and previews the query before issuing its
+        signed tile access. Other map layers can continue loading independently.
+        """
+        try:
+            return _result(await maps.prepare_map_layer(dependencies.query, layer))
+        except Exception as error:
+            return _error_result(error)
+
+    mcp.tool(app=query_map_refresh_app)(prepare_map_layer)
+
     async def refresh_map(map_spec: maps.MapDefinitionInput) -> FastMCPToolResult:
-        """Refresh query tokens and catalog resolution from a durable mixed map spec."""
+        """Refresh catalog resolution and queue query preparation from a durable map spec."""
         try:
             return _result(
                 await maps.refresh_map(

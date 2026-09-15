@@ -209,9 +209,15 @@ def test_metadata_cache_requires_consistent_covering_on_every_file(tmp_path):
         return path
 
     a, b = write("a.parquet", "envelope"), write("b.parquet", "bbox")
+    write("a2.parquet", "envelope")
     cache = CoveringMetadataCache()
     assert cache.resolve(c, (a,), "geometry").xmin == ("envelope", "xmin")
+    assert cache.resolve(c, (str(tmp_path / "a*.parquet"),), "geometry").xmin == (
+        "envelope",
+        "xmin",
+    )
     assert cache.resolve(c, (a, b), "geometry") is None
+    assert cache.resolve(c, (str(tmp_path / "*.parquet"),), "geometry") is None
     assert cache.resolve(c, (a,), "missing") is None
     from query_worker.protocol import WorkerSeaweedSource
 
@@ -219,6 +225,8 @@ def test_metadata_cache_requires_consistent_covering_on_every_file(tmp_path):
     cache.resolve(c, (a,), "geometry", storage=WorkerSeaweedSource("bucket", "localhost:8333"))
     cache.resolve(c, (a,), "geometry", storage=WorkerSeaweedSource("bucket", "localhost:8334"))
     assert len(cache._entries) == before + 2
+    c.execute("COPY (SELECT 1 id) TO ? (FORMAT PARQUET)", [str(tmp_path / "absent.parquet")])
+    assert CoveringMetadataCache().resolve(c, (str(tmp_path / "a*.parquet"),), "geometry") is None
     c.close()
 
 

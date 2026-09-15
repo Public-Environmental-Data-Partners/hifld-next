@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
+import logging
+
 import pytest
 from fastmcp import Client
 from pydantic import ValidationError
 
 from app.mcp_server import AppDependencies, UIResourceConfig, create_mcp_server
+from app.tools import maps
 from app.tools.maps import (
     CatalogMapSourceInput,
     MapDefinitionInput,
@@ -25,6 +29,65 @@ class Catalog:
     ) -> dict[str, str]:
         assert (collection_id, dataset_id, file_id, file_source_id) == (3, 12, 99, 44)
         return {"type": "pmtiles", "url": "https://cdn.example/roads.pmtiles"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["view", "refresh", "prepare"])
+@pytest.mark.parametrize("failed", [False, True])
+async def test_map_duration_logs_allowlisted_outcome_only(caplog, operation, failed) -> None:
+    class InstrumentedService(Service):
+        def validate_sql(self, sql, aliases):
+            if failed:
+                raise ValueError(
+                    "sensitive-query signed-secret gs://private-bucket/private.parquet"
+                )
+            super().validate_sql(sql, aliases)
+
+    layer = MapLayerInput(
+        layer_name="sensitive-layer",
+        source=QueryMapSourceInput(
+            inputs=[{"alias": "roads", "private": "signed-secret"}],
+            sql="SELECT * FROM roads -- sensitive-query",
+        ),
+    )
+    spec = MapDefinitionInput(title="sensitive-title", layers=[layer])
+    service = InstrumentedService()
+    caplog.set_level(logging.INFO, logger="uvicorn.error.maps")
+
+    async def invoke():
+        if operation == "prepare":
+            return await maps.prepare_map_layer(service, layer)
+        if operation == "refresh":
+            return await refresh_map(
+                service, Catalog(), spec, worker_url="https://assets.example/worker.mjs"
+            )
+        return await view_map(
+            service,
+            Catalog(),
+            title=spec.title,
+            layers=spec.layers,
+            worker_url="https://assets.example/worker.mjs",
+        )
+
+    if failed:
+        with pytest.raises(ValueError):
+            await invoke()
+    else:
+        await invoke()
+    records = [record for record in caplog.records if record.name == "uvicorn.error.maps"]
+    assert len(records) == 1
+    event = json.loads(records[0].getMessage())
+    duration = event.pop("duration_ms")
+    assert isinstance(duration, (int, float)) and duration >= 0
+    assert event == {
+        "event": "map_preparation",
+        "stage": "query_layer" if operation == "prepare" else "configuration",
+        "outcome": "failed" if failed else "ready",
+    }
+    assert records[0].exc_info is None
+    assert "sensitive" not in caplog.text
+    assert "signed-secret" not in caplog.text
+    assert "private-bucket" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -65,8 +128,12 @@ async def test_view_map_combines_query_catalog_and_explicit_sources() -> None:
         ],
     )
 
+    class NoPreviewService(Service):
+        async def query(self, *args, **kwargs):
+            pytest.fail("view_map must return before executing query previews")
+
     result = await view_map(
-        Service(),
+        NoPreviewService(),
         Catalog(),
         title=spec.title,
         layers=spec.layers,
@@ -76,13 +143,15 @@ async def test_view_map_combines_query_catalog_and_explicit_sources() -> None:
 
     assert result.text.startswith("Prepared map configuration 'Mixed sources'")
     assert "Rendering is pending" in result.text
-    assert result.structured_content["worker_url"] == (
-        "https://maps.example/assets/maplibre-gl-worker.mjs"
-    )
+    assert result.structured_content["worker_url"] == "https://assets.example/worker.mjs"
     layers = result.structured_content["layers"]
-    assert layers[0]["query_id"] == "roadsquery1234567890ABCD"
-    assert layers[0]["result_status"] == "empty_result"
-    assert layers[0]["style"] == {"color": "#2166ac"}
+    assert layers[0] == {
+        "layer_id": "preparing-0",
+        "layer_name": "Query",
+        "preparation_status": "preparing",
+        "visible": True,
+        "style": {"color": "#2166ac"},
+    }
     assert layers[1] == {
         "layer_id": "external-1",
         "layer_name": "Catalog",
@@ -104,9 +173,130 @@ async def test_view_map_combines_query_catalog_and_explicit_sources() -> None:
         "source_layer": "roads",
     }
     assert "query_id" not in layers[1]
-    assert "Empty layers: Query" in result.text
-    assert "Empty layers: Query. Rendering is pending" in result.text
+    assert "Empty layers:" not in result.text
     assert result.structured_content["map_spec"] == spec.model_dump(mode="json", exclude_none=True)
+
+
+@pytest.mark.asyncio
+async def test_prepare_map_layer_returns_validated_runtime_without_source_secrets() -> None:
+    prepare = getattr(maps, "prepare_map_layer", None)
+    assert prepare is not None
+    result = await prepare(
+        Service(),
+        MapLayerInput(
+            layer_name="Roads",
+            source=QueryMapSourceInput(inputs=[{"alias": "roads"}], sql="SELECT * FROM roads"),
+            visible=False,
+            color="#2166ac",
+        ),
+    )
+    runtime = result.structured_content["layer"]
+    assert runtime["query_id"] == "roadsquery1234567890ABCD"
+    assert runtime["result_status"] == "empty_result"
+    assert runtime["visible"] is False
+    assert runtime["style"] == {"color": "#2166ac"}
+    assert result.structured_content["worker_url"].startswith("https://maps.example/")
+    assert "secret-bucket" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_prepare_map_layer_rejects_invalid_sql_before_preview() -> None:
+    class RejectingService(Service):
+        def validate_sql(self, sql, aliases):
+            raise ValueError("SQL policy rejected")
+
+        async def query(self, *args, **kwargs):
+            pytest.fail("invalid SQL must never execute")
+
+    prepare = getattr(maps, "prepare_map_layer", None)
+    assert prepare is not None
+    with pytest.raises(ValueError, match="SQL policy rejected"):
+        await prepare(
+            RejectingService(),
+            MapLayerInput(
+                layer_name="Roads",
+                source=QueryMapSourceInput(inputs=[{"alias": "roads"}], sql="DELETE FROM roads"),
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_refresh_query_map_returns_placeholder_without_preview() -> None:
+    class NoPreviewService(Service):
+        async def query(self, *args, **kwargs):
+            pytest.fail("refresh_map must let the widget prepare each query independently")
+
+    result = await refresh_map(
+        NoPreviewService(),
+        Catalog(),
+        MapDefinitionInput(
+            title="Roads",
+            layers=[
+                MapLayerInput(
+                    layer_name="Roads",
+                    source=QueryMapSourceInput(
+                        inputs=[{"alias": "roads"}], sql="SELECT * FROM roads"
+                    ),
+                )
+            ],
+        ),
+        worker_url="https://assets.example/worker.mjs",
+    )
+    assert result.structured_content["layers"][0]["preparation_status"] == "preparing"
+
+
+@pytest.mark.asyncio
+async def test_view_map_rejects_sql_policy_before_returning_placeholders() -> None:
+    class RejectingService(Service):
+        def validate_sql(self, sql, aliases):
+            raise ValueError("SQL policy rejected")
+
+    with pytest.raises(ValueError, match="SQL policy rejected"):
+        await view_map(
+            RejectingService(),
+            Catalog(),
+            title="Roads",
+            layers=[
+                MapLayerInput(
+                    layer_name="Roads",
+                    source=QueryMapSourceInput(
+                        inputs=[{"alias": "roads"}], sql="DELETE FROM roads"
+                    ),
+                )
+            ],
+            worker_url="https://assets.example/worker.mjs",
+        )
+
+
+@pytest.mark.asyncio
+async def test_registered_prepare_map_layer_sanitizes_preparation_failure() -> None:
+    class FailingService(Service):
+        async def query(self, *args, **kwargs):
+            raise RuntimeError("gs://secret-bucket/private.parquet")
+
+    server = create_mcp_server(
+        AppDependencies(catalog=Catalog(), query=FailingService()), ui_html="<html></html>"
+    )
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "prepare_map_layer",
+            {
+                "layer": {
+                    "layer_name": "Roads",
+                    "source": {
+                        "type": "query",
+                        "inputs": [{"alias": "roads"}],
+                        "sql": "SELECT * FROM roads",
+                    },
+                }
+            },
+            raise_on_error=False,
+        )
+    assert result.is_error
+    assert result.structured_content == {
+        "error": {"code": "internal_error", "message": "request could not be completed"}
+    }
+    assert "secret-bucket" not in str(result)
 
 
 @pytest.mark.asyncio

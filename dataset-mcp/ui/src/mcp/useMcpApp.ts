@@ -8,6 +8,7 @@ import {
   type MapDefinition,
   type MapResult,
   MapResultSchema,
+  PreparedMapLayerResultSchema,
 } from "./contracts";
 import {
   FEEDBACK_UNAVAILABLE,
@@ -71,9 +72,16 @@ export interface McpMapState {
 
 export function useMcpApp(): McpMapState {
   const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
+  const [refreshNotices, setRefreshNotices] = useState<Record<string, string>>(
+    {},
+  );
   const teardownHandlerRef = useRef<(() => Promise<void>) | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapSequenceRef = useRef(0);
+  const preparationAbortRef = useRef<AbortController | null>(null);
+  const layerRefreshTimersRef = useRef(
+    new Map<number, ReturnType<typeof setTimeout>>(),
+  );
   const [mapConfiguration, setMapConfiguration] =
     useState<MapConfiguration | null>(null);
   const [queryTokens, setQueryTokens] = useState<Record<string, string>>({});
@@ -89,8 +97,17 @@ export function useMcpApp(): McpMapState {
           refreshTimerRef.current = null;
         }
       };
+      const cancelPreparation = () => {
+        preparationAbortRef.current?.abort();
+        preparationAbortRef.current = null;
+        for (const timer of layerRefreshTimersRef.current.values())
+          clearTimeout(timer);
+        layerRefreshTimersRef.current.clear();
+        setRefreshNotices({});
+      };
       const failMap = (message: string, validation = false) => {
         clearRefreshTimer();
+        cancelPreparation();
         setMapConfiguration(null);
         setQueryTokens({});
         setBridgeError(message);
@@ -110,6 +127,165 @@ export function useMcpApp(): McpMapState {
       const acceptMapResult = (result: MapResult, sequence: number) => {
         if (sequence !== mapSequenceRef.current) return;
         clearRefreshTimer();
+        if (result.layers.some((layer) => "preparation_status" in layer)) {
+          cancelPreparation();
+          const controller = new AbortController();
+          preparationAbortRef.current = controller;
+          let current = result;
+          const publish = () => {
+            if (
+              controller.signal.aborted ||
+              sequence !== mapSequenceRef.current
+            )
+              return;
+            setMapConfiguration(runtimeConfiguration(current));
+            setQueryTokens(
+              Object.fromEntries(
+                current.layers.flatMap((layer) =>
+                  "query_id" in layer
+                    ? [[layer.query_id, layer.query_token]]
+                    : [],
+                ),
+              ),
+            );
+            setBridgeError(null);
+          };
+          const prepare = async (index: number): Promise<void> => {
+            const spec = result.map_spec.layers[index];
+            const original = result.layers[index];
+            if (
+              !spec ||
+              !("source" in spec) ||
+              spec.source.type !== "query" ||
+              !original ||
+              !("preparation_status" in original)
+            )
+              return;
+            const replace = (layer: MapResult["layers"][number]) => {
+              current = {
+                ...current,
+                layers: current.layers.map((existing, position) =>
+                  position === index ? layer : existing,
+                ),
+              };
+              publish();
+            };
+            const schedule = (callback: () => void, delay: number) => {
+              const previousTimer = layerRefreshTimersRef.current.get(index);
+              if (previousTimer !== undefined) clearTimeout(previousTimer);
+              layerRefreshTimersRef.current.set(
+                index,
+                setTimeout(() => {
+                  layerRefreshTimersRef.current.delete(index);
+                  if (
+                    !controller.signal.aborted &&
+                    sequence === mapSequenceRef.current
+                  )
+                    callback();
+                }, delay),
+              );
+            };
+            const previous = current.layers[index];
+            const previousExpiry =
+              previous && "expires_at" in previous
+                ? Date.parse(previous.expires_at)
+                : 0;
+            const preparing = () =>
+              replace({ ...original, preparation_status: "preparing" });
+            if (previousExpiry > Date.now())
+              schedule(preparing, previousExpiry - Date.now());
+            else preparing();
+            const clearNotice = () =>
+              setRefreshNotices((notices) =>
+                Object.fromEntries(
+                  Object.entries(notices).filter(
+                    ([name]) => name !== original.layer_name,
+                  ),
+                ),
+              );
+            const fail = (message: string) => {
+              const failed = () => {
+                clearNotice();
+                replace({
+                  ...original,
+                  preparation_status: "failed",
+                  preparation_error: message,
+                });
+              };
+              if (previousExpiry > Date.now()) {
+                setRefreshNotices((notices) => ({
+                  ...notices,
+                  [original.layer_name]: `${original.layer_name}: refresh failed. The existing layer remains available until its token expires. Reopen the map to retry.`,
+                }));
+                schedule(failed, previousExpiry - Date.now());
+              } else failed();
+            };
+            try {
+              const response = await created.callServerTool(
+                {
+                  name: "prepare_map_layer",
+                  arguments: { layer: spec },
+                },
+                { signal: controller.signal },
+              );
+              if (
+                controller.signal.aborted ||
+                sequence !== mapSequenceRef.current
+              )
+                return;
+              const parsed = PreparedMapLayerResultSchema.safeParse(
+                response.structuredContent,
+              );
+              if (
+                !parsed.success ||
+                parsed.data.layer.layer_name !== original.layer_name
+              ) {
+                const stable = ErrorResultSchema.safeParse(
+                  response.structuredContent,
+                );
+                fail(
+                  stable.success
+                    ? `${stable.data.error.message} (${stable.data.error.code})`
+                    : "The prepared layer did not match the map contract. Reopen the map with the current MCP connection.",
+                );
+                return;
+              }
+              const expiresAt = Date.parse(parsed.data.layer.expires_at);
+              if (expiresAt <= Date.now()) {
+                fail(
+                  "The prepared query token has expired. Reopen the map to retry.",
+                );
+                return;
+              }
+              replace(parsed.data.layer);
+              clearNotice();
+              schedule(
+                () => {
+                  void prepare(index);
+                },
+                Math.max(1000, expiresAt - Date.now() - TOKEN_REFRESH_LEAD_MS),
+              );
+            } catch {
+              if (
+                controller.signal.aborted ||
+                sequence !== mapSequenceRef.current
+              )
+                return;
+              fail(
+                "The host could not prepare this query layer. Reopen the map to retry.",
+              );
+            }
+          };
+          publish();
+          result.layers.forEach((layer, index) => {
+            if (
+              "preparation_status" in layer &&
+              layer.preparation_status === "preparing"
+            )
+              void prepare(index);
+          });
+          return;
+        }
         const expiresAt = earliestExpiration(result);
         if (expiresAt <= Date.now()) {
           void refreshMap(result.map_spec, sequence);
@@ -169,6 +345,7 @@ export function useMcpApp(): McpMapState {
         }
       };
       created.ontoolresult = (params) => {
+        cancelPreparation();
         const sequence = mapSequenceRef.current + 1;
         mapSequenceRef.current = sequence;
         const parsed = MapResultSchema.safeParse(params.structuredContent);
@@ -189,6 +366,8 @@ export function useMcpApp(): McpMapState {
         failMap(event.message);
       };
       created.onteardown = async () => {
+        mapSequenceRef.current += 1;
+        cancelPreparation();
         clearRefreshTimer();
         await teardownHandlerRef.current?.();
         return {};
@@ -197,6 +376,11 @@ export function useMcpApp(): McpMapState {
   });
   useEffect(
     () => () => {
+      mapSequenceRef.current += 1;
+      preparationAbortRef.current?.abort();
+      for (const timer of layerRefreshTimersRef.current.values())
+        clearTimeout(timer);
+      layerRefreshTimersRef.current.clear();
       if (refreshTimerRef.current !== null) {
         clearTimeout(refreshTimerRef.current);
       }
@@ -224,7 +408,11 @@ export function useMcpApp(): McpMapState {
   return useMemo(
     () => ({
       reportStatus,
-      feedbackNotice,
+      feedbackNotice:
+        [
+          ...Object.values(refreshNotices),
+          ...(feedbackNotice ? [feedbackNotice] : []),
+        ].join(" ") || null,
       app,
       error: bridgeError ?? error?.message ?? null,
       mapConfiguration,
@@ -234,6 +422,7 @@ export function useMcpApp(): McpMapState {
     [
       reportStatus,
       feedbackNotice,
+      refreshNotices,
       app,
       bridgeError,
       error,

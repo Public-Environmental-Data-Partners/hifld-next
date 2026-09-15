@@ -15,6 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.argument_diagnostics import ArgumentIngressDiagnostics
+from app.catalog.client import catalog_request_scope
 from app.http.disconnect import serve_connected_tile
 from app.http.queries import QueryHttpService, create_query_router
 from app.http.tiles import TileService, create_tile_router
@@ -134,6 +135,20 @@ class McpPathCanonicalizer:
         await self._app(scope, receive, send)
 
 
+class CatalogRequestScope:
+    """Keep source/collection resolution reuse isolated to an ASGI request."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        with catalog_request_scope():
+            await self._app(scope, receive, send)
+
+
 class AssetHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
@@ -216,6 +231,7 @@ def create_http_app(
     # missing response to that middleware.
     app.add_middleware(ConcurrencyLimiter, maximum=max_concurrency)
     app.add_middleware(ArgumentIngressDiagnostics)
+    app.add_middleware(CatalogRequestScope)
 
     async def invalid_request(_: Request, __: Exception) -> JSONResponse:
         return JSONResponse(

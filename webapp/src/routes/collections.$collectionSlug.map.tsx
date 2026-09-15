@@ -794,6 +794,29 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     [],
   );
 
+  const handleMapSourceRecovered = useCallback(
+    ({ sourceId, queryId }: { sourceId: string; queryId?: string | undefined }) => {
+      setLoadedLayers((current) =>
+        current.map((layer) =>
+          layer.id === sourceId && layer.loadError
+            ? {
+                ...layer,
+                loadError: null,
+                ...(layer.kind === "query_mvt" ? { status: "ready" as const } : {}),
+              }
+            : layer,
+        ),
+      );
+      if (queryId === undefined) return;
+      setQueryResult((current) =>
+        current?.page.query_id === queryId && current.errorMessage === "The query layer could not be loaded."
+          ? { ...current, status: "ready", errorMessage: null }
+          : current,
+      );
+    },
+    [],
+  );
+
   const { mapRef, setHoverFeature, clearHoverFeature, clearSelectionBox } = useMultiLayerMapInitialization(
     mapContainerRef,
     loadedLayers,
@@ -807,6 +830,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     pinnedPopupElementRef,
     queryTokensRef.current,
     handleMapSourceError,
+    handleMapSourceRecovered,
   );
 
   useLayerStyling(mapRef, vectorLayers, layerStyles, setLayerStyles);
@@ -1000,7 +1024,13 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
         label: layer.label,
         kind: layer.kind,
         visible: layer.visible,
-        ...(layer.kind === "query_mvt" ? { status: layer.status, query_id: layer.queryId } : {}),
+        status: layer.loadError
+          ? ("error" as const)
+          : mapRef.current?.getSource(layer.mapSourceId) && mapRef.current.isSourceLoaded(layer.mapSourceId)
+            ? ("ready" as const)
+            : ("loading" as const),
+        ...(layer.loadError ? { error: layer.loadError } : {}),
+        ...(layer.kind === "query_mvt" ? { query_id: layer.queryId } : {}),
         style_layers: vectorLayers
           .filter((vectorLayer) => vectorLayer.loadedLayerId === layer.id)
           .map((vectorLayer) => {

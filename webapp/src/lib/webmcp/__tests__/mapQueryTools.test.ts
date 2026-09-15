@@ -83,6 +83,29 @@ function queryPage() {
 }
 
 describe("query WebMCP tools", () => {
+  it.each([
+    [0, false, false, "empty_result"],
+    [100, false, false, "empty_page"],
+    [0, false, true, "indeterminate"],
+    [0, true, false, "indeterminate"],
+  ])("distinguishes empty results from pages and truncation (%s, %s, %s)", async (offset, hasMore, truncated, status) => {
+    const execute = vi.fn().mockResolvedValue({
+      ...queryPage(), offset, returned_count: 0, rows: [], has_more: hasMore, response_truncated: truncated,
+    });
+    const result = await executeQueryPageTool({ query_id: queryId, offset }, new AbortController().signal, execute);
+    expect(result).toMatchObject({ ok: true, data: { result_status: status } });
+  });
+
+  it("explains an empty initial query to the agent", async () => {
+    const execute = vi.fn().mockResolvedValue({ ...queryPage(), returned_count: 0, rows: [] });
+    const result = await executeQueryTool({
+      sources: [{ alias: "h", collection_id: 1, dataset_id: 2, file_id: 3, file_source_id: 4 }],
+      sql: "SELECT name FROM h",
+    }, new AbortController().signal, execute);
+    expect(result).toMatchObject({ ok: true, data: { result_status: "empty_result" } });
+    expect(JSON.stringify(result)).toContain("no rows");
+  });
+
   it("does not expose query tokens in execute results", async () => {
     const execute = vi.fn().mockResolvedValue({
       query_id: queryId,
@@ -203,6 +226,18 @@ describe("query WebMCP tools", () => {
     });
   });
 
+  it.each([
+    [400, "query_execution_failed", "Column COUNTY is missing from the query input.", "query_rejected"],
+    [408, "query_timeout", "The query exceeded its execution deadline.", "query_timeout"],
+  ])("preserves actionable validated query errors (%s)", async (status, code, message, expectedCode) => {
+    const execute = vi.fn().mockRejectedValue(new QueryApiError(status, code, message));
+    const result = await executeQueryTool({
+      sources: [{ alias: "h", collection_id: 1, dataset_id: 2, file_id: 3, file_source_id: 4 }],
+      sql: "SELECT name FROM h",
+    }, new AbortController().signal, execute);
+    expect(result).toMatchObject({ ok: false, error: { code: expectedCode, message } });
+  });
+
   it("reports an unavailable worker as query capacity", async () => {
     const execute = vi.fn().mockRejectedValue(
       new QueryApiError(503, "worker_unavailable", "No query worker is available"),
@@ -229,6 +264,24 @@ describe("query WebMCP tools", () => {
 });
 
 describe("map WebMCP tools", () => {
+  it("reports bounded per-layer failures alongside successful layers", async () => {
+    const fake = createModelContextFake();
+    installModelContextFake(fake);
+    render(createElement(MapToolHarness, { state: {
+      ...emptyState,
+      layers: [
+        { id: "flood", label: "Flood", kind: "catalog_pmtiles", visible: true, status: "ready" },
+        { id: "hosp", label: "Hospitals", kind: "query_mvt", visible: true, status: "error", error: "The query exceeded its deadline." },
+      ],
+    } }));
+    await waitFor(() => expect(fake.toolNames()).toContain("get_map_state"));
+    const result = await fake.execute("get_map_state", {});
+    expect(result).toMatchObject({ ok: true, data: { layers: [
+      { status: "ready" },
+      { status: "error", error: "The query exceeded its deadline." },
+    ] } });
+  });
+
   it("registers only map-mounted global tools when the map is empty", async () => {
     const fake = createModelContextFake();
     installModelContextFake(fake);

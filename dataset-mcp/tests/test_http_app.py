@@ -263,6 +263,7 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
                 "refresh_query_map",
                 "view_map",
                 "refresh_map",
+                "prepare_map_layer",
             }
             assert set(by_name) == expected_model_tools
             for name in expected_model_tools:
@@ -292,6 +293,10 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
             }
             assert by_name["refresh_query_map"].meta is not None
             assert by_name["refresh_query_map"].meta["ui"] == {
+                "resourceUri": "ui://hifld/dataset-explorer.html",
+                "visibility": ["app"],
+            }
+            assert by_name["prepare_map_layer"].meta["ui"] == {
                 "resourceUri": "ui://hifld/dataset-explorer.html",
                 "visibility": ["app"],
             }

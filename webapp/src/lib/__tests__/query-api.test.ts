@@ -133,6 +133,11 @@ describe("query-api", () => {
     });
   });
 
+  it("accepts explicit query result status without weakening the response schema", () => {
+    expect(QueryPageSchema.safeParse({ ...page, result_status: "rows_returned" }).success).toBe(true);
+    expect(QueryPageSchema.safeParse({ ...page, result_status: "maybe" }).success).toBe(false);
+  });
+
   it("rejects binary and raw geometry cells", () => {
     expect(
       QueryPageSchema.safeParse({

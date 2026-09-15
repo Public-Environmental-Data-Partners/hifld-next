@@ -83,14 +83,17 @@ class SourceResolver:
         metadata_object_paths = metadata.object_paths if metadata is not None else ()
         object_paths = _unique_non_empty(metadata_object_paths or ())
         storage_config = source.storage_location.config
+        storage_globs = [uri for uri in storage_uris if _contains_glob(uri)]
         concrete_storage_uris = [uri for uri in storage_uris if not _contains_glob(uri)]
         concrete_object_paths = [path for path in object_paths if not _contains_glob(path)]
-        if concrete_storage_uris:
+        if glob_patterns:
+            paths = glob_patterns
+        elif storage_globs:
+            paths = storage_globs
+        elif concrete_storage_uris:
             paths = concrete_storage_uris
         elif concrete_object_paths:
             paths = concrete_object_paths
-        elif glob_patterns and storage_config.type == "seaweedfs":
-            paths = glob_patterns
         else:
             raise CatalogClientError(
                 "source_location_invalid", "catalog source has no trusted storage URI"

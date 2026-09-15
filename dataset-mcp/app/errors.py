@@ -33,7 +33,7 @@ class ErrorCode(StrEnum):
     HOST_INTERACTIVITY_UNAVAILABLE = "host_interactivity_unavailable"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class AppError(Exception):
     code: ErrorCode
     message: str
