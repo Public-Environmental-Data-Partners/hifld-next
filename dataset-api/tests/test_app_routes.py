@@ -1,5 +1,6 @@
 """Route and startup tests for the Dataset API."""
 
+import asyncio
 import sys
 import warnings
 from pathlib import Path
@@ -16,12 +17,24 @@ import main
 from api.datasets import DatasetVersionUpsertRequest
 from database.db import get_db
 from main import app
-from models.dataset import Collection, Dataset, File, FileSource, StorageLocation
+from models import helpers
+from models.dataset import (
+    BucketStorageLocationConfig,
+    Collection,
+    Dataset,
+    File,
+    FileFormat,
+    FileLocation,
+    FileSource,
+    Format,
+    StorageLocation,
+)
 from models.helpers import file_source_json_dict, storage_location_json_dict
-from services.dataset import DatasetService
+from services.dataset import DatasetService, shaping
 
 
 HTTP_OK = 200
+GCS_CLIENT_CREATION_MESSAGE = "URL formatting must not create a GCS client"
 
 
 def test_geoserver_routes_are_not_registered() -> None:
@@ -283,3 +296,93 @@ def test_storage_location_json_dict_normalizes_config_without_serializer_warning
         "bucket": "hifld",
         "endpoint_url": "http://localhost:8333",
     }
+
+
+def test_gcs_source_urls_are_formatted_without_creating_a_storage_client(monkeypatch: MonkeyPatch) -> None:
+    """GCS response URLs are pure formatting and never initialize credentials."""
+    source = FileSource(
+        id=1,
+        file_format_id=2,
+        storage_location_id=3,
+        source_type="file",
+        location=FileLocation(path="hifld/hospitals.parquet"),
+    )
+    storage_location = StorageLocation(
+        id=3,
+        slug="gcs",
+        name="GCS",
+        backend_type="s3",
+        config=BucketStorageLocationConfig(
+            type="gcs",
+            bucket="hifld-next-datasets-prod",
+            base_url="https://datasets.example/storage",
+        ),
+    )
+
+    def fail_client_creation(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError(GCS_CLIENT_CREATION_MESSAGE)
+
+    monkeypatch.setattr(helpers, "create_storage_client_from_location", fail_client_creation)
+
+    payload = shaping._safe_source_response(source, {storage_location.id: storage_location})
+
+    assert payload["url"] == "https://datasets.example/storage/hifld/hospitals.parquet"
+    assert payload["storage_uri"] == "gs://hifld-next-datasets-prod/hifld/hospitals.parquet"
+
+
+def test_geoparquet_detail_keeps_catalog_glob_without_expanding_it(monkeypatch: MonkeyPatch) -> None:
+    """GeoParquet glob sources remain native DuckDB-discoverable catalog paths."""
+    source = FileSource(
+        id=1,
+        file_format_id=2,
+        storage_location_id=3,
+        source_type="file",
+        location=FileLocation(path="hifld/hospitals/v1/geoparquet/**/*.parquet"),
+    )
+    storage_location = StorageLocation(
+        id=3,
+        slug="seaweedfs",
+        name="SeaweedFS",
+        backend_type="s3",
+        config=BucketStorageLocationConfig(
+            type="seaweedfs",
+            bucket="hifld",
+            base_url="http://localhost:8888",
+        ),
+    )
+    context = shaping.SourceContext(
+        file_formats_by_file_id={},
+        sources_by_file_format_id={2: [source]},
+        storage_locations_by_id={3: storage_location},
+    )
+    expanded = False
+
+    async def record_expansion(*_args: object, **_kwargs: object) -> list[dict[str, object]]:
+        nonlocal expanded
+        expanded = True
+        return []
+
+    monkeypatch.setattr(shaping, "expand_glob_pattern_in_source", record_expansion)
+
+    payload = asyncio.run(
+        shaping._detail_format_response(
+            File(id=4, dataset_id=5, slug="hospitals", name="Hospitals"),
+            FileFormat(id=2, file_id=4, format_id=6),
+            Format(id=6, format_type="geoparquet", name="GeoParquet", description="GeoParquet"),
+            context,
+        )
+    )
+
+    assert expanded is False
+    assert len(payload["sources"]) == 1
+    response_source = payload["sources"][0]
+    assert response_source["location"] == {
+        "type": "file",
+        "version": "v1",
+        "path": "hifld/hospitals/v1/geoparquet/**/*.parquet",
+    }
+    assert response_source["url"] is None
+    assert response_source["storage_uri"] == (
+        "s3://hifld/hifld/hospitals/v1/geoparquet/**/*.parquet?endpoint_url=http://localhost:8333"
+    )
+    assert response_source["glob_pattern"] == response_source["storage_uri"]
