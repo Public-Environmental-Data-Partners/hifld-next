@@ -313,7 +313,7 @@ async def _map_from_definition(
     count = len(map_spec.layers)
     noun = "layer" if count == 1 else "layers"
     empty_layers_text = (
-        f" Empty layers: {', '.join(empty_layer_names)}." if empty_layer_names else ""
+        f"Empty layers: {', '.join(empty_layer_names)}. " if empty_layer_names else ""
     )
     return query.ToolResult(
         text=(

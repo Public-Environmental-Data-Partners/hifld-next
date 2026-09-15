@@ -268,6 +268,7 @@ async def test_view_query_map_returns_only_the_map_contract() -> None:
     )
     assert "Rendering is pending" in result.text
     assert "Empty layers: Roads, Bridges" in result.text
+    assert "Empty layers: Roads, Bridges. Rendering is pending" in result.text
     assert "signed" not in result.text
     assert result.structured_content["layers"][0]["query_token"] == "signed-roads"
 

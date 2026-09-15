@@ -573,7 +573,7 @@ async def _query_map_from_definition(
     layer_names = ", ".join(layer.layer_name for layer in layers)
     verb = "Refreshed" if refreshed else "Prepared"
     empty_layers_text = (
-        f" Empty layers: {', '.join(empty_layer_names)}." if empty_layer_names else ""
+        f"Empty layers: {', '.join(empty_layer_names)}. " if empty_layer_names else ""
     )
     return ToolResult(
         text=(

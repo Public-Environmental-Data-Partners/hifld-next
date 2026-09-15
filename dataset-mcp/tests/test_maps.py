@@ -105,6 +105,7 @@ async def test_view_map_combines_query_catalog_and_explicit_sources() -> None:
     }
     assert "query_id" not in layers[1]
     assert "Empty layers: Query" in result.text
+    assert "Empty layers: Query. Rendering is pending" in result.text
     assert result.structured_content["map_spec"] == spec.model_dump(mode="json", exclude_none=True)
 
 
