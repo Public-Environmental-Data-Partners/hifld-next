@@ -265,6 +265,7 @@ async def _map_from_definition(
         raise ValueError("map layer names must be unique")
     configured_worker_url = _configured_worker_url(worker_url)
     runtime_layers: list[JSONValue] = []
+    empty_layer_names: list[str] = []
     query_worker_url: str | None = None
     for index, layer in enumerate(map_spec.layers):
         if isinstance(layer.source, QueryMapSourceInput):
@@ -273,6 +274,8 @@ async def _map_from_definition(
                 raise ValueError("map layers must use the same worker URL")
             query_worker_url = layer_worker_url
             runtime_layers.append(runtime)
+            if runtime.get("result_status") == "empty_result":
+                empty_layer_names.append(layer.layer_name)
             continue
         if isinstance(layer.source, CatalogMapSourceInput):
             resolved = await catalog.resolve_map_source(
@@ -309,9 +312,13 @@ async def _map_from_definition(
     names_text = ", ".join(layer.layer_name for layer in map_spec.layers)
     count = len(map_spec.layers)
     noun = "layer" if count == 1 else "layers"
+    empty_layers_text = (
+        f" Empty layers: {', '.join(empty_layer_names)}." if empty_layer_names else ""
+    )
     return query.ToolResult(
         text=(
             f"Prepared map configuration '{map_spec.title}' with {count} {noun}: {names_text}. "
+            f"{empty_layers_text}"
             "Rendering is pending in the host widget; this does not confirm that layers loaded."
         ),
         structured_content=payload,

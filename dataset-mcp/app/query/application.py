@@ -238,6 +238,15 @@ class QueryApplicationService:
         result_crs: str | None = None,
     ) -> JSONMapping:
         parsed = page
+        result_status = (
+            "rows_returned"
+            if parsed.returned_count > 0
+            else "indeterminate"
+            if parsed.response_truncated
+            else "empty_result"
+            if parsed.offset == 0 and not parsed.has_more and not parsed.response_truncated
+            else "empty_page"
+        )
         payload = _JsonMapping.model_validate(
             {
                 "columns": [
@@ -259,6 +268,7 @@ class QueryApplicationService:
                 "files_read": parsed.files_read,
                 "response_truncated": parsed.response_truncated,
                 "deterministic_order": parsed.deterministic_order,
+                "result_status": result_status,
             }
         ).root
         if parsed.next_offset is not None:

@@ -81,6 +81,7 @@ async def test_view_map_combines_query_catalog_and_explicit_sources() -> None:
     )
     layers = result.structured_content["layers"]
     assert layers[0]["query_id"] == "roadsquery1234567890ABCD"
+    assert layers[0]["result_status"] == "empty_result"
     assert layers[0]["style"] == {"color": "#2166ac"}
     assert layers[1] == {
         "layer_id": "external-1",
@@ -103,6 +104,7 @@ async def test_view_map_combines_query_catalog_and_explicit_sources() -> None:
         "source_layer": "roads",
     }
     assert "query_id" not in layers[1]
+    assert "Empty layers: Query" in result.text
     assert result.structured_content["map_spec"] == spec.model_dump(mode="json", exclude_none=True)
 
 

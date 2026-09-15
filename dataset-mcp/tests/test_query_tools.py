@@ -38,6 +38,7 @@ class Service:
                 {"name": "traffic", "type": "INTEGER", "nullable": True},
             ],
             "rows": [],
+            "result_status": "empty_result",
             "query_token": f"signed-{alias}",
             "resolved_sources": [
                 {"object_uris": ["gs://secret-bucket/roads.parquet", "s3://secret/roads.parquet"]}
@@ -105,9 +106,25 @@ async def test_generate_mvt_tile_url_returns_only_tile_access_contract() -> None
         "source_layer": "hifld",
         "geometry_column": "geometry",
         "result_crs": "EPSG:4326",
+        "result_status": "empty_result",
     }
     assert "secret-bucket" not in result.text
     assert result.meta is None
+
+
+@pytest.mark.asyncio
+async def test_generate_mvt_tile_url_marks_legacy_preview_metadata_indeterminate() -> None:
+    class LegacyService(Service):
+        async def query(self, sources, sql, limit, geometry_column, result_crs):
+            payload = await super().query(sources, sql, limit, geometry_column, result_crs)
+            del payload["result_status"]
+            return payload
+
+    result = await query_tools.generate_mvt_tile_url(
+        LegacyService(), [{"alias": "roads"}], "SELECT geometry FROM roads"
+    )
+
+    assert result.structured_content["result_status"] == "indeterminate"
 
 
 @pytest.mark.asyncio
@@ -194,6 +211,7 @@ async def test_view_query_map_returns_only_the_map_contract() -> None:
                     "line_width_scale": "log",
                 },
                 "visible": True,
+                "result_status": "empty_result",
             },
             {
                 "query_id": "bridgesquery123456789AB",
@@ -211,6 +229,7 @@ async def test_view_query_map_returns_only_the_map_contract() -> None:
                     {"name": "traffic", "type": "INTEGER", "nullable": True},
                 ],
                 "visible": False,
+                "result_status": "empty_result",
             },
         ],
         "map_spec": {
@@ -248,6 +267,7 @@ async def test_view_query_map_returns_only_the_map_contract() -> None:
         "Prepared map configuration 'Transportation comparison' with 2 layers: Roads, Bridges."
     )
     assert "Rendering is pending" in result.text
+    assert "Empty layers: Roads, Bridges" in result.text
     assert "signed" not in result.text
     assert result.structured_content["layers"][0]["query_token"] == "signed-roads"
 

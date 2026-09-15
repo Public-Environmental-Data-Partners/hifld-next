@@ -141,6 +141,38 @@ class NonSpatialExecutor(Executor):
         )
 
 
+class EmptyPageExecutor(Executor):
+    response_truncated = False
+
+    async def execute(
+        self,
+        request: WorkerQuery | WorkerTileQuery,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> WorkerResult:
+        del timeout_seconds
+        self.calls.append(request)
+        if not isinstance(request, WorkerQuery):
+            return WorkerFailure("unused", "not exercised")
+        return WorkerPage(
+            columns=(("id", "INTEGER", False),),
+            rows=(),
+            offset=request.offset,
+            returned_count=0,
+            has_more=False,
+            next_offset=None,
+            elapsed_ms=1,
+            bytes_read=0,
+            files_read=1,
+            response_truncated=self.response_truncated,
+            deterministic_order=True,
+        )
+
+
+class TruncatedEmptyPageExecutor(EmptyPageExecutor):
+    response_truncated = True
+
+
 class UnexpectedTileExecutor(Executor):
     async def execute(
         self,
@@ -206,6 +238,25 @@ def _service(
         public_origin="https://mcp.example.test/base/",
         tile_cache=tile_cache,
     )
+
+
+@pytest.mark.asyncio
+async def test_query_result_status_distinguishes_empty_results_from_empty_pages() -> None:
+    rows_service = _service(Resolver(), Executor())
+    rows = await rows_service.query((_source(),), "SELECT id FROM roads", 1, None, None)
+    assert rows["result_status"] == "rows_returned"
+
+    empty_service = _service(Resolver(), EmptyPageExecutor())
+    initial = await empty_service.query((_source(),), "SELECT id FROM roads", 1, None, None)
+    assert initial["result_status"] == "empty_result"
+    token = initial["query_token"]
+    assert isinstance(token, str)
+    later = await empty_service.page(token, 1, 1)
+    assert later["result_status"] == "empty_page"
+
+    truncated_service = _service(Resolver(), TruncatedEmptyPageExecutor())
+    truncated = await truncated_service.query((_source(),), "SELECT id FROM roads", 1, None, None)
+    assert truncated["result_status"] == "indeterminate"
 
 
 @pytest.mark.parametrize("expired", [False, True])
