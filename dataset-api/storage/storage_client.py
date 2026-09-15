@@ -51,7 +51,7 @@ def format_storage_uri(storage_type: str, bucket: str, base_url: str, path: str)
     if storage_type == "gcs":
         return f"gs://{bucket}/{clean_path}"
     if storage_type == "seaweedfs" and base_url:
-        return f"s3://{bucket}/{clean_path}?endpoint_url={_seaweedfs_s3_url(base_url)}"
+        return f"s3://{bucket}/{clean_path}?endpoint_url={_seaweedfs_s3_url(base_url.rstrip('/'))}"
     return None
 
 

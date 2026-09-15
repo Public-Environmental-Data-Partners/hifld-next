@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from storage.storage_client import GCSStorageClient, SeaweedFSFilerClient
+from storage.storage_client import GCSStorageClient, SeaweedFSFilerClient, format_storage_uri
 
 
 def test_seaweedfs_list_files_uses_filer_http_recursively(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,6 +93,18 @@ def test_seaweedfs_list_files_uses_filer_http_recursively(monkeypatch: pytest.Mo
         "root/dataset/file.parquet",
         "root/top.json",
     ]
+
+
+def test_seaweedfs_storage_uri_strips_trailing_filer_url_slash() -> None:
+    """Pure URI formatting matches SeaweedFS client endpoint normalization."""
+    storage_uri = format_storage_uri(
+        "seaweedfs",
+        "hifld",
+        "http://localhost:8888/",
+        "root/dataset/file.parquet",
+    )
+
+    assert storage_uri == "s3://hifld/root/dataset/file.parquet?endpoint_url=http://localhost:8333"
 
 
 def test_gcs_expand_glob_pattern_includes_nested_recursive_parquet(monkeypatch: pytest.MonkeyPatch) -> None:
