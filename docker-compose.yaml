@@ -2,6 +2,27 @@
 # Copy .env.example to .env and configure your settings
 
 services:
+  clickhouse:
+    build:
+      context: ./ops/clickhouse
+    image: hifld-clickhouse:local
+    environment:
+      CLICKHOUSE_QUERY_PASSWORD: ${CLICKHOUSE_QUERY_PASSWORD:-hifld_query_local_only}
+      CLICKHOUSE_CONTROL_PASSWORD: ${CLICKHOUSE_CONTROL_PASSWORD:-hifld_control_local_only}
+    ports:
+      - "127.0.0.1:${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+    volumes:
+      - clickhouse_cache:/var/lib/clickhouse
+    mem_limit: 3g
+    cpus: 2
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8123/ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - hifld-network
+
   # PostgreSQL database for dataset-api metadata
   # Stores collections, datasets, formats, and sources metadata
   dataset-api-postgres:
@@ -87,6 +108,8 @@ services:
       - hifld-network
 
 volumes:
+  clickhouse_cache:
+    driver: local
   dataset_api_postgres_data:
     driver: local
   seaweedfs_master_data:

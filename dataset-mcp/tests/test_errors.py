@@ -38,6 +38,16 @@ async def test_prepare_map_layer_preserves_query_app_error() -> None:
         ) -> JSONMapping:
             raise AppError(ErrorCode.QUERY_EXECUTION_FAILED, "column missing")
 
+        async def prepare_spatial_query(
+            self,
+            sources: Sequence[JSONMapping],
+            sql: str,
+            limit: int,
+            geometry_column: str | None,
+            result_crs: str | None,
+        ) -> JSONMapping:
+            return await self.query(sources, sql, limit, geometry_column, result_crs)
+
         async def page(self, token: str, offset: int, limit: int) -> JSONMapping:
             raise AssertionError("page should not be called")
 

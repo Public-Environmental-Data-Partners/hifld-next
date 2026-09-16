@@ -1,0 +1,76 @@
+<clickhouse>
+  <users>
+    <default remove="remove"/>
+    <hifld_query>
+      <password from_env="CLICKHOUSE_QUERY_PASSWORD"/>
+      <profile>hifld_readonly</profile>
+      <quota>hifld_query</quota>
+      <networks><ip>::/0</ip></networks>
+      <access_management>0</access_management>
+      <named_collection_control>0</named_collection_control>
+      <show_named_collections>0</show_named_collections>
+      <show_named_collections_secrets>0</show_named_collections_secrets>
+      <grants>
+        <query>GRANT SELECT ON default.*</query>
+        <query>GRANT S3 ON *.*</query>
+        <query>GRANT CREATE TEMPORARY TABLE ON *.*</query>
+      </grants>
+    </hifld_query>
+    <hifld_control>
+      <password from_env="CLICKHOUSE_CONTROL_PASSWORD"/>
+      <profile>hifld_control</profile>
+      <quota>hifld_query</quota>
+      <networks><ip>::/0</ip></networks>
+      <access_management>0</access_management>
+      <grants>
+        <query>GRANT SELECT ON system.processes</query>
+        <query>GRANT KILL QUERY ON *.*</query>
+      </grants>
+    </hifld_control>
+  </users>
+  <profiles>
+    <hifld_readonly>
+      <readonly>2</readonly>
+      <allow_ddl>0</allow_ddl>
+      <allow_introspection_functions>0</allow_introspection_functions>
+      <max_execution_time>60</max_execution_time>
+      <max_memory_usage>1073741824</max_memory_usage>
+      <max_threads>4</max_threads>
+      <max_result_rows>100000</max_result_rows>
+      <max_result_bytes>67108864</max_result_bytes>
+      <filesystem_cache_name>hifld_s3_cache</filesystem_cache_name>
+      <enable_filesystem_cache>1</enable_filesystem_cache>
+      <use_query_cache>0</use_query_cache>
+      <max_block_size>1024</max_block_size>
+      <join_use_nulls>1</join_use_nulls>
+      <constraints>
+        <readonly><readonly/></readonly>
+        <max_execution_time><min>1</min><max>60</max></max_execution_time>
+        <max_memory_usage><min>1048576</min><max>1073741824</max></max_memory_usage>
+        <max_threads><min>1</min><max>4</max></max_threads>
+        <max_result_rows><min>1</min><max>100000</max></max_result_rows>
+        <max_result_bytes><min>1024</min><max>67108864</max></max_result_bytes>
+      </constraints>
+    </hifld_readonly>
+    <hifld_control>
+      <readonly>0</readonly>
+      <allow_ddl>0</allow_ddl>
+      <max_execution_time>5</max_execution_time>
+      <max_memory_usage>67108864</max_memory_usage>
+      <max_threads>1</max_threads>
+      <constraints><readonly><readonly/></readonly></constraints>
+    </hifld_control>
+  </profiles>
+  <quotas>
+    <hifld_query>
+      <interval>
+        <duration>3600</duration>
+        <queries>10000</queries>
+        <errors>1000</errors>
+        <result_rows>10000000</result_rows>
+        <read_rows>1000000000</read_rows>
+        <execution_time>3600</execution_time>
+      </interval>
+    </hifld_query>
+  </quotas>
+</clickhouse>

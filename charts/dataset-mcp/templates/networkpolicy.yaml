@@ -7,6 +7,12 @@ spec:
   policyTypes: [Ingress, Egress]
   ingress: [{from: [{namespaceSelector: {}}], ports: [{protocol: TCP, port: {{ .Values.containerPort }}}]}]
   egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "dataset-mcp.name" . }}-clickhouse
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports: [{protocol: TCP, port: 8123}]
     - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}}]
       ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
     {{- range .Values.networkPolicy.dnsCidrs }}

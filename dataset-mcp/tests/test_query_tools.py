@@ -45,6 +45,11 @@ class Service:
             ],
         }
 
+    async def prepare_spatial_query(
+        self, sources, sql, limit, geometry_column, result_crs
+    ) -> dict[str, object]:
+        return await self.query(sources, sql, limit, geometry_column, result_crs)
+
     def validate_token(self, token: str) -> dict[str, object]:
         if token == "signed":
             return {}

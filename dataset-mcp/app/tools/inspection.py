@@ -32,10 +32,12 @@ in the bbox CRS. Missing metadata does not justify inventing bbox fields.
 Preserve string partition values including leading zeroes; select all partitions
 intersecting the area. Camera bounds do not filter SQL.
 
-Avoid ST_Transform(large_source.geometry, ...) in the initial WHERE predicate:
-it can prevent cheap Parquet row-group pruning. Transform the small query region
-or point set into the verified source CRS, using explicit axis order where needed,
-then apply exact predicates to candidates. Unknown CRS is not EPSG:4326.
+Spatial query sources are normalized into the requested result_crs before SQL;
+map preparation defaults that working CRS to EPSG:4326. Native bbox columns stay
+in the source CRS, while coordinate literals and geometry expressions are in the
+working CRS. Unknown source CRS is not EPSG:4326 and cannot be guessed.
+ST_Intersects, ST_AsHexWKB, ST_GeomFromHexWKB, and constant ST_MakeEnvelope expressions
+are supported. ST_Transform is not currently supported by the SQL compiler.
 LIMIT and CTE names do not make a full-source spatial join cheap.
 
 For multiple polygon matches, MAX on a categorical zone label is lexicographic,
@@ -59,9 +61,11 @@ async def inspect_query_source(service: QueryService, source: QuerySourceRef) ->
         if kind == "GEOMETRY" or kind.startswith("GEOMETRY("):
             match = _geometry_crs.fullmatch(column.type)
             geometry_fields.append({"name": column.name, "crs": match.group(1) if match else None})
-        if kind.startswith("STRUCT(") and all(
+        if kind.startswith(("STRUCT(", "TUPLE(")) and all(
             re.search(
-                rf'(?:\(|,)\s*"?{field}"?\s+(?:DOUBLE|FLOAT|REAL)\b', column.type, re.IGNORECASE
+                rf'(?:\(|,)\s*"?{field}"?\s+(?:DOUBLE|FLOAT(?:32|64)?|REAL)\b',
+                column.type,
+                re.IGNORECASE,
             )
             for field in ("xmin", "ymin", "xmax", "ymax")
         ):
@@ -72,7 +76,8 @@ async def inspect_query_source(service: QueryService, source: QuerySourceRef) ->
         {
             "source": reference,
             "schema_provenance": (
-                "DuckDB SELECT * LIMIT 0 over the resolved Parquet source; no feature rows scanned"
+                "ClickHouse SELECT * LIMIT 0 over the resolved Parquet source; "
+                "no feature rows scanned"
             ),
             "columns": [column.model_dump() for column in columns],
             "geometry_fields": geometry_fields,
@@ -86,8 +91,8 @@ async def inspect_query_source(service: QueryService, source: QuerySourceRef) ->
                 "A null CRS is unknown: do not guess or silently assume EPSG:4326. "
                 "Use authoritative source metadata to resolve it.",
                 "Use partition filters and scalar bbox overlap predicates before exact spatial "
-                "predicates. Transform the small query region or point set into the source CRS "
-                "instead of wrapping every large-source geometry in ST_Transform in WHERE.",
+                "predicates. Bbox fields remain in source CRS; spatial coordinate literals use "
+                "the query working CRS.",
             ],
         }
     )

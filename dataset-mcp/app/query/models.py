@@ -82,6 +82,7 @@ class QueryTokenPayload(QueryModel):
     sources: tuple[QuerySourceRef, ...] = Field(min_length=1, max_length=8)
     geometry_column: str | None = None
     result_crs: str | None = None
+    working_crs: str | None = None
     query_id: str = Field(
         default_factory=lambda: secrets.token_urlsafe(18),
         pattern=r"^[A-Za-z0-9_-]{20,64}$",

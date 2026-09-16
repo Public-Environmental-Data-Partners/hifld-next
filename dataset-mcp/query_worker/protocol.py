@@ -59,6 +59,7 @@ class WorkerQuery:
     deterministic_order: bool = False
     max_result_bytes: int | None = None
     max_cell_bytes: int | None = None
+    working_crs: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

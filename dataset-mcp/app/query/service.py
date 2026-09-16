@@ -79,7 +79,7 @@ class QueryService:
         *,
         max_limit: int = 1_000,
         max_offset: int = 50_000,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 60.0,
         max_result_bytes: int = 4 * 1024 * 1024,
         max_cell_bytes: int = 64 * 1024,
     ) -> None:
@@ -118,6 +118,7 @@ class QueryService:
         sources: tuple[ExecutionSource, ...],
         limit: int,
         offset: int,
+        working_crs: str | None = None,
     ) -> PageResult:
         if not 1 <= limit <= self._max_limit:
             raise ValueError(f"limit must be between 1 and {self._max_limit}")
@@ -136,6 +137,7 @@ class QueryService:
             deterministic_order=validated_sql.deterministic_order,
             max_result_bytes=self._max_result_bytes,
             max_cell_bytes=self._max_cell_bytes,
+            working_crs=working_crs,
         )
         response = await self._executor.execute(request, timeout_seconds=self._timeout_seconds)
         if isinstance(response, WorkerFailure):

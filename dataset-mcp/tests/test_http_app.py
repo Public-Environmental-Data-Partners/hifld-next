@@ -80,6 +80,16 @@ class QueryStub:
             ],
         }
 
+    async def prepare_spatial_query(
+        self,
+        sources: Sequence[dict[str, str]],
+        sql: str,
+        limit: int,
+        geometry_column: str | None,
+        result_crs: str | None,
+    ) -> dict[str, int | str | list[dict[str, str | bool]]]:
+        return await self.query(sources, sql, limit, geometry_column, result_crs)
+
     async def page(self, token: str, offset: int, limit: int) -> dict[str, int]:
         return {"offset": offset, "limit": limit}
 
@@ -102,10 +112,10 @@ def _dependencies() -> AppDependencies:
     return AppDependencies(catalog=CatalogStub(), query=QueryStub())
 
 
-def test_http_dependencies_default_to_thirty_second_tile_timeout() -> None:
+def test_http_dependencies_default_to_sixty_second_tile_timeout() -> None:
     dependencies = HttpDependencies(tools=_dependencies())
 
-    assert dependencies.tile_timeout_seconds == 30
+    assert dependencies.tile_timeout_seconds == 60
 
 
 @pytest.mark.parametrize("stringify", [False, True])

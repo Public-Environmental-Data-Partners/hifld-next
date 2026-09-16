@@ -30,7 +30,14 @@ def test_query_references_are_deduplicated_and_partition_values_preserve_zeroes(
 
 
 @pytest.mark.asyncio
-async def test_inspection_uses_zero_row_probe_and_never_returns_query_tokens() -> None:
+@pytest.mark.parametrize(
+    "bbox_type",
+    [
+        "STRUCT(xmin DOUBLE, ymin DOUBLE, xmax DOUBLE, ymax DOUBLE)",
+        "Tuple(xmin Float64, ymin Float64, xmax Float64, ymax Float64)",
+    ],
+)
+async def test_inspection_uses_zero_row_probe_and_never_returns_query_tokens(bbox_type) -> None:
     class InspectionService(Service):
         async def query(self, sources, sql, limit, geometry_column, result_crs):
             assert sql == 'SELECT * FROM "roads" LIMIT 0'
@@ -41,7 +48,7 @@ async def test_inspection_uses_zero_row_probe_and_never_returns_query_tokens() -
                     {"name": "shape", "type": "GEOMETRY('EPSG:4269')", "nullable": True},
                     {
                         "name": "bounds",
-                        "type": "STRUCT(xmin DOUBLE, ymin DOUBLE, xmax DOUBLE, ymax DOUBLE)",
+                        "type": bbox_type,
                         "nullable": True,
                     },
                     {"name": "region", "type": "VARCHAR", "nullable": True},

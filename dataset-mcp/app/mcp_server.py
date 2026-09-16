@@ -281,15 +281,14 @@ def create_mcp_server(
         geometry_column: str | None = None,
         result_crs: str | None = None,
     ) -> FastMCPToolResult:
-        """Run one safe read-only DuckDB SELECT over up to eight catalog sources.
+        """Run one safe read-only SELECT over up to eight catalog sources.
 
         Copy source objects from get_dataset_file.query_sources and reference
         their aliases as SQL tables. SELECTs, joins, CTEs, aggregates, and the
         allowlisted spatial functions are supported. The limit bounds the
         returned first page, not the relational meaning of SQL LIMIT clauses.
-        Raw GEOMETRY values return size summaries, not coordinates. For bounded
-        GeoJSON use ST_AsGeoJSON, transforming to EPSG:4326 if necessary; its
-        result is a JSON string. For scalable map data use generate_mvt_tile_url.
+        Raw GEOMETRY values are not returned as GeoJSON. Use ST_AsHexWKB for a
+        serialized representation or generate_mvt_tile_url for scalable maps.
         """
         try:
             return _result(
@@ -311,7 +310,7 @@ def create_mcp_server(
         """Inspect actual Parquet columns and geometry CRS using a zero-row query.
 
         Copy one query_sources reference from get_dataset_file. Uses the existing
-        bounded worker with SELECT * LIMIT 0: may list objects/read metadata but
+        bounded query service with SELECT * LIMIT 0: may list objects/read metadata but
         does not scan feature rows. Returns columns, geometry_fields with CRS
         when available, and numeric bbox_candidates. Candidates alone do not
         prove bbox CRS or geometry association. Combine with query_hints to find
@@ -340,8 +339,9 @@ def create_mcp_server(
         Copy catalog source references from get_dataset_file.query_sources.
         SQL must SELECT a GEOMETRY column, not ST_AsGeoJSON or geometry text.
         Set geometry_column when more than one geometry is returned. Set
-        result_crs to the SQL output CRS if it cannot be inferred; it does not
-        transform your SQL. Tiles reproject and clip geometry server-side.
+        result_crs to choose the CRS in which sources and coordinate literals
+        are evaluated. Map queries default to EPSG:4326. Tiles clip geometry
+        server-side from that working CRS.
 
         Returns tile_url with {z}/{x}/{y}, required headers, expires_at,
         source_layer, geometry_column, and result_crs. Send the returned headers
