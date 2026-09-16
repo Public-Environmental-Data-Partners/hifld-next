@@ -21,6 +21,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.errors import AppError
 from app.tools import query
 
 type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
@@ -304,22 +305,29 @@ async def _map_from_definition(
         raise ValueError("map layer names must be unique")
     configured_worker_url = _configured_worker_url(worker_url)
     runtime_layers: list[JSONValue] = []
+    previews: list[JSONValue] = []
+    empty_layers: list[str] = []
     for index, layer in enumerate(map_spec.layers):
         if isinstance(layer.source, QueryMapSourceInput):
-            aliases = tuple(str(source.get("alias", "")) for source in layer.source.inputs)
-            if any(not alias for alias in aliases):
-                raise ValueError("every source must have an alias")
-            service.validate_sql(layer.source.sql, aliases)
-            pending: dict[str, JSONValue] = {
-                "layer_id": f"preparing-{index}",
-                "layer_name": layer.layer_name,
-                "preparation_status": "preparing",
-                "visible": layer.visible,
-            }
-            style = _style(layer)
-            if style is not None:
-                pending["style"] = _style_payload(style)
-            runtime_layers.append(pending)
+            try:
+                runtime, _ = await _runtime_query_layer(service, layer)
+            except AppError as error:
+                raise AppError(
+                    error.code,
+                    f"Query layer {layer.layer_name!r} failed before map creation: {error.message}",
+                    error.details,
+                ) from error
+            runtime_layers.append(runtime)
+            previews.append(
+                {
+                    "layer_name": layer.layer_name,
+                    "result_status": runtime["result_status"],
+                    "columns": runtime["columns"],
+                    "preview": runtime["preview"],
+                }
+            )
+            if runtime["result_status"] == "empty_result":
+                empty_layers.append(layer.layer_name)
             continue
         if isinstance(layer.source, CatalogMapSourceInput):
             resolved = await catalog.resolve_map_source(
@@ -355,10 +363,19 @@ async def _map_from_definition(
     names_text = ", ".join(layer.layer_name for layer in map_spec.layers)
     count = len(map_spec.layers)
     noun = "layer" if count == 1 else "layers"
+    preview_text = (
+        "\nQuery previews (at most one row per layer; not full results):\n"
+        + json.dumps(previews, ensure_ascii=False, separators=(",", ":"))
+        if previews
+        else ""
+    )
+    empty_text = f"Empty layers: {', '.join(empty_layers)}. " if empty_layers else ""
     return query.ToolResult(
         text=(
             f"Prepared map configuration '{map_spec.title}' with {count} {noun}: {names_text}. "
+            f"{empty_text}"
             "Rendering is pending in the host widget; this does not confirm that layers loaded."
+            f"{preview_text}"
         ),
         structured_content=payload,
     )

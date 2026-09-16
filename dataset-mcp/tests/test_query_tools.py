@@ -192,6 +192,7 @@ async def test_view_query_map_returns_only_the_map_contract() -> None:
         "layers": [
             {
                 "query_id": "roadsquery1234567890ABCD",
+                "preview": {"rows": [], "limit": 1, "warnings": []},
                 "layer_name": "Roads",
                 "tile_url": ("https://maps.example/tiles/roadsquery1234567890ABCD/{z}/{x}/{y}.mvt"),
                 "source_layer": "hifld",
@@ -220,6 +221,7 @@ async def test_view_query_map_returns_only_the_map_contract() -> None:
             },
             {
                 "query_id": "bridgesquery123456789AB",
+                "preview": {"rows": [], "limit": 1, "warnings": []},
                 "layer_name": "Bridges",
                 "tile_url": ("https://maps.example/tiles/bridgesquery123456789AB/{z}/{x}/{y}.mvt"),
                 "source_layer": "hifld",

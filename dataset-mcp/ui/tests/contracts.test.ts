@@ -4,6 +4,22 @@ import { ErrorResultSchema, MapResultSchema } from "../src/mcp/contracts";
 const roadsId = "roadsquery1234567890ABCD";
 const bridgesId = "bridgesquery123456789AB";
 
+it("accepts bounded query previews without rejecting the prepared map", () => {
+  const result = structuredClone(mapResult);
+  const preview = {
+    rows: [
+      { name: "Hospital", geometry: { $type: "geometry", omitted: true } },
+    ],
+    limit: 1,
+    warnings: [],
+  };
+  const parsed = MapResultSchema.safeParse({
+    ...result,
+    layers: result.layers.map((layer) => ({ ...layer, preview })),
+  });
+  expect(parsed.success).toBe(true);
+});
+
 const mapResult = {
   title: "Transportation comparison",
   basemap: "street",

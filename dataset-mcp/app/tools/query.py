@@ -553,6 +553,11 @@ async def _query_map_from_definition(
         }
         result_status = _result_status(query_result.structured_content)
         presented_layer["result_status"] = result_status
+        presented_layer["preview"] = {
+            "rows": query_result.structured_content.get("rows", []),
+            "limit": 1,
+            "warnings": query_result.structured_content.get("warnings", []),
+        }
         if result_status == "empty_result":
             empty_layer_names.append(layer.layer_name)
         columns, column_types = _result_columns(query_result.structured_content.get("columns"))
