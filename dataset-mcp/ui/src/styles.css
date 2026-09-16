@@ -262,6 +262,27 @@ button:focus-visible {
   border-top-color: currentColor;
   border-radius: 50%;
   animation: map-loading-spin 700ms linear infinite;
+  flex-shrink: 0;
+}
+
+.map-feature-loading {
+  position: absolute;
+  top: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  max-width: calc(100% - 7rem);
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  background: var(--color-background-primary, #fff);
+  color: var(--color-text-primary, #252525);
+  box-shadow: 0 1px 5px #0003;
+  font-size: var(--font-text-sm-size, 0.875rem);
+  overflow-wrap: anywhere;
+  pointer-events: none;
 }
 
 @keyframes map-loading-spin {

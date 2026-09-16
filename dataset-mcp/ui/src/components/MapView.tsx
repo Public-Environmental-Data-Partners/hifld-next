@@ -1460,6 +1460,11 @@ export function MapView({
   };
   const visibleMessage =
     message && !dismissedMessages.has(message) ? message : null;
+  const loadingLayers = runtimeStatuses
+    .filter(
+      (layer) => layer.status === "loading" || layer.status === "preparing",
+    )
+    .map((layer) => layer.layer_name);
   return (
     <section
       className={`map-view${hasHighlight ? " map-view-has-selection" : ""}`}
@@ -1469,12 +1474,23 @@ export function MapView({
       <div
         ref={mapNode}
         className="map-canvas"
-        aria-busy={isMapLoading || undefined}
+        aria-busy={isMapLoading || loadingLayers.length > 0 || undefined}
       />
       {isMapLoading ? (
         <div className="map-loading" role="status">
           <span className="map-loading-spinner" aria-hidden="true" />
           <span>Loading map…</span>
+        </div>
+      ) : null}
+      {!isMapLoading && loadingLayers.length > 0 ? (
+        <div
+          className="map-feature-loading"
+          role="status"
+          aria-label="Feature loading"
+          aria-live="polite"
+        >
+          <span className="map-loading-spinner" aria-hidden="true" />
+          <span>Loading features: {loadingLayers.join(", ")}…</span>
         </div>
       ) : null}
       {visibleMessage || selectionContextStatus === "rejected" ? (
@@ -1497,7 +1513,11 @@ export function MapView({
             </div>
           ) : null}
           {selectionContextStatus === "rejected" ? (
-            <div className="map-selection-status" role="status">
+            <div
+              className="map-selection-status"
+              role="status"
+              aria-label="Selection context"
+            >
               {!hasHighlight && selectionBounds === null
                 ? "Highlight cleared locally, but the host context could not be cleared. The prior selection may remain available to the agent."
                 : "Selection context could not be updated."}

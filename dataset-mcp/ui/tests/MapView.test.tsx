@@ -1066,6 +1066,25 @@ describe("MapView", () => {
     expect(screen.queryByText("Loading map…")).not.toBeInTheDocument();
   });
 
+  it("shows feature loading until source rendering completes and again on viewport changes", () => {
+    render(<MapView {...baseProps} />);
+    expect(screen.getByText("Loading features: Roads…")).toBeVisible();
+    act(() => runtimeEvents.get("render")?.({}));
+    expect(
+      screen.queryByText("Loading features: Roads…"),
+    ).not.toBeInTheDocument();
+    act(() =>
+      runtimeEvents.get("sourcedataloading")?.({
+        sourceId: `hifld-query-${roadsId}`,
+      }),
+    );
+    expect(screen.getByText("Loading features: Roads…")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Hide Roads" }));
+    expect(
+      screen.queryByText("Loading features: Roads…"),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders one legend group per named layer without an overlaid title", () => {
     render(<MapView {...baseProps} />);
 
@@ -1339,7 +1358,9 @@ describe("MapView", () => {
     expect(contextTooltip).toHaveTextContent(
       "The MCP client does not support adding selected features to chat context.",
     );
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "Selection context" }),
+    ).not.toBeInTheDocument();
   });
 
   it("clears the table and all selection status with the toolbar eraser", () => {
@@ -1356,7 +1377,9 @@ describe("MapView", () => {
     expect(
       screen.queryByRole("table", { name: "Selected features" }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "Selection context" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText("0 features highlighted"),
     ).not.toBeInTheDocument();
@@ -1376,7 +1399,9 @@ describe("MapView", () => {
     expect(
       screen.queryByRole("table", { name: "Selected features" }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "Selection context" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText("0 features highlighted"),
     ).not.toBeInTheDocument();
@@ -1663,7 +1688,9 @@ describe("MapView", () => {
       );
     });
 
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "Selection context" }),
+    ).not.toBeInTheDocument();
     expect(mapSetData).toHaveBeenLastCalledWith({
       type: "FeatureCollection",
       features: [],
@@ -1707,7 +1734,9 @@ describe("MapView", () => {
       />,
     );
 
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "Selection context" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("complementary", { name: "Selected feature" }),
     ).not.toBeInTheDocument();
@@ -1821,12 +1850,16 @@ describe("MapView", () => {
     await act(async () => {
       second.resolve({});
     });
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "Selection context" }),
+    ).not.toBeInTheDocument();
 
     await act(async () => {
       first.reject(new Error("stale host failure"));
     });
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "Selection context" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows an error status when clearing highlight context is rejected", async () => {
@@ -1859,12 +1892,14 @@ describe("MapView", () => {
       );
     });
 
-    expect(screen.getByRole("status")).toHaveTextContent(
+    expect(
+      screen.getByRole("status", { name: "Selection context" }),
+    ).toHaveTextContent(
       "Highlight cleared locally, but the host context could not be cleared. The prior selection may remain available to the agent.",
     );
-    expect(screen.getByRole("status")).not.toHaveTextContent(
-      "0 features highlighted",
-    );
+    expect(
+      screen.getByRole("status", { name: "Selection context" }),
+    ).not.toHaveTextContent("0 features highlighted");
   });
 
   it("retries a rejected context clear when the map view unmounts", async () => {
