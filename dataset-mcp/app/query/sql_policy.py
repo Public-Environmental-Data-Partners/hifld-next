@@ -3,6 +3,8 @@ from dataclasses import dataclass
 import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError, TokenError
+from sqlglot.expressions.dml import DML
+from sqlglot.optimizer.scope import Scope, traverse_scope
 
 MAX_SQL_BYTES = 8 * 1024
 
@@ -204,6 +206,8 @@ class SqlPolicy:
         statement = statements[0]
         if not isinstance(statement, exp.Select | exp.SetOperation):
             raise SqlPolicyError("Only SELECT queries are allowed")
+        if statement.find(exp.DDL, DML, exp.Into, exp.Command) is not None:
+            raise SqlPolicyError("Only SELECT queries are allowed, including inside CTEs")
 
         SqlPolicy._validate_tables(statement, aliases)
         SqlPolicy._validate_functions(statement)
@@ -221,15 +225,19 @@ class SqlPolicy:
         cte_names = {cte.alias.casefold() for cte in statement.find_all(exp.CTE)}
         if allowed_relations.intersection(cte_names):
             raise SqlPolicyError("Source aliases must not collide with CTE names")
-        allowed_relations.update(cte_names)
-
         for table in statement.find_all(exp.Table):
             if table.catalog or table.db:
                 raise SqlPolicyError("Qualified catalog and schema names are not allowed")
             if not isinstance(table.this, exp.Identifier):
                 raise SqlPolicyError("Table functions and path relations are not allowed")
-            if table.name.casefold() not in allowed_relations:
-                raise SqlPolicyError(f"Unknown source alias: {table.name}")
+        # A CTE is visible only in its lexical scope. Collecting all CTE names
+        # globally would authorize unrelated outer references to engine tables.
+        for scope in traverse_scope(statement):
+            for _, source in scope.selected_sources.values():
+                if isinstance(source, Scope):
+                    continue
+                if source.name.casefold() not in allowed_relations:
+                    raise SqlPolicyError(f"Unknown source alias: {source.name}")
 
     @staticmethod
     def _validate_functions(statement: exp.Query) -> None:

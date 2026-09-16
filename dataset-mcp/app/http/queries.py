@@ -18,8 +18,8 @@ from app.http.tiles import (
 )
 from app.observability import QueryObservability
 from app.query.models import JsonValue
+from query_engine.tiles import validate_tile_coordinates
 from query_worker.protocol import WorkerFailure, WorkerTile
-from query_worker.tiles import validate_tile_coordinates
 
 
 class _RequestModel(BaseModel):
@@ -150,7 +150,7 @@ def create_query_router(
 ) -> APIRouter:
     """Adapt query application methods to stable REST resources without SQL logic."""
     if tile_timeout_seconds <= 0 or tile_timeout_seconds > DEFAULT_TILE_TIMEOUT_SECONDS:
-        raise ValueError("tile timeout must be greater than zero and at most 30 seconds")
+        raise ValueError("tile timeout must be greater than zero and at most 60 seconds")
     router = APIRouter()
     allowed_origins = frozenset(webapp_origins)
 

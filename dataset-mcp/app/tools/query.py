@@ -219,6 +219,14 @@ class QueryService(Protocol):
     def read_rows(
         self, source: JSONMapping, columns: Sequence[str], limit: int, offset: int
     ) -> Awaitable[JSONMapping]: ...
+    def prepare_spatial_query(
+        self,
+        sources: Sequence[JSONMapping],
+        sql: str,
+        limit: int,
+        geometry_column: str | None,
+        result_crs: str | None,
+    ) -> Awaitable[JSONMapping]: ...
     def query(
         self,
         sources: Sequence[JSONMapping],
@@ -306,6 +314,24 @@ async def query_geoparquet(
     return _result("Parquet query", payload)
 
 
+async def _prepare_spatial_query(
+    service: QueryService,
+    sources: Sequence[JSONMapping],
+    sql: str,
+    *,
+    geometry_column: str | None,
+    result_crs: str | None,
+) -> ToolResult:
+    if not 1 <= len(sources) <= 8:
+        raise ValueError("between 1 and 8 sources are required")
+    aliases = tuple(str(source.get("alias", "")) for source in sources)
+    if any(not alias for alias in aliases):
+        raise ValueError("every source must have an alias")
+    service.validate_sql(sql, aliases)
+    payload = await service.prepare_spatial_query(sources, sql, 1, geometry_column, result_crs)
+    return _result("Spatial Parquet query", payload)
+
+
 async def generate_mvt_tile_url(
     service: QueryService,
     sources: Sequence[JSONMapping],
@@ -315,11 +341,10 @@ async def generate_mvt_tile_url(
     result_crs: str | None = None,
 ) -> ToolResult:
     """Reuse signed query execution and geometry/CRS validation without creating a UI."""
-    result = await query_geoparquet(
+    result = await _prepare_spatial_query(
         service,
         sources,
         sql,
-        limit=1,
         geometry_column=geometry_column,
         result_crs=result_crs,
     )
@@ -492,11 +517,10 @@ async def _query_map_from_definition(
     )
     for layer in layers:
         layer_style = layer.resolved_style()
-        query_result = await query_geoparquet(
+        query_result = await _prepare_spatial_query(
             service,
             layer.sources,
             layer.sql,
-            limit=1,
             geometry_column=layer.geometry_column,
             result_crs=layer.result_crs,
         )

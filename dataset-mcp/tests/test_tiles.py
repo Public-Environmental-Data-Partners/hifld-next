@@ -428,10 +428,10 @@ def make_client(service: TileService) -> TestClient:
     return TestClient(app)
 
 
-def test_http_tile_router_rejects_timeout_over_thirty_seconds() -> None:
+def test_http_tile_router_rejects_timeout_over_sixty_seconds() -> None:
     service = TileService(WorkerTile(b"mvt", 1.0, 0, 0))
-    with pytest.raises(ValueError, match="at most 30 seconds"):
-        create_tile_router(service, timeout_seconds=30.1)
+    with pytest.raises(ValueError, match="at most 60 seconds"):
+        create_tile_router(service, timeout_seconds=60.1)
 
 
 def test_http_tile_validates_coordinates_before_service_dispatch() -> None:
@@ -443,7 +443,7 @@ def test_http_tile_validates_coordinates_before_service_dispatch() -> None:
     assert service.calls == []
 
 
-def test_http_tile_revalidates_token_with_thirty_second_timeout_and_safe_cors() -> None:
+def test_http_tile_revalidates_token_with_sixty_second_timeout_and_safe_cors() -> None:
     service = TileService(WorkerTile(b"mvt", 1.0, 0, 0))
     response = make_client(service).get(
         "/tiles/2/1/1.mvt", headers={"X-HIFLD-Query-Token": "signed"}
@@ -455,7 +455,7 @@ def test_http_tile_revalidates_token_with_thirty_second_timeout_and_safe_cors() 
     assert response.headers["access-control-allow-origin"] == "*"
     assert response.headers["access-control-allow-headers"] == "X-HIFLD-Query-Token"
     assert response.headers["vary"] == "X-HIFLD-Query-Token"
-    assert service.calls == [("signed", 2, 1, 1, 30.0)]
+    assert service.calls == [("signed", 2, 1, 1, 60.0)]
 
 
 def test_http_query_id_tile_binds_path_identity_before_rendering() -> None:
@@ -468,7 +468,7 @@ def test_http_query_id_tile_binds_path_identity_before_rendering() -> None:
 
     assert response.status_code == 200
     assert service.identity_calls == [("signed", query_id)]
-    assert service.calls == [("signed", 2, 1, 1, 30.0)]
+    assert service.calls == [("signed", 2, 1, 1, 60.0)]
 
 
 def test_http_query_id_tile_preflight_allows_sandbox_token_header() -> None:

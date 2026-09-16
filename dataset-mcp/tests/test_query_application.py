@@ -387,6 +387,39 @@ async def test_arbitrary_query_does_not_guess_result_crs_from_its_sources() -> N
     )
 
     assert "map_configuration" not in result
+    request = service._worker_executor.calls[0]
+    assert isinstance(request, WorkerQuery)
+    assert request.working_crs is None
+
+
+@pytest.mark.asyncio
+async def test_spatial_query_defaults_working_crs_and_preserves_it_for_pages() -> None:
+    executor = Executor()
+    service = _service(ProjectedResolver(), executor)
+
+    result = await service.prepare_spatial_query(
+        (_source(),), "SELECT geometry FROM roads", 1, None, None
+    )
+    token = result["query_token"]
+    assert isinstance(token, str)
+    await service.page(token, 1, 1)
+
+    requests = [request for request in executor.calls if isinstance(request, WorkerQuery)]
+    assert [request.working_crs for request in requests] == ["EPSG:4326", "EPSG:4326"]
+    assert [request.materialize_geometry for request in requests] == [False, True]
+    assert result["map_configuration"]["result_crs"] == "EPSG:4326"
+
+
+@pytest.mark.asyncio
+async def test_explicit_query_result_crs_normalizes_before_sql() -> None:
+    executor = Executor()
+    service = _service(Resolver(), executor)
+
+    await service.query((_source(),), "SELECT geometry FROM roads", 1, None, "EPSG:3857")
+
+    request = executor.calls[0]
+    assert isinstance(request, WorkerQuery)
+    assert request.working_crs == "EPSG:3857"
 
 
 @pytest.mark.asyncio
@@ -410,7 +443,6 @@ async def test_query_uses_crs_declared_by_the_result_geometry_type() -> None:
         "source_layer": "hifld",
         "geometry_column": "geometry",
         "result_crs": "EPSG:3857",
-        "initial_bounds": [-80.0, 35.0, -79.0, 36.0],
     }
 
     map_result = await service.map_configuration(result["query_token"])
@@ -446,7 +478,6 @@ async def test_map_configuration_rejects_a_non_spatial_query_token() -> None:
     "executor, sql, geometry_column, expected",
     [
         (NonSpatialExecutor(), "SELECT id FROM roads", None, ErrorCode.GEOMETRY_AMBIGUOUS),
-        (Executor(), "SELECT geometry FROM roads", None, ErrorCode.GEOMETRY_CRS_REQUIRED),
         (Executor(), "SELECT geometry FROM roads", "missing", ErrorCode.MAP_NOT_SUPPORTED),
     ],
 )
@@ -474,7 +505,7 @@ async def test_tile_url_tool_reuses_full_signed_query_and_sandbox_safe_route() -
     assert isinstance(token, str)
     payload = service._decode_token(token)
     assert payload.canonical_sql == sql
-    assert result.structured_content["result_crs"] == "EPSG:3857"
+    assert result.structured_content["result_crs"] == "EPSG:4326"
     assert result.structured_content["tile_url"] == (
         f"https://mcp.example.test/base/tiles/{payload.query_id}/{{z}}/{{x}}/{{y}}.mvt"
     )

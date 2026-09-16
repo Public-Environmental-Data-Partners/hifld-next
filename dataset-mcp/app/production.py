@@ -15,8 +15,9 @@ from app.query.service import QueryService
 from app.query.tile_cache import TileCache
 from app.query.token_codec import QueryTokenCodec
 from app.storage.resolver import StorageResolver
-from query_worker.pool import WorkerPool, WorkerPoolConfig
-from query_worker.protocol import WorkerRuntimeConfig, WorkerSeaweedCredentials
+from query_engine.client import ClickHouseClient
+from query_engine.executor import ClickHouseExecutor
+from query_worker.protocol import WorkerSeaweedCredentials
 
 
 def create_production_app(
@@ -31,25 +32,23 @@ def create_production_app(
     catalog = CatalogClient(str(configured.catalog_base_url))
     source_resolver = SourceResolver(catalog)
     storage_resolver = StorageResolver()
-    pool = WorkerPool(
-        WorkerPoolConfig(
-            worker_count=configured.worker_count,
-            soft_timeout_seconds=configured.query_timeout_seconds,
-            hard_timeout_seconds=configured.query_timeout_seconds + 5,
+    del install_extensions, seaweedfs_credentials
+    executor = ClickHouseExecutor(
+        ClickHouseClient(
+            str(configured.clickhouse_url),
+            configured.clickhouse_username,
+            configured.clickhouse_password.get_secret_value(),
+            control_username=configured.clickhouse_control_username,
+            control_password=configured.clickhouse_control_password.get_secret_value(),
+            max_threads=configured.clickhouse_max_threads,
+            max_memory_bytes=configured.clickhouse_max_memory_bytes,
+            discover_replicas=configured.clickhouse_discover_replicas,
+            max_pending_queries=configured.clickhouse_max_pending_queries,
         ),
-        WorkerRuntimeConfig(
-            threads=configured.duckdb_threads,
-            memory_limit=configured.duckdb_memory_limit,
-            temp_directory=configured.duckdb_temp_directory,
-            max_temp_directory_size=configured.duckdb_max_temp_directory_size,
-            extension_directory=configured.duckdb_extension_directory,
-            seaweedfs_credentials=seaweedfs_credentials,
-            install_extensions=install_extensions,
-            max_result_bytes=configured.max_result_bytes,
-        ),
+        seaweed_endpoint=configured.clickhouse_seaweed_endpoint,
     )
     core_query = QueryService(
-        pool,
+        executor,
         max_limit=configured.query_max_limit,
         max_offset=configured.query_max_offset,
         timeout_seconds=configured.query_timeout_seconds,
@@ -60,7 +59,7 @@ def create_production_app(
         source_resolver=source_resolver,
         storage_resolver=storage_resolver,
         query_service=core_query,
-        worker_executor=pool,
+        worker_executor=executor,
         token_codec=QueryTokenCodec(
             configured.query_token_secret.get_secret_value().encode("utf-8")
         ),
@@ -81,8 +80,8 @@ def create_production_app(
     return create_http_app(
         HttpDependencies(
             tools=tools,
-            startup=(pool.start,),
-            shutdown=(catalog.aclose, pool.close),
+            startup=(executor.start,),
+            shutdown=(catalog.aclose, executor.close),
             tile_service=query,
             tile_timeout_seconds=configured.tile_timeout_seconds,
             query_service=query,

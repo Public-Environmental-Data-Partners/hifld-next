@@ -207,6 +207,7 @@ class QueryApplicationService:
         *,
         geometry_column: str | None,
         result_crs: str | None,
+        working_crs: str | None = None,
     ) -> tuple[str, str]:
         issued_at = datetime.now(tz=UTC).replace(microsecond=0)
         query_id = secrets.token_urlsafe(18)
@@ -215,6 +216,7 @@ class QueryApplicationService:
             sources=tuple(refs),
             geometry_column=geometry_column,
             result_crs=result_crs,
+            working_crs=working_crs,
             query_id=query_id,
             issued_at=issued_at,
             expires_at=issued_at + timedelta(seconds=self._token_ttl_seconds),
@@ -357,6 +359,7 @@ class QueryApplicationService:
         bounds = [source.resolved.bbox for source in sources]
         if (
             bounds
+            and result_crs == "EPSG:4326"
             and all(bound is not None for bound in bounds)
             and all(source.resolved.crs == "EPSG:4326" for source in sources)
         ):
@@ -415,22 +418,47 @@ class QueryApplicationService:
         geometry_column: str | None,
         result_crs: str | None,
     ) -> JSONMapping:
+        return await self._query(sources, sql, limit, geometry_column, result_crs, spatial=False)
+
+    async def prepare_spatial_query(
+        self,
+        sources: Sequence[JSONMapping],
+        sql: str,
+        limit: int,
+        geometry_column: str | None,
+        result_crs: str | None,
+    ) -> JSONMapping:
+        return await self._query(sources, sql, limit, geometry_column, result_crs, spatial=True)
+
+    async def _query(
+        self,
+        sources: Sequence[JSONMapping],
+        sql: str,
+        limit: int,
+        geometry_column: str | None,
+        result_crs: str | None,
+        *,
+        spatial: bool,
+    ) -> JSONMapping:
         refs = tuple(self._parse_source(source) for source in sources)
         if len({ref.alias.casefold() for ref in refs}) != len(refs):
             raise ValueError("source aliases must be unique")
         validated = self._validated_sql(sql, refs)
         execution_sources = await self._execution_sources(refs)
+        working_crs = result_crs or ("EPSG:4326" if spatial else None)
         page = await self._query_service.execute_page(
             validated_sql=validated,
             sources=execution_sources,
             limit=limit,
             offset=0,
+            working_crs=working_crs,
+            materialize_geometry=not spatial,
         )
         resolved_geometry, resolved_crs = self._resolve_map_columns(
             page,
             execution_sources,
             geometry_column=geometry_column,
-            result_crs=result_crs,
+            result_crs=working_crs,
             infer_source_crs=False,
         )
         token, query_id = self._encode_token(
@@ -438,6 +466,7 @@ class QueryApplicationService:
             refs,
             geometry_column=resolved_geometry,
             result_crs=resolved_crs,
+            working_crs=working_crs,
         )
         return self._page_payload(
             page,
@@ -458,6 +487,7 @@ class QueryApplicationService:
             sources=sources,
             limit=limit,
             offset=offset,
+            working_crs=payload.working_crs,
         )
         return self._page_payload(
             page,

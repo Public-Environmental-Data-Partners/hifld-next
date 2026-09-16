@@ -1,0 +1,12 @@
+<clickhouse>
+  <user_scripts_path>/opt/hifld-user-scripts/</user_scripts_path>
+  <user_defined_executable_functions_config>/etc/clickhouse-server/*_function.xml</user_defined_executable_functions_config>
+  <filesystem_caches>
+    <hifld_s3_cache>
+      <path>/var/lib/clickhouse/filesystem_cache/hifld_s3/</path>
+      <max_size>1073741824</max_size>
+      <max_elements>10000</max_elements>
+      <cache_on_write_operations>false</cache_on_write_operations>
+    </hifld_s3_cache>
+  </filesystem_caches>
+</clickhouse>

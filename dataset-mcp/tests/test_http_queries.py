@@ -95,9 +95,9 @@ def client(service: QueryService, observability: QueryObservability | None = Non
     return TestClient(app)
 
 
-def test_http_query_router_rejects_tile_timeout_over_thirty_seconds() -> None:
-    with pytest.raises(ValueError, match="at most 30 seconds"):
-        create_query_router(QueryService(), tile_timeout_seconds=30.1)
+def test_http_query_router_rejects_tile_timeout_over_sixty_seconds() -> None:
+    with pytest.raises(ValueError, match="at most 60 seconds"):
+        create_query_router(QueryService(), tile_timeout_seconds=60.1)
 
 
 def query_request() -> dict[str, JsonValue]:
@@ -253,7 +253,7 @@ def test_http_query_tile_reflects_only_configured_origin_and_preserves_mvt_behav
     assert tile.headers["vary"] == "Origin, X-HIFLD-Query-Token"
     assert service.calls == [
         "validate:signed:query_123",
-        "tile:signed:4:3:6:30.0",
+        "tile:signed:4:3:6:60.0",
     ]
 
     denied = http.get(

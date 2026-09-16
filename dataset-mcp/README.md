@@ -1,14 +1,16 @@
 # dataset-mcp
 
 Stateless FastMCP Apps service for catalog discovery and bounded server-side
-DuckDB queries. The production image builds the nested React app, installs
-DuckDB `httpfs` and `spatial` extensions at image-build time, and runs as a
-non-root user with a read-only root filesystem. Runtime scratch space is the
-dedicated 4 GiB spill volume configured by the Helm chart.
+ClickHouse queries. The production image builds the nested React app and runs
+as a non-root user. A separate internal ClickHouse service provides request-local
+SQL execution, native object-store glob discovery, shared filesystem caching and
+fixed CRS projection functions. See [query engine setup and compatibility](../ops/clickhouse/README.md).
 
 ## Local development
 
-Start the service on port 8001 with no configuration:
+Start ClickHouse with `docker compose up -d --build clickhouse` from the repository
+root, export the ClickHouse settings documented in `.env.example`, then start the
+service on port 8001:
 
 ```bash
 cd dataset-mcp
@@ -16,8 +18,8 @@ uv run fastapi dev
 ```
 
 Local development defaults the dataset-api URL to `http://127.0.0.1:8000` and
-uses the fixed `access` / `secret` credentials from the repository's local
-SeaweedFS setup. Set `DATASET_MCP_CATALOG_BASE_URL` only when dataset-api is
+uses unsigned reads against the repository's local SeaweedFS setup. Set
+`DATASET_MCP_CATALOG_BASE_URL` only when dataset-api is
 running elsewhere. Object locations and non-secret storage configuration come
 from dataset-api; dataset-mcp does not maintain a second storage-profile
 configuration.
@@ -29,9 +31,9 @@ prefix and is exposed on port 8000. Required settings are:
 - `DATASET_MCP_QUERY_TOKEN_SECRET`: at least 32 bytes, used to sign stateless
   query and tile tokens.
 
-`DATASET_MCP_PUBLIC_ORIGIN` is optional. DuckDB's `httpfs` and `spatial`
-extensions are installed into `/opt/duckdb/extensions` while the image is
-built; the container never downloads extensions at startup. `/healthz` is the
+ClickHouse endpoint and query/control credentials are also required as described
+in the engine setup. `DATASET_MCP_PUBLIC_ORIGIN` is optional. No DuckDB runtime
+or extensions are installed in the production image. `/healthz` is the
 Kubernetes and container health endpoint; MCP traffic is served at `/mcp`.
 
 The first-party webapp keeps the MCP transport same-origin by default. Its
@@ -64,7 +66,7 @@ service:
   `offset` is non-negative and `page_size` is 1 through 1,000.
 
 Stable problem codes are returned for policy, timeout, capacity, token, and
-geometry failures. They do not expose DuckDB errors, SQL, object paths,
+geometry failures. They do not expose raw database errors, SQL, object paths,
 credentials, or token values. Query MVT is loaded directly from the public
 `GET /api/queries/{query_id}/tiles/{z}/{x}/{y}.mvt` URL, with the same token
 header; the webapp does not proxy tiles. Query IDs do not identify persisted
@@ -90,7 +92,9 @@ layer sources. Common styling (`color`, `color_property`, `opacity`,
 `point_radius`, etc.) and `visible` remain on each layer.
 
 - `query`: `inputs` contains catalog references and SQL aliases; `sql` is required.
-  Optional `geometry_column` and `result_crs` describe the query's output.
+  Optional `geometry_column` selects the output geometry. `result_crs` sets the
+  common working CRS of all geometry sources before SQL runs (default EPSG:4326).
+  Native bbox columns are not reprojected.
 - `catalog`: `collection_id`, `dataset_id`, `file_id`, and `file_source_id` select
   an exact published PMTiles source. `get_dataset_file` returns `map_sources`
   alongside all existing file formats and GeoParquet `query_sources`.
@@ -113,7 +117,7 @@ For example, the following layer sources can be mixed in one map:
 {"type":"vector_tiles","tiles":["https://example.org/{z}/{x}/{y}.pbf"],"source_layer":"hospitals","maxzoom":14}
 ```
 
-Only query sources invoke DuckDB. Other sources load directly in the browser and
+Only query sources invoke ClickHouse. Other sources load directly in the browser and
 must allow cross-origin requests; PMTiles hosting must support HTTP byte ranges.
 `source_layer` is inferred only when metadata declares exactly one vector layer.
 Metadata failures are reported per layer without blocking other layers. Rendering
@@ -123,7 +127,7 @@ The widget declares public HTTPS connections in its MCP resource CSP; script and
 frame permissions are not broadened. Hosts may impose stricter network policies.
 External sources never receive HIFLD query tokens. Local/private URLs, embedded
 credentials, non-vector PMTiles, and invalid metadata are rejected. URLs are not
-server-side fetch instructions or DuckDB inputs.
+server-side fetch instructions or SQL source inputs.
 
 The result includes a durable `map_spec`; `refresh_map` refreshes query tokens and
 re-resolves catalog sources. External-only maps do not schedule token refreshes.
@@ -172,7 +176,7 @@ Each layer receives an absolute sandbox-compatible
 `${publicOrigin}/tiles/{query_id}/{z}/{x}/{y}.mvt` URL. The component matches
 that query ID to its layer token and sends `X-HIFLD-Query-Token`; the server
 verifies that the path ID matches the signed token before re-running the
-bounded DuckDB tile query on a cache miss. The component renders independent MapLibre sources
+bounded ClickHouse tile query on a cache miss. The component renders independent MapLibre sources
 in input order, fits their combined bounds unless the agent supplies a camera,
 and displays one named solid-color legend group per layer.
 
@@ -209,7 +213,7 @@ Before building spatial SQL, call `inspect_query_source(source)` with one
 `get_dataset_file.query_sources` reference. It uses the existing bounded worker
 to inspect actual Parquet columns with `SELECT * LIMIT 0`, including generated
 Hive fields absent from older catalog statistics. Geometry CRS is returned when
-DuckDB reports it; unknown CRS remains null. Numeric bbox structs are candidates,
+GeoParquet metadata declares it; unknown CRS remains null. Numeric bbox structs are candidates,
 not verified GeoParquet covering metadata. No feature rows or query tokens are
 returned. Metadata/object listing can still require remote reads.
 
@@ -254,16 +258,12 @@ revalidation, and worker memory limits apply.
 
 ### Query scheduling and tile budgets
 
-Tile execution allows up to 30 seconds. Worker admission has a separate,
-bounded 30-second queue wait; expired queue entries do not execute. The default
-pool has two workers with one DuckDB thread and a 1 GiB DuckDB memory limit each.
-Only one request for the same canonical SQL and source identity runs at once,
-so one layer's tile fan-out cannot occupy both workers. Different queries can
-execute concurrently, but two distinct slow queries can still occupy the pool.
-The Helm chart requests 2 GiB and allows 4 GiB for both workers and overhead.
-Workers use separate spill directories, removed when the worker is retired.
-Each allows 3 GiB of spill; the shared volume and pod ephemeral-storage limit
-are 8 GiB, with a 1 GiB ephemeral-storage request.
+Tile execution allows up to 60 seconds. The former two-process DuckDB worker
+pool is no longer used. Independent ClickHouse HTTP queries default to two
+threads and a 1 GiB per-query memory limit; the server profile caps queries at
+60 seconds. Caller cancellation sends KILL QUERY through a separate restricted
+control connection. The ClickHouse pod has its own resource and disposable cache
+limits; aggregate concurrency must be load-tested within that pod's memory budget.
 
 HTTP tile admission is separate from execution: `DATASET_MCP_MAX_CONCURRENCY`
 (default 8) bounds simultaneous HTTP requests per query ID, with a global tile
@@ -347,6 +347,11 @@ logged. Remove the two diagnostic middleware registrations, their module, and
 the chart revision variable after the investigation.
 
 ## Opt-in storage acceptance tests
+
+Current ClickHouse live tests and their environment settings are documented in
+[engine verification](../ops/clickhouse/README.md#verification). The following
+DuckDB tests are retained only as legacy regression references, not production
+engine acceptance tests.
 
 The normal test suite does not require network access. To exercise a real
 public GCS object through the DuckDB worker, set:
