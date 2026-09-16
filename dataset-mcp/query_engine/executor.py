@@ -10,7 +10,7 @@ from app.query.serialization import RowTooLargeError, serialize_rows
 from app.query.sql_policy import SqlPolicyError
 from query_engine.client import ClickHouseClient, ClickHouseError
 from query_engine.metadata import MetadataReader
-from query_engine.results import ClickHouseResult
+from query_engine.results import ClickHouseResult, ResultColumn
 from query_engine.sql import compile_query, identifier
 from query_engine.tasks import gather_owned
 from query_worker.protocol import (
@@ -109,6 +109,10 @@ class ClickHouseExecutor:
         }
         crs_values = {field.crs for fields in declarations for field in fields}
         inferred = next(iter(crs_values)) if len(crs_values) == 1 else None
+        schemas: dict[str, tuple[ResultColumn, ...]] = {}
+        for source, fields in zip(request.sources, declarations, strict=True):
+            if fields:
+                schemas[source.alias] = await self.metadata.schema(source)
         filters: dict[str, str] = {}
         if isinstance(request, WorkerTileQuery) and len(request.sources) == 1:
             from query_engine.pruning import covering_filter
@@ -129,6 +133,7 @@ class ClickHouseExecutor:
             geometry=geometry,
             working_crs=working_crs,
             source_filters=filters,
+            schemas=schemas,
         ), working_crs or inferred
 
     async def describe(self, sql: str, timeout: float) -> ClickHouseResult:
@@ -148,7 +153,11 @@ class ClickHouseExecutor:
                 "query_schema", "Result columns must have unique names; use aliases"
             )
         selection = ", ".join(
-            f"length(wkb({identifier(c.name)})) AS {identifier(c.name)}"
+            (
+                f"length(wkb({identifier(c.name)})) AS {identifier(c.name)}"
+                if request.materialize_geometry
+                else f"1 AS {identifier(c.name)}"
+            )
             if is_geometry(c.type)
             else identifier(c.name)
             for c in schema.meta
@@ -167,7 +176,11 @@ class ClickHouseExecutor:
             values: list[object] = []
             for column, value in zip(schema.meta, row, strict=True):
                 values.append(
-                    {"$type": "geometry", "byte_length": value}
+                    (
+                        {"$type": "geometry", "byte_length": value}
+                        if request.materialize_geometry
+                        else {"$type": "geometry", "omitted": True}
+                    )
                     if is_geometry(column.type) and isinstance(value, int)
                     else value
                 )

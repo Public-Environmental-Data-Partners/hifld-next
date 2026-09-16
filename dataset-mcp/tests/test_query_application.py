@@ -406,6 +406,7 @@ async def test_spatial_query_defaults_working_crs_and_preserves_it_for_pages() -
 
     requests = [request for request in executor.calls if isinstance(request, WorkerQuery)]
     assert [request.working_crs for request in requests] == ["EPSG:4326", "EPSG:4326"]
+    assert [request.materialize_geometry for request in requests] == [False, True]
     assert result["map_configuration"]["result_crs"] == "EPSG:4326"
 
 

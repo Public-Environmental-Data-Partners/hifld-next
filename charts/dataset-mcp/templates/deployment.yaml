@@ -23,7 +23,9 @@ spec:
           ports: [{name: http, containerPort: {{ .Values.containerPort }}, protocol: TCP}]
           env:
             - name: DATASET_MCP_CLICKHOUSE_URL
-              value: {{ default (printf "http://%s-clickhouse:8123" (include "dataset-mcp.fullname" .)) .Values.clickhouse.externalUrl | quote }}
+              value: {{ default (printf "http://%s-clickhouse-replicas:8123" (include "dataset-mcp.fullname" .)) .Values.clickhouse.externalUrl | quote }}
+            - name: DATASET_MCP_CLICKHOUSE_DISCOVER_REPLICAS
+              value: {{ and .Values.clickhouse.enabled (not .Values.clickhouse.externalUrl) | quote }}
             - name: DATASET_MCP_CLICKHOUSE_PASSWORD
               valueFrom: {secretKeyRef: {name: {{ .Values.clickhouse.secretName }}, key: {{ .Values.clickhouse.queryPasswordKey }}}}
             - name: DATASET_MCP_CLICKHOUSE_CONTROL_PASSWORD

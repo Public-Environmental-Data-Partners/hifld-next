@@ -13,9 +13,8 @@ import pyarrow.parquet as pq
 from pydantic import BaseModel, Field, ValidationError
 
 from query_engine.client import ClickHouseClient, ClickHouseError
-from query_engine.results import ClickHouseResult
+from query_engine.results import ClickHouseResult, ResultColumn
 from query_engine.sql import GeometrySpec, source_relation, source_url
-from query_engine.tasks import gather_owned
 from query_worker.protocol import WorkerSourceSpec
 
 
@@ -89,6 +88,28 @@ class MetadataReader:
             OrderedDict()
         )
         self._semaphore = asyncio.Semaphore(4)
+        self._schemas: OrderedDict[WorkerSourceSpec, tuple[float, tuple[ResultColumn, ...]]] = (
+            OrderedDict()
+        )
+
+    async def schema(self, source: WorkerSourceSpec) -> tuple[ResultColumn, ...]:
+        cached = self._schemas.get(source)
+        if cached is not None and cached[0] > monotonic():
+            self._schemas.move_to_end(source)
+            return cached[1]
+        relation = source_relation(source, seaweed_endpoint=self._seaweed_endpoint)
+        response = ClickHouseResult.model_validate_json(
+            await self._client.query(
+                f"SELECT * FROM ({relation}) LIMIT 0 FORMAT JSONCompact",
+                timeout_seconds=30,
+            )
+        )
+        columns = tuple(response.meta)
+        self._schemas[source] = (monotonic() + 60, columns)
+        self._schemas.move_to_end(source)
+        while len(self._schemas) > 32:
+            self._schemas.popitem(last=False)
+        return columns
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -101,20 +122,18 @@ class MetadataReader:
         # The metadata reader runs beside MCP, not inside the ClickHouse pod.
         # Its local endpoint can differ from ClickHouse's Compose-network endpoint.
         urls = [source_url(source, uri) for uri in source.object_uris]
+        if not urls:
+            raise ClickHouseError("storage_unavailable", "Catalog source has no objects")
         if any(any(c in url for c in "*?{") for url in urls):
             relation = source_relation(
                 source, seaweed_endpoint=self._seaweed_endpoint, format_name="ParquetMetadata"
             )
             response = ClickHouseResult.model_validate_json(
                 await self._client.query(
-                    f"SELECT _path FROM ({relation}) LIMIT 4097 FORMAT JSONCompact",
+                    f"SELECT _path FROM ({relation}) LIMIT 1 FORMAT JSONCompact",
                     timeout_seconds=30,
                 )
             )
-            if len(response.data) > 4096:
-                raise ClickHouseError(
-                    "map_not_supported", "Source exceeds the metadata object limit"
-                )
             discovered: list[str] = []
             for row in response.data:
                 if not row or not isinstance(row[0], str):
@@ -139,12 +158,9 @@ class MetadataReader:
                     )
                 discovered.append(matched)
             urls = discovered
-        declarations = await gather_owned(*(self._footer(url) for url in urls))
-        first = declarations[0] if declarations else ()
-        if any(value != first for value in declarations):
-            raise ClickHouseError(
-                "map_not_supported", "GeoParquet files have inconsistent CRS or geometry metadata"
-            )
+        if not urls:
+            raise ClickHouseError("storage_unavailable", "Catalog source has no objects")
+        first = await self._footer(urls[0])
         self._cache[source] = (monotonic() + 60, first)
         self._cache.move_to_end(source)
         while len(self._cache) > 32:

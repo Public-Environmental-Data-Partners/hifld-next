@@ -42,6 +42,8 @@ def create_production_app(
             control_password=configured.clickhouse_control_password.get_secret_value(),
             max_threads=configured.clickhouse_max_threads,
             max_memory_bytes=configured.clickhouse_max_memory_bytes,
+            discover_replicas=configured.clickhouse_discover_replicas,
+            max_pending_queries=configured.clickhouse_max_pending_queries,
         ),
         seaweed_endpoint=configured.clickhouse_seaweed_endpoint,
     )

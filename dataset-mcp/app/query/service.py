@@ -119,6 +119,7 @@ class QueryService:
         limit: int,
         offset: int,
         working_crs: str | None = None,
+        materialize_geometry: bool = True,
     ) -> PageResult:
         if not 1 <= limit <= self._max_limit:
             raise ValueError(f"limit must be between 1 and {self._max_limit}")
@@ -138,6 +139,7 @@ class QueryService:
             max_result_bytes=self._max_result_bytes,
             max_cell_bytes=self._max_cell_bytes,
             working_crs=working_crs,
+            materialize_geometry=materialize_geometry,
         )
         response = await self._executor.execute(request, timeout_seconds=self._timeout_seconds)
         if isinstance(response, WorkerFailure):
@@ -149,6 +151,8 @@ class QueryService:
             )
 
         warnings: list[str] = []
+        if not materialize_geometry:
+            warnings.append("geometry_values_not_materialized")
         if not response.deterministic_order:
             warnings.append("result_order_is_not_deterministic")
         if response.response_truncated:

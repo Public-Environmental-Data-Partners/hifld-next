@@ -17,6 +17,13 @@ http: {allowedHosts: []}
 tokenSecret: {name: dataset-mcp-secrets, key: query-token-secret}
 clickhouse:
   enabled: true
+  replicaCount: 1
+  maxConcurrentQueries: 2
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
   image:
     repository: ghcr.io/public-environmental-data-partners/hifld-next/clickhouse
     tag: ""

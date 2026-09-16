@@ -16,4 +16,6 @@ COPY hifld_reproject_wkb_function.xml /etc/clickhouse-server/hifld_reproject_wkb
 COPY config.d/filesystem-cache.xml /etc/clickhouse-server/config.d/filesystem-cache.xml
 COPY users.d/query-user.xml /etc/clickhouse-server/users.d/query-user.xml
 
+ENV CLICKHOUSE_MAX_CONCURRENT_QUERIES=2
+
 USER clickhouse

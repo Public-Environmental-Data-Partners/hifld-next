@@ -1,4 +1,7 @@
 {{- if .Values.clickhouse.enabled }}
+{{- if lt (int .Values.clickhouse.maxConcurrentQueries) 1 }}
+{{- fail "clickhouse.maxConcurrentQueries must be positive (zero disables the safety limit)" }}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -10,12 +13,25 @@ spec:
     app.kubernetes.io/instance: {{ .Release.Name }}
   ports: [{name: http, port: 8123, targetPort: http}]
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dataset-mcp.fullname" . }}-clickhouse-replicas
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ include "dataset-mcp.name" . }}-clickhouse
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports: [{name: http, port: 8123, targetPort: http}]
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "dataset-mcp.fullname" . }}-clickhouse
 spec:
-  replicas: 1
+  {{- if not .Values.clickhouse.autoscaling.enabled }}
+  replicas: {{ .Values.clickhouse.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "dataset-mcp.name" . }}-clickhouse
@@ -38,6 +54,8 @@ spec:
           image: "{{ .Values.clickhouse.image.repository }}:{{ default .Values.image.tag .Values.clickhouse.image.tag }}"
           ports: [{name: http, containerPort: 8123}]
           env:
+            - name: CLICKHOUSE_MAX_CONCURRENT_QUERIES
+              value: {{ .Values.clickhouse.maxConcurrentQueries | quote }}
             - name: CLICKHOUSE_QUERY_PASSWORD
               valueFrom: {secretKeyRef: {name: {{ .Values.clickhouse.secretName }}, key: {{ .Values.clickhouse.queryPasswordKey }}}}
             - name: CLICKHOUSE_CONTROL_PASSWORD
@@ -60,6 +78,30 @@ spec:
           emptyDir: {sizeLimit: 512Mi}
         - name: tmp
           emptyDir: {sizeLimit: 256Mi}
+{{- if .Values.clickhouse.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "dataset-mcp.fullname" . }}-clickhouse
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "dataset-mcp.fullname" . }}-clickhouse
+  minReplicas: {{ .Values.clickhouse.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.clickhouse.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.clickhouse.autoscaling.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+{{- end }}
 {{- if .Values.networkPolicy.enabled }}
 ---
 apiVersion: networking.k8s.io/v1

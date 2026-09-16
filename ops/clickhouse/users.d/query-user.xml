@@ -36,6 +36,7 @@
       <max_execution_time>60</max_execution_time>
       <max_memory_usage>1073741824</max_memory_usage>
       <max_threads>4</max_threads>
+      <max_concurrent_queries_for_user from_env="CLICKHOUSE_MAX_CONCURRENT_QUERIES"/>
       <max_result_rows>100000</max_result_rows>
       <max_result_bytes>67108864</max_result_bytes>
       <filesystem_cache_name>hifld_s3_cache</filesystem_cache_name>
@@ -45,6 +46,7 @@
       <join_use_nulls>1</join_use_nulls>
       <constraints>
         <readonly><readonly/></readonly>
+        <max_concurrent_queries_for_user><readonly/></max_concurrent_queries_for_user>
         <max_execution_time><min>1</min><max>60</max></max_execution_time>
         <max_memory_usage><min>1048576</min><max>1073741824</max></max_memory_usage>
         <max_threads><min>1</min><max>4</max></max_threads>

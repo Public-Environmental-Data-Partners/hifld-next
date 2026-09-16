@@ -53,6 +53,98 @@ def deadline():
     return datetime.now(UTC) + timedelta(seconds=60)
 
 
+@pytest.mark.asyncio
+async def test_concurrency_cap_is_shared_across_clients():
+    """Six calls from two independent MCP clients execute at most two at once."""
+    engines = [executor(), executor()]
+    marker = "admission_" + uuid4().hex
+    observed = []
+    async with httpx.AsyncClient(
+        base_url=os.environ["CLICKHOUSE_TEST_URL"],
+        auth=("hifld_control", os.environ["CLICKHOUSE_TEST_CONTROL_PASSWORD"]),
+    ) as control:
+        tasks = [
+            asyncio.create_task(
+                engines[i % 2].client.query(
+                    f"SELECT sleep(1) AS {marker} FORMAT TSV", timeout_seconds=20
+                )
+            )
+            for i in range(6)
+        ]
+        try:
+            while not all(task.done() for task in tasks):
+                response = await control.post(
+                    "/",
+                    content=f"SELECT count() FROM system.processes WHERE user='hifld_query' "
+                    f"AND query LIKE '%{marker}%' FORMAT TSV",
+                )
+                response.raise_for_status()
+                observed.append(int(response.text))
+                await asyncio.sleep(0.05)
+            assert await asyncio.gather(*tasks) == [b"0\n"] * 6
+            assert max(observed) == 2, observed
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            for engine in engines:
+                await engine.close()
+
+
+@pytest.mark.asyncio
+async def test_two_replicas_route_and_cancel_independently(monkeypatch):
+    from query_engine.routing import ReplicaRouter
+
+    peer = os.getenv("CLICKHOUSE_TEST_PEER_URL")
+    if not peer:
+        pytest.skip("second local ClickHouse required")
+    urls = (os.environ["CLICKHOUSE_TEST_URL"], peer)
+
+    async def addresses(self):
+        return urls
+
+    monkeypatch.setattr(ReplicaRouter, "addresses", addresses)
+    engine = executor()
+    marker = "replica_" + uuid4().hex
+    tasks = []
+    try:
+        hosts = await asyncio.gather(
+            *(engine.client.query("SELECT hostName() FORMAT TSV", timeout_seconds=5) for _ in urls)
+        )
+        assert hosts[0] != hosts[1]
+        tasks = [
+            asyncio.create_task(
+                engine.client.query(f"SELECT sleep(3) AS {marker} FORMAT TSV", timeout_seconds=10)
+            )
+            for _ in urls
+        ]
+        async with httpx.AsyncClient(
+            auth=("hifld_control", os.environ["CLICKHOUSE_TEST_CONTROL_PASSWORD"])
+        ) as control:
+            counts_sql = (
+                "SELECT count() FROM system.processes WHERE user='hifld_query' "
+                f"AND query LIKE '%{marker}%' FORMAT TSV"
+            )
+            async with asyncio.timeout(2):
+                while True:
+                    counts = [
+                        int((await control.post(url, content=counts_sql)).text) for url in urls
+                    ]
+                    if counts == [1, 1]:
+                        break
+                    await asyncio.sleep(0.02)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            counts = [int((await control.post(url, content=counts_sql)).text) for url in urls]
+            assert counts == [0, 0]
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await engine.close()
+
+
 def assert_decodable_tile(tile, z, x, y, geometry_type):
     """Decode with the map frontend's actual vector-tile library, including IDs."""
     script = """
@@ -140,6 +232,64 @@ async def test_nfhl_gcs_glob_polygon_reprojection_and_mvt():
 
 
 @pytest.mark.asyncio
+async def test_miami_tile_preserves_parquet_row_group_pruning():
+    """Opt-in production-file regression for the projection/pushdown interaction."""
+    from query_engine.results import ClickHouseResult
+    from query_engine.tiles import mvt_sql
+
+    engine = executor()
+    source = WorkerSourceSpec("f", (FLOOD.replace("state_fips=12/part-*", "**/*"),))
+    sql = (
+        "SELECT geometry,FLD_ZONE,SFHA_TF FROM f WHERE state_fips='12' "
+        "AND bbox.xmin<=-80.10 AND bbox.xmax>=-80.35 "
+        "AND bbox.ymin<=25.90 AND bbox.ymax>=25.65"
+    )
+    request = WorkerTileQuery(
+        sql, (source,), 10, 283, 436, "geometry", "EPSG:4326", 20000, deadline()
+    )
+    marker = "pruning_" + uuid4().hex
+    task = None
+    read_groups = 0
+    pruned_groups = 0
+    try:
+        compiled, _ = await engine.compiled(sql, request, "EPSG:4326")
+        schema = await engine.describe(compiled, 30)
+        tile_sql = mvt_sql(compiled, schema.meta, "geometry", "EPSG:4326", 10, 283, 436, 20000)
+        task = asyncio.create_task(
+            engine.client.query(f"/*{marker}*/ {tile_sql}", timeout_seconds=60)
+        )
+        async with httpx.AsyncClient(
+            base_url=os.environ["CLICKHOUSE_TEST_URL"],
+            auth=("hifld_control", os.environ["CLICKHOUSE_TEST_CONTROL_PASSWORD"]),
+            timeout=5,
+        ) as control:
+            while not task.done():
+                response = await control.post(
+                    "/",
+                    content=(
+                        "SELECT ProfileEvents['ParquetReadRowGroups'], "
+                        "ProfileEvents['ParquetPrunedRowGroups'] FROM system.processes "
+                        f"WHERE user='hifld_query' AND position(query,'{marker}')>0 "
+                        "FORMAT JSONCompact"
+                    ),
+                )
+                response.raise_for_status()
+                for read, pruned in response.json()["data"]:
+                    read_groups = max(read_groups, int(read))
+                    pruned_groups = max(pruned_groups, int(pruned))
+                await asyncio.sleep(0.03)
+        result = ClickHouseResult.model_validate_json(await task)
+        assert result.data[0][0] == 729
+        assert 0 < read_groups <= 4, (read_groups, pruned_groups)
+        assert pruned_groups >= 47, (read_groups, pruned_groups)
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await engine.close()
+
+
+@pytest.mark.asyncio
 async def test_cancel_removes_running_server_query():
     engine = executor()
     marker = "cancel_probe_" + uuid4().hex
@@ -207,7 +357,7 @@ async def test_seaweed_mixed_crs_join_and_concurrent_alias_isolation():
                         }
                     },
                 }
-                table = pa.table({"name": [name], "geometry": [to_wkb(geometry)]})
+                table = pa.table({"name": [name, "null"], "geometry": [to_wkb(geometry), None]})
                 table = table.replace_schema_metadata({b"geo": json.dumps(geo).encode()})
                 output = pa.BufferOutputStream()
                 pq.write_table(table, output)
@@ -218,6 +368,18 @@ async def test_seaweed_mixed_crs_join_and_concurrent_alias_isolation():
                     WorkerSourceSpec(name, (f"s3://{bucket}/{name}/*.parquet",), storage)
                 )
             for crs in ("EPSG:4326", "EPSG:3857"):
+                null_result = await engine.execute(
+                    WorkerQuery(
+                        "SELECT geometry FROM hosp WHERE name='null'",
+                        tuple(sources[:1]),
+                        1,
+                        0,
+                        deadline(),
+                        working_crs=crs,
+                    )
+                )
+                assert isinstance(null_result, WorkerPage), null_result
+                assert null_result.rows == ({"geometry": None},)
                 result = await engine.execute(
                     WorkerQuery(
                         "SELECT h.name AS hospital, f.name AS flood FROM hosp h "

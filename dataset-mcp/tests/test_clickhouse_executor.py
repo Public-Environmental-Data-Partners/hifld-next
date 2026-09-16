@@ -9,6 +9,52 @@ from query_worker.protocol import WorkerPage, WorkerQuery
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("empty", [False, True])
+async def test_map_preview_does_not_materialize_geometry_but_still_detects_empty_results(empty):
+    from query_engine.executor import ClickHouseExecutor
+
+    statements = []
+
+    def handler(request):
+        sql = request.content.decode()
+        statements.append(sql)
+        schema = "LIMIT 0" in sql
+        rows = [] if schema or empty else [[1]]
+        return httpx.Response(
+            200,
+            json={
+                "meta": [{"name": "geometry", "type": "Point" if schema else "UInt8"}],
+                "data": rows,
+                "rows": len(rows),
+                "statistics": {"elapsed": 0.01, "rows_read": len(rows), "bytes_read": 0},
+            },
+        )
+
+    engine = ClickHouseExecutor(
+        ClickHouseClient("http://ch", "q", "pw", transport=httpx.MockTransport(handler))
+    )
+    try:
+        result = await engine.execute(
+            WorkerQuery(
+                "SELECT ST_GeomFromText('POINT(1 2)') AS geometry",
+                (),
+                1,
+                0,
+                datetime.now(UTC) + timedelta(seconds=10),
+                materialize_geometry=False,
+            )
+        )
+        assert isinstance(result, WorkerPage)
+        assert result.returned_count == (0 if empty else 1)
+        assert "length(wkb(" not in statements[-1]
+        assert '1 AS "geometry"' in statements[-1]
+        if not empty:
+            assert result.rows[0]["geometry"] == {"$type": "geometry", "omitted": True}
+    finally:
+        await engine.close()
+
+
+@pytest.mark.asyncio
 async def test_metadata_failure_cancels_sibling_before_returning():
     from query_engine.executor import ClickHouseExecutor
     from query_worker.protocol import WorkerFailure, WorkerSourceSpec

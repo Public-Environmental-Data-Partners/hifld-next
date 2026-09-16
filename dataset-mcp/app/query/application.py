@@ -452,6 +452,7 @@ class QueryApplicationService:
             limit=limit,
             offset=0,
             working_crs=working_crs,
+            materialize_geometry=not spatial,
         )
         resolved_geometry, resolved_crs = self._resolve_map_columns(
             page,

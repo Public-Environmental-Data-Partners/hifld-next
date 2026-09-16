@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     clickhouse_max_threads: int = Field(default=2, ge=1, le=32)
     clickhouse_max_memory_bytes: int = Field(default=1024 * 1024 * 1024, ge=1)
     clickhouse_seaweed_endpoint: str | None = None
+    clickhouse_discover_replicas: bool = False
+    clickhouse_max_pending_queries: int = Field(default=64, ge=1, le=256)
     max_sources: int = Field(default=8, ge=1, le=8)
     max_result_bytes: int = Field(default=4 * 1024 * 1024, ge=1024)
     public_origin: AnyHttpUrl | None = None

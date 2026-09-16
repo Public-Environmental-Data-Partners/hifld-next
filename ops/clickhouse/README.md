@@ -6,6 +6,33 @@ source subqueries. There are no ClickHouse HTTP sessions. The filesystem cache
 is shared; query-result caching is disabled. Losing the cache requires fresh
 object reads, not query-token regeneration.
 
+## Parquet pruning and map preparation
+
+GeoParquet bindings cache a schema-only (`LIMIT 0`) source description for 60
+seconds. Explicit-column queries bind WKB as bytes and expose scalar numeric
+tuple leaves to the Parquet reader, preserving row-group statistics pruning
+through reprojection. The original tuple remains available to SQL. No dataset
+paths, partition values, or geographic regions are hard-coded. Native object
+glob discovery remains inside ClickHouse.
+
+User projection wildcards (`SELECT *` or `source.*`) retain native bindings so
+internal scan columns cannot change the returned schema or join/star semantics.
+Complex tuples and existing dotted-column name collisions also retain native
+tuple handling. Use explicit selected columns for the optimized map-query path.
+
+Map/URL preparation still checks for matching rows and validates the geometry
+schema, but does not read/reproject selected geometry just to calculate its byte
+length. Preview geometry values are marked `{"$type":"geometry","omitted":true}`
+and carry the `geometry_values_not_materialized` warning. Ordinary paginated
+queries retain geometry byte-length summaries. Spatial predicates, joins,
+sorting, or grouping in user SQL may still require geometry evaluation.
+
+Each query caps S3-compatible socket reads at five seconds (or its smaller
+remaining deadline), connection attempts at one second, and retry budgets at
+one. These complement, rather than replace, the overall query deadline and
+explicit cancellation. They do not guarantee instantaneous cancellation of
+every underlying operation.
+
 ## Local development
 
 From the repository root:
@@ -34,7 +61,8 @@ private storage is not yet supported by the new adapter.
   to those columns without converting the envelope.
 - The final map result is converted to geographic XY before native MVT encoding.
 - GeoParquet's omitted CRS means OGC:CRS84; explicit null means unknown and cannot
-  be silently normalized. All files in a source must agree on geometry metadata.
+  be silently normalized. Files in a source are assumed to share geometry metadata;
+  interactive requests do not validate every partition.
 
 Projection uses fixed Python/PROJ/Shapely executable functions, not user scripts.
 PROJ networking is disabled. Authority CRS codes are validated. Individual WKB
@@ -61,9 +89,9 @@ sent through JSON, which would corrupt arbitrary bytes.
 
 Data glob expansion stays inside ClickHouse's `s3()` table function, including
 GCS HTTPS paths. CRS discovery also asks ClickHouse for matching file identities
-using ParquetMetadata, then reads bounded footer ranges. This metadata path
-checks consistency, is cached for 60 seconds (32 source definitions), and has a
-4096-file / 16-MiB-per-footer safety limit. It does not rewrite data scans into
+using ParquetMetadata with LIMIT 1, then reads one representative file's bounded
+footer ranges. This metadata path is cached for 60 seconds (32 source definitions)
+and has a 16-MiB-per-footer safety limit. It does not rewrite data scans into
 application-generated object lists. Cold metadata inspection still has a cost.
 
 Automatic native-covering pruning is restricted to direct single-source SELECTs
@@ -88,6 +116,33 @@ no Keeper or database replication requirement. A replacement pod starts cold.
 Resource limits bound the whole pod, including projection subprocesses; per-query
 limits alone do not bound aggregate concurrent memory. Load testing is required
 before raising concurrency or scaling production.
+
+### Admission and horizontal scaling
+
+Each pod enforces `CLICKHOUSE_MAX_CONCURRENT_QUERIES` (default 2) for the query
+user across **all** MCP clients. The control user is separate so cancellation
+can run when both query slots are occupied. The client retries only explicit
+ClickHouse admission refusals, with backoff inside the original query deadline;
+it never retries ambiguous transport failures. At most 64 running/waiting calls
+are admitted per MCP client (`DATASET_MCP_CLICKHOUSE_MAX_PENDING_QUERIES`).
+Overflow gets an explicit queue-full error. There is no durable queue.
+
+Set `clickhouse.replicaCount` to scale independent ClickHouse pods. The chart uses
+a headless Service; MCP refreshes ready pod addresses every five seconds and
+round-robins each query attempt. Cancellation is pinned to the chosen pod address,
+not sent through a load-balanced Service. Each replica has a disposable local
+cache, not shared database state. In-flight queries are not migrated or replayed
+when a pod disappears. New requests discover replacement pods after DNS refresh.
+
+Optional `clickhouse.autoscaling.enabled=true` enables CPU-based HPA with
+configurable min/max replicas and target utilization. This is not queue-aware
+autoscaling: I/O-bound queued work may not trigger CPU scaling; choose sufficient
+minimum replicas and monitor latency. No production scaling is enabled by default.
+
+External URLs default to single-server routing; use a direct server endpoint,
+not an arbitrary load balancer (which cannot guarantee cancellation affinity).
+`DATASET_MCP_CLICKHOUSE_DISCOVER_REPLICAS=true` is only for a trusted internal
+HTTP headless-service origin, not TLS/public endpoint discovery.
 
 ## Verification
 

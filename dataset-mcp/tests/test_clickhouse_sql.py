@@ -1,6 +1,79 @@
 import pytest
 
 from app.query.sql_policy import SqlPolicy, SqlPolicyError
+from query_engine.results import ResultColumn
+
+
+def test_explicit_scan_schema_preserves_public_tuple_and_raw_geometry():
+    from query_engine.sql import GeometrySpec, compile_query
+    from query_worker.protocol import WorkerSourceSpec
+
+    result = compile_query(
+        "SELECT geometry, bbox FROM f WHERE bbox.xmin < 10",
+        (WorkerSourceSpec("f", ("gs://b/data/**/*.parquet",)),),
+        geometry={"f": (GeometrySpec("geometry", "EPSG:4269"),)},
+        working_crs="EPSG:4326",
+        schemas={
+            "f": (
+                ResultColumn(name="geometry", type="MultiPolygon"),
+                ResultColumn(name="bbox", type="Tuple(xmin Float64, xmax Float64)"),
+                ResultColumn(name="name", type="Nullable(String)"),
+            )
+        },
+    )
+    assert '"bbox.xmin" Float64' in result
+    assert '"bbox.xmax" Float64' in result
+    assert "tuple(" in result.lower()
+    assert "AS bbox" in result or 'AS "bbox"' in result
+    assert "hex(wkb(" not in result.lower()
+    assert "hifld_reproject_wkb" in result
+    assert "bbox.xmin < 10" in result
+
+
+def test_user_stars_keep_original_schema_without_internal_scan_leaves():
+    from query_engine.sql import compile_query
+    from query_worker.protocol import WorkerSourceSpec
+
+    result = compile_query(
+        "WITH x AS (SELECT f.* FROM f WHERE bbox.xmin < 1) SELECT * FROM x",
+        (WorkerSourceSpec("f", ("gs://b/a.parquet",)),),
+        schemas={"f": (ResultColumn(name="bbox", type="Tuple(xmin Float64)"),)},
+    )
+    assert '"bbox.xmin" Float64' not in result
+    assert "SELECT f.*" in result
+
+
+@pytest.mark.parametrize(
+    "tuple_type", ["Tuple(xmin Float64, label String)", "Tuple(Float64, Float64)"]
+)
+def test_complex_or_unnamed_tuples_use_native_schema(tuple_type):
+    from query_engine.sql import compile_query
+    from query_worker.protocol import WorkerSourceSpec
+
+    result = compile_query(
+        "SELECT bbox FROM f",
+        (WorkerSourceSpec("f", ("gs://b/a.parquet",)),),
+        schemas={"f": (ResultColumn(name="bbox", type=tuple_type),)},
+    )
+    assert '"bbox.xmin"' not in result
+
+
+def test_existing_dotted_column_is_not_shadowed_by_flattening():
+    from query_engine.sql import compile_query
+    from query_worker.protocol import WorkerSourceSpec
+
+    result = compile_query(
+        'SELECT bbox, "bbox.xmin" FROM f',
+        (WorkerSourceSpec("f", ("gs://b/a.parquet",)),),
+        schemas={
+            "f": (
+                ResultColumn(name="bbox", type="Tuple(xmin Float64)"),
+                ResultColumn(name="bbox.xmin", type="String"),
+            )
+        },
+    )
+    assert "CAST(tuple(" not in result
+    assert '"bbox.xmin" String' in result
 
 
 def test_clickhouse_identifier_escape_cannot_inject_a_relation():

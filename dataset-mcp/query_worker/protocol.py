@@ -60,6 +60,7 @@ class WorkerQuery:
     max_result_bytes: int | None = None
     max_cell_bytes: int | None = None
     working_crs: str | None = None
+    materialize_geometry: bool = True
 
 
 @dataclass(frozen=True, slots=True)

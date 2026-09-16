@@ -10,6 +10,7 @@ from sqlglot import ErrorLevel, exp, parse_one
 from sqlglot.optimizer.scope import Scope, traverse_scope
 
 from app.query.sql_policy import SqlPolicy, SqlPolicyError
+from query_engine.results import ResultColumn
 from query_worker.protocol import WorkerSourceSpec
 
 
@@ -59,6 +60,73 @@ def source_relation(
         for uri in source.object_uris
     ]
     return " UNION ALL ".join(parts)
+
+
+def _typed_relation(
+    source: WorkerSourceSpec,
+    columns: tuple[ResultColumn, ...],
+    geometry: tuple[GeometrySpec, ...],
+    target_crs: str | None,
+    seaweed_endpoint: str | None,
+) -> str:
+    """Expose physical scalar leaves to Parquet without changing the public schema.
+
+    Inferred nested subcolumns behind a projection can lose statistics pushdown in
+    ClickHouse. Explicit scalar scan columns retain it, even through user CTEs.
+    Decode WKB once, after filtering, rather than native geometry -> WKB -> geometry.
+    """
+    fields = {field.name: field for field in geometry}
+    names = {column.name for column in columns}
+    structure: list[str] = []
+    projection: list[str] = []
+    for column in columns:
+        name = identifier(column.name)
+        field = fields.get(column.name)
+        if field is not None:
+            structure.append(f"{name} Nullable(String)")
+            # Executable UDF arguments are non-nullable. Supply valid empty WKB
+            # for evaluation, then restore NULL instead of inventing a geometry.
+            value = f"ifNull({name}, unhex('010300000000000000'))"
+            if target_crs is not None and field.crs != target_crs:
+                if field.crs is None:
+                    raise SqlPolicyError(f"Unknown CRS for geometry {field.name}")
+                value = (
+                    f"unhex(hifld_reproject_wkb(hex({value}), "
+                    f"{literal(field.crs)}, {literal(target_crs)}))"
+                )
+            projection.append(f"if(isNull({name}), NULL, readWKB({value})) AS {name}")
+            continue
+        children: list[tuple[str, str]] = []
+        if column.type.startswith("Tuple("):
+            kind = exp.DataType.build(column.type, dialect="clickhouse")
+            for child in kind.expressions:
+                if not isinstance(child, exp.ColumnDef) or not isinstance(child.kind, exp.DataType):
+                    break
+                child_type = child.kind.sql(dialect="clickhouse")
+                if not re.fullmatch(r"(?:Nullable\()?Float(?:32|64)\)?", child_type):
+                    break
+                children.append((child.name, child_type))
+            else:
+                if children and not any(f"{column.name}.{n}" in names for n, _ in children):
+                    leaves = [identifier(f"{column.name}.{n}") for n, _ in children]
+                    structure.extend(
+                        f"{leaf} {t}" for leaf, (_, t) in zip(leaves, children, strict=True)
+                    )
+                    # Keep physical leaves visible through the binding: a filter
+                    # on only the reconstructed tuple loses statistics pushdown.
+                    projection.extend(leaves)
+                    projection.append(
+                        f"CAST(tuple({', '.join(leaves)}), {literal(column.type)}) AS {name}"
+                    )
+                    continue
+        structure.append(f"{name} {column.type}")
+        projection.append(name)
+    return " UNION ALL ".join(
+        f"SELECT {', '.join(projection)} FROM s3("
+        f"{literal(source_url(source, uri, seaweed_endpoint))}, NOSIGN, 'Parquet', "
+        f"{literal(', '.join(structure))})"
+        for uri in source.object_uris
+    )
 
 
 _SPATIAL_FUNCTIONS = {
@@ -121,12 +189,18 @@ def compile_query(
     spatial: bool = False,
     working_crs: str | None = None,
     source_filters: Mapping[str, str] | None = None,
+    schemas: Mapping[str, tuple[ResultColumn, ...]] | None = None,
 ) -> str:
     target_crs = working_crs or ("EPSG:4326" if spatial else None)
     if target_crs is not None and re.fullmatch(r"EPSG:[1-9][0-9]*|OGC:CRS84", target_crs) is None:
         raise SqlPolicyError("Working CRS must be an EPSG authority code or OGC:CRS84")
     validated = SqlPolicy.validate(sql, frozenset(source.alias for source in sources))
     statement = parse_one(validated.canonical_sql, read="duckdb")
+    # Internal physical leaves must never leak through a user wildcard. Keep the
+    # native binding for wildcard queries rather than rewrite join/star semantics.
+    has_projection_star = any(
+        item.is_star for select in statement.find_all(exp.Select) for item in select.expressions
+    )
     for name in statement.find_all(exp.Identifier):
         identifier(name.name)
     bindings = {source.alias.casefold(): source for source in sources}
@@ -136,10 +210,19 @@ def compile_query(
                 continue
             source = bindings[resolved.name.casefold()]
             relation = source_relation(source, seaweed_endpoint=seaweed_endpoint)
+            columns = None if has_projection_star else (schemas or {}).get(source.alias)
+            if columns:
+                relation = _typed_relation(
+                    source,
+                    columns,
+                    (geometry or {}).get(source.alias, ()),
+                    target_crs,
+                    seaweed_endpoint,
+                )
             native_filter = (source_filters or {}).get(source.alias)
             if native_filter:
                 relation = f"SELECT * FROM ({relation}) WHERE {native_filter}"
-            if target_crs is not None:
+            if target_crs is not None and not columns:
                 replacements: list[str] = []
                 for field in (geometry or {}).get(source.alias, ()):
                     if field.crs is None:

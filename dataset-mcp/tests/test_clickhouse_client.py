@@ -12,6 +12,24 @@ from query_engine.client import ClickHouseClient, ClickHouseError
 from query_engine.results import ClickHouseResult
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout,maximum_ms", [(0.25, 250), (2, 2000), (60, 5000)])
+async def test_storage_reads_cannot_keep_default_long_retry_budget(timeout, maximum_ms):
+    def handler(request):
+        params = request.url.params
+        assert 0 < int(params["s3_request_timeout_ms"]) <= maximum_ms
+        assert int(params["s3_connect_timeout_ms"]) <= maximum_ms
+        assert params["s3_retry_attempts"] == "1"
+        assert params["s3_max_single_read_retries"] == "1"
+        return httpx.Response(200, content=b"ok")
+
+    client = ClickHouseClient("http://engine", "u", "p", transport=httpx.MockTransport(handler))
+    try:
+        await client.query("SELECT 1", timeout_seconds=timeout)
+    finally:
+        await client.close()
+
+
 def test_server_profile_allows_sixty_seconds_without_changing_cleanup_budget():
     profile = ElementTree.parse(
         Path(__file__).resolve().parents[2] / "ops/clickhouse/users.d/query-user.xml"
@@ -34,7 +52,9 @@ class ChunkedStream(httpx.AsyncByteStream):
 @pytest.mark.parametrize("timeout,server_limit", [(0.25, 1.0), (60, 60.0), (90, 60.0)])
 async def test_server_timeout_respects_profile_bounds(timeout, server_limit):
     def handler(request: httpx.Request) -> httpx.Response:
-        assert float(request.url.params["max_execution_time"]) == server_limit
+        assert float(request.url.params["max_execution_time"]) == pytest.approx(
+            server_limit, abs=0.01
+        )
         return httpx.Response(200, content=b"ok")
 
     client = ClickHouseClient(
@@ -73,7 +93,7 @@ async def test_query_posts_sql_with_auth_readonly_limits_and_unique_query_ids() 
     assert "readonly" not in first.url.params
     assert first.url.params["max_threads"] == "3"
     assert first.url.params["max_memory_usage"] == "2048"
-    assert first.url.params["max_execution_time"] == "2.5"
+    assert float(first.url.params["max_execution_time"]) == pytest.approx(2.5, abs=0.01)
     assert first.url.params["wait_end_of_query"] == "1"
     assert first.url.params["output_format_json_quote_64bit_integers"] == "0"
     assert first.url.params["output_format_json_named_tuples_as_objects"] == "1"
@@ -135,6 +155,7 @@ async def test_query_bounds_error_response_and_does_not_leak_server_body() -> No
         (b"Code: 159. DB::Exception: Timeout exceeded", "query_timeout", "time limit"),
         (b"Code: 241. DB::Exception: Memory limit exceeded", "query_memory_limit", "memory limit"),
         (b"Code: 47. DB::Exception: Unknown identifier password", "query_schema", "schema"),
+        (b"Code: 47. Unknown identifier TOO_MANY_SIMULTANEOUS_QUERIES", "query_schema", "schema"),
     ],
 )
 async def test_query_maps_known_clickhouse_errors_to_safe_messages(
@@ -232,5 +253,139 @@ async def test_total_deadline_cancels_trickling_response():
             await client.query("SELECT 1", timeout_seconds=0.025)
         assert len(statements) == 2
         assert statements[-1].startswith("KILL QUERY")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_admission_refusal_retries_without_killing_rejected_query():
+    statements = []
+
+    def handler(request):
+        statements.append(request.content.decode())
+        if len(statements) == 1:
+            return httpx.Response(500, content=b"Code: 202. Too many simultaneous queries")
+        return httpx.Response(200, content=b"ok")
+
+    client = ClickHouseClient("http://ch", "u", "p", transport=httpx.MockTransport(handler))
+    try:
+        assert await client.query("SELECT 1", timeout_seconds=2) == b"ok"
+        assert statements == ["SELECT 1", "SELECT 1"]
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_busy_queue_has_total_deadline_without_backend_kill():
+    statements = []
+
+    def handler(request):
+        statements.append(request.content.decode())
+        return httpx.Response(500, content=b"Code: 202. Too many simultaneous queries")
+
+    client = ClickHouseClient("http://ch", "u", "p", transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(ClickHouseError, match="query_timeout"):
+            await client.query("SELECT 1", timeout_seconds=0.03)
+        assert all(sql == "SELECT 1" for sql in statements)
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_replica_routing_pins_cancellation(monkeypatch):
+    from query_engine.routing import ReplicaRouter
+
+    async def addresses(self):
+        return ("http://10.0.0.1:8123/", "http://10.0.0.2:8123/")
+
+    monkeypatch.setattr(ReplicaRouter, "addresses", addresses)
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.content.startswith(b"KILL QUERY"):
+            return httpx.Response(200)
+        if len(requests) == 1:
+            return httpx.Response(200, content=b"ok")
+        raise httpx.ReadTimeout("timeout", request=request)
+
+    client = ClickHouseClient(
+        "http://ch:8123",
+        "u",
+        "p",
+        discover_replicas=True,
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        assert await client.query("SELECT 1", timeout_seconds=1) == b"ok"
+        with pytest.raises(ClickHouseError, match="query_timeout"):
+            await client.query("SELECT 2", timeout_seconds=1)
+        assert requests[0].url.host != requests[1].url.host
+        assert requests[1].url.host == requests[2].url.host
+    finally:
+        await client.close()
+
+
+def test_query_profile_caps_concurrency_without_limiting_control_user():
+    profile = ElementTree.parse(
+        Path(__file__).resolve().parents[2] / "ops/clickhouse/users.d/query-user.xml"
+    )
+    cap = profile.find("profiles/hifld_readonly/max_concurrent_queries_for_user")
+    assert cap is not None
+    assert cap.attrib == {"from_env": "CLICKHOUSE_MAX_CONCURRENT_QUERIES"}
+    dockerfile = Path(__file__).resolve().parents[2] / "ops/clickhouse/Dockerfile"
+    assert "ENV CLICKHOUSE_MAX_CONCURRENT_QUERIES=2" in dockerfile.read_text()
+    assert (
+        profile.find("profiles/hifld_readonly/constraints/max_concurrent_queries_for_user/readonly")
+        is not None
+    )
+    assert profile.find("profiles/hifld_control/max_concurrent_queries_for_user") is None
+
+
+@pytest.mark.asyncio
+async def test_client_pending_capacity_is_bounded_and_released():
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def handler(request):
+        entered.set()
+        await release.wait()
+        return httpx.Response(200, content=b"ok")
+
+    client = ClickHouseClient(
+        "http://ch", "u", "p", max_pending_queries=1, transport=httpx.MockTransport(handler)
+    )
+    first = asyncio.create_task(client.query("SELECT 1", timeout_seconds=2))
+    try:
+        await entered.wait()
+        with pytest.raises(ClickHouseError, match="queue is full"):
+            await client.query("SELECT 2", timeout_seconds=1)
+        release.set()
+        assert await first == b"ok"
+        assert await client.query("SELECT 3", timeout_seconds=1) == b"ok"
+    finally:
+        release.set()
+        await first
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_outer_deadline_does_not_interrupt_backend_cleanup():
+    finished = asyncio.Event()
+
+    async def handler(request):
+        if request.content.startswith(b"KILL QUERY"):
+            await asyncio.sleep(0.04)
+            finished.set()
+            return httpx.Response(200)
+        await asyncio.sleep(0.01)
+        raise httpx.ReadTimeout("timeout", request=request)
+
+    client = ClickHouseClient("http://ch", "u", "p", transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(ClickHouseError, match="query_timeout"):
+            await client.query("SELECT 1", timeout_seconds=0.03)
+        assert finished.is_set()
     finally:
         await client.close()
