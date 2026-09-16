@@ -12,6 +12,44 @@ from query_engine.client import ClickHouseClient, ClickHouseError
 from query_engine.results import ClickHouseResult
 
 
+def test_geometry_group_by_error_is_actionable_without_leaking_sql():
+    from query_engine.client import _server_error
+
+    error = _server_error(
+        b"Code: 44. Data types Variant/Dynamic are not allowed in GROUP BY keys. "
+        b"(ILLEGAL_COLUMN) secret-bucket SELECT private"
+    )
+    assert "GROUP BY" in error.message
+    assert "geometry" in error.message
+    assert "query_parquet" in error.message
+    assert "secret" not in error.message
+
+
+@pytest.mark.asyncio
+async def test_invalid_join_error_is_actionable_without_leaking_backend_sql():
+    client = ClickHouseClient(
+        "http://engine",
+        "u",
+        "p",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                500,
+                text="Code: 403. Cannot determine join keys. "
+                "(INVALID_JOIN_ON_EXPRESSION) secret-bucket signed-secret SELECT private",
+            )
+        ),
+    )
+    try:
+        with pytest.raises(ClickHouseError) as raised:
+            await client.query("SELECT 1", timeout_seconds=1)
+        assert "JOIN ON" in raised.value.message
+        assert "query_parquet" in raised.value.message
+        assert "secret" not in raised.value.message
+        assert raised.value.code == "query_failed"
+    finally:
+        await client.close()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("timeout,maximum_ms", [(0.25, 250), (2, 2000), (60, 5000)])
 async def test_storage_reads_cannot_keep_default_long_retry_budget(timeout, maximum_ms):

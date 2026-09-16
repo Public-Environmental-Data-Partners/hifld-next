@@ -190,6 +190,14 @@ export const MapLayerConfigurationSchema = z
     geometry_column: z.string(),
     result_crs: z.string(),
     columns: z.array(MapColumnSchema),
+    preview: z
+      .object({
+        rows: z.array(z.record(z.string(), JsonValueSchema)).max(1),
+        limit: z.literal(1),
+        warnings: z.array(z.string()),
+      })
+      .strict()
+      .optional(),
     result_status: z
       .enum(["rows_returned", "empty_result", "empty_page", "indeterminate"])
       .optional(),

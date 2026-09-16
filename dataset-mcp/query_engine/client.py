@@ -228,6 +228,26 @@ class ClickHouseClient:
 
 def _server_error(body: bytes) -> ClickHouseError:
     text = body.decode("utf-8", errors="replace").lower()
+    if re.match(r"\s*code:\s*44\.", text) and (
+        "data types variant/dynamic are not allowed in group by keys" in text.split("(in query:")[0]
+    ):
+        return ClickHouseError(
+            "query_failed",
+            "Unsupported GROUP BY key (ILLEGAL_COLUMN): ClickHouse cannot group by "
+            "Variant/Dynamic values, including geometry in this query path. "
+            "Group using scalar keys and retrieve geometry separately, or use a supported "
+            "scalar geometry representation. Test the revised SQL with query_parquet "
+            "before mapping.",
+        )
+    if re.match(r"\s*code:\s*403\.", text):
+        return ClickHouseError(
+            "query_failed",
+            "Unsupported JOIN ON expression (INVALID_JOIN_ON_EXPRESSION): "
+            "ClickHouse could not determine join keys. A spatial-only ON predicate "
+            "such as ST_Intersects is not supported by this query path. "
+            "Revise the join and test the exact SQL with query_parquet before mapping; "
+            "preserve unmatched rows if LEFT JOIN semantics are required.",
+        )
     if re.match(r"\s*code:\s*202\.", text):
         return ClickHouseError("query_busy", "query service is busy")
     if "code: 159" in text or "timeout_exceeded" in text or "timeout exceeded" in text:

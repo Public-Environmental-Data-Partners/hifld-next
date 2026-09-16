@@ -289,6 +289,11 @@ def create_mcp_server(
         returned first page, not the relational meaning of SQL LIMIT clauses.
         Raw GEOMETRY values are not returned as GeoJSON. Use ST_AsHexWKB for a
         serialized representation or generate_mvt_tile_url for scalable maps.
+
+        Before view_map, test new or revised query-layer SQL here with a small
+        returned-page limit, identical sources and result_crs. Inspect errors,
+        empty results, geometry, and styling columns; reuse the validated SQL.
+        A small returned page does not bound the work of joins or aggregates.
         """
         try:
             return _result(
@@ -459,10 +464,18 @@ def create_mcp_server(
         sources use a public HTTPS URL; vector_tiles uses public HTTPS XYZ templates
         and requires source_layer. The server never fetches explicit source URLs.
 
-        Query layers prepare independently in the widget after this tool returns;
-        published tiles can render while SQL previews are still running. A query
-        preparation failure affects that layer only. The widget reports preparing
-        and empty_result as distinct per-layer outcomes.
+        Before mapping new or revised SQL, run that exact SQL with query_parquet
+        using a small returned-page limit and the same inputs and result_crs.
+        Check errors, empty results, geometry, and styling columns. A page limit
+        does not necessarily make joins or aggregates cheap; do not add SQL LIMIT
+        merely for testing and then accidentally map only that limited subset.
+
+        This tool executes a bounded one-row preview for every query layer before
+        returning a map. If any query preparation fails, it returns a tool error
+        instead of a map. Success includes per-layer preview rows, columns, warnings,
+        and result_status in text and structured content. Geometry previews are
+        summaries, not GeoJSON. Empty layers are explicitly identified. The widget
+        reuses prepared tile access; previews do not guarantee successful rendering.
 
         The widget sends asynchronous map_status model-context updates when the
         host supports them: loading, loaded, partial, or failed, with per-layer
@@ -524,7 +537,7 @@ def create_mcp_server(
     mcp.tool(app=query_map_refresh_app)(prepare_map_layer)
 
     async def refresh_map(map_spec: maps.MapDefinitionInput) -> FastMCPToolResult:
-        """Refresh catalog resolution and queue query preparation from a durable map spec."""
+        """Refresh catalog resolution and validate query previews from a durable map spec."""
         try:
             return _result(
                 await maps.refresh_map(

@@ -7,6 +7,7 @@ import pytest
 from fastmcp import Client
 from pydantic import ValidationError
 
+from app.errors import AppError, ErrorCode
 from app.mcp_server import AppDependencies, UIResourceConfig, create_mcp_server
 from app.tools import maps
 from app.tools.maps import (
@@ -128,12 +129,17 @@ async def test_view_map_combines_query_catalog_and_explicit_sources() -> None:
         ],
     )
 
-    class NoPreviewService(Service):
+    class PreviewService(Service):
         async def query(self, *args, **kwargs):
-            pytest.fail("view_map must return before executing query previews")
+            result = await super().query(*args, **kwargs)
+            result["rows"] = [
+                {"name": "Main Street", "geometry": {"$type": "geometry", "omitted": True}}
+            ]
+            result["result_status"] = "rows_returned"
+            return result
 
     result = await view_map(
-        NoPreviewService(),
+        PreviewService(),
         Catalog(),
         title=spec.title,
         layers=spec.layers,
@@ -145,13 +151,11 @@ async def test_view_map_combines_query_catalog_and_explicit_sources() -> None:
     assert "Rendering is pending" in result.text
     assert result.structured_content["worker_url"] == "https://assets.example/worker.mjs"
     layers = result.structured_content["layers"]
-    assert layers[0] == {
-        "layer_id": "preparing-0",
-        "layer_name": "Query",
-        "preparation_status": "preparing",
-        "visible": True,
-        "style": {"color": "#2166ac"},
-    }
+    assert layers[0]["query_id"] == "roadsquery1234567890ABCD"
+    assert "preparation_status" not in layers[0]
+    assert layers[0]["preview"]["rows"][0]["name"] == "Main Street"
+    assert "Main Street" in result.text
+    assert "secret-bucket" not in str(result)
     assert layers[1] == {
         "layer_id": "external-1",
         "layer_name": "Catalog",
@@ -221,13 +225,9 @@ async def test_prepare_map_layer_rejects_invalid_sql_before_preview() -> None:
 
 
 @pytest.mark.asyncio
-async def test_refresh_query_map_returns_placeholder_without_preview() -> None:
-    class NoPreviewService(Service):
-        async def query(self, *args, **kwargs):
-            pytest.fail("refresh_map must let the widget prepare each query independently")
-
+async def test_refresh_query_map_returns_prepared_query_with_empty_preview() -> None:
     result = await refresh_map(
-        NoPreviewService(),
+        Service(),
         Catalog(),
         MapDefinitionInput(
             title="Roads",
@@ -242,7 +242,46 @@ async def test_refresh_query_map_returns_placeholder_without_preview() -> None:
         ),
         worker_url="https://assets.example/worker.mjs",
     )
-    assert result.structured_content["layers"][0]["preparation_status"] == "preparing"
+    assert result.structured_content["layers"][0]["preview"]["rows"] == []
+    assert "Empty layers: Roads" in result.text
+
+
+@pytest.mark.asyncio
+async def test_view_map_returns_query_error_instead_of_map() -> None:
+    class FailingService(Service):
+        async def query(self, *args, **kwargs):
+            raise AppError(ErrorCode.QUERY_EXECUTION_FAILED, "Unsupported JOIN ON expression")
+
+    server = create_mcp_server(
+        AppDependencies(catalog=Catalog(), query=FailingService()),
+        ui_html="<html></html>",
+        resource_config=UIResourceConfig(tile_origin="https://maps.example"),
+    )
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "view_map",
+            {
+                "title": "NYC",
+                "layers": [
+                    {
+                        "layer_name": "Hospitals",
+                        "source": {
+                            "type": "query",
+                            "inputs": [{"alias": "roads"}],
+                            "sql": "SELECT * FROM roads",
+                        },
+                    }
+                ],
+            },
+            raise_on_error=False,
+        )
+        descriptions = {tool.name: tool.description for tool in await client.list_tools()}
+    assert result.is_error
+    assert "Unsupported JOIN ON expression" in str(result.content)
+    assert "Hospitals" in str(result.content)
+    assert "map_spec" not in result.structured_content
+    assert "query_parquet" in descriptions["view_map"]
+    assert "preview" in descriptions["view_map"]
 
 
 @pytest.mark.asyncio

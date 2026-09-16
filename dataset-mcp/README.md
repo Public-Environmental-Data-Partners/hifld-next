@@ -8,6 +8,24 @@ fixed CRS projection functions. See [query engine setup and compatibility](../op
 
 ## Local development
 
+### Map query preflight
+
+`view_map` validates and executes a bounded one-row preview of each query layer
+before returning a map. A failed preparation returns a tool error naming the
+layer, not a pending map. Successful responses include `layers[].preview`
+(`rows`, `limit`, `warnings`), column metadata and result status. Preview rows
+also appear in the text response; geometry values are summaries, not GeoJSON.
+Empty results are explicitly identified. The widget reuses the prepared tile
+credentials without repeating preparation. External tile sources are unchanged.
+
+Test new SQL with `query_parquet` and a small returned-page limit before mapping.
+Use the same source references, SQL and CRS. Preview success does not guarantee
+tile rendering, and a page limit does not bound aggregate or join execution cost.
+Spatial-only joins and geometry grouping remain engine compatibility limitations;
+their known errors now provide sanitized explanations instead of a generic failure.
+
+### Starting locally
+
 Start ClickHouse with `docker compose up -d --build clickhouse` from the repository
 root, export the ClickHouse settings documented in `.env.example`, then start the
 service on port 8001:
