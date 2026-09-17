@@ -77,6 +77,7 @@ type RenderLayer = Pick<
 > & {
   id: string;
   query_id?: string;
+  query_token?: string;
   tile_url?: string;
   source?: ExternalTileSource;
   preparation_status?: "preparing" | "failed";
@@ -121,6 +122,7 @@ type McpMapApp = Pick<
 };
 
 export interface MapViewProps {
+  onTokenExpired?: (queryId: string, token: string) => Promise<void>;
   onStatus?: (status: MapStatus) => Promise<void>;
   configuration: MapConfiguration | null;
   queryTokens: Record<string, string>;
@@ -244,22 +246,33 @@ function blobText(blob: Blob): Promise<string> {
   });
 }
 
-export async function mapErrorMessage(error: Error): Promise<string> {
+async function mapErrorDetails(
+  error: Error,
+): Promise<{ message: string; code?: string }> {
   if (error instanceof maplibregl.AJAXError) {
     try {
       const parsed = TileErrorSchema.safeParse(
         JSON.parse(await blobText(error.body)),
       );
       if (parsed.success) {
-        return `${parsed.data.message} (${parsed.data.code})`;
+        return {
+          message: `${parsed.data.message} (${parsed.data.code})`,
+          code: parsed.data.code,
+        };
       }
     } catch {
       // MapLibre's generic AJAX message remains useful when the body is not JSON.
     }
   }
-  return /dense/i.test(error.message)
-    ? "This tile is too dense. Filter, aggregate, or zoom in."
-    : error.message;
+  return {
+    message: /dense/i.test(error.message)
+      ? "This tile is too dense. Filter, aggregate, or zoom in."
+      : error.message,
+  };
+}
+
+export async function mapErrorMessage(error: Error): Promise<string> {
+  return (await mapErrorDetails(error)).message;
 }
 
 function combinedBounds(
@@ -608,6 +621,7 @@ function highlightedLayers(configuration: RenderConfiguration) {
 
 export function MapView({
   onStatus,
+  onTokenExpired,
   configuration,
   queryTokens,
   app,
@@ -630,8 +644,8 @@ export function MapView({
   );
   const mapNode = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
-  const latestRef = useRef({ parsed, queryTokens, onStatus });
-  latestRef.current = { parsed, queryTokens, onStatus };
+  const latestRef = useRef({ parsed, queryTokens, onStatus, onTokenExpired });
+  latestRef.current = { parsed, queryTokens, onStatus, onTokenExpired };
   const reconcileRef = useRef<(() => void) | null>(null);
   const disposeMapRef = useRef<(() => void) | null>(null);
   const visibilityByNameRef = useRef(new Map<string, boolean>());
@@ -889,6 +903,7 @@ export function MapView({
     if (!mapNode.current) return;
     let map: MapLibreMap;
     let disposed = false;
+    const renewingLayers = new Set<string>();
     const statuses = new Map<string, LayerStatus>(
       parsed.data.layers.map((layer) => [
         layer.id,
@@ -990,7 +1005,7 @@ export function MapView({
       const reportLoadedSources = () => {
         if (disposed) return;
         for (const [id, layer] of statuses) {
-          if (layer.status !== "loading") continue;
+          if (layer.status !== "loading" || renewingLayers.has(id)) continue;
           const sourceId = querySourceId(id);
           if (map.getSource(sourceId) && map.isSourceLoaded(sourceId)) {
             statuses.set(id, { ...layer, status: "loaded" });
@@ -1039,12 +1054,14 @@ export function MapView({
               JSON.stringify([
                 previous.source,
                 previous.tile_url,
+                previous.query_token,
                 previous.result_status,
                 previous.preparation_status,
               ]) ===
                 JSON.stringify([
                   next.source,
                   next.tile_url,
+                  next.query_token,
                   next.result_status,
                   next.preparation_status,
                 ])
@@ -1196,25 +1213,65 @@ export function MapView({
             provenance.success &&
             querySourceId(candidate.id) === provenance.data.sourceId,
         );
-        const detail =
-          event.error instanceof maplibregl.AJAXError
-            ? ` HTTP status ${event.error.status}.`
-            : "";
-        if (layer)
-          failLayer(
-            layer.id,
-            `tile_load_failed:${detail} Check tile access, CORS, query expiry, or server errors. Other layers may still load.`,
-          );
-        else {
-          globalError = `map_resource_failed:${detail} Check basemap, worker, and network access.`;
-          report();
-        }
-        setIsMapLoading(false);
-        if (event.error instanceof Error) {
-          void mapErrorMessage(event.error).then(setMessage);
-        } else {
-          setMessage("Map rendering is unavailable.");
-        }
+        const failedToken = layer?.query_token;
+        const handleError = async () => {
+          const details =
+            event.error instanceof Error
+              ? await mapErrorDetails(event.error)
+              : { message: "Map rendering is unavailable." };
+          if (disposed) return;
+          if (
+            details.code === "query_token_expired" &&
+            layer?.query_id &&
+            failedToken &&
+            latestRef.current.onTokenExpired
+          ) {
+            if (latestRef.current.queryTokens[layer.query_id] !== failedToken)
+              return;
+            if (renewingLayers.has(layer.id)) return;
+            renewingLayers.add(layer.id);
+            statuses.set(layer.id, {
+              layer_name: layer.layer_name,
+              status: layer.visible ? "loading" : "hidden",
+            });
+            report();
+            try {
+              await latestRef.current.onTokenExpired(
+                layer.query_id,
+                failedToken,
+              );
+            } catch {
+              if (!disposed) {
+                failLayer(
+                  layer.id,
+                  "query_token_refresh_failed: Could not renew the expired query token. Reopen the map to retry.",
+                );
+                setMessage(
+                  "Could not renew the expired query token. Reopen the map to retry.",
+                );
+              }
+            } finally {
+              renewingLayers.delete(layer.id);
+            }
+            return;
+          }
+          const detail =
+            event.error instanceof maplibregl.AJAXError
+              ? ` HTTP status ${event.error.status}.`
+              : "";
+          if (layer)
+            failLayer(
+              layer.id,
+              `tile_load_failed:${detail} Check tile access, CORS, query expiry, or server errors. Other layers may still load.`,
+            );
+          else {
+            globalError = `map_resource_failed:${detail} Check basemap, worker, and network access.`;
+            report();
+          }
+          setIsMapLoading(false);
+          setMessage(details.message);
+        };
+        void handleError();
       });
       map.on("click", (event: MapLayerMouseEvent) => {
         if (suppressNextClickSelectionRef.current) {
@@ -1476,55 +1533,57 @@ export function MapView({
         className="map-canvas"
         aria-busy={isMapLoading || loadingLayers.length > 0 || undefined}
       />
-      {isMapLoading ? (
-        <div className="map-loading" role="status">
-          <span className="map-loading-spinner" aria-hidden="true" />
-          <span>Loading map…</span>
-        </div>
-      ) : null}
-      {!isMapLoading && loadingLayers.length > 0 ? (
-        <div
-          className="map-feature-loading"
-          role="status"
-          aria-label="Feature loading"
-          aria-live="polite"
-        >
-          <span className="map-loading-spinner" aria-hidden="true" />
-          <span>Loading features: {loadingLayers.join(", ")}…</span>
-        </div>
-      ) : null}
-      {visibleMessage || selectionContextStatus === "rejected" ? (
-        <div className="map-notification-stack">
-          {visibleMessage ? (
-            <div className="map-message" role="alert">
-              <span>{visibleMessage}</span>
-              <button
-                type="button"
-                className="map-message-dismiss"
-                aria-label="Dismiss map error"
-                onClick={() =>
-                  setDismissedMessages(
-                    (current) => new Set([...current, visibleMessage]),
-                  )
-                }
+      <div className="map-notification-stack">
+        {isMapLoading ? (
+          <div className="map-feature-loading" role="status">
+            <span className="map-loading-spinner" aria-hidden="true" />
+            <span>Loading map…</span>
+          </div>
+        ) : null}
+        {!isMapLoading && loadingLayers.length > 0 ? (
+          <div
+            className="map-feature-loading"
+            role="status"
+            aria-label="Feature loading"
+            aria-live="polite"
+          >
+            <span className="map-loading-spinner" aria-hidden="true" />
+            <span>Loading features: {loadingLayers.join(", ")}…</span>
+          </div>
+        ) : null}
+        {visibleMessage || selectionContextStatus === "rejected" ? (
+          <>
+            {visibleMessage ? (
+              <div className="map-message" role="alert">
+                <span>{visibleMessage}</span>
+                <button
+                  type="button"
+                  className="map-message-dismiss"
+                  aria-label="Dismiss map error"
+                  onClick={() =>
+                    setDismissedMessages(
+                      (current) => new Set([...current, visibleMessage]),
+                    )
+                  }
+                >
+                  <X aria-hidden="true" />
+                </button>
+              </div>
+            ) : null}
+            {selectionContextStatus === "rejected" ? (
+              <div
+                className="map-selection-status"
+                role="status"
+                aria-label="Selection context"
               >
-                <X aria-hidden="true" />
-              </button>
-            </div>
-          ) : null}
-          {selectionContextStatus === "rejected" ? (
-            <div
-              className="map-selection-status"
-              role="status"
-              aria-label="Selection context"
-            >
-              {!hasHighlight && selectionBounds === null
-                ? "Highlight cleared locally, but the host context could not be cleared. The prior selection may remain available to the agent."
-                : "Selection context could not be updated."}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+                {!hasHighlight && selectionBounds === null
+                  ? "Highlight cleared locally, but the host context could not be cleared. The prior selection may remain available to the agent."
+                  : "Selection context could not be updated."}
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </div>
       <MapControls
         mapRef={mapRef}
         basemap={basemap}

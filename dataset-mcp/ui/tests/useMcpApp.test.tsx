@@ -115,153 +115,72 @@ const pendingResult = {
 };
 
 describe("useMcpApp", () => {
-  it("stops using an expired token while refresh runs and accepts its eventual replacement", async () => {
-    vi.useFakeTimers();
-    try {
-      const app = fakeApp();
-      app.callServerTool.mockResolvedValueOnce({
-        content: [],
-        structuredContent: {
-          layer: {
-            ...validLayer,
-            expires_at: new Date(Date.now() + 60_000).toISOString(),
-          },
-          worker_url: validResult.worker_url,
-        },
-      });
-      let finish: ((value: FakeToolResult) => void) | undefined;
-      app.callServerTool.mockImplementationOnce(
-        () =>
-          new Promise<FakeToolResult>((resolve) => {
-            finish = resolve;
-          }),
-      );
-      const { result, unmount } = connect(app);
-      await act(async () =>
-        app.ontoolresult?.({ content: [], structuredContent: pendingResult }),
-      );
-      await act(async () => vi.advanceTimersByTime(30_000));
-      expect(result.current.queryTokens[queryId]).toBe("signed-capitols");
-      await act(async () => vi.advanceTimersByTime(30_000));
-      expect(result.current.queryTokens).toEqual({});
-      expect(result.current.mapConfiguration?.layers[0]).toMatchObject({
-        preparation_status: "preparing",
-      });
-      await act(async () =>
-        finish?.({
-          content: [],
-          structuredContent: {
-            layer: {
-              ...validLayer,
-              query_token: "replacement",
-              expires_at: new Date(Date.now() + 60_000).toISOString(),
-            },
-            worker_url: validResult.worker_url,
-          },
-        }),
-      );
-      expect(result.current.queryTokens[queryId]).toBe("replacement");
-      expect(result.current.mapConfiguration?.layers[0]).toMatchObject({
-        query_id: queryId,
-      });
-      expect(app.callServerTool).toHaveBeenCalledTimes(2);
-      unmount();
-    } finally {
-      vi.useRealTimers();
-    }
+  it("reports a failed demand refresh without retrying indefinitely", async () => {
+    const app = fakeApp();
+    app.callServerTool.mockRejectedValue(new Error("offline"));
+    const { result } = connect(app);
+    act(() =>
+      app.ontoolresult?.({ content: [], structuredContent: validResult }),
+    );
+    await act(async () =>
+      result.current.refreshExpiredToken(queryId, "signed-capitols"),
+    );
+    expect(result.current.error).toMatch(/could not refresh/i);
+    await act(async () =>
+      result.current.refreshExpiredToken(queryId, "signed-capitols"),
+    );
+    expect(app.callServerTool).toHaveBeenCalledTimes(1);
   });
-  it("keeps a valid query after refresh failure and marks only that layer failed at expiry", async () => {
-    vi.useFakeTimers();
-    try {
-      const app = fakeApp();
-      app.callServerTool.mockResolvedValueOnce({
-        content: [],
-        structuredContent: {
-          layer: {
-            ...validLayer,
-            expires_at: new Date(Date.now() + 60_000).toISOString(),
-          },
-          worker_url: validResult.worker_url,
-        },
-      });
-      app.callServerTool.mockRejectedValueOnce(new Error("Connection lost"));
-      const { result, unmount } = connect(app);
-      await act(async () =>
-        app.ontoolresult?.({ content: [], structuredContent: pendingResult }),
-      );
-      await act(async () => vi.advanceTimersByTime(30_000));
-      expect(result.current.mapConfiguration?.layers[0]).toMatchObject({
-        query_id: queryId,
-      });
-      expect(result.current.queryTokens[queryId]).toBe("signed-capitols");
-      expect(result.current.feedbackNotice).toMatch(
-        /refresh.*existing.*expires/i,
-      );
-      await act(async () => vi.advanceTimersByTime(30_000));
-      expect(result.current.mapConfiguration?.layers[0]).toMatchObject({
-        preparation_status: "failed",
-      });
-      expect(result.current.queryTokens).toEqual({});
-      expect(app.callServerTool).toHaveBeenCalledTimes(2);
-      unmount();
-    } finally {
-      vi.useRealTimers();
-    }
+
+  it("rejects expired replacement tokens instead of looping", async () => {
+    const app = fakeApp();
+    app.callServerTool.mockResolvedValue({
+      content: [],
+      structuredContent: {
+        ...validResult,
+        layers: [{ ...validLayer, expires_at: "2020-01-01T00:00:00Z" }],
+      },
+    });
+    const { result } = connect(app);
+    act(() =>
+      app.ontoolresult?.({ content: [], structuredContent: validResult }),
+    );
+    await act(async () =>
+      result.current.refreshExpiredToken(queryId, "signed-capitols"),
+    );
+    expect(result.current.error).toMatch(/expired replacement/i);
+    expect(app.callServerTool).toHaveBeenCalledTimes(1);
   });
-  it("refreshes each prepared query token and cancels pending preparation on teardown", async () => {
-    vi.useFakeTimers();
-    try {
-      const app = fakeApp();
-      app.callServerTool.mockResolvedValueOnce({
+
+  it("ignores a renewal response after teardown", async () => {
+    const app = fakeApp();
+    let finish: ((value: FakeToolResult) => void) | undefined;
+    app.callServerTool.mockImplementation(
+      () =>
+        new Promise<FakeToolResult>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { result } = connect(app);
+    act(() =>
+      app.ontoolresult?.({ content: [], structuredContent: validResult }),
+    );
+    let renewal: Promise<void> | undefined;
+    act(() => {
+      renewal = result.current.refreshExpiredToken(queryId, "signed-capitols");
+    });
+    await act(async () => app.onteardown?.());
+    await act(async () => {
+      finish?.({
         content: [],
         structuredContent: {
-          layer: {
-            ...validLayer,
-            expires_at: new Date(Date.now() + 60_000).toISOString(),
-          },
-          worker_url: validResult.worker_url,
+          ...validResult,
+          layers: [{ ...validLayer, query_token: "ignored" }],
         },
       });
-      let finish: ((value: FakeToolResult) => void) | undefined;
-      app.callServerTool.mockImplementationOnce(
-        () =>
-          new Promise<FakeToolResult>((resolve) => {
-            finish = resolve;
-          }),
-      );
-      const { result, unmount } = connect(app);
-      await act(async () =>
-        app.ontoolresult?.({ content: [], structuredContent: pendingResult }),
-      );
-      expect(result.current.queryTokens[queryId]).toBe("signed-capitols");
-      await act(async () => vi.advanceTimersByTime(30_000));
-      expect(app.callServerTool).toHaveBeenCalledTimes(2);
-      expect(app.callServerTool.mock.calls[1]?.[0].name).toBe(
-        "prepare_map_layer",
-      );
-      const requestOptions = app.callServerTool.mock.calls[1]?.[1] as {
-        signal: AbortSignal;
-      };
-      await act(async () => app.onteardown?.());
-      expect(requestOptions.signal.aborted).toBe(true);
-      await act(async () =>
-        finish?.({
-          content: [],
-          structuredContent: {
-            layer: validLayer,
-            worker_url: validResult.worker_url,
-          },
-        }),
-      );
-      expect(result.current.mapConfiguration?.layers[0]).toMatchObject({
-        query_id: queryId,
-      });
-      await act(async () => vi.advanceTimersByTime(120_000));
-      expect(app.callServerTool).toHaveBeenCalledTimes(2);
-      unmount();
-    } finally {
-      vi.useRealTimers();
-    }
+      await renewal;
+    });
+    expect(result.current.queryTokens[queryId]).toBe("signed-capitols");
   });
 
   it("ignores a preparation response after a new map replaces it", async () => {
@@ -527,6 +446,43 @@ describe("useMcpApp", () => {
     expect(result.current.mapConfiguration).toBeNull();
     expect(result.current.queryTokens).toEqual({});
     expect(result.current.error).toBe("Query failed");
+  });
+
+  it("renews on demand once for concurrent expired tiles, not on a timer", async () => {
+    vi.useFakeTimers();
+    const app = fakeApp();
+    const { result } = connect(app);
+    act(() =>
+      app.ontoolresult?.({ content: [], structuredContent: validResult }),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000));
+    expect(app.callServerTool).not.toHaveBeenCalled();
+    app.callServerTool.mockResolvedValue({
+      content: [],
+      structuredContent: {
+        ...validResult,
+        layers: [
+          {
+            ...validLayer,
+            query_token: "replacement",
+            expires_at: new Date(Date.now() + 3600000).toISOString(),
+          },
+        ],
+      },
+    });
+    await act(async () => {
+      await Promise.all([
+        result.current.refreshExpiredToken(queryId, "signed-capitols"),
+        result.current.refreshExpiredToken(queryId, "signed-capitols"),
+      ]);
+    });
+    expect(app.callServerTool).toHaveBeenCalledTimes(1);
+    expect(result.current.queryTokens[queryId]).toBe("replacement");
+    await act(async () => {
+      await result.current.refreshExpiredToken(queryId, "signed-capitols");
+    });
+    expect(app.callServerTool).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 
   it("refreshes an expired saved map from its durable definition", async () => {

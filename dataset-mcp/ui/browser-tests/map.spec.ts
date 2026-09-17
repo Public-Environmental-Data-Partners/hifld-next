@@ -40,7 +40,7 @@ function pointTile(): Buffer {
 }
 
 for (const opaqueOrigin of [false, true]) {
-  for (const tileFailure of [false, true]) {
+  for (const tileFailure of [false, true, "expired"] as const) {
     test(`reports actual MVT outcome (opaque origin: ${opaqueOrigin}, tile failure: ${tileFailure})`, async ({
       page,
     }, testInfo) => {
@@ -89,8 +89,23 @@ for (const opaqueOrigin of [false, true]) {
             });
           } else {
             tileHeaders.push(route.request().headers()["x-hifld-query-token"]);
+            if (
+              tileFailure === "expired" &&
+              route.request().headers()["x-hifld-query-token"] !==
+                "renewed-token"
+            ) {
+              return route.fulfill({
+                status: 401,
+                contentType: "application/json",
+                headers,
+                body: JSON.stringify({
+                  code: "query_token_expired",
+                  message: "The query token has expired.",
+                }),
+              });
+            }
             await route.fulfill({
-              status: tileFailure ? 500 : 200,
+              status: tileFailure === true ? 500 : 200,
               contentType: "application/vnd.mapbox-vector-tile",
               headers,
               body: tile,
@@ -129,6 +144,7 @@ for (const opaqueOrigin of [false, true]) {
                     protocolVersion: event.data.params.protocolVersion,
                     hostInfo: { name: "local-browser-test", version: "1" },
                     hostCapabilities: {
+                      serverTools: {},
                       updateModelContext: { structuredContent: {} },
                     },
                     hostContext: { theme: "light", displayMode: "inline" },
@@ -138,6 +154,11 @@ for (const opaqueOrigin of [false, true]) {
               );
             } else if (event.data.method === "ui/notifications/initialized") {
               document.body.dataset.ready = "true";
+            } else if (event.data.method === "tools/call") {
+              document.body.dataset.renewalCount = String(
+                Number(document.body.dataset.renewalCount ?? 0) + 1,
+              );
+              document.body.dataset.renewalId = String(event.data.id);
             } else if (event.data.method === "ui/update-model-context") {
               const status = event.data.params.structuredContent?.map_status;
               if (status)
@@ -157,6 +178,7 @@ for (const opaqueOrigin of [false, true]) {
       const queryId = "hospitalquery123456789AB";
       await page.evaluate(
         (result) => {
+          document.body.dataset.mapResult = JSON.stringify(result);
           document.querySelector("iframe")?.contentWindow?.postMessage(
             {
               jsonrpc: "2.0",
@@ -219,16 +241,63 @@ for (const opaqueOrigin of [false, true]) {
       expect(tileHeaders.every((value) => value === "test-query-token")).toBe(
         true,
       );
+      if (tileFailure === "expired") {
+        await expect(page.locator("body")).toHaveAttribute(
+          "data-renewal-count",
+          "1",
+        );
+        const loading = frame.getByRole("status", { name: "Feature loading" });
+        await expect(loading).toBeVisible();
+        const mapBox = await frame.locator(".map-canvas").boundingBox();
+        const loadingBox = await loading.boundingBox();
+        if (!mapBox || !loadingBox) throw new Error("Missing loading layout");
+        expect(loadingBox.x - mapBox.x).toBeCloseTo(12, 0);
+        expect(loadingBox.y - mapBox.y).toBeCloseTo(12, 0);
+        await page.screenshot({
+          path: testInfo.outputPath("renewing-top-left.png"),
+        });
+        await page.evaluate(() => {
+          const result = JSON.parse(
+            document.body.dataset.mapResult ?? "{}",
+          ) as { layers: { query_token: string; expires_at: string }[] };
+          for (const layer of result.layers) {
+            layer.query_token = "renewed-token";
+            layer.expires_at = new Date(Date.now() + 3600000).toISOString();
+          }
+          document.querySelector("iframe")?.contentWindow?.postMessage(
+            {
+              jsonrpc: "2.0",
+              id: Number(document.body.dataset.renewalId),
+              result: { content: [], structuredContent: result },
+            },
+            "*",
+          );
+        });
+        await expect
+          .poll(() => tileHeaders.includes("renewed-token"))
+          .toBe(true);
+        await expect(loading).toBeHidden();
+        await expect(frame.getByRole("alert")).toHaveCount(0);
+        await expect(page.locator("body")).toHaveAttribute(
+          "data-renewal-count",
+          "1",
+        );
+        await page.screenshot({
+          path: testInfo.outputPath("renewed-points.png"),
+        });
+      }
       await expect
         .poll(() => page.locator("body").getAttribute("data-runtime-statuses"))
         .toContain('"status":"loading"');
       await expect
         .poll(() => page.locator("body").getAttribute("data-runtime-statuses"))
-        .toContain(tileFailure ? '"status":"failed"' : '"status":"loaded"');
+        .toContain(
+          tileFailure === true ? '"status":"failed"' : '"status":"loaded"',
+        );
       expect(
         await page.locator("body").getAttribute("data-runtime-statuses"),
       ).not.toContain("test-query-token");
-      if (tileFailure) {
+      if (tileFailure === true) {
         const map = frame.locator(".map-canvas");
         const banner = frame.getByRole("alert");
         await expect(banner).toContainText("500");

@@ -10,6 +10,7 @@ export default function App() {
     queryTokens,
     registerTeardownHandler,
     reportStatus,
+    refreshExpiredToken,
     feedbackNotice,
   } = useMcpApp();
 
@@ -33,6 +34,7 @@ export default function App() {
         <h2>{mapConfiguration.title}</h2>
       </header>
       <MapView
+        onTokenExpired={refreshExpiredToken}
         onStatus={reportStatus}
         configuration={mapConfiguration}
         queryTokens={queryTokens}
