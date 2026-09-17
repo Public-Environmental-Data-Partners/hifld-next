@@ -118,8 +118,8 @@ describe("FeatureTablePanel", () => {
     expect(searchInput.parentElement).toHaveClass("w-full", "sm:w-80", "sm:flex-none");
     expect(screen.getByTestId("selected-features-scroll")).toHaveClass(
       "overflow-x-auto",
-      "sm:overflow-auto",
-      "sm:overscroll-contain",
+      "md:overflow-auto",
+      "md:overscroll-contain",
     );
   });
 

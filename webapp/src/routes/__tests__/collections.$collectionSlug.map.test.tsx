@@ -167,9 +167,9 @@ describe("collection map route", () => {
     vi.mocked(apiClient.getDatasetFileBySlug).mockResolvedValue({ dataset, file });
   });
 
-  it("opens the desktop selected-features drawer larger by default", () => {
-    expect(MAP_CANVAS_DESKTOP_DEFAULT_SIZE).toBe("45%");
-    expect(MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE).toBe("55%");
+  it("keeps most of the map visible when the desktop drawer opens", () => {
+    expect(MAP_CANVAS_DESKTOP_DEFAULT_SIZE).toBe("70%");
+    expect(MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE).toBe("30%");
   });
 
   it("resolves an initial source search param on the canonical map URL", async () => {

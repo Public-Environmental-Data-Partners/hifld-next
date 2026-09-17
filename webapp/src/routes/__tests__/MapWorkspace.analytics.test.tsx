@@ -1,7 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockFeature } from "@/components/viewer/__tests__/test-utils";
+import { useMultiLayerMapInitialization } from "@/components/viewer/useMapInitialization";
+import { useLayerStyling } from "@/components/viewer/useLayerStyling";
+import { DEFAULT_STYLE } from "@/components/viewer/utils";
 import type { SourceDescriptor } from "@/components/map/sourceDescriptors";
 import type { Collection, Dataset, DatasetFile, DatasetSource } from "@/lib/api-client";
 
@@ -39,19 +43,19 @@ vi.mock("react-resizable-panels", () => ({
 }));
 
 vi.mock("@/components/viewer/useMapInitialization", () => ({
-  useMultiLayerMapInitialization: () => ({
+  useMultiLayerMapInitialization: vi.fn(() => ({
     mapRef: { current: null },
     setHoverFeature: vi.fn(),
     clearHoverFeature: vi.fn(),
     clearSelectionBox: vi.fn(),
-  }),
+  })),
 }));
 
 vi.mock("@/components/viewer/useLayerStyling", () => ({
   useLayerStyling: vi.fn(),
 }));
 
-import { MapWorkspace, type ResolvedDescriptor } from "../collections.$collectionSlug.map";
+import { MapWorkspace, resolvedToMapLayer, type ResolvedDescriptor } from "../collections.$collectionSlug.map";
 
 const collection: Collection = {
   id: 1,
@@ -178,6 +182,40 @@ describe("MapWorkspace map-import analytics", () => {
       configurable: true,
       value: vi.fn(),
     });
+  });
+
+  it.each([false, true])("only collapses the legend on mobile feature selection (mobile: %s)", async (mobile) => {
+    const originalMatchMedia = window.matchMedia;
+    vi.stubGlobal("matchMedia", (query: string) => ({ ...originalMatchMedia(query), matches: mobile }));
+    const layer = resolvedToMapLayer(initialLayer);
+    if (!layer) throw new Error("Missing fixture layer");
+    render(<MapWorkspace collection={collection} initialLayers={[initialLayer]} initialLayerKey="route" />);
+    const mapCallbacks = vi.mocked(useMultiLayerMapInitialization).mock.calls.at(-1);
+    const styleCallbacks = vi.mocked(useLayerStyling).mock.calls.at(-1);
+    if (!mapCallbacks || !styleCallbacks) throw new Error("Map hooks were not initialized");
+    act(() => {
+      mapCallbacks[2]([{
+        id: "test-layer", loadedLayerId: layer.id, sourceLayerId: "hospitals",
+        mapSourceId: layer.mapSourceId, fields: [], numericFields: [],
+      }]);
+      styleCallbacks[3]({ "test-layer": { ...DEFAULT_STYLE } });
+    });
+    expect(screen.getByRole("region", { name: "Map legend" })).toBeVisible();
+    const onSelection = vi.mocked(useMultiLayerMapInitialization).mock.calls.at(-1)?.[5];
+    const feature = createMockFeature({
+      source: layer.mapSourceId,
+      sourceLayer: "hospitals",
+      layer: { id: "test-layer", type: "circle", source: layer.mapSourceId },
+    });
+    act(() => onSelection?.([feature], "replace"));
+    if (mobile) {
+      expect(screen.queryByRole("region", { name: "Map legend" })).not.toBeInTheDocument();
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Show color key" }));
+    }
+    expect(screen.getByRole("region", { name: "Map legend" })).toBeVisible();
+    act(() => onSelection?.([], "replace"));
+    expect(screen.getByRole("region", { name: "Map legend" })).toBeVisible();
   });
 
   it("keeps the collapsed data panel registered before the first feature selection", () => {

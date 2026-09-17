@@ -45,7 +45,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { PageLoader } from "@/components/ui/page-loader";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FeatureHoverPopup } from "@/components/viewer/FeatureHoverPopup";
@@ -98,8 +97,8 @@ type MapSearch = {
 const MAP_DATASET_PAGE_SIZE = 12;
 const SEARCH_DEBOUNCE_MS = 500;
 const MOBILE_SETTINGS_MEDIA_QUERY = "(max-width: 767.98px)";
-export const MAP_CANVAS_DESKTOP_DEFAULT_SIZE = "45%";
-export const MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE = "55%";
+export const MAP_CANVAS_DESKTOP_DEFAULT_SIZE = "70%";
+export const MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE = "30%";
 export const DATASET_SEARCH_PANEL_CLASSNAME =
   "absolute top-full right-0 left-0 z-30 mt-2 min-w-0 rounded-md border bg-popover p-0 text-popover-foreground shadow-md";
 export const DATASET_SEARCH_LIST_CLASSNAME =
@@ -588,7 +587,7 @@ function StyleLayerCard({
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <CardContent className="min-w-0 pt-0">
+          <CardContent className="min-w-0 px-3 pt-0">
             <LayerStylingEditor
               activeLayer={layer}
               activeStyle={style}
@@ -758,6 +757,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     (features: maplibregl.MapGeoJSONFeature[], mode: FeatureSelectionMode) => {
       const incoming = normalizeSelectedFeatures({ features, loadedLayers });
       if (incoming.length > 0) {
+        if (isMobileMapLayout) setLegendVisible(false);
         dispatchDataPanel({ type: "features_selected" });
       } else if (mode === "replace") {
         dispatchDataPanel({ type: "features_cleared", hasQueryResults: queryResult !== null });
@@ -768,7 +768,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
         return update.rows;
       });
     },
-    [loadedLayers, queryResult],
+    [isMobileMapLayout, loadedLayers, queryResult],
   );
 
   const handleMapSourceError = useCallback(
@@ -1150,7 +1150,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
       if (dataPanelHasOpenedRef.current) {
         panel.expand();
       } else {
-        panel.resize(isMobileMapLayout ? "62%" : MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE);
+        panel.resize(isMobileMapLayout ? "40%" : MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE);
         dataPanelHasOpenedRef.current = true;
       }
     } else {
@@ -1379,15 +1379,15 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const queryResultsButtonLabel = queryResultsVisible ? "Hide results" : "View results";
 
   const settingsPanelContent = (
-    <div className="box-border w-full max-w-full min-w-0 overflow-hidden p-3 sm:p-4">
+    <div className="box-border w-full max-w-full min-w-0 overflow-hidden p-3">
       <Card className="w-full max-w-full min-w-0">
-        <CardHeader className="px-4 pb-3 sm:px-6">
+        <CardHeader className="px-3 pb-3">
           <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
             <Layers className="h-4 w-4" />
             Layers
           </CardTitle>
         </CardHeader>
-        <CardContent className="min-w-0 space-y-5 px-4 sm:px-6">
+        <CardContent className="min-w-0 space-y-5 px-3">
           <div className="min-w-0 space-y-2">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Dataset</div>
             <DatasetSearchCombobox
@@ -1638,7 +1638,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
       <ResizablePanel
         id="map-data-panel"
         defaultSize="0%"
-        minSize={isMobileMapLayout ? "42%" : "18%"}
+        minSize={isMobileMapLayout ? "25%" : "15%"}
         collapsible
         collapsedSize="0%"
         panelRef={dataPanelRef}
@@ -1768,7 +1768,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
         <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
           <ResizablePanel
             defaultSize="28%"
-            minSize="22%"
+            minSize="240px"
             maxSize="42%"
             collapsible
             collapsedSize="0%"
@@ -1776,7 +1776,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
             onResize={(panelSize) => setIsSettingsCollapsed(panelSize.asPercentage === 0)}
             className="min-w-0 overflow-hidden"
           >
-            <ScrollArea className="h-full">{settingsPanelContent}</ScrollArea>
+            <div className="h-full min-w-0 overflow-y-auto overflow-x-hidden">{settingsPanelContent}</div>
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel
