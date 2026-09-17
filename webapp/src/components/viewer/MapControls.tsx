@@ -52,7 +52,7 @@ export function MapControls({
   return (
     <TooltipProvider delayDuration={0}>
       <SharedMapControls
-        className="absolute right-4 top-4 z-[1000] flex flex-col gap-2"
+        className="absolute right-4 top-4 z-10 flex flex-col gap-2"
         basemapMode={basemapMode}
         isSelectionActive={Boolean(isSelectionActive)}
         onToggleSelection={onToggleSelection}

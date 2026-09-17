@@ -178,12 +178,12 @@ function SelectedFeaturesTable({
       : [];
   const propertyKeys = sortedPropertyKeys(scopedFeatures);
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto overscroll-contain sm:overflow-hidden">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto overscroll-contain md:overflow-hidden">
       <SharedSelectedFeaturesTable
         features={scopedFeatures}
         columns={propertyKeys}
         highlightedFeatureId={highlightedFeatureId}
-        toolbarClassName="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 sm:px-4"
+        toolbarClassName="grid shrink-0 grid-cols-[minmax(0,1fr)_7rem] items-center gap-2 border-b px-3 py-2 sm:flex sm:flex-wrap sm:px-4"
         toolbarLeading={
           <>
             <Select value={selectedGroup?.key ?? ""} onValueChange={onSelectedLayerKeyChange}>
@@ -212,7 +212,7 @@ function SelectedFeaturesTable({
             </Select>
           </>
         }
-        searchClassName="hifld-selected-features-search relative w-full min-w-0 sm:w-80 sm:flex-none"
+        searchClassName="hifld-selected-features-search relative col-span-2 w-full min-w-0 sm:w-80 sm:flex-none"
         renderSearchInput={(control) => (
           <Input
             type="search"
@@ -229,7 +229,7 @@ function SelectedFeaturesTable({
           feature.sourceLayerId,
           feature.featureId,
         ]}
-        className="min-w-0 shrink-0 overflow-x-auto sm:min-h-0 sm:flex-1 sm:overflow-auto sm:overscroll-contain"
+        className="min-w-0 shrink-0 overflow-x-auto md:min-h-0 md:flex-1 md:overflow-auto md:overscroll-contain"
         tableClassName="w-full min-w-[640px] text-sm"
         headerClassName="sticky top-0 z-10 bg-background"
         headerRowClassName="border-b text-left text-xs text-muted-foreground"
@@ -1125,7 +1125,7 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
             <div className="text-sm font-semibold">{features.length} selected features</div>
             {wasSelectionCapped && <Badge variant="secondary">Selection is capped at 100 features per layer.</Badge>}
           </div>
-          <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 sm:w-auto">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
             {panelModeControls}
             {canDiff && (
               <div className="flex w-full min-w-0 rounded-md border p-0.5 sm:w-auto">

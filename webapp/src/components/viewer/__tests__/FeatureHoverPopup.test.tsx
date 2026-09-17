@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { FeatureHoverPopup } from '../FeatureHoverPopup'
 import { createMockHoverInfo, createMockFeature } from './test-utils'
 
@@ -159,9 +160,9 @@ describe('FeatureHoverPopup', () => {
     consoleError.mockRestore()
   })
 
-  it('positions popup correctly based on hoverInfo coordinates', () => {
+  it('constrains popup coordinates to the available map area', () => {
     const mockHoverInfo = createMockHoverInfo({ x: 100, y: 200 })
-    const { container } = render(
+    const markup = renderToStaticMarkup(
       <FeatureHoverPopup
         hoverInfo={mockHoverInfo}
         selectedIndex={0}
@@ -170,8 +171,9 @@ describe('FeatureHoverPopup', () => {
       />
     )
 
-    const popup = container.firstChild as HTMLElement
-    expect(popup).toHaveStyle({ left: '112px', top: '212px' }) // x + 12, y + 12
+    // jsdom drops CSS math with mixed units; check the emitted styles directly.
+    expect(markup).toContain('left:clamp(8px, 112px, calc(100% - 20rem - 8px))')
+    expect(markup).toContain('top:clamp(8px, 212px, calc(100% - 16rem - 8px))')
   })
 
   it('displays layer ID in header', () => {

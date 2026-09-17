@@ -391,8 +391,15 @@ export function syncPinnedPopupPosition({
   }
 
   const point = map.project({ lng: lngLat.lng, lat: lngLat.lat });
-  element.style.left = `${point.x + 12}px`;
-  element.style.top = `${point.y + 12}px`;
+  const parent = element.parentElement;
+  const left = parent
+    ? Math.max(8, Math.min(point.x + 12, parent.clientWidth - element.offsetWidth - 8))
+    : point.x + 12;
+  const top = parent
+    ? Math.max(8, Math.min(point.y + 12, parent.clientHeight - element.offsetHeight - 8))
+    : point.y + 12;
+  element.style.left = `${left}px`;
+  element.style.top = `${top}px`;
 }
 
 function queryRenderedSelectionFeatures({

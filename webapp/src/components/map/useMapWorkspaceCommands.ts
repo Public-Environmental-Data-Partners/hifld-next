@@ -1,5 +1,5 @@
 import type maplibregl from "maplibre-gl";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import type { LayerStyle, LayerStylesById, VectorLayerInfo } from "@/components/viewer/types";
 import { syncBasemapVisibility } from "@/components/viewer/useMapInitialization";
 import { DEFAULT_STYLE } from "@/components/viewer/utils";
@@ -51,23 +51,6 @@ function unionBounds(bounds: readonly (MapBounds | null)[]): MapBounds | null {
     Math.max(...known.map((bound) => bound[2])),
     Math.max(...known.map((bound) => bound[3])),
   ];
-}
-
-type MapStyleLoadState = ReturnType<maplibregl.Map["isStyleLoaded"]>;
-
-interface MapFitApi {
-  isStyleLoaded(): MapStyleLoadState;
-  once(event: "style.load", listener: () => void): void;
-  fitBounds(bounds: MapBounds, options: { padding: number; duration: number }): void;
-}
-
-export function fitMapWhenReady(map: MapFitApi, bounds: MapBounds): void {
-  const applyFit = () => map.fitBounds(bounds, { padding: 48, duration: 0 });
-  if (map.isStyleLoaded()) {
-    applyFit();
-    return;
-  }
-  map.once("style.load", applyFit);
 }
 
 interface MapMovementApi {
@@ -230,30 +213,10 @@ export function useMapWorkspaceCommands({
   const loadedLayersRef = useRef(loadedLayers);
   const vectorLayersRef = useRef(vectorLayers);
   const selectedFeaturesRef = useRef(selectedFeatures);
-  const initialFitAttemptedRef = useRef(false);
-  const firstLayerFitScheduledRef = useRef(false);
   const pendingLayerIdsRef = useRef<Set<string>>(new Set());
   loadedLayersRef.current = loadedLayers;
   vectorLayersRef.current = vectorLayers;
   selectedFeaturesRef.current = selectedFeatures;
-
-  const fitKnownLayerUnion = useCallback(
-    (layers: readonly LoadedMapLayer[]): void => {
-      const map = mapRef.current;
-      const bounds = unionBounds(layers.map((layer) => layer.bounds));
-      if (!map || !bounds) return;
-      fitMapWhenReady(map, bounds);
-    },
-    [mapRef],
-  );
-
-  useEffect(() => {
-    if (initialFitAttemptedRef.current || loadedLayers.length === 0) return;
-    const map = mapRef.current;
-    if (!map) return;
-    initialFitAttemptedRef.current = true;
-    fitKnownLayerUnion(loadedLayers);
-  }, [fitKnownLayerUnion, loadedLayers, mapRef]);
 
   const addDatasetLayer = useCallback(
     async (input: DatasetLayerInput): Promise<MapLayerSummary> => {
@@ -272,21 +235,16 @@ export function useMapWorkspaceCommands({
           { layerId: resolved.id, label: resolved.label, kind: resolved.kind },
           summaries(loadedLayersRef.current),
         );
-        const wasEmpty = loadedLayersRef.current.length === 0;
         setLoadedLayers((previous) =>
           previous.some((layer) => layer.id === resolved.id) ? previous : [...previous, resolved],
         );
         if (resolved.kind === "catalog_pmtiles") onCatalogLayerAdded?.(resolved);
-        if (wasEmpty && !firstLayerFitScheduledRef.current) {
-          firstLayerFitScheduledRef.current = true;
-          fitKnownLayerUnion([resolved]);
-        }
         return { id: resolved.id, label: resolved.label, kind: resolved.kind, visible: resolved.visible };
       } finally {
         pendingLayerIdsRef.current.delete(input.layerId);
       }
     },
-    [fitKnownLayerUnion, onCatalogLayerAdded, resolveDatasetLayer, setLoadedLayers],
+    [onCatalogLayerAdded, resolveDatasetLayer, setLoadedLayers],
   );
 
   const removeLayer = useCallback(
