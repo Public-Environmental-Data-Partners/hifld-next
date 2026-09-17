@@ -16,8 +16,6 @@ import {
   publishMapStatus,
 } from "./mapStatus";
 
-const TOKEN_REFRESH_LEAD_MS = 30_000;
-
 function invalidMapMessage(issues: readonly z.core.$ZodIssue[]): string {
   const fields = (
     items: readonly z.core.$ZodIssue[],
@@ -61,6 +59,7 @@ function earliestExpiration(result: MapResult): number {
 }
 
 export interface McpMapState {
+  refreshExpiredToken: (queryId: string, token: string) => Promise<void>;
   reportStatus: (status: MapStatus) => Promise<void>;
   feedbackNotice: string | null;
   app: McpApp | null;
@@ -72,16 +71,13 @@ export interface McpMapState {
 
 export function useMcpApp(): McpMapState {
   const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
-  const [refreshNotices, setRefreshNotices] = useState<Record<string, string>>(
-    {},
-  );
   const teardownHandlerRef = useRef<(() => Promise<void>) | null>(null);
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshExpiredRef = useRef<McpMapState["refreshExpiredToken"]>(
+    async () => {},
+  );
+  const tokensRef = useRef<Record<string, string>>({});
   const mapSequenceRef = useRef(0);
   const preparationAbortRef = useRef<AbortController | null>(null);
-  const layerRefreshTimersRef = useRef(
-    new Map<number, ReturnType<typeof setTimeout>>(),
-  );
   const [mapConfiguration, setMapConfiguration] =
     useState<MapConfiguration | null>(null);
   const [queryTokens, setQueryTokens] = useState<Record<string, string>>({});
@@ -91,22 +87,13 @@ export function useMcpApp(): McpMapState {
     capabilities: {},
     autoResize: true,
     onAppCreated: (created) => {
-      const clearRefreshTimer = () => {
-        if (refreshTimerRef.current !== null) {
-          clearTimeout(refreshTimerRef.current);
-          refreshTimerRef.current = null;
-        }
-      };
       const cancelPreparation = () => {
         preparationAbortRef.current?.abort();
         preparationAbortRef.current = null;
-        for (const timer of layerRefreshTimersRef.current.values())
-          clearTimeout(timer);
-        layerRefreshTimersRef.current.clear();
-        setRefreshNotices({});
       };
       const failMap = (message: string, validation = false) => {
-        clearRefreshTimer();
+        refreshExpiredRef.current = async () => {};
+        tokensRef.current = {};
         cancelPreparation();
         setMapConfiguration(null);
         setQueryTokens({});
@@ -126,7 +113,14 @@ export function useMcpApp(): McpMapState {
       };
       const acceptMapResult = (result: MapResult, sequence: number) => {
         if (sequence !== mapSequenceRef.current) return;
-        clearRefreshTimer();
+        refreshExpiredRef.current = async (queryId, token) => {
+          if (
+            sequence !== mapSequenceRef.current ||
+            tokensRef.current[queryId] !== token
+          )
+            return;
+          await refreshMap(result.map_spec, sequence);
+        };
         if (result.layers.some((layer) => "preparation_status" in layer)) {
           cancelPreparation();
           const controller = new AbortController();
@@ -139,6 +133,13 @@ export function useMcpApp(): McpMapState {
             )
               return;
             setMapConfiguration(runtimeConfiguration(current));
+            tokensRef.current = Object.fromEntries(
+              current.layers.flatMap((layer) =>
+                "query_id" in layer
+                  ? [[layer.query_id, layer.query_token]]
+                  : [],
+              ),
+            );
             setQueryTokens(
               Object.fromEntries(
                 current.layers.flatMap((layer) =>
@@ -170,55 +171,13 @@ export function useMcpApp(): McpMapState {
               };
               publish();
             };
-            const schedule = (callback: () => void, delay: number) => {
-              const previousTimer = layerRefreshTimersRef.current.get(index);
-              if (previousTimer !== undefined) clearTimeout(previousTimer);
-              layerRefreshTimersRef.current.set(
-                index,
-                setTimeout(() => {
-                  layerRefreshTimersRef.current.delete(index);
-                  if (
-                    !controller.signal.aborted &&
-                    sequence === mapSequenceRef.current
-                  )
-                    callback();
-                }, delay),
-              );
-            };
-            const previous = current.layers[index];
-            const previousExpiry =
-              previous && "expires_at" in previous
-                ? Date.parse(previous.expires_at)
-                : 0;
-            const preparing = () =>
-              replace({ ...original, preparation_status: "preparing" });
-            if (previousExpiry > Date.now())
-              schedule(preparing, previousExpiry - Date.now());
-            else preparing();
-            const clearNotice = () =>
-              setRefreshNotices((notices) =>
-                Object.fromEntries(
-                  Object.entries(notices).filter(
-                    ([name]) => name !== original.layer_name,
-                  ),
-                ),
-              );
+            replace({ ...original, preparation_status: "preparing" });
             const fail = (message: string) => {
-              const failed = () => {
-                clearNotice();
-                replace({
-                  ...original,
-                  preparation_status: "failed",
-                  preparation_error: message,
-                });
-              };
-              if (previousExpiry > Date.now()) {
-                setRefreshNotices((notices) => ({
-                  ...notices,
-                  [original.layer_name]: `${original.layer_name}: refresh failed. The existing layer remains available until its token expires. Reopen the map to retry.`,
-                }));
-                schedule(failed, previousExpiry - Date.now());
-              } else failed();
+              replace({
+                ...original,
+                preparation_status: "failed",
+                preparation_error: message,
+              });
             };
             try {
               const response = await created.callServerTool(
@@ -258,13 +217,6 @@ export function useMcpApp(): McpMapState {
                 return;
               }
               replace(parsed.data.layer);
-              clearNotice();
-              schedule(
-                () => {
-                  void prepare(index);
-                },
-                Math.max(1000, expiresAt - Date.now() - TOKEN_REFRESH_LEAD_MS),
-              );
             } catch {
               if (
                 controller.signal.aborted ||
@@ -292,6 +244,11 @@ export function useMcpApp(): McpMapState {
           return;
         }
         setMapConfiguration(runtimeConfiguration(result));
+        tokensRef.current = Object.fromEntries(
+          result.layers.flatMap((layer) =>
+            "query_id" in layer ? [[layer.query_id, layer.query_token]] : [],
+          ),
+        );
         setQueryTokens(
           Object.fromEntries(
             result.layers.flatMap((layer) =>
@@ -300,20 +257,27 @@ export function useMcpApp(): McpMapState {
           ),
         );
         setBridgeError(null);
-        if (!Number.isFinite(expiresAt)) return;
-        const refreshDelay = Math.max(
-          0,
-          expiresAt - Date.now() - TOKEN_REFRESH_LEAD_MS,
-        );
-        refreshTimerRef.current = setTimeout(() => {
-          void refreshMap(result.map_spec, sequence);
-        }, refreshDelay);
       };
+      let refreshing: { sequence: number; promise: Promise<void> } | null =
+        null;
       const refreshMap = async (
         mapSpec: MapDefinition,
         sequence: number,
       ): Promise<void> => {
         if (sequence !== mapSequenceRef.current) return;
+        if (refreshing?.sequence === sequence) return refreshing.promise;
+        const promise = performRefresh(mapSpec, sequence);
+        refreshing = { sequence, promise };
+        try {
+          await promise;
+        } finally {
+          if (refreshing?.promise === promise) refreshing = null;
+        }
+      };
+      const performRefresh = async (
+        mapSpec: MapDefinition,
+        sequence: number,
+      ): Promise<void> => {
         try {
           const response = await created.callServerTool({
             name: mapSpec.layers.some((layer) => "source" in layer)
@@ -324,6 +288,12 @@ export function useMcpApp(): McpMapState {
           if (sequence !== mapSequenceRef.current) return;
           const parsed = MapResultSchema.safeParse(response.structuredContent);
           if (parsed.success) {
+            if (earliestExpiration(parsed.data) <= Date.now()) {
+              failMap(
+                "The server returned an expired replacement query token. Reopen the map to retry.",
+              );
+              return;
+            }
             acceptMapResult(parsed.data, sequence);
             return;
           }
@@ -368,7 +338,7 @@ export function useMcpApp(): McpMapState {
       created.onteardown = async () => {
         mapSequenceRef.current += 1;
         cancelPreparation();
-        clearRefreshTimer();
+        refreshExpiredRef.current = async () => {};
         await teardownHandlerRef.current?.();
         return {};
       };
@@ -378,16 +348,15 @@ export function useMcpApp(): McpMapState {
     () => () => {
       mapSequenceRef.current += 1;
       preparationAbortRef.current?.abort();
-      for (const timer of layerRefreshTimersRef.current.values())
-        clearTimeout(timer);
-      layerRefreshTimersRef.current.clear();
-      if (refreshTimerRef.current !== null) {
-        clearTimeout(refreshTimerRef.current);
-      }
+      refreshExpiredRef.current = async () => {};
     },
     [],
   );
   useHostStyles(app, app?.getHostContext());
+  const refreshExpiredToken = useCallback<McpMapState["refreshExpiredToken"]>(
+    (queryId, token) => refreshExpiredRef.current(queryId, token),
+    [],
+  );
   const reportStatus = useCallback(
     async (status: MapStatus) => {
       const sequence = mapSequenceRef.current;
@@ -407,12 +376,9 @@ export function useMcpApp(): McpMapState {
 
   return useMemo(
     () => ({
+      refreshExpiredToken,
       reportStatus,
-      feedbackNotice:
-        [
-          ...Object.values(refreshNotices),
-          ...(feedbackNotice ? [feedbackNotice] : []),
-        ].join(" ") || null,
+      feedbackNotice,
       app,
       error: bridgeError ?? error?.message ?? null,
       mapConfiguration,
@@ -420,9 +386,9 @@ export function useMcpApp(): McpMapState {
       registerTeardownHandler,
     }),
     [
+      refreshExpiredToken,
       reportStatus,
       feedbackNotice,
-      refreshNotices,
       app,
       bridgeError,
       error,

@@ -241,20 +241,6 @@ button:focus-visible {
   inset: 0;
 }
 
-.map-loading {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.55rem;
-  color: var(--color-text-secondary, #6d6659);
-  font-size: var(--font-text-sm-size, 0.875rem);
-  font-weight: var(--font-weight-medium, 500);
-  pointer-events: none;
-}
-
 .map-loading-spinner {
   width: 1rem;
   height: 1rem;
@@ -266,15 +252,11 @@ button:focus-visible {
 }
 
 .map-feature-loading {
-  position: absolute;
-  top: 0.75rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2;
   display: flex;
   align-items: center;
   gap: 0.55rem;
-  max-width: calc(100% - 7rem);
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 0.5rem 0.75rem;
   border-radius: 0.375rem;
   background: var(--color-background-primary, #fff);
@@ -345,6 +327,7 @@ button:focus-visible {
 }
 
 .map-notification-stack {
+  pointer-events: none;
   position: absolute;
   z-index: 2;
   top: 0.75rem;
@@ -358,6 +341,7 @@ button:focus-visible {
 
 .map-message,
 .map-selection-status {
+  pointer-events: auto;
   box-sizing: border-box;
   width: fit-content;
   max-width: 100%;
