@@ -18,5 +18,11 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true
   },
-  "include": ["src", "tests", "vite.config.ts"]
+  "include": [
+    "src",
+    "tests",
+    "browser-tests",
+    "playwright.config.ts",
+    "vite.config.ts"
+  ]
 }

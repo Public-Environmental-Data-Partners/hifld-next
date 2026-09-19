@@ -11,6 +11,11 @@ import re
 from time import monotonic
 from typing import Protocol
 
+import duckdb
+from sqlglot import exp, parse_one
+from sqlglot.errors import ParseError, TokenError
+
+from query_worker.covering import GeometryCovering, quote_path
 from query_worker.protocol import WorkerFailure, WorkerTile, WorkerTileQuery
 
 MAX_TILE_BYTES = 1024 * 1024
@@ -20,6 +25,7 @@ MVT_FEATURE_HASH_COLUMN = "__hifld_feature_hash"
 MVT_FEATURE_KEY_COLUMN = "__hifld_feature_key"
 MVT_CENTROID_LNG_COLUMN = "__hifld_centroid_lng"
 MVT_CENTROID_LAT_COLUMN = "__hifld_centroid_lat"
+COVERING_COLUMN = "__hifld_covering"
 MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
 # DuckDB's current spatial extension validates ST_AsMVT feature IDs as int32
 # even when the source column is BIGINT.
@@ -70,13 +76,22 @@ def _quote_literal(value: str) -> str:
     return f"'{value}'"
 
 
-def _bbox_bounds_predicate(bbox_identifier: str) -> str:
+def _bbox_bounds_predicate(bbox_identifier: str, envelope: str) -> str:
     quoted = _quote_identifier(bbox_identifier)
     # Keep the spike comparison and axis ordering. GeoParquet readers can use
     # this cheap struct predicate before the exact spatial predicate.
+    fields = {
+        name: (
+            _quote_identifier(f"{COVERING_COLUMN}_{name}")
+            if bbox_identifier == COVERING_COLUMN
+            else f"{quoted}.{name}"
+        )
+        for name in ("xmin", "xmax", "ymin", "ymax")
+    }
     return (
-        f"{quoted}.xmax >= b.xmin AND {quoted}.xmin <= b.xmax\n"
-        f"      AND {quoted}.ymax >= b.ymin AND {quoted}.ymin <= b.ymax"
+        f"{fields['xmax']} >= ST_XMin({envelope}) AND {fields['xmin']} <= ST_XMax({envelope})\n"
+        f"      AND {fields['ymax']} >= ST_YMin({envelope}) "
+        f"AND {fields['ymin']} <= ST_YMax({envelope})"
     )
 
 
@@ -118,6 +133,8 @@ def _properties(
     internal_columns = {
         geometry_column,
         "bbox",
+        COVERING_COLUMN,
+        *(f"{COVERING_COLUMN}_{name}" for name in ("xmin", "ymin", "xmax", "ymax")),
         MVT_FEATURE_ID_COLUMN,
         MVT_FEATURE_HASH_COLUMN,
         MVT_FEATURE_KEY_COLUMN,
@@ -132,11 +149,156 @@ def _properties(
     return tuple(properties)
 
 
-def _has_bbox(columns: tuple[tuple[str, str], ...]) -> bool:
-    return any(
-        name == "bbox" and logical_type.upper().startswith("STRUCT")
-        for name, logical_type in columns
+def _valid_bbox_type(logical_type: str) -> bool:
+    try:
+        expression = parse_one(f"CAST(NULL AS {logical_type})", dialect="duckdb")
+    except (ParseError, TokenError):
+        return False
+    data_type = expression.find(exp.DataType)
+    if data_type is None or str(data_type.this) != "DType.STRUCT":
+        return False
+    numeric_types = {
+        "BIGINT",
+        "DECIMAL",
+        "DOUBLE",
+        "FLOAT",
+        "HUGEINT",
+        "INT",
+        "SMALLINT",
+        "TINYINT",
+        "UBIGINT",
+        "UHUGEINT",
+        "UINT",
+        "USMALLINT",
+        "UTINYINT",
+    }
+    fields: dict[str, str] = {}
+    for field in data_type.expressions:
+        if not isinstance(field, exp.ColumnDef) or not isinstance(field.kind, exp.DataType):
+            return False
+        fields[field.name.casefold()] = str(field.kind.this).removeprefix("DType.")
+    return all(fields.get(name) in numeric_types for name in ("xmin", "ymin", "xmax", "ymax"))
+
+
+def bbox_retention_candidate(
+    validated_query_sql: str, geometry_column: str, *, declared: bool = False
+) -> tuple[exp.Select, exp.Table] | None:
+    """Return a simple select and its sole base table when bbox carry-through is safe."""
+
+    try:
+        expression = parse_one(validated_query_sql, dialect="duckdb")
+    except (ParseError, TokenError):
+        return None
+    if not isinstance(expression, exp.Select):
+        return None
+    if any(
+        expression.args.get(key) is not None
+        for key in ("with_", "distinct", "group", "having", "qualify", "limit", "offset")
+    ):
+        return None
+    if expression.find(exp.AggFunc) is not None or expression.find(exp.Window) is not None:
+        return None
+    from_expression = expression.args.get("from_")
+    if not isinstance(from_expression, exp.From) or not isinstance(from_expression.this, exp.Table):
+        return None
+    table = from_expression.this
+    if table.catalog or table.db or expression.args.get("joins"):
+        return None
+    if len(list(expression.find_all(exp.Table))) != 1:
+        return None
+    if not declared and any(
+        selected.alias_or_name.casefold() == "bbox" or selected.find(exp.Star) is not None
+        for selected in expression.expressions
+    ):
+        return None
+    expected_qualifier = table.alias_or_name.casefold()
+    # Duplicate output names are renamed by DuckDB in projection order. A raw
+    # geometry later in the list does not prove the selected output is unchanged.
+    geometry_outputs = [
+        selected
+        for selected in expression.expressions
+        if selected.alias_or_name.casefold() == geometry_column.casefold()
+    ]
+    if len(geometry_outputs) > 1 or any(
+        not isinstance(selected, exp.Column) for selected in geometry_outputs
+    ):
+        return None
+    raw_geometry = any(
+        isinstance(selected, exp.Column)
+        and selected.name.casefold() == geometry_column.casefold()
+        and selected.alias_or_name.casefold() == geometry_column.casefold()
+        and (not selected.table or selected.table.casefold() == expected_qualifier)
+        for selected in expression.expressions
     )
+    if declared:
+        # Qualified p.* is a Column containing Star, not a top-level Star.
+        stars = [
+            star
+            for selected in expression.expressions
+            if (star := selected.find(exp.Star)) is not None
+        ]
+        if any(value is not None for star in stars for value in star.args.values()):
+            return None
+        if stars and geometry_outputs:
+            return None
+        if stars:
+            raw_geometry = True
+    if not raw_geometry:
+        return None
+    return expression, table
+
+
+def retain_declared_covering(
+    connection: TileConnection,
+    sql: str,
+    geometry: str,
+    crs: str | None,
+    coverings: dict[str, GeometryCovering | None],
+) -> tuple[str, str | None]:
+    candidate = bbox_retention_candidate(sql, geometry, declared=True)
+    if candidate is None:
+        return sql, None
+    expression, table = candidate
+    covering = coverings.get(table.name)
+    if covering is None or covering.crs != crs:
+        return sql, None
+    if crs not in {"EPSG:4326", "EPSG:3857", "EPSG:4269"}:
+        return sql, None
+    # Validate every declared accessor against the actual bound source schema.
+    qualifier = table.alias_or_name
+    fields = [
+        f"{quote_path(path, qualifier)} AS {COVERING_COLUMN}_{name}"
+        for name, path in (
+            ("xmin", covering.xmin),
+            ("ymin", covering.ymin),
+            ("xmax", covering.xmax),
+            ("ymax", covering.ymax),
+        )
+    ]
+    try:
+        columns = _describe_columns(connection, sql)
+        if any(name.casefold().startswith(COVERING_COLUMN) for name, _ in columns):
+            return sql, None
+        # Four scalar projections, not a reconstructed struct: DuckDB does not
+        # simplify struct_extract(struct_pack(...)) into statistics predicates.
+        check = expression.copy().select(
+            *(parse_one(field, dialect="duckdb") for field in fields), append=True
+        )
+        checked_columns = _describe_columns(connection, check.sql(dialect="duckdb"))
+    except duckdb.BinderException:
+        return sql, None
+    scalar_types = dict(checked_columns)
+    synthetic_type = (
+        "STRUCT("
+        + ", ".join(
+            f"{name} {scalar_types[f'{COVERING_COLUMN}_{name}']}"
+            for name in ("xmin", "ymin", "xmax", "ymax")
+        )
+        + ")"
+    )
+    if not _valid_bbox_type(synthetic_type):
+        return sql, None
+    return check.sql(dialect="duckdb"), COVERING_COLUMN
 
 
 # Adapted from ../geoparquet-duckdb-partitioning/server.py:_TILE_SQL_TEMPLATE.
@@ -145,18 +307,13 @@ def _has_bbox(columns: tuple[tuple[str, str], ...]) -> bool:
 _TILE_SQL_TEMPLATE = """
 WITH
   tile AS (SELECT ST_TileEnvelope({z}, {x}, {y}) AS env),
-  bounds AS (
-    SELECT e AS env, ST_XMin(e) xmin, ST_YMin(e) ymin, ST_XMax(e) xmax, ST_YMax(e) ymax
-    FROM (SELECT ST_Transform(env, 'EPSG:3857', {result_crs}, always_xy := true) e
-          FROM tile)
-  ),
   query_result AS (
     SELECT * FROM ({validated_query}) AS _mcp_result
   ),
   candidate_features AS (
     SELECT {candidate_properties}{candidate_separator}
            {geometry_column} AS source_geometry
-    FROM query_result, bounds b
+    FROM query_result
     WHERE {viewport_predicate}
     LIMIT {candidate_limit}
   ),
@@ -196,6 +353,7 @@ def build_tile_sql(
     request: WorkerTileQuery,
     *,
     columns: tuple[tuple[str, str], ...],
+    bbox_column: str | None = None,
 ) -> str:
     """Wrap one validated query as an envelope-constrained MVT relation."""
 
@@ -218,9 +376,24 @@ def build_tile_sql(
     hash_properties = ", ".join(_quote_identifier(name) for name, _ in properties)
     hash_separator = ", " if hash_properties else ""
     predicates: list[str] = []
-    if _has_bbox(columns):
-        predicates.append(_bbox_bounds_predicate("bbox"))
-    predicates.append(f"ST_Intersects({geometry}, b.env)")
+    tile_envelope = f"ST_TileEnvelope({request.z}, {request.x}, {request.y})"
+    envelope = f"ST_Transform({tile_envelope}, 'EPSG:3857', {crs}, always_xy := true)"
+    # Inline constant expressions are required for Parquet statistics pushdown.
+    # Joining a bounds CTE turns these into join conditions instead of scan filters.
+    if request.result_crs in {"EPSG:4326", "EPSG:3857", "EPSG:4269"}:
+        if bbox_column == COVERING_COLUMN or (
+            bbox_column is not None
+            and any(name == bbox_column and _valid_bbox_type(kind) for name, kind in columns)
+        ):
+            predicates.append(_bbox_bounds_predicate(bbox_column, envelope))
+        predicates.append(f"ST_Intersects({geometry}, {envelope})")
+    else:
+        # Corner-transformed envelopes may under-cover other projections. Evaluate
+        # the exact predicate in the rendering CRS without unsafe covering pruning.
+        predicates.append(
+            f"ST_Intersects(ST_Transform({geometry}, {crs}, 'EPSG:3857', "
+            f"always_xy := true), {tile_envelope})"
+        )
     viewport_predicate = "\n      AND ".join(predicates)
 
     return _TILE_SQL_TEMPLATE.format(
@@ -272,13 +445,22 @@ def execute_tile(
     connection: TileConnection,
     validated_query_sql: str,
     request: WorkerTileQuery,
+    *,
+    source_coverings: dict[str, GeometryCovering | None] | None = None,
 ) -> WorkerTile | WorkerFailure:
     """Execute a bounded MVT query inside an already-prepared worker request."""
 
     started = monotonic()
     try:
-        columns = _describe_columns(connection, validated_query_sql)
-        sql = build_tile_sql(validated_query_sql, request, columns=columns)
+        tile_query_sql, bbox_column = retain_declared_covering(
+            connection,
+            validated_query_sql,
+            request.geometry_column,
+            request.result_crs,
+            source_coverings or {},
+        )
+        columns = _describe_columns(connection, tile_query_sql)
+        sql = build_tile_sql(tile_query_sql, request, columns=columns, bbox_column=bbox_column)
     except TileConfigurationError:
         code = "geometry_crs_required" if request.result_crs is None else "map_not_supported"
         message = (

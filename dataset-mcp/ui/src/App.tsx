@@ -3,8 +3,16 @@ import { useMcpApp } from "./mcp/useMcpApp";
 import "./styles.css";
 
 export default function App() {
-  const { app, error, mapConfiguration, queryTokens, registerTeardownHandler } =
-    useMcpApp();
+  const {
+    app,
+    error,
+    mapConfiguration,
+    queryTokens,
+    registerTeardownHandler,
+    reportStatus,
+    refreshExpiredToken,
+    feedbackNotice,
+  } = useMcpApp();
 
   if (error) {
     return (
@@ -26,11 +34,14 @@ export default function App() {
         <h2>{mapConfiguration.title}</h2>
       </header>
       <MapView
+        onTokenExpired={refreshExpiredToken}
+        onStatus={reportStatus}
         configuration={mapConfiguration}
         queryTokens={queryTokens}
         app={app}
         registerTeardownHandler={registerTeardownHandler}
       />
+      {feedbackNotice && <p role="status">{feedbackNotice}</p>}
     </main>
   );
 }

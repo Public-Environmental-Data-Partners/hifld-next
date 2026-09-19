@@ -339,6 +339,7 @@ const QueryResultDocumentationSchema = z
     offset: z.number().int().nonnegative(),
     limit: z.number().int().positive().max(1000),
     returned_count: z.number().int().nonnegative(),
+    result_status: z.enum(["rows_returned", "empty_result", "empty_page", "indeterminate"]).optional(),
     has_more: z.boolean(),
     next_offset: z.number().int().nonnegative().optional(),
     warnings: z.array(z.string()),

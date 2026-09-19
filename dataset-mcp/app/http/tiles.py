@@ -8,12 +8,12 @@ from fastapi import APIRouter, Header, Response
 from starlette.responses import JSONResponse
 
 from app.errors import AppError, ErrorCode
+from query_engine.tiles import validate_tile_coordinates
 from query_worker.protocol import WorkerFailure, WorkerTile
-from query_worker.tiles import validate_tile_coordinates
 
 QUERY_TOKEN_HEADER = "X-HIFLD-Query-Token"
 MVT_MEDIA_TYPE = "application/vnd.mapbox-vector-tile"
-DEFAULT_TILE_TIMEOUT_SECONDS = 10.0
+DEFAULT_TILE_TIMEOUT_SECONDS = 60.0
 
 
 class TileService(Protocol):
@@ -80,7 +80,7 @@ def create_tile_router(
     """Create the stateless tile router around a token-revalidating service."""
 
     if timeout_seconds <= 0 or timeout_seconds > DEFAULT_TILE_TIMEOUT_SECONDS:
-        raise ValueError("tile timeout must be greater than zero and at most 10 seconds")
+        raise ValueError("tile timeout must be greater than zero and at most 60 seconds")
     router = APIRouter()
 
     async def tile_preflight(z: int, x: int, y: int) -> Response:

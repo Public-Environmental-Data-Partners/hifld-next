@@ -111,6 +111,7 @@ export interface MapToolLayer {
   kind: "catalog_pmtiles" | "query_mvt";
   visible: boolean;
   status?: "loading" | "ready" | "error" | undefined;
+  error?: string | undefined;
   query_id?: string | undefined;
   style_layers?: readonly MapToolStyleSummary[] | undefined;
 }
@@ -192,6 +193,7 @@ function mapLayerData(layer: MapToolLayer): WebMcpJsonObject {
     visible: layer.visible,
   };
   if (layer.status !== undefined) data["status"] = layer.status;
+  if (layer.error !== undefined) data["error"] = Array.from(layer.error).slice(0, 500).join("");
   if (layer.query_id !== undefined) data["query_id"] = layer.query_id;
   if (layer.style_layers !== undefined) data["style_layers"] = layer.style_layers.map(styleLayerData);
   return data;
@@ -441,7 +443,8 @@ export function useMapWebMcpTools({
   useWebMcpTool({
     name: "get_map_state",
     title: "Get map state",
-    description: "Get loaded map layers and map state.",
+    description:
+      "Inspect configured map layers and current viewport load status, including per-layer errors. A configured layer is not necessarily loaded; status ready means its current source tiles have loaded, not that every feature was retrieved.",
     schema: emptyInputSchema,
     execute: getMapState,
     enabled,

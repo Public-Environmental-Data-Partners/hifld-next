@@ -15,6 +15,8 @@ from app.query.serialization import (
     RowTooLargeError,
     serialize_rows,
 )
+from query_worker.covering import CoveringMetadataCache, GeometryCovering
+from query_worker.diagnostics import duckdb_diagnostic
 from query_worker.metrics import init_connection, measure
 from query_worker.protocol import (
     WorkerBounds,
@@ -100,6 +102,7 @@ class WorkerRuntime:
     def __init__(self, config: WorkerRuntimeConfig) -> None:
         self._config = config
         self.connection = get_connection(config)
+        self._covering_metadata = CoveringMetadataCache()
 
     def close(self) -> None:
         self.connection.close()
@@ -138,9 +141,11 @@ class WorkerRuntime:
             self.connection.execute(f"DROP SECRET IF EXISTS {_quoted_identifier(secret_name)}")
 
     def _create_source_views(
-        self, request: WorkerQuery | WorkerBoundsQuery | WorkerTileQuery
-    ) -> dict[str, str]:
-        aliases: dict[str, str] = {}
+        self,
+        request: WorkerQuery | WorkerBoundsQuery | WorkerTileQuery,
+        aliases: dict[str, str],
+    ) -> None:
+        # Register incrementally so the caller can clean up even if a later source fails.
         for source in request.sources:
             if source.alias in aliases:
                 raise ValueError("duplicate source alias")
@@ -149,10 +154,11 @@ class WorkerRuntime:
             view_name = f"_mcp_source_{token_hex(16)}"
             # The relation API passes the exact trusted object list through
             # DuckDB's binding layer; no URI is interpolated into SQL.
-            relation = self.connection.read_parquet(list(source.object_uris), union_by_name=True)
+            relation = self.connection.read_parquet(
+                list(source.object_uris), hive_partitioning=True, union_by_name=True
+            )
             relation.create_view(view_name)
             aliases[source.alias] = view_name
-        return aliases
 
     def _drop_source_views(self, aliases: dict[str, str]) -> None:
         for view_name in aliases.values():
@@ -168,12 +174,28 @@ class WorkerRuntime:
         secret_names: tuple[str, ...] = ()
         try:
             secret_names = self._create_request_secrets(request)
-            aliases = self._create_source_views(request)
+            self._create_source_views(request, aliases)
             rewritten_sql = _rewrite_source_aliases(request.canonical_sql, aliases)
             if isinstance(request, WorkerTileQuery):
-                from query_worker.tiles import execute_tile
+                from query_worker.tiles import bbox_retention_candidate, execute_tile
 
-                return execute_tile(self.connection, rewritten_sql, request)
+                coverings: dict[str, GeometryCovering | None] = {}
+                candidate = bbox_retention_candidate(
+                    rewritten_sql, request.geometry_column, declared=True
+                )
+                if candidate is not None:
+                    table = candidate[1].name
+                    for source in request.sources:
+                        if aliases[source.alias] == table:
+                            coverings[table] = self._covering_metadata.resolve(
+                                self.connection,
+                                source.object_uris,
+                                request.geometry_column,
+                                storage=source.seaweedfs,
+                            )
+                return execute_tile(
+                    self.connection, rewritten_sql, request, source_coverings=coverings
+                )
             if isinstance(request, WorkerBoundsQuery):
                 from query_worker.bounds import execute_bounds
 
@@ -233,17 +255,27 @@ class WorkerRuntime:
                 code="row_too_large",
                 message="A result row exceeds the response size limit",
             )
-        except duckdb.OutOfMemoryException:
+        except duckdb.OutOfMemoryException as error:
             return WorkerFailure(
                 code="query_memory_limit",
-                message="The query exceeded its memory limit",
+                message=duckdb_diagnostic(error, self._config, request.sources, aliases),
             )
-        except duckdb.IOException:
+        except duckdb.IOException as error:
             return WorkerFailure(
                 code="storage_unavailable",
-                message="A query source could not be read",
+                message=duckdb_diagnostic(error, self._config, request.sources, aliases),
             )
-        except (duckdb.Error, ValueError, TypeError):
+        except duckdb.InternalException:
+            return WorkerFailure(
+                code="query_execution_failed",
+                message="An internal query engine error occurred",
+            )
+        except duckdb.Error as error:
+            return WorkerFailure(
+                code="query_execution_failed",
+                message=duckdb_diagnostic(error, self._config, request.sources, aliases),
+            )
+        except (ValueError, TypeError):
             return WorkerFailure(
                 code="query_execution_failed",
                 message="The bounded query could not be executed",

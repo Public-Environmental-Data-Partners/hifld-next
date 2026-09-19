@@ -159,6 +159,62 @@ async def test_tool_adapter_file_shape_has_query_sources_and_no_nested_columns()
 
 
 @pytest.mark.asyncio
+async def test_tool_adapter_exposes_pmtiles_map_sources_and_resolves_exact_asset() -> None:
+    file_payload = json.loads((FIXTURES / "file_response.json").read_text())
+    file_payload["file"]["formats"] = [
+        {
+            "format": {"id": 8, "format_type": "pmtiles", "name": "PMTiles"},
+            "sources": [
+                {
+                    "id": 44,
+                    "version": "v1",
+                    "source_type": "file",
+                    "location": {"type": "file", "path": "roads.pmtiles"},
+                    "url": "https://cdn.example/roads.pmtiles",
+                }
+            ],
+        }
+    ]
+    catalog = client_for(
+        {
+            "/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}],
+            "/api/collections/3": {"id": 3, "slug": "public-safety", "name": "Public Safety"},
+            "/api/collections/3/datasets/12/files/99": file_payload,
+        }
+    )
+    adapter = CatalogToolAdapter(catalog)
+
+    payload = await adapter.get_dataset_file("3", "12", "99")
+    assert payload["map_sources"] == [
+        {
+            "type": "catalog",
+            "collection_id": 3,
+            "dataset_id": 12,
+            "file_id": 99,
+            "file_source_id": 44,
+        }
+    ]
+    assert await adapter.resolve_map_source(3, 12, 99, 44) == {
+        "type": "pmtiles",
+        "url": "https://cdn.example/roads.pmtiles",
+    }
+
+
+@pytest.mark.asyncio
+async def test_tool_adapter_rejects_non_pmtiles_catalog_map_source() -> None:
+    file_payload = json.loads((FIXTURES / "file_response.json").read_text())
+    catalog = client_for(
+        {
+            "/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}],
+            "/api/collections/3": {"id": 3, "slug": "public-safety", "name": "Public Safety"},
+            "/api/collections/3/datasets/12/files/99": file_payload,
+        }
+    )
+    with pytest.raises(ValueError, match="PMTiles"):
+        await CatalogToolAdapter(catalog).resolve_map_source(3, 12, 99, 44)
+
+
+@pytest.mark.asyncio
 async def test_tool_adapter_schema_shape_exposes_paginated_columns() -> None:
     file_payload = json.loads((FIXTURES / "file_response.json").read_text())
     dataset_payload = json.loads((FIXTURES / "dataset.json").read_text())

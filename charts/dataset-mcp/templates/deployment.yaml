@@ -22,6 +22,15 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports: [{name: http, containerPort: {{ .Values.containerPort }}, protocol: TCP}]
           env:
+            - name: DATASET_MCP_CLICKHOUSE_URL
+              value: {{ default (printf "http://%s-clickhouse-replicas:8123" (include "dataset-mcp.fullname" .)) .Values.clickhouse.externalUrl | quote }}
+            - name: DATASET_MCP_CLICKHOUSE_DISCOVER_REPLICAS
+              value: {{ and .Values.clickhouse.enabled (not .Values.clickhouse.externalUrl) | quote }}
+            - name: DATASET_MCP_CLICKHOUSE_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ .Values.clickhouse.secretName }}, key: {{ .Values.clickhouse.queryPasswordKey }}}}
+            - name: DATASET_MCP_CLICKHOUSE_CONTROL_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ .Values.clickhouse.secretName }}, key: {{ .Values.clickhouse.controlPasswordKey }}}}
+            - {name: DATASET_MCP_BUILD_REVISION, value: {{ .Values.image.tag | quote }}}
             - {name: DATASET_MCP_CATALOG_BASE_URL, value: {{ .Values.catalog.baseUrl | quote }}}
             - name: DATASET_MCP_QUERY_TOKEN_SECRET
               valueFrom: {secretKeyRef: {name: {{ .Values.tokenSecret.name }}, key: {{ .Values.tokenSecret.key }}}}

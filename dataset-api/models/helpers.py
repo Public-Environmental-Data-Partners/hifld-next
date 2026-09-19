@@ -5,7 +5,11 @@ import re
 from typing import Protocol
 
 from schemas.types import APIDict, JSONDict, api_dict, json_value, model_json_dict
-from storage.storage_client import create_storage_client_from_location
+from storage.storage_client import (
+    create_storage_client_from_location,
+    format_storage_public_url,
+    format_storage_uri,
+)
 
 from .dataset import (
     ApiLocation,
@@ -77,8 +81,11 @@ def file_location_public_url(location: FileLocation, storage_location: StorageLo
     """Return a public URL for a concrete file location."""
     if not location.path or "*" in location.path or not storage_location:
         return None
-    storage_client = create_storage_client_from_location(storage_location)
-    return storage_client.get_public_url(location.path) if storage_client else None
+    storage_config = bucket_storage_config(storage_location)
+    if not storage_config:
+        return None
+    storage_type, bucket, base_url = storage_config
+    return format_storage_public_url(storage_type, bucket, base_url, location.path)
 
 
 def get_file_source_url(
@@ -120,14 +127,27 @@ def get_file_source_storage_uri(
     if storage_location.backend_type != "s3":
         return None
 
-    # Create storage client and use it to construct the URI
-    storage_client = create_storage_client_from_location(storage_location)
-    if not storage_client:
+    storage_config = bucket_storage_config(storage_location)
+    if not storage_config:
         return None
 
-    clean_path = file_path.lstrip("/")
-    uri = storage_client.path_to_storage_uri(clean_path)
-    return uri
+    storage_type, bucket, base_url = storage_config
+    return format_storage_uri(storage_type, bucket, base_url, file_path)
+
+
+def bucket_storage_config(storage_location: StorageLocation) -> tuple[str, str, str] | None:
+    """Return the formatting values for a bucket-backed storage location."""
+    config = storage_location.config
+    if isinstance(config, BucketStorageLocationConfig):
+        return (config.type, config.bucket, config.base_url)
+    if not isinstance(config, dict):
+        return None
+    storage_type = config.get("type")
+    bucket = config.get("bucket")
+    base_url = config.get("base_url")
+    if not isinstance(storage_type, str) or not isinstance(bucket, str) or not isinstance(base_url, str):
+        return None
+    return (storage_type, bucket, base_url)
 
 
 def file_source_path(file_source: FileSource) -> str | None:

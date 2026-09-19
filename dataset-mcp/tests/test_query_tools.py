@@ -1,6 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
+from app.tools import query as query_tools
 from app.tools.query import (
     MapCameraInput,
     MapDefinitionInput,
@@ -37,11 +38,17 @@ class Service:
                 {"name": "traffic", "type": "INTEGER", "nullable": True},
             ],
             "rows": [],
+            "result_status": "empty_result",
             "query_token": f"signed-{alias}",
             "resolved_sources": [
                 {"object_uris": ["gs://secret-bucket/roads.parquet", "s3://secret/roads.parquet"]}
             ],
         }
+
+    async def prepare_spatial_query(
+        self, sources, sql, limit, geometry_column, result_crs
+    ) -> dict[str, object]:
+        return await self.query(sources, sql, limit, geometry_column, result_crs)
 
     def validate_token(self, token: str) -> dict[str, object]:
         if token == "signed":
@@ -82,6 +89,47 @@ class Service:
                 "initial_bounds": [-80.0, 35.0, -75.0, 40.0],
             },
         }
+
+
+@pytest.mark.asyncio
+async def test_generate_mvt_tile_url_returns_only_tile_access_contract() -> None:
+    class BoundedService(Service):
+        async def query(self, sources, sql, limit, geometry_column, result_crs):
+            assert limit == 1
+            assert sql == "SELECT geometry, name FROM roads"
+            return await super().query(sources, sql, limit, geometry_column, result_crs)
+
+    generate = getattr(query_tools, "generate_mvt_tile_url", None)
+    assert generate is not None
+    result = await generate(
+        BoundedService(), [{"alias": "roads"}], "SELECT geometry, name FROM roads"
+    )
+    assert result.structured_content == {
+        "tile_url": "https://maps.example/tiles/roadsquery1234567890ABCD/{z}/{x}/{y}.mvt",
+        "headers": {"X-HIFLD-Query-Token": "signed-roads"},
+        "expires_at": "2026-09-01T18:00:00+00:00",
+        "source_layer": "hifld",
+        "geometry_column": "geometry",
+        "result_crs": "EPSG:4326",
+        "result_status": "empty_result",
+    }
+    assert "secret-bucket" not in result.text
+    assert result.meta is None
+
+
+@pytest.mark.asyncio
+async def test_generate_mvt_tile_url_marks_legacy_preview_metadata_indeterminate() -> None:
+    class LegacyService(Service):
+        async def query(self, sources, sql, limit, geometry_column, result_crs):
+            payload = await super().query(sources, sql, limit, geometry_column, result_crs)
+            del payload["result_status"]
+            return payload
+
+    result = await query_tools.generate_mvt_tile_url(
+        LegacyService(), [{"alias": "roads"}], "SELECT geometry FROM roads"
+    )
+
+    assert result.structured_content["result_status"] == "indeterminate"
 
 
 @pytest.mark.asyncio
@@ -144,6 +192,7 @@ async def test_view_query_map_returns_only_the_map_contract() -> None:
         "layers": [
             {
                 "query_id": "roadsquery1234567890ABCD",
+                "preview": {"rows": [], "limit": 1, "warnings": []},
                 "layer_name": "Roads",
                 "tile_url": ("https://maps.example/tiles/roadsquery1234567890ABCD/{z}/{x}/{y}.mvt"),
                 "source_layer": "hifld",
@@ -168,9 +217,11 @@ async def test_view_query_map_returns_only_the_map_contract() -> None:
                     "line_width_scale": "log",
                 },
                 "visible": True,
+                "result_status": "empty_result",
             },
             {
                 "query_id": "bridgesquery123456789AB",
+                "preview": {"rows": [], "limit": 1, "warnings": []},
                 "layer_name": "Bridges",
                 "tile_url": ("https://maps.example/tiles/bridgesquery123456789AB/{z}/{x}/{y}.mvt"),
                 "source_layer": "hifld",
@@ -185,6 +236,7 @@ async def test_view_query_map_returns_only_the_map_contract() -> None:
                     {"name": "traffic", "type": "INTEGER", "nullable": True},
                 ],
                 "visible": False,
+                "result_status": "empty_result",
             },
         ],
         "map_spec": {
@@ -218,7 +270,12 @@ async def test_view_query_map_returns_only_the_map_contract() -> None:
         },
     }
     assert result.meta is None
-    assert result.text == ("Opened map 'Transportation comparison' with 2 layers: Roads, Bridges.")
+    assert result.text.startswith(
+        "Prepared map configuration 'Transportation comparison' with 2 layers: Roads, Bridges."
+    )
+    assert "Rendering is pending" in result.text
+    assert "Empty layers: Roads, Bridges" in result.text
+    assert "Empty layers: Roads, Bridges. Rendering is pending" in result.text
     assert "signed" not in result.text
     assert result.structured_content["layers"][0]["query_token"] == "signed-roads"
 

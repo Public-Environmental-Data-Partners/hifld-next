@@ -14,14 +14,28 @@ class Settings(BaseSettings):
     query_default_limit: int = Field(default=100, ge=1, le=1_000)
     query_max_limit: int = Field(default=1_000, ge=1, le=1_000)
     query_max_offset: int = Field(default=50_000, ge=0)
-    query_timeout_seconds: float = Field(default=30.0, gt=0)
-    tile_timeout_seconds: float = Field(default=10.0, gt=0, le=10.0)
-    worker_count: int = Field(default=1, ge=1, le=8)
-    duckdb_threads: int = Field(default=2, ge=1, le=8)
+    query_timeout_seconds: float = Field(default=60.0, gt=0)
+    tile_timeout_seconds: float = Field(default=60.0, gt=0, le=60.0)
+    tile_cache_max_bytes: int = Field(default=256 * 1024 * 1024, ge=1)
+    tile_cache_ttl_seconds: float = Field(default=60.0, gt=0)
+    tile_cache_max_in_flight: int = Field(default=64, ge=1, le=256)
+    tile_cache_max_entries: int = Field(default=4_096, ge=1, le=65_536)
+    worker_count: int = Field(default=2, ge=1, le=8)
+    duckdb_threads: int = Field(default=1, ge=1, le=8)
     duckdb_memory_limit: str = "1GiB"
     duckdb_temp_directory: str = "/tmp/dataset-mcp"
     duckdb_max_temp_directory_size: str = "3GiB"
     duckdb_extension_directory: str = "/opt/duckdb/extensions"
+    clickhouse_url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:8123")
+    clickhouse_username: str = "hifld_query"
+    clickhouse_password: SecretStr = SecretStr("")
+    clickhouse_control_username: str = "hifld_control"
+    clickhouse_control_password: SecretStr = SecretStr("")
+    clickhouse_max_threads: int = Field(default=2, ge=1, le=32)
+    clickhouse_max_memory_bytes: int = Field(default=1024 * 1024 * 1024, ge=1)
+    clickhouse_seaweed_endpoint: str | None = None
+    clickhouse_discover_replicas: bool = False
+    clickhouse_max_pending_queries: int = Field(default=64, ge=1, le=256)
     max_sources: int = Field(default=8, ge=1, le=8)
     max_result_bytes: int = Field(default=4 * 1024 * 1024, ge=1024)
     public_origin: AnyHttpUrl | None = None

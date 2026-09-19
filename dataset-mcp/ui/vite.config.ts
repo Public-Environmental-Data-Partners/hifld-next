@@ -16,5 +16,9 @@ export default defineConfig({
     dedupe: ["lucide-react", "react", "react-dom"],
   },
   build: { target: "es2022", assetsInlineLimit: 100_000_000 },
-  test: { environment: "jsdom", setupFiles: "./tests/setup.ts" },
+  test: {
+    environment: "jsdom",
+    setupFiles: "./tests/setup.ts",
+    include: ["tests/**/*.test.{ts,tsx}"],
+  },
 });

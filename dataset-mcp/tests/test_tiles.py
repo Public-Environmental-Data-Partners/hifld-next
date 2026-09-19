@@ -55,6 +55,7 @@ def test_tile_sql_preserves_bbox_order_and_exact_clipping_shape() -> None:
     sql = build_tile_sql(
         "SELECT geometry, bbox, name, details FROM roads",
         tile_request(),
+        bbox_column="bbox",
         columns=(
             ("geometry", "GEOMETRY"),
             ("bbox", "STRUCT(xmin DOUBLE, ymin DOUBLE, xmax DOUBLE, ymax DOUBLE)"),
@@ -64,12 +65,9 @@ def test_tile_sql_preserves_bbox_order_and_exact_clipping_shape() -> None:
     )
 
     assert "ST_TileEnvelope(4, 3, 6)" in sql
-    assert "ST_Transform(env, 'EPSG:3857', 'EPSG:4326', always_xy := true)" in sql
-    assert (
-        '"bbox".xmax >= b.xmin AND "bbox".xmin <= b.xmax\n'
-        '      AND "bbox".ymax >= b.ymin AND "bbox".ymin <= b.ymax'
-    ) in sql
-    assert 'ST_Intersects("geometry", b.env)' in sql
+    assert "bounds AS" not in sql
+    assert '"bbox".xmax >= ST_XMin(ST_Transform(ST_TileEnvelope(4, 3, 6)' in sql
+    assert 'ST_Intersects("geometry", ST_Transform(ST_TileEnvelope(4, 3, 6)' in sql
     assert "ST_AsMVTGeom(" in sql
     assert "ST_Transform(source_geometry, 'EPSG:4326', 'EPSG:3857', always_xy := true)" in sql
     assert "ST_AsMVT(f, 'hifld', 4096, 'geom', '_mcp_feature_id')" in sql
@@ -252,6 +250,118 @@ class FakeConnection:
         return FakeRows(self.rows)
 
 
+class BboxRetentionConnection:
+    def __init__(
+        self,
+        bbox_type: str = "STRUCT(xmin DOUBLE, ymin DOUBLE, xmax DOUBLE, ymax DOUBLE)",
+    ) -> None:
+        self.sql: list[str] = []
+        self.bbox_type = bbox_type
+
+    def execute(self, sql: str) -> FakeRows:
+        self.sql.append(sql)
+        if sql == 'DESCRIBE SELECT * FROM (SELECT * FROM "flood") AS _mcp_describe':
+            return FakeRows(
+                [
+                    ("FLD_ZONE", "VARCHAR"),
+                    ("SFHA_TF", "VARCHAR"),
+                    ("geometry", "GEOMETRY"),
+                    ("bbox", self.bbox_type),
+                ]
+            )
+        if sql.startswith("DESCRIBE"):
+            description = [
+                ("FLD_ZONE", "VARCHAR"),
+                ("SFHA_TF", "VARCHAR"),
+                ("geometry", "GEOMETRY"),
+            ]
+            if ", bbox FROM flood" in sql:
+                description.append(
+                    ("bbox", "STRUCT(xmin DOUBLE, ymin DOUBLE, xmax DOUBLE, ymax DOUBLE)")
+                )
+            return FakeRows(description)
+        return FakeRows([(b"tile", 1)])
+
+
+def test_execute_tile_does_not_guess_covering_from_bbox_name() -> None:
+    connection = BboxRetentionConnection()
+
+    result = execute_tile(
+        connection,
+        "SELECT FLD_ZONE, SFHA_TF, geometry FROM flood WHERE DFIRM_ID = '12086C'",
+        tile_request(),
+    )
+
+    assert isinstance(result, WorkerTile)
+    assert len(connection.sql) == 2
+    assert "geometry FROM flood" in connection.sql[0]
+    assert '"bbox".xmax' not in connection.sql[1]
+
+
+@pytest.mark.parametrize(
+    "bbox_type",
+    [
+        "STRUCT(xmin DOUBLE, ymin DOUBLE, xmax DOUBLE)",
+        "STRUCT(xmin DOUBLE, ymin DOUBLE, xmax DOUBLE, ymax VARCHAR)",
+        "VARCHAR",
+    ],
+)
+def test_execute_tile_requires_a_complete_numeric_source_bbox(bbox_type: str) -> None:
+    connection = BboxRetentionConnection(bbox_type)
+
+    result = execute_tile(
+        connection,
+        "SELECT FLD_ZONE, SFHA_TF, geometry FROM flood WHERE DFIRM_ID = '12086C'",
+        tile_request(),
+    )
+
+    assert isinstance(result, WorkerTile)
+    assert "bbox FROM flood" not in connection.sql[-1]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SELECT geometry, bbox FROM flood",
+        "SELECT geometry, {'xmin': 0.0} AS bbox FROM flood",
+        "SELECT *, geometry FROM flood",
+    ],
+)
+def test_execute_tile_does_not_duplicate_an_explicit_or_star_bbox(query: str) -> None:
+    connection = BboxRetentionConnection()
+
+    result = execute_tile(connection, query, tile_request())
+
+    assert isinstance(result, WorkerTile)
+    assert all('SELECT * FROM "flood"' not in sql for sql in connection.sql)
+    assert query in connection.sql[0]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "WITH selected AS (SELECT geometry FROM flood) SELECT geometry FROM selected",
+        "SELECT geometry FROM flood JOIN zones ON flood.id = zones.id",
+        "SELECT ST_Transform(geometry, 'EPSG:4326', 'EPSG:3857') AS geometry FROM flood",
+        "SELECT COUNT(*), geometry FROM flood GROUP BY geometry",
+        "SELECT DISTINCT geometry FROM flood",
+        "SELECT geometry FROM flood LIMIT 10",
+        "SELECT geometry FROM flood OFFSET 10",
+        "SELECT geometry, ROW_NUMBER() OVER () AS row_number FROM flood",
+        "SELECT geometry FROM flood UNION ALL SELECT geometry FROM flood",
+    ],
+)
+def test_execute_tile_conservatively_bypasses_bbox_retention(query: str) -> None:
+    connection = BboxRetentionConnection()
+
+    result = execute_tile(connection, query, tile_request())
+
+    assert isinstance(result, WorkerTile)
+    assert connection.sql[0].startswith("DESCRIBE SELECT * FROM (")
+    assert all('SELECT * FROM "flood"' not in sql for sql in connection.sql)
+    assert "bbox FROM flood" not in connection.sql[-1]
+
+
 def test_execute_tile_returns_dense_failure_for_feature_or_byte_cap() -> None:
     description = [("geometry", "GEOMETRY"), ("name", "VARCHAR")]
     too_many = execute_tile(
@@ -318,6 +428,12 @@ def make_client(service: TileService) -> TestClient:
     return TestClient(app)
 
 
+def test_http_tile_router_rejects_timeout_over_sixty_seconds() -> None:
+    service = TileService(WorkerTile(b"mvt", 1.0, 0, 0))
+    with pytest.raises(ValueError, match="at most 60 seconds"):
+        create_tile_router(service, timeout_seconds=60.1)
+
+
 def test_http_tile_validates_coordinates_before_service_dispatch() -> None:
     service = TileService(WorkerTile(b"mvt", 1.0, 0, 0))
     response = make_client(service).get(
@@ -327,7 +443,7 @@ def test_http_tile_validates_coordinates_before_service_dispatch() -> None:
     assert service.calls == []
 
 
-def test_http_tile_revalidates_token_with_ten_second_timeout_and_safe_cors() -> None:
+def test_http_tile_revalidates_token_with_sixty_second_timeout_and_safe_cors() -> None:
     service = TileService(WorkerTile(b"mvt", 1.0, 0, 0))
     response = make_client(service).get(
         "/tiles/2/1/1.mvt", headers={"X-HIFLD-Query-Token": "signed"}
@@ -339,7 +455,7 @@ def test_http_tile_revalidates_token_with_ten_second_timeout_and_safe_cors() -> 
     assert response.headers["access-control-allow-origin"] == "*"
     assert response.headers["access-control-allow-headers"] == "X-HIFLD-Query-Token"
     assert response.headers["vary"] == "X-HIFLD-Query-Token"
-    assert service.calls == [("signed", 2, 1, 1, 10.0)]
+    assert service.calls == [("signed", 2, 1, 1, 60.0)]
 
 
 def test_http_query_id_tile_binds_path_identity_before_rendering() -> None:
@@ -352,7 +468,7 @@ def test_http_query_id_tile_binds_path_identity_before_rendering() -> None:
 
     assert response.status_code == 200
     assert service.identity_calls == [("signed", query_id)]
-    assert service.calls == [("signed", 2, 1, 1, 10.0)]
+    assert service.calls == [("signed", 2, 1, 1, 60.0)]
 
 
 def test_http_query_id_tile_preflight_allows_sandbox_token_header() -> None:

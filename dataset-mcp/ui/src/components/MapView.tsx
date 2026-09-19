@@ -10,6 +10,7 @@ import {
 } from "@hifld/map-core";
 import { SelectedFeaturesSummary, SelectedFeaturesTable } from "@hifld/map-ui";
 import type { App as McpApp } from "@modelcontextprotocol/ext-apps";
+import { X } from "lucide-react";
 import type {
   AddLayerObject,
   GeoJSONSource,
@@ -30,6 +31,7 @@ import {
 } from "react";
 import { z } from "zod";
 import {
+  type ExternalTileSource,
   type MapConfiguration,
   MapConfigurationSchema,
   type MapLayerConfiguration,
@@ -38,6 +40,7 @@ import {
   type HighlightContextUpdateResult,
   updateHighlightContext,
 } from "../mcp/highlightContext";
+import type { LayerStatus, MapStatus } from "../mcp/mapStatus";
 import { MapControls } from "./MapControls";
 import { MapLegend } from "./MapLegend";
 import {
@@ -54,8 +57,62 @@ import {
   type NumericScale,
 } from "./mapStyle";
 import { ResizableSelectedFeaturesPanel } from "./ResizableSelectedFeaturesPanel";
+import {
+  pmtilesProtocol,
+  resolveTileSource,
+  validatePublicTileUrl,
+} from "./tileSources";
 
 export type { MapConfiguration } from "../mcp/contracts";
+
+type RenderLayer = Pick<
+  MapLayerConfiguration,
+  | "layer_name"
+  | "visible"
+  | "style"
+  | "columns"
+  | "source_layer"
+  | "initial_bounds"
+  | "result_status"
+> & {
+  id: string;
+  query_id?: string;
+  query_token?: string;
+  tile_url?: string;
+  source?: ExternalTileSource;
+  preparation_status?: "preparing" | "failed";
+  preparation_error?: string;
+};
+type RenderConfiguration = Omit<MapConfiguration, "layers"> & {
+  layers: RenderLayer[];
+};
+
+function mapLifecycleKey(configuration: RenderConfiguration): string {
+  return JSON.stringify([
+    configuration.worker_url,
+    configuration.title,
+    configuration.camera,
+  ]);
+}
+
+function renderConfiguration(
+  configuration: MapConfiguration,
+): RenderConfiguration {
+  return {
+    ...configuration,
+    layers: configuration.layers.map((layer) =>
+      "query_id" in layer
+        ? { ...layer, id: layer.query_id }
+        : {
+            ...layer,
+            id: layer.layer_id,
+            source_layer:
+              "source" in layer ? (layer.source.source_layer ?? "") : "",
+            columns: [],
+          },
+    ),
+  };
+}
 
 type McpMapApp = Pick<
   McpApp,
@@ -65,6 +122,8 @@ type McpMapApp = Pick<
 };
 
 export interface MapViewProps {
+  onTokenExpired?: (queryId: string, token: string) => Promise<void>;
+  onStatus?: (status: MapStatus) => Promise<void>;
   configuration: MapConfiguration | null;
   queryTokens: Record<string, string>;
   app: McpMapApp | null;
@@ -135,6 +194,17 @@ export function normalizeMapConfiguration(
   const parsed = MapConfigurationSchema.safeParse(configuration);
   if (!parsed.success || !parsedHttpUrl(parsed.data.worker_url)) return null;
   for (const layer of parsed.data.layers) {
+    if ("preparation_status" in layer) continue;
+    if ("source" in layer) {
+      try {
+        if (layer.source.type === "vector_tiles")
+          layer.source.tiles.forEach(validatePublicTileUrl);
+        else validatePublicTileUrl(layer.source.url);
+      } catch {
+        return null;
+      }
+      continue;
+    }
     if (
       !parsedHttpUrl(layer.tile_url) ||
       tileQueryId(layer.tile_url) !== layer.query_id
@@ -148,9 +218,17 @@ export function normalizeMapConfiguration(
 export function mapTileRequest(
   url: string,
   queryTokens: Record<string, string>,
+  trustedTileUrls?: readonly string[],
 ): TileRequest {
   const queryId = tileQueryId(url);
-  const token = queryId ? queryTokens[queryId] : undefined;
+  const origin = parsedHttpUrl(url)?.origin;
+  const trusted =
+    trustedTileUrls === undefined ||
+    trustedTileUrls.some(
+      (tile) =>
+        parsedHttpUrl(tile)?.origin === origin && tileQueryId(tile) === queryId,
+    );
+  const token = trusted && queryId ? queryTokens[queryId] : undefined;
   return token ? { url, headers: { "X-HIFLD-Query-Token": token } } : { url };
 }
 
@@ -168,26 +246,37 @@ function blobText(blob: Blob): Promise<string> {
   });
 }
 
-export async function mapErrorMessage(error: Error): Promise<string> {
+async function mapErrorDetails(
+  error: Error,
+): Promise<{ message: string; code?: string }> {
   if (error instanceof maplibregl.AJAXError) {
     try {
       const parsed = TileErrorSchema.safeParse(
         JSON.parse(await blobText(error.body)),
       );
       if (parsed.success) {
-        return `${parsed.data.message} (${parsed.data.code})`;
+        return {
+          message: `${parsed.data.message} (${parsed.data.code})`,
+          code: parsed.data.code,
+        };
       }
     } catch {
       // MapLibre's generic AJAX message remains useful when the body is not JSON.
     }
   }
-  return /dense/i.test(error.message)
-    ? "This tile is too dense. Filter, aggregate, or zoom in."
-    : error.message;
+  return {
+    message: /dense/i.test(error.message)
+      ? "This tile is too dense. Filter, aggregate, or zoom in."
+      : error.message,
+  };
+}
+
+export async function mapErrorMessage(error: Error): Promise<string> {
+  return (await mapErrorDetails(error)).message;
 }
 
 function combinedBounds(
-  layers: MapLayerConfiguration[],
+  layers: Pick<MapLayerConfiguration, "initial_bounds">[],
 ): [number, number, number, number] | null {
   const available = layers.flatMap((layer) =>
     layer.initial_bounds ? [layer.initial_bounds] : [],
@@ -206,7 +295,7 @@ function combinedBounds(
 }
 
 export function initialMapView(
-  configuration: MapConfiguration,
+  configuration: MapConfiguration | RenderConfiguration,
 ): Partial<MapOptions> {
   const camera = configuration.camera;
   const orientation = {
@@ -227,7 +316,11 @@ export function initialMapView(
       ...orientation,
     };
   }
-  const bounds = combinedBounds(configuration.layers);
+  const bounds = combinedBounds(
+    configuration.layers.flatMap((layer) =>
+      "initial_bounds" in layer ? [layer] : [],
+    ),
+  );
   if (bounds) {
     return {
       bounds,
@@ -247,7 +340,7 @@ function queryRenderLayerIds(queryId: string): [string, string, string] {
   return [`${sourceId}-polygons`, `${sourceId}-lines`, `${sourceId}-points`];
 }
 
-function initialLayerStyle(layer: MapLayerConfiguration): LayerStyleState {
+function initialLayerStyle(layer: RenderLayer): LayerStyleState {
   return {
     color: layer.style?.color ?? DEFAULT_QUERY_COLOR,
     colorProperty: layer.style?.color_property ?? null,
@@ -264,36 +357,32 @@ function initialLayerStyle(layer: MapLayerConfiguration): LayerStyleState {
 }
 
 function initialLayerVisibility(
-  configuration: MapConfiguration | null,
+  configuration: RenderConfiguration | null,
 ): Record<string, boolean> {
   return Object.fromEntries(
-    (configuration?.layers ?? []).map((layer) => [
-      layer.query_id,
-      layer.visible,
-    ]),
+    (configuration?.layers ?? []).map((layer) => [layer.id, layer.visible]),
   );
 }
 
-function layersForQuery(
-  queryId: string,
-  layer: MapLayerConfiguration,
-): AddLayerObject[] {
+function layersForQuery(queryId: string, layer: RenderLayer): AddLayerObject[] {
   const source = querySourceId(queryId);
   const [polygons, lines, points] = queryRenderLayerIds(queryId);
   const color = layer.style?.color ?? DEFAULT_QUERY_COLOR;
-  const layout = {
-    visibility: layer.visible ? ("visible" as const) : ("none" as const),
-  };
+  // Layout visibility reloads and then unloads vector tiles in MapLibre.
+  // Paint-only hiding retains them; picking explicitly excludes hidden layers.
+  const layout = { visibility: "visible" as const };
+  const opacity = layer.visible ? (layer.style?.opacity ?? 0.7) : 0;
   return [
     {
       id: polygons,
       type: "fill",
       source,
       "source-layer": layer.source_layer,
+      filter: ["==", ["geometry-type"], "Polygon"],
       layout,
       paint: {
         "fill-color": color,
-        "fill-opacity": layer.style?.opacity ?? 0.7,
+        "fill-opacity": opacity,
         "fill-outline-color": "#bbfeab",
       },
     },
@@ -302,10 +391,11 @@ function layersForQuery(
       type: "line",
       source,
       "source-layer": layer.source_layer,
+      filter: ["==", ["geometry-type"], "LineString"],
       layout,
       paint: {
         "line-color": color,
-        "line-opacity": layer.style?.opacity ?? 0.7,
+        "line-opacity": opacity,
         "line-width": layer.style?.line_width ?? 2,
       },
     },
@@ -314,10 +404,12 @@ function layersForQuery(
       type: "circle",
       source,
       "source-layer": layer.source_layer,
+      filter: ["==", ["geometry-type"], "Point"],
       layout,
       paint: {
         "circle-color": color,
-        "circle-opacity": layer.style?.opacity ?? 0.7,
+        "circle-opacity": opacity,
+        "circle-stroke-opacity": layer.visible ? 1 : 0,
         "circle-radius": layer.style?.point_radius ?? 4,
         "circle-stroke-color": "#bbfeab",
         "circle-stroke-width": 1,
@@ -328,7 +420,7 @@ function layersForQuery(
 
 function applyLayerStyle(
   map: MapLibreMap,
-  layer: MapLayerConfiguration,
+  layer: RenderLayer,
   queryId: string,
   style: LayerStyleState,
 ): LegendItem[] {
@@ -346,9 +438,22 @@ function applyLayerStyle(
   map.setPaintProperty(polygons, "fill-color", driven.paint);
   map.setPaintProperty(lines, "line-color", driven.paint);
   map.setPaintProperty(points, "circle-color", driven.paint);
-  map.setPaintProperty(polygons, "fill-opacity", style.opacity);
-  map.setPaintProperty(lines, "line-opacity", style.opacity);
-  map.setPaintProperty(points, "circle-opacity", style.opacity);
+  map.setPaintProperty(
+    polygons,
+    "fill-opacity",
+    layer.visible ? style.opacity : 0,
+  );
+  map.setPaintProperty(
+    lines,
+    "line-opacity",
+    layer.visible ? style.opacity : 0,
+  );
+  map.setPaintProperty(
+    points,
+    "circle-opacity",
+    layer.visible ? style.opacity : 0,
+  );
+  map.setPaintProperty(points, "circle-stroke-opacity", layer.visible ? 1 : 0);
   map.setPaintProperty(
     points,
     "circle-radius",
@@ -431,31 +536,26 @@ function configureBasemap(
   );
 }
 
-function addQueryOverlays(
+function addLayerOverlay(
   map: MapLibreMap,
-  configuration: MapConfiguration,
+  layer: RenderLayer,
+  source: maplibregl.VectorSourceSpecification,
+  before?: string,
 ): void {
   const firstLabel = map
     .getStyle()
     .layers?.find((layer) => layer.type === "symbol")?.id;
-  configuration.layers.forEach((layer) => {
-    const sourceId = querySourceId(layer.query_id);
-    map.addSource(sourceId, {
-      type: "vector",
-      tiles: [layer.tile_url],
-      minzoom: 0,
-      maxzoom: 22,
-    });
-    for (const renderLayer of layersForQuery(layer.query_id, layer)) {
-      map.addLayer(renderLayer, firstLabel);
-    }
-  });
+  const sourceId = querySourceId(layer.id);
+  map.addSource(sourceId, source);
+  for (const renderLayer of layersForQuery(layer.id, layer)) {
+    map.addLayer(renderLayer, before ?? firstLabel);
+  }
 }
 
-function allQueryRenderLayerIds(configuration: MapConfiguration): string[] {
-  return configuration.layers.flatMap((layer) =>
-    queryRenderLayerIds(layer.query_id),
-  );
+function allQueryRenderLayerIds(configuration: RenderConfiguration): string[] {
+  return configuration.layers
+    .filter((layer) => layer.visible)
+    .flatMap((layer) => queryRenderLayerIds(layer.id));
 }
 
 function selectionBoxCollection(
@@ -509,16 +609,19 @@ function setMapSelectionCursor(map: MapLibreMap, active: boolean): void {
   map.getCanvas().style.cursor = active ? "crosshair" : "";
 }
 
-function highlightedLayers(configuration: MapConfiguration) {
+function highlightedLayers(configuration: RenderConfiguration) {
   return configuration.layers.map((layer) => ({
-    mapSourceId: querySourceId(layer.query_id),
+    mapSourceId: querySourceId(layer.id),
     queryId: layer.query_id,
+    layerId: layer.id,
     layerName: layer.layer_name,
     sourceLayerId: layer.source_layer,
   }));
 }
 
 export function MapView({
+  onStatus,
+  onTokenExpired,
   configuration,
   queryTokens,
   app,
@@ -531,13 +634,25 @@ export function MapView({
         : (() => {
             const normalized = normalizeMapConfiguration(configuration);
             return normalized
-              ? { success: true as const, data: normalized }
+              ? {
+                  success: true as const,
+                  data: renderConfiguration(normalized),
+                }
               : { success: false as const };
           })(),
     [configuration],
   );
   const mapNode = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const latestRef = useRef({ parsed, queryTokens, onStatus, onTokenExpired });
+  latestRef.current = { parsed, queryTokens, onStatus, onTokenExpired };
+  const reconcileRef = useRef<(() => void) | null>(null);
+  const disposeMapRef = useRef<(() => void) | null>(null);
+  const visibilityByNameRef = useRef(new Map<string, boolean>());
+  const [runtimeStatuses, setRuntimeStatuses] = useState<LayerStatus[]>([]);
+  const visibilityStatusRef = useRef<(id: string, visible: boolean) => void>(
+    () => {},
+  );
   const selectionActiveRef = useRef(false);
   const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
   const selectionStartLngLatRef = useRef<{ lng: number; lat: number } | null>(
@@ -546,7 +661,7 @@ export function MapView({
   const suppressNextClickSelectionRef = useRef(false);
   const contextRequestSequenceRef = useRef(0);
   const hasPublishedHighlightContextRef = useRef(false);
-  const lastParsedConfigurationRef = useRef<MapConfiguration | null>(null);
+  const lastParsedConfigurationRef = useRef<RenderConfiguration | null>(null);
   const currentMapTitleRef = useRef<string | null>(null);
   const publishHighlightContextRef = useRef<
     (
@@ -556,6 +671,9 @@ export function MapView({
   >(async () => ({ status: "unsupported", isLatest: true }));
   const [isMapLoading, setIsMapLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [dismissedMessages, setDismissedMessages] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const [highlightedFeatures, setHighlightedFeatures] = useState<
     HighlightedMapFeature[]
   >([]);
@@ -577,7 +695,7 @@ export function MapView({
   );
   const [layerVisibility, setLayerVisibility] = useState<
     Record<string, boolean>
-  >(() => initialLayerVisibility(configuration));
+  >(() => initialLayerVisibility(parsed.success ? parsed.data : null));
   const [legendItems, setLegendItems] = useState<Record<string, LegendItem[]>>(
     {},
   );
@@ -619,6 +737,38 @@ export function MapView({
   useEffect(() => {
     if (!parsed.success) return;
     if (lastParsedConfigurationRef.current === parsed.data) return;
+    const previous = lastParsedConfigurationRef.current;
+    const sameLifecycle =
+      previous !== null &&
+      mapLifecycleKey(previous) === mapLifecycleKey(parsed.data);
+    const names = new Set(parsed.data.layers.map((layer) => layer.layer_name));
+    for (const name of visibilityByNameRef.current.keys())
+      if (!names.has(name) || !sameLifecycle)
+        visibilityByNameRef.current.delete(name);
+    for (const layer of parsed.data.layers) {
+      layer.visible =
+        visibilityByNameRef.current.get(layer.layer_name) ?? layer.visible;
+    }
+    setLayerVisibility(initialLayerVisibility(parsed.data));
+    const ids = new Set(parsed.data.layers.map((layer) => layer.id));
+    setLegendItems((items) =>
+      Object.fromEntries(
+        Object.entries(items).filter(([id]) => sameLifecycle && ids.has(id)),
+      ),
+    );
+    lastParsedConfigurationRef.current = parsed.data;
+    if (sameLifecycle) {
+      // A changed tool input is authoritative. Unchanged inputs from layer
+      // preparation must preserve the user's current basemap selection.
+      if (previous.basemap !== parsed.data.basemap) {
+        setBasemap(parsed.data.basemap);
+        const map = mapRef.current;
+        if (map?.getSource(SATELLITE_SOURCE_ID))
+          configureBasemap(map, parsed.data.basemap);
+      }
+      return;
+    }
+    if (previous?.title !== parsed.data.title) setDismissedMessages(new Set());
     currentMapTitleRef.current = parsed.data.title;
     if (hasPublishedHighlightContextRef.current) {
       void publishHighlightContext(
@@ -634,10 +784,7 @@ export function MapView({
         }
       });
     }
-    lastParsedConfigurationRef.current = parsed.data;
     setBasemap(parsed.data.basemap);
-    setLayerVisibility(initialLayerVisibility(parsed.data));
-    setLegendItems({});
     setHighlightedFeatures([]);
     setWasSelectionCapped(false);
     setSelectionBounds(null);
@@ -673,6 +820,7 @@ export function MapView({
   useEffect(() => {
     if (!registerTeardownHandler) return;
     registerTeardownHandler(async () => {
+      disposeMapRef.current?.();
       const mapTitle = currentMapTitleRef.current;
       if (!hasPublishedHighlightContextRef.current || !mapTitle) return;
       const result = await publishHighlightContextRef.current(
@@ -725,60 +873,318 @@ export function MapView({
     };
   }, [cancelActiveBoxSelection, resetShiftSelectionOnBlur]);
 
+  const workerUrl = parsed.success ? parsed.data.worker_url : null;
+  const lifecycleKey = parsed.success ? mapLifecycleKey(parsed.data) : null;
   useEffect(() => {
-    if (!parsed.success) {
+    setDismissedMessages(new Set());
+    const initialParsed = latestRef.current.parsed;
+    const parsed = {
+      get success() {
+        return initialParsed.success;
+      },
+      get data(): RenderConfiguration {
+        const current = latestRef.current.parsed;
+        if (current.success) return current.data;
+        if (initialParsed.success) return initialParsed.data;
+        throw new Error("Invalid map configuration");
+      },
+    };
+    if (!lifecycleKey || !workerUrl || !parsed.success) {
       setIsMapLoading(false);
       setMessage("Map configuration is missing absolute tile or worker URLs.");
+      void latestRef.current.onStatus?.({
+        status: "failed",
+        layers: [],
+        error:
+          "validation_failed: map configuration is missing absolute tile or worker URLs.",
+      });
       return;
     }
     if (!mapNode.current) return;
     let map: MapLibreMap;
     let disposed = false;
+    const renewingLayers = new Set<string>();
+    const statuses = new Map<string, LayerStatus>(
+      parsed.data.layers.map((layer) => [
+        layer.id,
+        {
+          layer_name: layer.layer_name,
+          status: !layer.visible
+            ? "hidden"
+            : layer.result_status === "empty_result"
+              ? "empty_result"
+              : (layer.preparation_status ?? "loading"),
+          ...(layer.preparation_error
+            ? { error: layer.preparation_error }
+            : {}),
+        },
+      ]),
+    );
+    let lastStatus = "";
+    let globalError: string | undefined;
+    let feedback = Promise.resolve();
+    const report = () => {
+      const layers = [...statuses.values()].map((layer) => ({ ...layer }));
+      const failures = layers.filter(
+        (layer) => layer.status === "failed",
+      ).length;
+      const snapshot: MapStatus = {
+        map_title: parsed.data.title,
+        scope: "current_viewport",
+        layers,
+        status: globalError
+          ? "failed"
+          : failures
+            ? failures === layers.length
+              ? "failed"
+              : "partial"
+            : layers.some(
+                  (layer) =>
+                    layer.status === "loading" || layer.status === "preparing",
+                )
+              ? "loading"
+              : "loaded",
+        ...(globalError ? { error: globalError } : {}),
+      };
+      const serialized = JSON.stringify(snapshot);
+      if (serialized === lastStatus) return;
+      lastStatus = serialized;
+      setRuntimeStatuses(layers);
+      // Serialize delivery; a slower loading notification must not replace a later failure.
+      feedback = feedback
+        .then(async () => {
+          if (!disposed) await latestRef.current.onStatus?.(snapshot);
+        })
+        .catch(() => {});
+    };
+    const failLayer = (id: string, error: string) => {
+      const layer = statuses.get(id);
+      if (layer) statuses.set(id, { ...layer, status: "failed", error });
+      report();
+    };
+    visibilityStatusRef.current = (id, visible) => {
+      const layer = statuses.get(id);
+      if (layer)
+        statuses.set(id, {
+          layer_name: layer.layer_name,
+          status: !visible
+            ? "hidden"
+            : parsed.data.layers.find((candidate) => candidate.id === id)
+                  ?.result_status === "empty_result"
+              ? "empty_result"
+              : (parsed.data.layers.find((candidate) => candidate.id === id)
+                  ?.preparation_status ?? (layer.error ? "failed" : "loading")),
+          ...(layer.error ? { error: layer.error } : {}),
+        });
+      report();
+    };
+    report();
     try {
       setIsMapLoading(true);
       setMessage(null);
-      maplibregl.setWorkerUrl(parsed.data.worker_url);
+      maplibregl.setWorkerUrl(workerUrl);
+      if (
+        parsed.data.layers.some((layer) => layer.source?.type === "pmtiles")
+      ) {
+        maplibregl.addProtocol("pmtiles", pmtilesProtocol.tile);
+      }
       map = new maplibregl.Map({
         container: mapNode.current,
         ...initialMapView(parsed.data),
         style: OPENFREEMAP_BRIGHT_STYLE_URL,
-        transformRequest: (url) => mapTileRequest(url, queryTokens),
+        transformRequest: (url) =>
+          mapTileRequest(
+            url,
+            latestRef.current.queryTokens,
+            parsed.data.layers.flatMap((layer) =>
+              layer.tile_url ? [layer.tile_url] : [],
+            ),
+          ),
       });
       mapRef.current = map;
+      const reportLoadedSources = () => {
+        if (disposed) return;
+        for (const [id, layer] of statuses) {
+          if (layer.status !== "loading" || renewingLayers.has(id)) continue;
+          const sourceId = querySourceId(id);
+          if (map.getSource(sourceId) && map.isSourceLoaded(sourceId)) {
+            statuses.set(id, { ...layer, status: "loaded" });
+          }
+        }
+        report();
+      };
+      map.on("render", reportLoadedSources);
+      map.on("idle", reportLoadedSources);
+      map.on("sourcedataloading", (event) => {
+        for (const [id, layer] of statuses) {
+          if (
+            querySourceId(id) === event.sourceId &&
+            layer.status === "loaded"
+          ) {
+            statuses.set(id, { ...layer, status: "loading" });
+          }
+        }
+        report();
+      });
+      const activeLayers = new Map<string, RenderLayer>();
+      let basemapConfigured = false;
+      let awaitingInitialBounds =
+        !parsed.data.camera && combinedBounds(parsed.data.layers) === null;
       const initializeQueryLayers = () => {
         if (disposed) return;
         try {
-          configureBasemap(map, parsed.data.basemap);
-          addQueryOverlays(map, parsed.data);
-          const items = Object.fromEntries(
-            parsed.data.layers.map((layer) => [
-              layer.query_id,
-              applyLayerStyle(
-                map,
-                layer,
-                layer.query_id,
-                initialLayerStyle(layer),
-              ),
-            ]),
+          if (awaitingInitialBounds) {
+            const bounds = combinedBounds(parsed.data.layers);
+            if (bounds) {
+              map.fitBounds(bounds, { padding: 24 });
+              awaitingInitialBounds = false;
+            }
+          }
+          if (!basemapConfigured) {
+            configureBasemap(map, parsed.data.basemap);
+            basemapConfigured = true;
+          }
+          const wanted = new Map(
+            parsed.data.layers.map((layer) => [layer.id, layer]),
           );
-          setLegendItems(items);
-          map.once("idle", () => {
-            setLegendItems(
-              Object.fromEntries(
-                parsed.data.layers.map((layer) => [
-                  layer.query_id,
-                  applyLayerStyle(
-                    map,
-                    layer,
-                    layer.query_id,
-                    initialLayerStyle(layer),
-                  ),
-                ]),
-              ),
+          for (const [id, previous] of activeLayers) {
+            const next = wanted.get(id);
+            if (
+              next &&
+              JSON.stringify([
+                previous.source,
+                previous.tile_url,
+                previous.query_token,
+                previous.result_status,
+                previous.preparation_status,
+              ]) ===
+                JSON.stringify([
+                  next.source,
+                  next.tile_url,
+                  next.query_token,
+                  next.result_status,
+                  next.preparation_status,
+                ])
+            )
+              continue;
+            for (const renderId of queryRenderLayerIds(id)) {
+              if (map.getLayer(renderId)) map.removeLayer(renderId);
+            }
+            if (map.getSource(querySourceId(id)))
+              map.removeSource(querySourceId(id));
+            activeLayers.delete(id);
+            statuses.delete(id);
+          }
+          for (const id of statuses.keys())
+            if (!wanted.has(id)) statuses.delete(id);
+          const addReadyLayer = (
+            layer: RenderLayer,
+            source: maplibregl.VectorSourceSpecification,
+          ) => {
+            if (disposed || activeLayers.get(layer.id) !== layer) return;
+            const laterLayers = parsed.data.layers.slice(
+              parsed.data.layers.findIndex(
+                (candidate) => candidate.id === layer.id,
+              ) + 1,
             );
-          });
+            const before = laterLayers
+              .flatMap((candidate) => queryRenderLayerIds(candidate.id))
+              .find((id) => map.getLayer(id));
+            addLayerOverlay(map, layer, source, before);
+            const updateStyle = () => {
+              if (disposed || activeLayers.get(layer.id) !== layer) return;
+              const current = parsed.data.layers.find(
+                (candidate) => candidate.id === layer.id,
+              );
+              if (!current) return;
+              const items = applyLayerStyle(
+                map,
+                current,
+                layer.id,
+                initialLayerStyle(current),
+              );
+              setLegendItems((previous) => ({
+                ...previous,
+                [layer.id]: items,
+              }));
+            };
+            updateStyle();
+            map.once("idle", updateStyle);
+          };
+          for (const layer of parsed.data.layers) {
+            const previous = activeLayers.get(layer.id);
+            if (previous) {
+              layer.source_layer = previous.source_layer;
+              layer.columns = previous.columns;
+              Object.assign(previous, layer);
+              if (map.getLayer(queryRenderLayerIds(layer.id)[0]))
+                applyLayerStyle(map, layer, layer.id, initialLayerStyle(layer));
+              continue;
+            }
+            activeLayers.set(layer.id, layer);
+            statuses.set(layer.id, {
+              layer_name: layer.layer_name,
+              status: !layer.visible
+                ? "hidden"
+                : (layer.preparation_status ??
+                  (layer.result_status === "empty_result"
+                    ? "empty_result"
+                    : "loading")),
+              ...(layer.preparation_error
+                ? { error: layer.preparation_error }
+                : {}),
+            });
+            if (layer.preparation_status) {
+              if (
+                layer.preparation_status === "failed" &&
+                layer.preparation_error
+              )
+                setMessage(`${layer.layer_name}: ${layer.preparation_error}`);
+              continue;
+            }
+            if (layer.result_status === "empty_result") continue;
+            if (layer.source) {
+              if (layer.source.type === "pmtiles")
+                maplibregl.addProtocol("pmtiles", pmtilesProtocol.tile);
+              void resolveTileSource(layer.source)
+                .then((resolved) => {
+                  if (disposed || activeLayers.get(layer.id) !== layer) return;
+                  layer.source_layer = resolved.sourceLayer;
+                  layer.columns = resolved.columns;
+                  const current = parsed.data.layers.find(
+                    (candidate) => candidate.id === layer.id,
+                  );
+                  if (current) {
+                    current.source_layer = resolved.sourceLayer;
+                    current.columns = resolved.columns;
+                    layer.visible = current.visible;
+                  }
+                  addReadyLayer(layer, resolved.source);
+                })
+                .catch((error: Error) => {
+                  if (disposed || activeLayers.get(layer.id) !== layer) return;
+                  failLayer(
+                    layer.id,
+                    "source_metadata_failed: verify the tile URL is reachable, allows cross-origin requests, and names a valid vector layer.",
+                  );
+                  if (!disposed)
+                    setMessage(`${layer.layer_name}: ${error.message}`);
+                });
+            } else if (layer.tile_url) {
+              addReadyLayer(layer, {
+                type: "vector",
+                tiles: [layer.tile_url],
+                minzoom: 0,
+                maxzoom: 22,
+              });
+            }
+          }
+          report();
           setIsMapLoading(false);
         } catch (error) {
+          globalError =
+            "map_initialization_failed: the widget could not initialize map sources or styles.";
+          report();
           setIsMapLoading(false);
           setMessage(
             error instanceof Error
@@ -787,16 +1193,85 @@ export function MapView({
           );
         }
       };
-      if (map.isStyleLoaded()) initializeQueryLayers();
-      else map.once("style.load", initializeQueryLayers);
+      // isStyleLoaded() also waits for every source's tiles. Once the initial
+      // style exists, source loading must not delay independent layer updates.
+      let styleReady = map.isStyleLoaded();
+      reconcileRef.current = () => {
+        if (styleReady) initializeQueryLayers();
+      };
+      if (styleReady) initializeQueryLayers();
+      else
+        map.once("style.load", () => {
+          styleReady = true;
+          initializeQueryLayers();
+        });
       map.on("error", (event) => {
         if (disposed) return;
-        setIsMapLoading(false);
-        if (event.error instanceof Error) {
-          void mapErrorMessage(event.error).then(setMessage);
-        } else {
-          setMessage("Map rendering is unavailable.");
-        }
+        const provenance = z.object({ sourceId: z.string() }).safeParse(event);
+        const layer = parsed.data.layers.find(
+          (candidate) =>
+            provenance.success &&
+            querySourceId(candidate.id) === provenance.data.sourceId,
+        );
+        const failedToken = layer?.query_token;
+        const handleError = async () => {
+          const details =
+            event.error instanceof Error
+              ? await mapErrorDetails(event.error)
+              : { message: "Map rendering is unavailable." };
+          if (disposed) return;
+          if (
+            details.code === "query_token_expired" &&
+            layer?.query_id &&
+            failedToken &&
+            latestRef.current.onTokenExpired
+          ) {
+            if (latestRef.current.queryTokens[layer.query_id] !== failedToken)
+              return;
+            if (renewingLayers.has(layer.id)) return;
+            renewingLayers.add(layer.id);
+            statuses.set(layer.id, {
+              layer_name: layer.layer_name,
+              status: layer.visible ? "loading" : "hidden",
+            });
+            report();
+            try {
+              await latestRef.current.onTokenExpired(
+                layer.query_id,
+                failedToken,
+              );
+            } catch {
+              if (!disposed) {
+                failLayer(
+                  layer.id,
+                  "query_token_refresh_failed: Could not renew the expired query token. Reopen the map to retry.",
+                );
+                setMessage(
+                  "Could not renew the expired query token. Reopen the map to retry.",
+                );
+              }
+            } finally {
+              renewingLayers.delete(layer.id);
+            }
+            return;
+          }
+          const detail =
+            event.error instanceof maplibregl.AJAXError
+              ? ` HTTP status ${event.error.status}.`
+              : "";
+          if (layer)
+            failLayer(
+              layer.id,
+              `tile_load_failed:${detail} Check tile access, CORS, query expiry, or server errors. Other layers may still load.`,
+            );
+          else {
+            globalError = `map_resource_failed:${detail} Check basemap, worker, and network access.`;
+            report();
+          }
+          setIsMapLoading(false);
+          setMessage(details.message);
+        };
+        void handleError();
       });
       map.on("click", (event: MapLayerMouseEvent) => {
         if (suppressNextClickSelectionRef.current) {
@@ -804,7 +1279,9 @@ export function MapView({
           return;
         }
         const rendered = map.queryRenderedFeatures(event.point, {
-          layers: allQueryRenderLayerIds(parsed.data),
+          layers: allQueryRenderLayerIds(parsed.data).filter((id) =>
+            map.getLayer(id),
+          ),
         });
         const normalized = normalizeHighlightedFeatures({
           features: rendered,
@@ -819,22 +1296,24 @@ export function MapView({
         if (hasHighlightedFeatures) {
           hasPublishedHighlightContextRef.current = true;
         }
-        void publishHighlightContext(
-          snapshotMapHighlights({
-            mapTitle: parsed.data.title,
-            features: normalized.features,
-            wasCapped: normalized.wasCapped,
-            selectionBounds: null,
-          }),
-        ).then((result) => {
-          if (
-            !hasHighlightedFeatures &&
-            result.isLatest &&
-            result.status !== "rejected"
-          ) {
-            hasPublishedHighlightContextRef.current = false;
-          }
-        });
+        void publishHighlightContextRef
+          .current(
+            snapshotMapHighlights({
+              mapTitle: parsed.data.title,
+              features: normalized.features,
+              wasCapped: normalized.wasCapped,
+              selectionBounds: null,
+            }),
+          )
+          .then((result) => {
+            if (
+              !hasHighlightedFeatures &&
+              result.isLatest &&
+              result.status !== "rejected"
+            ) {
+              hasPublishedHighlightContextRef.current = false;
+            }
+          });
       });
       map.on("mousedown", (event: MapLayerMouseEvent) => {
         const shiftHeld = event.originalEvent.shiftKey;
@@ -895,7 +1374,9 @@ export function MapView({
         }, 0);
         const bounds = selectionScreenBounds(start, end);
         const rendered = map.queryRenderedFeatures(bounds, {
-          layers: allQueryRenderLayerIds(parsed.data),
+          layers: allQueryRenderLayerIds(parsed.data).filter((id) =>
+            map.getLayer(id),
+          ),
         });
         const normalized = normalizeHighlightedFeatures({
           features: rendered,
@@ -911,7 +1392,7 @@ export function MapView({
         ];
         setSelectionBounds(normalizedBounds);
         hasPublishedHighlightContextRef.current = true;
-        void publishHighlightContext(
+        void publishHighlightContextRef.current(
           snapshotMapHighlights({
             mapTitle: parsed.data.title,
             features: normalized.features,
@@ -921,6 +1402,9 @@ export function MapView({
         );
       });
     } catch (error) {
+      globalError =
+        "map_initialization_failed: check WebGL support and worker access.";
+      report();
       setIsMapLoading(false);
       setMessage(
         error instanceof Error
@@ -928,8 +1412,11 @@ export function MapView({
           : "Map rendering is unavailable.",
       );
     }
-    return () => {
+    const dispose = () => {
+      if (disposed) return;
       disposed = true;
+      reconcileRef.current = null;
+      visibilityStatusRef.current = () => {};
       if (selectionStartRef.current !== null) map?.dragPan.enable();
       mapRef.current = null;
       selectionStartRef.current = null;
@@ -940,7 +1427,13 @@ export function MapView({
         // MapLibre can fail to tear down an uninitialized WebGL context.
       }
     };
-  }, [parsed, publishHighlightContext, queryTokens]);
+    disposeMapRef.current = dispose;
+    return dispose;
+  }, [workerUrl, lifecycleKey]);
+
+  useEffect(() => {
+    if (parsed.success) reconcileRef.current?.();
+  }, [parsed]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -967,19 +1460,23 @@ export function MapView({
     if (map) configureBasemap(map, nextBasemap);
   };
   const changeLayerVisibility = (queryId: string, nextVisible: boolean) => {
+    visibilityStatusRef.current(queryId, nextVisible);
     setLayerVisibility((current) => ({
       ...current,
       [queryId]: nextVisible,
     }));
     if (!parsed.success) return;
+    const layer = parsed.data.layers.find(
+      (candidate) => candidate.id === queryId,
+    );
+    if (layer) {
+      layer.visible = nextVisible;
+      visibilityByNameRef.current.set(layer.layer_name, nextVisible);
+    }
     const map = mapRef.current;
     if (!map) return;
-    for (const layerId of queryRenderLayerIds(queryId)) {
-      map.setLayoutProperty(
-        layerId,
-        "visibility",
-        nextVisible ? "visible" : "none",
-      );
+    if (layer && map.getLayer(queryRenderLayerIds(queryId)[0])) {
+      applyLayerStyle(map, layer, queryId, initialLayerStyle(layer));
     }
   };
   const clearSelection = () => {
@@ -1018,6 +1515,13 @@ export function MapView({
   const mapViewStyle: MapViewStyle = {
     "--selected-features-panel-height": `${selectedFeaturesPanelHeight}%`,
   };
+  const visibleMessage =
+    message && !dismissedMessages.has(message) ? message : null;
+  const loadingLayers = runtimeStatuses
+    .filter(
+      (layer) => layer.status === "loading" || layer.status === "preparing",
+    )
+    .map((layer) => layer.layer_name);
   return (
     <section
       className={`map-view${hasHighlight ? " map-view-has-selection" : ""}`}
@@ -1027,19 +1531,59 @@ export function MapView({
       <div
         ref={mapNode}
         className="map-canvas"
-        aria-busy={isMapLoading || undefined}
+        aria-busy={isMapLoading || loadingLayers.length > 0 || undefined}
       />
-      {isMapLoading ? (
-        <div className="map-loading" role="status">
-          <span className="map-loading-spinner" aria-hidden="true" />
-          <span>Loading map…</span>
-        </div>
-      ) : null}
-      {message ? (
-        <div className="map-message" role="alert">
-          {message}
-        </div>
-      ) : null}
+      <div className="map-notification-stack">
+        {isMapLoading ? (
+          <div className="map-feature-loading" role="status">
+            <span className="map-loading-spinner" aria-hidden="true" />
+            <span>Loading map…</span>
+          </div>
+        ) : null}
+        {!isMapLoading && loadingLayers.length > 0 ? (
+          <div
+            className="map-feature-loading"
+            role="status"
+            aria-label="Feature loading"
+            aria-live="polite"
+          >
+            <span className="map-loading-spinner" aria-hidden="true" />
+            <span>Loading features: {loadingLayers.join(", ")}…</span>
+          </div>
+        ) : null}
+        {visibleMessage || selectionContextStatus === "rejected" ? (
+          <>
+            {visibleMessage ? (
+              <div className="map-message" role="alert">
+                <span>{visibleMessage}</span>
+                <button
+                  type="button"
+                  className="map-message-dismiss"
+                  aria-label="Dismiss map error"
+                  onClick={() =>
+                    setDismissedMessages(
+                      (current) => new Set([...current, visibleMessage]),
+                    )
+                  }
+                >
+                  <X aria-hidden="true" />
+                </button>
+              </div>
+            ) : null}
+            {selectionContextStatus === "rejected" ? (
+              <div
+                className="map-selection-status"
+                role="status"
+                aria-label="Selection context"
+              >
+                {!hasHighlight && selectionBounds === null
+                  ? "Highlight cleared locally, but the host context could not be cleared. The prior selection may remain available to the agent."
+                  : "Selection context could not be updated."}
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </div>
       <MapControls
         mapRef={mapRef}
         basemap={basemap}
@@ -1051,25 +1595,45 @@ export function MapView({
         onClearSelection={hasClearableSelection ? clearSelection : undefined}
         onFullscreen={canFullscreen ? requestFullscreen : undefined}
       />
-      {selectionContextStatus === "rejected" ? (
-        <div className="map-selection-status" role="status">
-          {!hasHighlight && selectionBounds === null
-            ? "Highlight cleared locally, but the host context could not be cleared. The prior selection may remain available to the agent."
-            : "Selection context could not be updated."}
-        </div>
-      ) : null}
       {parsed.success ? (
         <MapLegend
           groups={parsed.data.layers.map((layer) => {
             const style = initialLayerStyle(layer);
+            const runtime = runtimeStatuses.find(
+              (status) => status.layer_name === layer.layer_name,
+            );
             return {
-              id: layer.query_id,
+              id: layer.id,
               title: layer.layer_name,
               field: style.colorProperty,
-              items: legendItems[layer.query_id] ?? [
-                { color: style.color, label: "All values" },
-              ],
-              layerVisible: layerVisibility[layer.query_id] ?? layer.visible,
+              items:
+                layer.preparation_status === "preparing"
+                  ? [
+                      {
+                        color: style.color,
+                        label: "Preparing query…",
+                      },
+                    ]
+                  : runtime?.status === "failed"
+                    ? [
+                        {
+                          color: style.color,
+                          label: layer.preparation_status
+                            ? "Failed: retry query"
+                            : "Failed: check source URL",
+                        },
+                      ]
+                    : layer.result_status === "empty_result"
+                      ? [
+                          {
+                            color: style.color,
+                            label: "No rows returned",
+                          },
+                        ]
+                      : (legendItems[layer.id] ?? [
+                          { color: style.color, label: "All values" },
+                        ]),
+              layerVisible: layerVisibility[layer.id] ?? layer.visible,
             };
           })}
           visible={legendVisible}

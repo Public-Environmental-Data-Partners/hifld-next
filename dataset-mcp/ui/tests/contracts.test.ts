@@ -4,6 +4,22 @@ import { ErrorResultSchema, MapResultSchema } from "../src/mcp/contracts";
 const roadsId = "roadsquery1234567890ABCD";
 const bridgesId = "bridgesquery123456789AB";
 
+it("accepts bounded query previews without rejecting the prepared map", () => {
+  const result = structuredClone(mapResult);
+  const preview = {
+    rows: [
+      { name: "Hospital", geometry: { $type: "geometry", omitted: true } },
+    ],
+    limit: 1,
+    warnings: [],
+  };
+  const parsed = MapResultSchema.safeParse({
+    ...result,
+    layers: result.layers.map((layer) => ({ ...layer, preview })),
+  });
+  expect(parsed.success).toBe(true);
+});
+
 const mapResult = {
   title: "Transportation comparison",
   basemap: "street",
@@ -75,6 +91,17 @@ const mapResult = {
 };
 
 describe("MCP multi-layer map contracts", () => {
+  it("accepts a validated empty query outcome on a layer", () => {
+    const result = MapResultSchema.safeParse({
+      ...mapResult,
+      layers: mapResult.layers.map((layer) => ({
+        ...layer,
+        result_status: "empty_result",
+      })),
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("accepts named query layers with self-contained query tokens", () => {
     const result = MapResultSchema.parse(mapResult);
 
@@ -82,10 +109,11 @@ describe("MCP multi-layer map contracts", () => {
       "Roads",
       "Bridges",
     ]);
-    expect(result.layers.map((layer) => layer.query_token)).toEqual([
-      "signed-roads",
-      "signed-bridges",
-    ]);
+    expect(
+      result.layers.flatMap((layer) =>
+        "query_token" in layer ? [layer.query_token] : [],
+      ),
+    ).toEqual(["signed-roads", "signed-bridges"]);
   });
 
   it("rejects a layer without its query token", () => {

@@ -17,6 +17,7 @@ from app.errors import AppError, ErrorCode
 from app.query.models import JsonValue, PageResult, QueryTokenPayload, ResolvedSource
 from app.query.service import ExecutionSource, QueryService, worker_source
 from app.query.sql_policy import SqlPolicy, SqlPolicyError, ValidatedSql
+from app.query.tile_cache import TileCache, TileCacheCapacityError, TileCacheKey
 from app.query.token_codec import QueryTokenCodec, QueryTokenError
 from app.storage.resolver import StorageResolutionError, StorageResolver
 from query_worker.protocol import (
@@ -33,6 +34,7 @@ type JSONMapping = Mapping[str, JsonValue]
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _GEOMETRY_CRS = re.compile(r"^GEOMETRY\s*\(\s*'(?P<crs>EPSG:[1-9][0-9]*)'\s*\)$", re.IGNORECASE)
+_TILE_FEATURE_CAP = 20_000
 
 
 class _JsonMapping(RootModel[dict[str, JsonValue]]):
@@ -65,6 +67,11 @@ class WorkerExecutor(Protocol):
     ) -> WorkerResult: ...
 
 
+class _TileWorkerFailure(Exception):
+    def __init__(self, failure: WorkerFailure) -> None:
+        self.failure = failure
+
+
 class QueryApplicationService:
     """Re-resolve trusted sources for every page, tile, and map request."""
 
@@ -79,6 +86,7 @@ class QueryApplicationService:
         token_ttl_seconds: int,
         tile_timeout_seconds: float,
         public_origin: str | None,
+        tile_cache: TileCache | None = None,
     ) -> None:
         if not 60 <= token_ttl_seconds <= 7_200:
             raise ValueError("token TTL must be between 60 and 7,200 seconds")
@@ -90,6 +98,7 @@ class QueryApplicationService:
         self._token_ttl_seconds = token_ttl_seconds
         self._tile_timeout_seconds = tile_timeout_seconds
         self._public_origin = public_origin.rstrip("/") if public_origin is not None else None
+        self._tile_cache = tile_cache
 
     def validate_sql(self, sql: str, aliases: Sequence[str]) -> None:
         try:
@@ -112,7 +121,8 @@ class QueryApplicationService:
         if not hmac.compare_digest(payload.query_id, query_id):
             raise AppError(
                 ErrorCode.QUERY_TOKEN_INVALID,
-                "The query token is invalid or expired",
+                "The query token does not match this tile URL. "
+                "Use the URL and token returned together.",
             )
 
     async def _execution_sources(
@@ -176,7 +186,19 @@ class QueryApplicationService:
                 if "expired" in str(error).casefold()
                 else ErrorCode.QUERY_TOKEN_INVALID
             )
-            raise AppError(code, "The query token is invalid or expired") from error
+            if code == ErrorCode.QUERY_TOKEN_EXPIRED:
+                message = "The query token has expired. Refresh the map or generate a new tile URL."
+            elif "SQL" in str(error):
+                message = (
+                    "The query token's saved SQL could not be validated. "
+                    "Generate a new tile URL from the original query."
+                )
+            else:
+                message = (
+                    "The query token is invalid. Use the original token and URL returned together, "
+                    "or generate a new tile URL."
+                )
+            raise AppError(code, message) from error
 
     def _encode_token(
         self,
@@ -185,6 +207,7 @@ class QueryApplicationService:
         *,
         geometry_column: str | None,
         result_crs: str | None,
+        working_crs: str | None = None,
     ) -> tuple[str, str]:
         issued_at = datetime.now(tz=UTC).replace(microsecond=0)
         query_id = secrets.token_urlsafe(18)
@@ -193,6 +216,7 @@ class QueryApplicationService:
             sources=tuple(refs),
             geometry_column=geometry_column,
             result_crs=result_crs,
+            working_crs=working_crs,
             query_id=query_id,
             issued_at=issued_at,
             expires_at=issued_at + timedelta(seconds=self._token_ttl_seconds),
@@ -216,6 +240,15 @@ class QueryApplicationService:
         result_crs: str | None = None,
     ) -> JSONMapping:
         parsed = page
+        result_status = (
+            "rows_returned"
+            if parsed.returned_count > 0
+            else "indeterminate"
+            if parsed.response_truncated
+            else "empty_result"
+            if parsed.offset == 0 and not parsed.has_more and not parsed.response_truncated
+            else "empty_page"
+        )
         payload = _JsonMapping.model_validate(
             {
                 "columns": [
@@ -237,6 +270,7 @@ class QueryApplicationService:
                 "files_read": parsed.files_read,
                 "response_truncated": parsed.response_truncated,
                 "deterministic_order": parsed.deterministic_order,
+                "result_status": result_status,
             }
         ).root
         if parsed.next_offset is not None:
@@ -317,7 +351,7 @@ class QueryApplicationService:
             "tile_url": (
                 f"{self._public_origin}/api/queries/{query_id}/tiles/{{z}}/{{x}}/{{y}}.mvt"
             ),
-            "worker_url": f"{self._public_origin}/assets/maplibre-gl-worker.mjs",
+            "worker_url": f"{self._public_origin}/assets/maplibre-gl-worker.cjs",
             "source_layer": "hifld",
             "geometry_column": geometry_column,
             "result_crs": result_crs,
@@ -325,6 +359,7 @@ class QueryApplicationService:
         bounds = [source.resolved.bbox for source in sources]
         if (
             bounds
+            and result_crs == "EPSG:4326"
             and all(bound is not None for bound in bounds)
             and all(source.resolved.crs == "EPSG:4326" for source in sources)
         ):
@@ -383,22 +418,47 @@ class QueryApplicationService:
         geometry_column: str | None,
         result_crs: str | None,
     ) -> JSONMapping:
+        return await self._query(sources, sql, limit, geometry_column, result_crs, spatial=False)
+
+    async def prepare_spatial_query(
+        self,
+        sources: Sequence[JSONMapping],
+        sql: str,
+        limit: int,
+        geometry_column: str | None,
+        result_crs: str | None,
+    ) -> JSONMapping:
+        return await self._query(sources, sql, limit, geometry_column, result_crs, spatial=True)
+
+    async def _query(
+        self,
+        sources: Sequence[JSONMapping],
+        sql: str,
+        limit: int,
+        geometry_column: str | None,
+        result_crs: str | None,
+        *,
+        spatial: bool,
+    ) -> JSONMapping:
         refs = tuple(self._parse_source(source) for source in sources)
         if len({ref.alias.casefold() for ref in refs}) != len(refs):
             raise ValueError("source aliases must be unique")
         validated = self._validated_sql(sql, refs)
         execution_sources = await self._execution_sources(refs)
+        working_crs = result_crs or ("EPSG:4326" if spatial else None)
         page = await self._query_service.execute_page(
             validated_sql=validated,
             sources=execution_sources,
             limit=limit,
             offset=0,
+            working_crs=working_crs,
+            materialize_geometry=not spatial,
         )
         resolved_geometry, resolved_crs = self._resolve_map_columns(
             page,
             execution_sources,
             geometry_column=geometry_column,
-            result_crs=result_crs,
+            result_crs=working_crs,
             infer_source_crs=False,
         )
         token, query_id = self._encode_token(
@@ -406,6 +466,7 @@ class QueryApplicationService:
             refs,
             geometry_column=resolved_geometry,
             result_crs=resolved_crs,
+            working_crs=working_crs,
         )
         return self._page_payload(
             page,
@@ -426,6 +487,7 @@ class QueryApplicationService:
             sources=sources,
             limit=limit,
             offset=offset,
+            working_crs=payload.working_crs,
         )
         return self._page_payload(
             page,
@@ -504,6 +566,43 @@ class QueryApplicationService:
     def _worker_sources(sources: Sequence[ExecutionSource]) -> tuple[WorkerSourceSpec, ...]:
         return tuple(worker_source(source) for source in sources)
 
+    @staticmethod
+    def _tile_cache_key(
+        *,
+        canonical_sql: str,
+        sources: Sequence[ExecutionSource],
+        geometry_column: str,
+        result_crs: str | None,
+        z: int,
+        x: int,
+        y: int,
+    ) -> TileCacheKey:
+        return TileCacheKey(
+            canonical_sql=canonical_sql,
+            sources=tuple(
+                (
+                    source.resolved.source.alias,
+                    source.resolved.version,
+                    source.duckdb.object_uris,
+                    source.duckdb.seaweedfs.bucket if source.duckdb.seaweedfs is not None else None,
+                    source.duckdb.seaweedfs.endpoint
+                    if source.duckdb.seaweedfs is not None
+                    else None,
+                    source.duckdb.seaweedfs.tls if source.duckdb.seaweedfs is not None else None,
+                    source.duckdb.seaweedfs.url_style
+                    if source.duckdb.seaweedfs is not None
+                    else None,
+                )
+                for source in sources
+            ),
+            geometry_column=geometry_column,
+            result_crs=result_crs,
+            z=z,
+            x=x,
+            y=y,
+            feature_cap=_TILE_FEATURE_CAP,
+        )
+
     async def render_tile(
         self,
         token: str,
@@ -528,12 +627,42 @@ class QueryApplicationService:
             y=y,
             geometry_column=payload.geometry_column,
             result_crs=payload.result_crs,
-            feature_cap=20_000,
+            feature_cap=_TILE_FEATURE_CAP,
             deadline=datetime.now(tz=UTC) + timedelta(seconds=timeout_seconds),
         )
-        result = await self._worker_executor.execute(request, timeout_seconds=timeout_seconds)
-        if isinstance(result, (WorkerTile, WorkerFailure)):
-            return result
-        return WorkerFailure(
-            "worker_protocol_invalid", "The query worker returned an unexpected result"
-        )
+
+        async def execute_tile() -> WorkerTile:
+            result = await self._worker_executor.execute(request, timeout_seconds=timeout_seconds)
+            if isinstance(result, WorkerTile):
+                return result
+            if isinstance(result, WorkerFailure):
+                raise _TileWorkerFailure(result)
+            raise _TileWorkerFailure(
+                WorkerFailure(
+                    "worker_protocol_invalid",
+                    "The query worker returned an unexpected result",
+                )
+            )
+
+        cache = self._tile_cache
+        try:
+            if cache is None:
+                return await execute_tile()
+            return await cache.get_or_compute(
+                self._tile_cache_key(
+                    canonical_sql=payload.canonical_sql,
+                    sources=sources,
+                    geometry_column=payload.geometry_column,
+                    result_crs=payload.result_crs,
+                    z=z,
+                    x=x,
+                    y=y,
+                ),
+                execute_tile,
+            )
+        except _TileWorkerFailure as error:
+            return error.failure
+        except TileCacheCapacityError:
+            return WorkerFailure(
+                "worker_unavailable", "Tile cache computation capacity is exhausted"
+            )

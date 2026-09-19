@@ -14,6 +14,9 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.argument_diagnostics import ArgumentIngressDiagnostics
+from app.catalog.client import catalog_request_scope
+from app.http.disconnect import serve_connected_tile
 from app.http.queries import QueryHttpService, create_query_router
 from app.http.tiles import TileService, create_tile_router
 from app.mcp_server import AppDependencies, UIResourceConfig, create_mcp_server
@@ -27,7 +30,7 @@ class HttpDependencies:
     startup: tuple[LifecycleAction, ...] = ()
     shutdown: tuple[LifecycleAction, ...] = ()
     tile_service: TileService | None = None
-    tile_timeout_seconds: float = 10.0
+    tile_timeout_seconds: float = 60.0
     query_service: QueryHttpService | None = None
     webapp_origins: tuple[str, ...] = ()
     mcp_allowed_hosts: tuple[str, ...] | None = None
@@ -35,31 +38,87 @@ class HttpDependencies:
 
 
 class ConcurrencyLimiter:
-    """One process-wide bound shared only by expensive query execution."""
+    """Fail-fast bounds for tile and non-tile query execution."""
 
     def __init__(self, app: ASGIApp, maximum: int) -> None:
         self._app = app
-        self._semaphore = asyncio.Semaphore(maximum)
+        # Bound HTTP waiters independently of execution. One map query gets at
+        # most `maximum` slots, leaving room for seven other query identities.
+        # Actual SQL remains bounded by the worker pool and tile-cache admission.
+        self._tile_semaphore = asyncio.Semaphore(maximum * 8)
+        self._query_semaphore = asyncio.Semaphore(maximum)
+        self._maximum_per_tile_query = maximum
+        self._tile_queries: dict[str, int] = {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if self._is_expensive_request(scope):
-            async with self._semaphore:
-                await self._app(scope, receive, send)
+        semaphore = self._semaphore_for(scope)
+        if semaphore is not None:
+            tile_key = self._tile_query_key(scope) if semaphore is self._tile_semaphore else None
+            if semaphore.locked() or (
+                tile_key is not None
+                and self._tile_queries.get(tile_key, 0) >= self._maximum_per_tile_query
+            ):
+                response = JSONResponse(
+                    status_code=503,
+                    content={
+                        "code": "server_overloaded",
+                        "message": "The server is handling too many expensive requests.",
+                    },
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Cache-Control": "no-store",
+                        "Retry-After": "1",
+                    },
+                )
+                await response(scope, receive, send)
+                return
+            await semaphore.acquire()
+            if tile_key is not None:
+                self._tile_queries[tile_key] = self._tile_queries.get(tile_key, 0) + 1
+            try:
+                if semaphore is self._tile_semaphore and scope.get("method") == "GET":
+                    await serve_connected_tile(self._app, scope, receive, send)
+                else:
+                    await self._app(scope, receive, send)
+            finally:
+                semaphore.release()
+                if tile_key is not None:
+                    remaining = self._tile_queries[tile_key] - 1
+                    if remaining:
+                        self._tile_queries[tile_key] = remaining
+                    else:
+                        del self._tile_queries[tile_key]
             return
         await self._app(scope, receive, send)
 
     @staticmethod
-    def _is_expensive_request(scope: Scope) -> bool:
+    def _tile_query_key(scope: Scope) -> str:
+        parts = scope.get("path", "").split("/")
+        if len(parts) == 6 and parts[1] == "tiles":
+            return parts[2]
+        if len(parts) == 8 and parts[1:3] == ["api", "queries"]:
+            return parts[3]
+        return "legacy"
+
+    def _semaphore_for(self, scope: Scope) -> asyncio.Semaphore | None:
         if scope["type"] != "http" or scope.get("method") == "OPTIONS":
-            return False
+            return None
         path = scope.get("path", "")
-        return (
+        path_parts = path.split("/")
+        if path.startswith("/tiles/") or (
+            len(path_parts) > 5
+            and path_parts[1:3] == ["api", "queries"]
+            and path_parts[4] == "tiles"
+        ):
+            return self._tile_semaphore
+        if (
             path == "/mcp"
             or path.startswith("/mcp/")
             or path == "/api/queries"
             or path.startswith("/api/queries/")
-            or path.startswith("/tiles/")
-        )
+        ):
+            return self._query_semaphore
+        return None
 
 
 class McpPathCanonicalizer:
@@ -76,10 +135,26 @@ class McpPathCanonicalizer:
         await self._app(scope, receive, send)
 
 
+class CatalogRequestScope:
+    """Keep source/collection resolution reuse isolated to an ASGI request."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        with catalog_request_scope():
+            await self._app(scope, receive, send)
+
+
 class AssetHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
         if request.url.path.startswith("/assets/"):
+            if request.url.path.endswith("/maplibre-gl-worker.cjs"):
+                response.headers["Content-Type"] = "text/javascript"
             response.headers["Access-Control-Allow-Origin"] = "*"
             response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
         return response
@@ -149,9 +224,14 @@ def create_http_app(
                     await shutdown()
 
     app = FastAPI(lifespan=lifespan)
-    app.add_middleware(ConcurrencyLimiter, maximum=max_concurrency)
     app.add_middleware(McpPathCanonicalizer)
     app.add_middleware(AssetHeadersMiddleware)
+    # Cancel the whole response-wrapper task on disconnect. Putting the limiter
+    # inside BaseHTTPMiddleware makes intentional cancellation look like a
+    # missing response to that middleware.
+    app.add_middleware(ConcurrencyLimiter, maximum=max_concurrency)
+    app.add_middleware(ArgumentIngressDiagnostics)
+    app.add_middleware(CatalogRequestScope)
 
     async def invalid_request(_: Request, __: Exception) -> JSONResponse:
         return JSONResponse(

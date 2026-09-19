@@ -20,6 +20,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with: {python-version: "3.12", enable-cache: true}
       - run: uv sync --frozen
+      - name: Install official DuckDB extensions for spatial regression tests
+        run: uv run python -c "import duckdb; c = duckdb.connect(); c.execute('INSTALL spatial; INSTALL httpfs'); c.close()"
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pyright
@@ -37,6 +39,8 @@ jobs:
       - run: npm run --workspace @hifld/dataset-mcp-ui typecheck
       - run: npm run --workspace @hifld/dataset-mcp-ui test
       - run: npm run --workspace @hifld/dataset-mcp-ui build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run --workspace @hifld/dataset-mcp-ui test:browser
   map-core:
     runs-on: ubuntu-latest
     steps:

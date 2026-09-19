@@ -82,6 +82,7 @@ async def test_service_dispatches_typed_worker_request_and_builds_page_result() 
         sources=(_source(),),
         limit=2,
         offset=5,
+        working_crs="EPSG:3857",
     )
 
     assert executor.request is not None
@@ -92,6 +93,7 @@ async def test_service_dispatches_typed_worker_request_and_builds_page_result() 
     )
     assert executor.request.limit == 2
     assert executor.request.offset == 5
+    assert executor.request.working_crs == "EPSG:3857"
     assert executor.request.deadline <= datetime.now(tz=UTC) + timedelta(seconds=31)
     assert executor.timeout == 30
     assert page.returned_count == 2

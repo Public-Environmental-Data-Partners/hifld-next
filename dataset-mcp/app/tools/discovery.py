@@ -32,6 +32,9 @@ class CatalogClient(Protocol):
     def get_dataset_file_schema(
         self, collection: str, dataset: str, identity: str, version: str | None
     ) -> Awaitable[JSONMapping]: ...
+    def resolve_map_source(
+        self, collection_id: int, dataset_id: int, file_id: int, file_source_id: int
+    ) -> Awaitable[JSONMapping]: ...
 
 
 def _result(label: str, payload: JSONMapping) -> ToolResult:

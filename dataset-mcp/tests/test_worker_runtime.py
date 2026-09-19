@@ -17,6 +17,7 @@ from query_worker.protocol import (
     WorkerSeaweedCredentials,
     WorkerSeaweedSource,
     WorkerSourceSpec,
+    WorkerTileQuery,
 )
 from query_worker.runtime import WorkerRuntime, _rewrite_source_aliases
 
@@ -66,6 +67,82 @@ def _runtime(tmp_path: Path) -> WorkerRuntime:
     )
 
 
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT missing_column FROM data", "Candidate bindings"),
+        ("SELECT nonexistent_function(id) FROM data", "nonexistent_function"),
+        ("SELECT CAST('not-an-integer' AS INTEGER) FROM data", "Conversion Error"),
+    ],
+)
+def test_runtime_preserves_duckdb_diagnostics(tmp_path: Path, sql: str, expected: str) -> None:
+    path = tmp_path / "private-source.parquet"
+    _write_parquet(path, "SELECT 1 AS id")
+    runtime = _runtime(tmp_path)
+    try:
+        result = runtime.execute(_request(sql, (WorkerSourceSpec("data", (str(path),)),)))
+    finally:
+        runtime.close()
+    assert isinstance(result, WorkerFailure)
+    assert result.code == "query_execution_failed"
+    assert expected in result.message
+    assert "_mcp_" not in result.message
+    assert str(tmp_path) not in result.message
+
+
+def test_runtime_storage_diagnostic_redacts_path(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    try:
+        result = runtime.execute(
+            _request(
+                "SELECT * FROM data",
+                (WorkerSourceSpec("data", (str(tmp_path / "missing.parquet"),)),),
+            )
+        )
+    finally:
+        runtime.close()
+    assert isinstance(result, WorkerFailure)
+    assert result.code == "storage_unavailable"
+    assert "No files found" in result.message
+    assert str(tmp_path) not in result.message
+
+
+def test_map_query_preserves_missing_column_diagnostic(tmp_path: Path) -> None:
+    path = tmp_path / "source.parquet"
+    _write_parquet(path, "SELECT 1 AS id")
+    runtime = _runtime(tmp_path)
+    try:
+        result = runtime.execute(
+            WorkerTileQuery(
+                canonical_sql="SELECT missing_geometry FROM data",
+                sources=(WorkerSourceSpec("data", (str(path),)),),
+                z=0,
+                x=0,
+                y=0,
+                geometry_column="missing_geometry",
+                result_crs="EPSG:4326",
+                feature_cap=100,
+                deadline=datetime.now(tz=UTC) + timedelta(seconds=5),
+            )
+        )
+    finally:
+        runtime.close()
+    assert isinstance(result, WorkerFailure)
+    assert "missing_geometry" in result.message
+    assert "Candidate bindings" in result.message
+    assert "_mcp_" not in result.message
+
+
+def test_runtime_keeps_python_configuration_errors_private(tmp_path: Path) -> None:
+    runtime = _runtime(tmp_path)
+    try:
+        result = runtime.execute(_request("SELECT * FROM data", (WorkerSourceSpec("data", ()),)))
+    finally:
+        runtime.close()
+    assert isinstance(result, WorkerFailure)
+    assert result.message == "The bounded query could not be executed"
+
+
 def test_runtime_executes_complex_join_and_extracts_schema(tmp_path: Path) -> None:
     left_path = tmp_path / "left.parquet"
     right_path = tmp_path / "right.parquet"
@@ -96,6 +173,59 @@ def test_runtime_executes_complex_join_and_extracts_schema(tmp_path: Path) -> No
     assert result.columns[0][:2] == ("id", "INTEGER")
     assert result.returned_count == 2
     assert result.has_more is False
+
+
+def test_runtime_prunes_hive_partitions_and_preserves_leading_zero_keys(
+    tmp_path: Path,
+) -> None:
+    paths: list[str] = []
+    for state_number in range(1, 31):
+        partition_path = tmp_path / f"state_fips={state_number:02d}" / "data.parquet"
+        partition_path.parent.mkdir()
+        _write_parquet(partition_path, f"SELECT {state_number} AS value")
+        paths.append(str(partition_path))
+
+    runtime = _runtime(tmp_path)
+    aliases: dict[str, str] = {}
+    request = _request(
+        "SELECT state_fips, value FROM states WHERE state_fips = '01'",
+        (WorkerSourceSpec(alias="states", object_uris=tuple(paths)),),
+    )
+    try:
+        runtime._create_source_views(request, aliases)
+        view_name = aliases["states"]
+        plan_rows = runtime.connection.execute(
+            f"EXPLAIN SELECT * FROM {view_name} WHERE state_fips = '01'"
+        ).fetchall()
+        result = runtime.execute(request)
+    finally:
+        runtime._drop_source_views(aliases)
+        runtime.close()
+
+    plan = "\n".join(str(value) for row in plan_rows for value in row)
+    assert "Scanning Files: 1/30" in plan
+    assert not isinstance(result, WorkerFailure)
+    assert result.rows == ({"state_fips": "01", "value": 1},)
+
+
+def test_runtime_reads_unpartitioned_sources_with_hive_partitioning_enabled(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "plain.parquet"
+    _write_parquet(path, "SELECT '01' AS state_fips, 1 AS value")
+    runtime = _runtime(tmp_path)
+    try:
+        result = runtime.execute(
+            _request(
+                "SELECT state_fips, value FROM states",
+                (WorkerSourceSpec(alias="states", object_uris=(str(path),)),),
+            )
+        )
+    finally:
+        runtime.close()
+
+    assert not isinstance(result, WorkerFailure)
+    assert result.rows == ({"state_fips": "01", "value": 1},)
 
 
 @pytest.mark.skipif(
@@ -229,6 +359,48 @@ def test_runtime_removes_unique_views_and_isolates_sequential_requests(tmp_path:
     assert second.rows == ({"id": 2},)
     assert views_after_first == []
     assert views_after_second == []
+
+
+@pytest.mark.parametrize("failure_mode", ["missing_file", "empty_objects", "duplicate_alias"])
+def test_runtime_cleans_partial_source_setup_after_repeated_failures(
+    tmp_path: Path, failure_mode: str
+) -> None:
+    path = tmp_path / "valid.parquet"
+    _write_parquet(path, "SELECT 1 AS id")
+    source = WorkerSourceSpec(alias="source", object_uris=(str(path),))
+    invalid = WorkerSourceSpec(alias="invalid", object_uris=(str(tmp_path / "missing.parquet"),))
+    expected_code = "storage_unavailable"
+    if failure_mode == "empty_objects":
+        invalid = WorkerSourceSpec(alias="invalid", object_uris=())
+        expected_code = "query_execution_failed"
+    elif failure_mode == "duplicate_alias":
+        invalid = source
+        expected_code = "query_execution_failed"
+
+    runtime = _runtime(tmp_path)
+    try:
+        for _ in range(3):
+            failure = runtime.execute(_request("SELECT * FROM source", (source, invalid)))
+            assert isinstance(failure, WorkerFailure)
+            assert failure.code == expected_code
+            assert (
+                runtime.connection.execute(
+                    "SELECT view_name FROM duckdb_views() WHERE view_name LIKE '_mcp_source_%'"
+                ).fetchall()
+                == []
+            )
+
+        recovered = runtime.execute(_request("SELECT * FROM source", (source,)))
+        assert not isinstance(recovered, WorkerFailure)
+        assert recovered.rows == ({"id": 1},)
+        assert (
+            runtime.connection.execute(
+                "SELECT view_name FROM duckdb_views() WHERE view_name LIKE '_mcp_source_%'"
+            ).fetchall()
+            == []
+        )
+    finally:
+        runtime.close()
 
 
 def test_metrics_profile_uses_stable_typed_output(tmp_path: Path) -> None:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -18,6 +20,7 @@ from app.mcp_server import (
     create_mcp_server,
 )
 from app.observability import InMemoryMetricSink, InMemoryStructuredLogSink, QueryObservability
+from query_worker.protocol import WorkerTile
 
 
 class CatalogStub:
@@ -77,6 +80,16 @@ class QueryStub:
             ],
         }
 
+    async def prepare_spatial_query(
+        self,
+        sources: Sequence[dict[str, str]],
+        sql: str,
+        limit: int,
+        geometry_column: str | None,
+        result_crs: str | None,
+    ) -> dict[str, int | str | list[dict[str, str | bool]]]:
+        return await self.query(sources, sql, limit, geometry_column, result_crs)
+
     async def page(self, token: str, offset: int, limit: int) -> dict[str, int]:
         return {"offset": offset, "limit": limit}
 
@@ -99,6 +112,138 @@ def _dependencies() -> AppDependencies:
     return AppDependencies(catalog=CatalogStub(), query=QueryStub())
 
 
+def test_http_dependencies_default_to_sixty_second_tile_timeout() -> None:
+    dependencies = HttpDependencies(tools=_dependencies())
+
+    assert dependencies.tile_timeout_seconds == 60
+
+
+@pytest.mark.parametrize("stringify", [False, True])
+def test_map_argument_diagnostics_correlate_http_and_validation_without_values(
+    stringify: bool,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATASET_MCP_BUILD_REVISION", "test-revision")
+    caplog.set_level(logging.INFO, logger="uvicorn.error.argument_diagnostics")
+
+    async def assert_diagnostics() -> None:
+        app = create_http_app(_dependencies(), ui_html="<html/>", assets_directory=tmp_path)
+        layers = [
+            {
+                "layer_name": "private-layer-name",
+                "sources": [{"alias": "roads"}],
+                "sql": "SELECT geometry FROM private_table",
+            }
+        ]
+        camera = {"center": [-74, 40], "zoom": 10}
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                response = await client.post(
+                    "/mcp/",
+                    headers={
+                        "Accept": "application/json, text/event-stream",
+                        "Authorization": "Bearer private-credential",
+                        "X-Request-ID": "untrusted-client-id",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "view_query_map",
+                            "arguments": {
+                                "title": "private-title",
+                                "layers": json.dumps(layers) if stringify else layers,
+                                "camera": json.dumps(camera) if stringify else camera,
+                            },
+                        },
+                    },
+                )
+        assert response.status_code == 200
+        assert '"isError":true' not in response.text
+        events = [
+            json.loads(record.message)
+            for record in caplog.records
+            if record.name == "uvicorn.error.argument_diagnostics"
+        ]
+        assert [event["stage"] for event in events] == ["http_ingress", "tool_dispatch"]
+        assert events[0]["request_id"] == events[1]["request_id"]
+        assert len(events[0]["request_id"]) == 32
+        for event in events:
+            assert event["layers_type"] == ("string" if stringify else "array")
+            assert event["camera_type"] == ("string" if stringify else "object")
+            assert event["revision"] == "test-revision"
+            assert event["tool"] == "view_query_map"
+        diagnostic_text = json.dumps(events)
+        for secret in ["private", "SELECT", "Bearer", "untrusted-client-id", "-74"]:
+            assert secret not in diagnostic_text
+
+    asyncio.run(assert_diagnostics())
+
+
+@pytest.mark.parametrize(
+    "layers, camera",
+    [
+        ("not-json", None),
+        ("{}", None),
+        ('"[]"', None),
+        ("[]", None),
+        ("[{}]", None),
+        ("[{}]", '{"center":[1000,40],"zoom":11}'),
+    ],
+)
+def test_map_json_compatibility_does_not_bypass_validation(layers, camera) -> None:
+    async def check() -> None:
+        mcp = create_mcp_server(_dependencies(), ui_html="<html/>")
+        async with Client(mcp) as client:
+            result = await client.call_tool(
+                "view_query_map",
+                {
+                    "title": "Invalid map",
+                    "layers": layers,
+                    "camera": camera,
+                },
+                raise_on_error=False,
+            )
+        assert result.is_error
+
+    asyncio.run(check())
+
+
+def test_query_parquet_and_tile_url_are_callable_without_opening_ui() -> None:
+    async def check() -> None:
+        mcp = create_mcp_server(_dependencies(), ui_html="<html/>")
+        async with Client(mcp) as client:
+            sources = [{"alias": "roads"}]
+            query_result = await client.call_tool(
+                "query_parquet",
+                {
+                    "sources": sources,
+                    "sql": "SELECT geometry FROM roads",
+                },
+            )
+            assert not query_result.is_error
+            tile_result = await client.call_tool(
+                "generate_mvt_tile_url",
+                {
+                    "sources": sources,
+                    "sql": "SELECT geometry FROM roads",
+                },
+            )
+            assert not tile_result.is_error
+            assert "tile_url" in tile_result.structured_content
+            tools = {tool.name: tool for tool in await client.list_tools()}
+            assert tools["view_query_map"].inputSchema["properties"]["layers"]["type"] == "array"
+            assert "ui" not in (tools["generate_mvt_tile_url"].meta or {})
+
+    asyncio.run(check())
+
+
 def test_only_view_query_map_opens_the_app_resource() -> None:
     async def assert_protocol() -> None:
         mcp = create_mcp_server(
@@ -113,6 +258,7 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
             tools = await client.list_tools()
             by_name = {tool.name: tool for tool in tools}
             expected_model_tools = {
+                "inspect_query_source",
                 "list_collections",
                 "get_collection",
                 "search_datasets",
@@ -120,14 +266,36 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
                 "get_dataset_file",
                 "get_dataset_file_schema",
                 "read_geoparquet_rows",
-                "query_geoparquet",
+                "query_parquet",
+                "generate_mvt_tile_url",
                 "get_query_page",
                 "view_query_map",
                 "refresh_query_map",
+                "view_map",
+                "refresh_map",
+                "prepare_map_layer",
             }
             assert set(by_name) == expected_model_tools
             for name in expected_model_tools:
                 assert by_name[name].description
+            map_guidance = by_name["view_map"].description or ""
+            assert "Prefer published PMTiles" in map_guidance
+            assert "Choose independently for each layer" in map_guidance
+            assert "simplified" in map_guidance
+            assert "joins" in map_guidance
+            for name in ("view_map", "view_query_map"):
+                guidance = by_name[name].description or ""
+                assert "does not confirm" in guidance
+                assert "map_status" in guidance
+                assert "Do not change SQL" in guidance
+            assert "view_map" in (by_name["view_query_map"].description or "")
+            discovery_guidance = by_name["get_dataset_file"].description or ""
+            assert "map_sources" in discovery_guidance
+            assert "query_sources" in discovery_guidance
+            assert "prebuilt" in (by_name["generate_mvt_tile_url"].description or "")
+            for name in ("query_parquet", "view_map", "view_query_map", "generate_mvt_tile_url"):
+                assert "inspect_query_source" in (by_name[name].description or "")
+                assert "scalar bbox" in (by_name[name].description or "")
             assert by_name["view_query_map"].meta is not None
             assert by_name["view_query_map"].meta["ui"] == {
                 "resourceUri": "ui://hifld/dataset-explorer.html",
@@ -135,6 +303,10 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
             }
             assert by_name["refresh_query_map"].meta is not None
             assert by_name["refresh_query_map"].meta["ui"] == {
+                "resourceUri": "ui://hifld/dataset-explorer.html",
+                "visibility": ["app"],
+            }
+            assert by_name["prepare_map_layer"].meta["ui"] == {
                 "resourceUri": "ui://hifld/dataset-explorer.html",
                 "visibility": ["app"],
             }
@@ -146,7 +318,8 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
                 "get_dataset_file",
                 "get_dataset_file_schema",
                 "read_geoparquet_rows",
-                "query_geoparquet",
+                "query_parquet",
+                "generate_mvt_tile_url",
                 "get_query_page",
             }:
                 assert by_name[name].meta is None or "ui" not in by_name[name].meta
@@ -224,8 +397,10 @@ def test_only_view_query_map_opens_the_app_resource() -> None:
             assert resources[0].meta["ui"]["csp"] == {
                 "connectDomains": [
                     "https://tiles.example.test",
+                    "https://assets.example.test",
                     "https://tiles.openfreemap.org",
                     "https://services.arcgisonline.com",
+                    "https:",
                 ],
                 "resourceDomains": [
                     "https://assets.example.test",
@@ -383,6 +558,172 @@ def test_health_and_assets_bypass_expensive_request_concurrency(
     asyncio.run(assert_bypass())
 
 
+def test_saturated_tile_admission_does_not_block_mcp() -> None:
+    async def assert_isolation() -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class BlockingTileService:
+            def validate_query_identity(self, token: str, query_id: str) -> None:
+                del token, query_id
+
+            async def render_tile(
+                self,
+                token: str,
+                z: int,
+                x: int,
+                y: int,
+                *,
+                timeout_seconds: float,
+            ) -> WorkerTile:
+                del token, z, x, y, timeout_seconds
+                entered.set()
+                await release.wait()
+                return WorkerTile(b"mvt", 1.0, 0, 0)
+
+        app = create_http_app(
+            HttpDependencies(tools=_dependencies(), tile_service=BlockingTileService()),
+            ui_html="<html><body>dataset explorer</body></html>",
+            max_concurrency=1,
+        )
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                tile_request = asyncio.create_task(
+                    client.get(
+                        "/tiles/0/0/0.mvt",
+                        headers={"X-HIFLD-Query-Token": "signed-token"},
+                    )
+                )
+                await asyncio.wait_for(entered.wait(), timeout=1)
+                mcp_response = await asyncio.wait_for(client.get("/mcp"), timeout=0.25)
+                release.set()
+                tile_response = await tile_request
+
+        assert mcp_response.status_code == 405
+        assert tile_response.status_code == 200
+
+    asyncio.run(assert_isolation())
+
+
+def test_saturated_admission_returns_cors_overload_and_releases_slot() -> None:
+    async def assert_overload() -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class BlockingTileService:
+            def validate_query_identity(self, token: str, query_id: str) -> None:
+                del token, query_id
+
+            async def render_tile(
+                self,
+                token: str,
+                z: int,
+                x: int,
+                y: int,
+                *,
+                timeout_seconds: float,
+            ) -> WorkerTile:
+                del token, z, x, y, timeout_seconds
+                entered.set()
+                await release.wait()
+                return WorkerTile(b"mvt", 1.0, 0, 0)
+
+        app = create_http_app(
+            HttpDependencies(tools=_dependencies(), tile_service=BlockingTileService()),
+            ui_html="<html><body>dataset explorer</body></html>",
+            max_concurrency=1,
+        )
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                first_request = asyncio.create_task(
+                    client.get(
+                        "/tiles/0/0/0.mvt",
+                        headers={"X-HIFLD-Query-Token": "signed-token"},
+                    )
+                )
+                await asyncio.wait_for(entered.wait(), timeout=1)
+                overloaded = await asyncio.wait_for(
+                    client.get(
+                        "/tiles/0/0/1.mvt",
+                        headers={"X-HIFLD-Query-Token": "signed-token"},
+                    ),
+                    timeout=0.25,
+                )
+                release.set()
+                first_response = await first_request
+                admitted_after_release = await client.get(
+                    "/tiles/0/0/0.mvt",
+                    headers={"X-HIFLD-Query-Token": "signed-token"},
+                )
+
+        assert overloaded.status_code == 503
+        assert overloaded.json() == {
+            "code": "server_overloaded",
+            "message": "The server is handling too many expensive requests.",
+        }
+        assert overloaded.headers["access-control-allow-origin"] == "*"
+        assert overloaded.headers["cache-control"] == "no-store"
+        assert overloaded.headers["retry-after"] == "1"
+        assert first_response.status_code == 200
+        assert admitted_after_release.status_code == 200
+
+    asyncio.run(assert_overload())
+
+
+def test_saturated_query_resource_tile_admission_does_not_block_mcp() -> None:
+    async def assert_isolation() -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class BlockingQueryTileService(QueryStub):
+            def validate_query_identity(self, token: str, query_id: str) -> None:
+                del token, query_id
+
+            async def render_tile(
+                self,
+                token: str,
+                z: int,
+                x: int,
+                y: int,
+                *,
+                timeout_seconds: float,
+            ) -> WorkerTile:
+                del token, z, x, y, timeout_seconds
+                entered.set()
+                await release.wait()
+                return WorkerTile(b"mvt", 1.0, 0, 0)
+
+        query = BlockingQueryTileService()
+        app = create_http_app(
+            HttpDependencies(
+                tools=AppDependencies(catalog=CatalogStub(), query=query),
+                query_service=query,
+            ),
+            ui_html="<html><body>dataset explorer</body></html>",
+            max_concurrency=1,
+        )
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                tile_request = asyncio.create_task(
+                    client.get(
+                        "/api/queries/query123/tiles/0/0/0.mvt",
+                        headers={"X-HIFLD-Query-Token": "signed-token"},
+                    )
+                )
+                await asyncio.wait_for(entered.wait(), timeout=1)
+                mcp_response = await asyncio.wait_for(client.get("/mcp"), timeout=0.25)
+                release.set()
+                tile_response = await tile_request
+
+        assert mcp_response.status_code == 405
+        assert tile_response.status_code == 200
+
+    asyncio.run(assert_isolation())
+
+
 def test_http_app_wires_query_resources_to_the_shared_query_service() -> None:
     async def assert_query_route() -> None:
         query = QueryStub()
@@ -427,9 +768,10 @@ def test_http_app_wires_query_resources_to_the_shared_query_service() -> None:
     asyncio.run(assert_query_route())
 
 
-def test_worker_asset_allows_cross_origin_module_loading(tmp_path: Path) -> None:
+@pytest.mark.parametrize("extension", ["mjs", "cjs"])
+def test_worker_asset_allows_cross_origin_loading(tmp_path: Path, extension: str) -> None:
     async def assert_asset_headers() -> None:
-        (tmp_path / "maplibre-gl-worker.mjs").write_text("export {};", encoding="utf-8")
+        (tmp_path / f"maplibre-gl-worker.{extension}").write_text("/* worker */", encoding="utf-8")
         app = create_http_app(
             _dependencies(),
             ui_html="<html><body>dataset explorer</body></html>",
@@ -439,13 +781,14 @@ def test_worker_asset_allows_cross_origin_module_loading(tmp_path: Path) -> None
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get(
-                    "/assets/maplibre-gl-worker.mjs",
+                    f"/assets/maplibre-gl-worker.{extension}",
                     headers={"Origin": "https://sandbox.example.test"},
                 )
 
         assert response.status_code == 200
         assert response.headers["access-control-allow-origin"] == "*"
         assert response.headers["cross-origin-resource-policy"] == "cross-origin"
+        assert "javascript" in response.headers["content-type"]
 
     asyncio.run(assert_asset_headers())
 

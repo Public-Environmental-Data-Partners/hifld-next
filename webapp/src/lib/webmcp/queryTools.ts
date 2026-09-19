@@ -76,6 +76,12 @@ function boundedWarnings(warnings: readonly string[]): string[] {
     .map((warning) => Array.from(warning).slice(0, MAX_WARNING_LENGTH).join(""));
 }
 
+function resultStatus(page: PublicToolQueryPage): "rows_returned" | "empty_result" | "empty_page" | "indeterminate" {
+  if (page.returned_count > 0) return "rows_returned";
+  if (page.response_truncated || page.has_more) return "indeterminate";
+  return page.offset === 0 ? "empty_result" : "empty_page";
+}
+
 function runResult(page: PublicToolQueryPage, mapAdded: boolean): WebMcpJsonObject {
   const warnings = boundedWarnings(page.warnings);
   return {
@@ -84,6 +90,7 @@ function runResult(page: PublicToolQueryPage, mapAdded: boolean): WebMcpJsonObje
     offset: page.offset,
     limit: page.limit,
     returned_count: page.returned_count,
+    result_status: resultStatus(page),
     has_more: page.has_more,
     ...(page.next_offset === undefined ? {} : { next_offset: page.next_offset }),
     warning_count: page.warnings.length,
@@ -101,6 +108,7 @@ function pageResult(page: PublicToolQueryPage): WebMcpJsonObject {
     offset: page.offset,
     page_size: page.limit,
     returned_count: page.returned_count,
+    result_status: resultStatus(page),
     has_more: page.has_more,
     preview_rows: previewRows(page, 2),
   };
@@ -108,8 +116,11 @@ function pageResult(page: PublicToolQueryPage): WebMcpJsonObject {
 
 function queryFailure(error: Error): WebMcpResult<WebMcpJsonObject> {
   if (error instanceof QueryApiError) {
+    // QueryApiError is parsed from the backend's public, sanitized error contract.
+    const message = Array.from(error.message).slice(0, 500).join("");
+    if (error.code === "query_timeout") return failure("query_timeout", message);
     if (error.status === 400 || error.status === 401 || error.status === 403) {
-      return failure("query_rejected", "The query request was rejected.");
+      return failure("query_rejected", message);
     }
     if (error.status === 404) return failure("not_found", "The requested query was not found.");
     if (error.status === 429) return failure("rate_limited", "The query service is rate limited.");
@@ -129,7 +140,12 @@ export async function executeQueryTool(
     const { layer_label: layerLabel, show_on_map: requestedShowOnMap, ...request } = input;
     const showOnMap = requestedShowOnMap ?? true;
     const page = await execute(request, { showOnMap, ...(layerLabel === undefined ? {} : { layerLabel }) }, signal);
-    return success("Query completed.", runResult(page, showOnMap));
+    return success(
+      resultStatus(page) === "empty_result"
+        ? "The query returned no rows. Inspect stored filter values before changing the query."
+        : "Query completed. Adding a map layer does not confirm its tiles have loaded; check get_map_state.",
+      runResult(page, showOnMap),
+    );
   } catch (error) {
     if (signal.aborted) throw error;
     return error instanceof Error
@@ -178,7 +194,7 @@ export function useQueryWebMcpTools({
     name: "run_dataset_query",
     title: "Run dataset query",
     description:
-      "Execute a bounded query against selected dataset sources. To map it, return a DuckDB GEOMETRY column, name it in geometry_column, and set result_crs to the CRS produced by the SQL; map tiles and framing reproject server-side.",
+      "Execute a bounded query for filtering or analysis. Prefer add_dataset_layer with published PMTiles for display-only maps. Inspect stored categorical values rather than guessing spelling or case. To map a query, return a DuckDB GEOMETRY column, name it in geometry_column, and set result_crs to the CRS produced by the SQL; map tiles and framing reproject server-side. result_status distinguishes empty_result from empty_page and indeterminate truncated results. map_added confirms configuration only; use get_map_state to check layer loading or failure.",
     schema: runDatasetQueryInputSchema,
     execute: executeQueryToolCallback,
     enabled,

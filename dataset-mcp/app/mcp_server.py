@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastmcp import FastMCP
 from fastmcp.apps import AppConfig, ResourceCSP
 from fastmcp.tools import ToolResult as FastMCPToolResult
 from mcp.types import TextContent
+from pydantic import BeforeValidator
 
+from app.argument_diagnostics import ArgumentToolDiagnostics
 from app.catalog.client import CatalogClientError
+from app.catalog.models import QuerySourceRef
 from app.errors import AppError
-from app.tools import discovery, query
+from app.tool_inputs import decode_json_parameter
+from app.tools import discovery, inspection, maps, query
 
 type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
 
@@ -39,7 +43,16 @@ class UIResourceConfig:
     def csp(self) -> ResourceCSP:
         return ResourceCSP(
             connect_domains=list(
-                dict.fromkeys([self.tile_origin, self.basemap_origin, self.satellite_origin])
+                dict.fromkeys(
+                    [
+                        self.tile_origin,
+                        *([self.worker_asset_origin] if self.worker_asset_origin != "self" else []),
+                        self.basemap_origin,
+                        self.satellite_origin,
+                        # Explicit public tile sources are fetched by the widget, not the server.
+                        "https:",
+                    ]
+                )
             ),
             resource_domains=list(
                 dict.fromkeys(
@@ -120,8 +133,18 @@ def create_mcp_server(
     than the constructor; ``http_app.py`` supplies that setting.
     """
     mcp = FastMCP("HIFLD Dataset Explorer")
+    mcp.add_middleware(ArgumentToolDiagnostics())
     query_map_app = _app_config(visibility=["model"])
     query_map_refresh_app = _app_config(visibility=["app"])
+    config = resource_config or UIResourceConfig(tile_origin="self")
+
+    def configured_worker_url() -> str:
+        origin = config.worker_asset_origin
+        if origin == "self":
+            origin = config.tile_origin
+        if origin == "self":
+            raise ValueError("a public worker asset origin is required for external map sources")
+        return f"{origin.rstrip('/')}/assets/maplibre-gl-worker.cjs"
 
     async def list_collections() -> FastMCPToolResult:
         """List catalog collections as the starting point for dataset discovery."""
@@ -175,7 +198,18 @@ def create_mcp_server(
     mcp.tool()(get_dataset)
 
     async def get_dataset_file(collection: str, dataset: str, identity: str) -> FastMCPToolResult:
-        """Get file metadata and ready-to-copy GeoParquet query source references."""
+        """Get all available file formats and ready-to-copy source references.
+
+        Prefer map_sources (published PMTiles) for displaying existing data in
+        view_map without SQL. Use query_sources for filtering, joins, aggregation,
+        calculations, or exact analysis. Choose sources independently per layer;
+        a map can combine prebuilt tiles with query results. Inspect schema and
+        available formats rather than assuming a dataset has prebuilt tiles.
+        query_hints summarizes observed Hive partition fields and values from
+        catalog paths, not an exhaustive inventory. References are deduplicated;
+        rename aliases when combining sources or self-joining. Before spatial
+        SQL, call inspect_query_source for actual Parquet columns and geometry CRS.
+        """
         try:
             return _result(
                 await discovery.get_dataset_file(
@@ -195,7 +229,11 @@ def create_mcp_server(
         column_offset: int = 0,
         column_limit: int = 100,
     ) -> FastMCPToolResult:
-        """Get a bounded page of file schema columns and their provenance."""
+        """Get a bounded page of catalog schema columns and their provenance.
+
+        These may predate generated Parquet fields or reflect only a sample.
+        Use inspect_query_source for actual Parquet columns and typed geometry CRS.
+        """
         try:
             return _result(
                 await discovery.get_dataset_file_schema(
@@ -236,21 +274,26 @@ def create_mcp_server(
 
     mcp.tool()(read_geoparquet_rows)
 
-    async def query_geoparquet(
+    async def query_parquet(
         sources: list[dict[str, JSONValue]],
         sql: str,
         limit: int = 100,
         geometry_column: str | None = None,
         result_crs: str | None = None,
     ) -> FastMCPToolResult:
-        """Run one safe read-only DuckDB SELECT over up to eight catalog sources.
+        """Run one safe read-only SELECT over up to eight catalog sources.
 
         Copy source objects from get_dataset_file.query_sources and reference
         their aliases as SQL tables. SELECTs, joins, CTEs, aggregates, and the
         allowlisted spatial functions are supported. The limit bounds the
         returned first page, not the relational meaning of SQL LIMIT clauses.
-        For map output, return a DuckDB GEOMETRY column and identify both its
-        column name and output CRS; tile rendering reprojects it server-side.
+        Raw GEOMETRY values are not returned as GeoJSON. Use ST_AsHexWKB for a
+        serialized representation or generate_mvt_tile_url for scalable maps.
+
+        Before view_map, test new or revised query-layer SQL here with a small
+        returned-page limit, identical sources and result_crs. Inspect errors,
+        empty results, geometry, and styling columns; reuse the validated SQL.
+        A small returned page does not bound the work of joins or aggregates.
         """
         try:
             return _result(
@@ -266,7 +309,68 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool()(query_geoparquet)
+    mcp.tool(description=f"{query_parquet.__doc__}\n{inspection.QUERY_GUIDANCE}")(query_parquet)
+
+    async def inspect_query_source(source: QuerySourceRef) -> FastMCPToolResult:
+        """Inspect actual Parquet columns and geometry CRS using a zero-row query.
+
+        Copy one query_sources reference from get_dataset_file. Uses the existing
+        bounded query service with SELECT * LIMIT 0: may list objects/read metadata but
+        does not scan feature rows. Returns columns, geometry_fields with CRS
+        when available, and numeric bbox_candidates. Candidates alone do not
+        prove bbox CRS or geometry association. Combine with query_hints to find
+        usable Hive partitions. Unknown CRS stays null; do not guess it.
+        No query tokens, tile URLs, or feature rows are returned.
+        """
+        try:
+            return _result(await inspection.inspect_query_source(dependencies.query, source))
+        except Exception as error:
+            return _error_result(error)
+
+    mcp.tool()(inspect_query_source)
+
+    async def generate_mvt_tile_url(
+        sources: list[dict[str, JSONValue]],
+        sql: str,
+        geometry_column: str | None = None,
+        result_crs: str | None = None,
+    ) -> FastMCPToolResult:
+        """Generate an MVT tile URL template for a geometry-returning SQL query.
+
+        Use this when SQL-derived tiles are needed. For displaying existing data,
+        prefer prebuilt map_sources from get_dataset_file with view_map; do not
+        regenerate tiles merely to display or style an existing tiled dataset.
+
+        Copy catalog source references from get_dataset_file.query_sources.
+        SQL must SELECT a GEOMETRY column, not ST_AsGeoJSON or geometry text.
+        Set geometry_column when more than one geometry is returned. Set
+        result_crs to choose the CRS in which sources and coordinate literals
+        are evaluated. Map queries default to EPSG:4326. Tiles clip geometry
+        server-side from that working CRS.
+
+        Returns tile_url with {z}/{x}/{y}, required headers, expires_at,
+        source_layer, geometry_column, and result_crs. Send the returned headers
+        on each tile GET. Regenerate after expiry. No features or map UI are
+        returned. The initial one-row probe does not limit the tiled result;
+        each tile retains existing query time, memory, and density limits.
+        """
+        try:
+            return _result(
+                await query.generate_mvt_tile_url(
+                    dependencies.query,
+                    sources,
+                    sql,
+                    geometry_column=geometry_column,
+                    result_crs=result_crs,
+                )
+            )
+        except Exception as error:
+            return _error_result(error)
+
+    mcp.tool(
+        annotations={"readOnlyHint": True, "destructiveHint": False},
+        description=f"{generate_mvt_tile_url.__doc__}\n{inspection.QUERY_GUIDANCE}",
+    )(generate_mvt_tile_url)
 
     async def get_query_page(
         query_token: str, offset: int, page_size: int = 100
@@ -283,11 +387,31 @@ def create_mcp_server(
 
     async def view_query_map(
         title: query.MapTitle,
-        layers: list[query.MapQueryLayerInput],
+        layers: Annotated[list[query.MapQueryLayerInput], BeforeValidator(decode_json_parameter)],
         basemap: query.BasemapStyle = "street",
-        camera: query.MapCameraInput | None = None,
+        camera: Annotated[
+            query.MapCameraInput | None, BeforeValidator(decode_json_parameter)
+        ] = None,
     ) -> FastMCPToolResult:
         """Execute and map up to eight named spatial GeoParquet queries.
+
+        Prefer view_map for ordinary visualization or mixed prebuilt/query maps.
+        Check get_dataset_file.map_sources before querying only to display data.
+        This legacy tool always executes SQL for every layer.
+
+        The widget sends asynchronous map_status model-context updates when the
+        host supports them: loading, loaded, partial, or failed, with per-layer
+        status and sanitized errors. Loaded applies only to the current viewport,
+        not the entire dataset or proof that features are present. Use these
+        updates to report failures and partial success. Missing feedback is not
+        success; ask the user for the widget error if updates are unavailable.
+
+        Success prepares a map configuration; it does not confirm that the host
+        rendered it or loaded every layer. Do not claim visual success without
+        confirmation from the widget or user. For an invalid map result, report
+        the widget's validation field paths as a configuration/host problem.
+        Do not change SQL or switch to expensive query layers to fix validation
+        errors. Tile-fetch errors are separate and require their own diagnosis.
 
         Copy source objects from get_dataset_file.query_sources into each
         layer and provide its safe read-only SQL. Always supply a meaningful
@@ -310,7 +434,81 @@ def create_mcp_server(
         except Exception as error:
             return _error_result(error)
 
-    mcp.tool(app=query_map_app)(view_query_map)
+    mcp.tool(
+        app=query_map_app, description=f"{view_query_map.__doc__}\n{inspection.QUERY_GUIDANCE}"
+    )(view_query_map)
+
+    async def view_map(
+        title: query.MapTitle,
+        layers: Annotated[list[maps.MapLayerInput], BeforeValidator(decode_json_parameter)],
+        basemap: query.BasemapStyle = "street",
+        camera: Annotated[
+            query.MapCameraInput | None, BeforeValidator(decode_json_parameter)
+        ] = None,
+    ) -> FastMCPToolResult:
+        """Configure a map from query, catalog PMTiles, or public HTTPS vector sources.
+
+        Prefer published PMTiles through a catalog source for displaying existing
+        data, including viewport navigation and styling existing properties.
+        Inspect get_dataset_file.map_sources first. Use a query source when SQL
+        is needed for filtering, joins, aggregation, or calculated properties,
+        or when no suitable prebuilt tiles exist. Camera bounds only position
+        the map; they do not filter the dataset. Choose independently for each layer:
+        prebuilt tiles and query results can be combined in the same map.
+        Tiles may contain simplified geometries or omit features at some zooms;
+        use query_parquet against the underlying data for exact analysis, not tiles.
+
+        Each layer has a layer_name, a discriminated source, shared styling fields,
+        and visibility. Query sources contain inputs and SQL. Catalog sources copy a
+        map_sources reference from get_dataset_file. Explicit pmtiles and tilejson
+        sources use a public HTTPS URL; vector_tiles uses public HTTPS XYZ templates
+        and requires source_layer. The server never fetches explicit source URLs.
+
+        Before mapping new or revised SQL, run that exact SQL with query_parquet
+        using a small returned-page limit and the same inputs and result_crs.
+        Check errors, empty results, geometry, and styling columns. A page limit
+        does not necessarily make joins or aggregates cheap; do not add SQL LIMIT
+        merely for testing and then accidentally map only that limited subset.
+
+        This tool executes a bounded one-row preview for every query layer before
+        returning a map. If any query preparation fails, it returns a tool error
+        instead of a map. Success includes per-layer preview rows, columns, warnings,
+        and result_status in text and structured content. Geometry previews are
+        summaries, not GeoJSON. Empty layers are explicitly identified. The widget
+        reuses prepared tile access; previews do not guarantee successful rendering.
+
+        The widget sends asynchronous map_status model-context updates when the
+        host supports them: loading, loaded, partial, or failed, with per-layer
+        status and sanitized errors. Loaded applies only to the current viewport,
+        not the entire dataset or proof that features are present. Use these
+        updates to report failures and partial success. Missing feedback is not
+        success; ask the user for the widget error if updates are unavailable.
+
+        Success prepares a map configuration; it does not confirm that the host
+        rendered it or loaded every layer. Do not claim visual success without
+        confirmation from the widget or user. For an invalid map result, report
+        the widget's validation field paths as a configuration/host problem.
+        Do not change SQL or switch to expensive query layers to fix validation
+        errors. Tile-fetch errors are separate and require their own diagnosis.
+        """
+        try:
+            return _result(
+                await maps.view_map(
+                    dependencies.query,
+                    dependencies.catalog,
+                    title=title,
+                    layers=layers,
+                    basemap=basemap,
+                    camera=camera,
+                    worker_url=configured_worker_url(),
+                )
+            )
+        except Exception as error:
+            return _error_result(error)
+
+    mcp.tool(app=query_map_app, description=f"{view_map.__doc__}\n{inspection.QUERY_GUIDANCE}")(
+        view_map
+    )
 
     async def refresh_query_map(map_spec: query.MapDefinitionInput) -> FastMCPToolResult:
         """Refresh runtime map tokens from a durable map definition.
@@ -325,7 +523,34 @@ def create_mcp_server(
 
     mcp.tool(app=query_map_refresh_app)(refresh_query_map)
 
-    config = resource_config or UIResourceConfig(tile_origin="self")
+    async def prepare_map_layer(layer: maps.MapLayerInput) -> FastMCPToolResult:
+        """Prepare one query layer independently for the map widget.
+
+        This app-only tool validates and previews the query before issuing its
+        signed tile access. Other map layers can continue loading independently.
+        """
+        try:
+            return _result(await maps.prepare_map_layer(dependencies.query, layer))
+        except Exception as error:
+            return _error_result(error)
+
+    mcp.tool(app=query_map_refresh_app)(prepare_map_layer)
+
+    async def refresh_map(map_spec: maps.MapDefinitionInput) -> FastMCPToolResult:
+        """Refresh catalog resolution and validate query previews from a durable map spec."""
+        try:
+            return _result(
+                await maps.refresh_map(
+                    dependencies.query,
+                    dependencies.catalog,
+                    map_spec,
+                    worker_url=configured_worker_url(),
+                )
+            )
+        except Exception as error:
+            return _error_result(error)
+
+    mcp.tool(app=query_map_refresh_app)(refresh_map)
 
     def query_map() -> str:
         return ui_html if ui_html is not None else default_ui_html()
