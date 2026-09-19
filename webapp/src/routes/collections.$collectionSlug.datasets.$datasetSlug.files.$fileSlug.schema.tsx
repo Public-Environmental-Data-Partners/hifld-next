@@ -10,14 +10,8 @@ import {
 } from "@/components/dataset/schemaSources";
 import { Button } from "@/components/ui/button";
 import { PageLoader } from "@/components/ui/page-loader";
-import {
-  getCollectionBySlug,
-  getDatasetBySlug,
-  getDatasetFileById,
-  getDatasetFileBySlug,
-  getFileVersions,
-} from "@/lib/api-client";
-import { schemaPath } from "@/lib/api-links";
+import { getCollectionBySlug, getDatasetBySlug, getDatasetFileBySlug } from "@/lib/api-client";
+import { fileMetadataPath } from "@/lib/api-links";
 
 const schemaSearchSchema = z
   .object({
@@ -58,25 +52,6 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
     });
     if (!dataset) {
       throw notFound();
-    }
-
-    const file = dataset.files?.find((entry) => entry.slug === params.fileSlug);
-    if (file?.id && dataset.id) {
-      const fileResponse = await getDatasetFileById({
-        data: {
-          collectionId: collection.id,
-          datasetId: dataset.id,
-          fileId: file.id,
-        },
-      });
-      const versions = await getFileVersions({
-        data: {
-          collectionId: collection.id,
-          datasetId: dataset.id,
-          fileId: file.id,
-        },
-      });
-      return { dataset: fileResponse.dataset, file: fileResponse.file, versions };
     }
 
     const fileResponse = await getDatasetFileBySlug({
@@ -121,9 +96,7 @@ function FileSchemaPage() {
       : latestVersion;
   const [selectedVersion, setSelectedVersion] = useState<string | number>(initialVersion ?? search.version ?? "1");
   const selectedSchemaSource = getBestSchemaSourceForVersion(versions.formats, selectedVersion);
-  const metadataHref = schemaPath(params.collectionSlug, params.datasetSlug, params.fileSlug, {
-    version: selectedVersion,
-  });
+  const metadataHref = fileMetadataPath(params.collectionSlug, params.datasetSlug, params.fileSlug, selectedVersion);
 
   const onVersionChange = (version: string) => {
     setSelectedVersion(version);

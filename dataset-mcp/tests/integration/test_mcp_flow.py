@@ -83,7 +83,12 @@ async def test_metadata_source_query_and_next_page_use_only_ephemeral_result_sta
 
     # Metadata -> selected source identity is deliberately catalog-shaped, not a file path.
     metadata_source = QuerySourceRef(
-        alias="roads", collection_id=1, dataset_id=2, file_id=3, file_source_id=4
+        alias="roads",
+        collection_slug="hifld",
+        dataset_slug="roads",
+        file_slug="roads",
+        version="v1.0.0",
+        asset_key="geoparquet",
     )
     service = LocalQueryService(parquet)
     initial = await query_geoparquet(

@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "feature-server.fullname" . }}
+  labels: {{- include "feature-server.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector: {matchLabels: {app.kubernetes.io/name: {{ include "feature-server.name" . }}, app.kubernetes.io/instance: {{ .Release.Name }}}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: {{ include "feature-server.name" . }}, app.kubernetes.io/instance: {{ .Release.Name }}}}
+    spec:
+      serviceAccountName: {{ include "feature-server.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: feature-server
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{name: http, containerPort: {{ .Values.containerPort }}, protocol: TCP}]
+          env:
+            - {name: FEATURE_SERVER_CATALOG_URL, value: {{ .Values.catalog.url | quote }}}
+            - {name: FEATURE_SERVER_CATALOG_POLL_SECONDS, value: {{ .Values.catalog.pollSeconds | quote }}}
+            - {name: FEATURE_SERVER_STORAGE_LOCATIONS, value: {{ .Values.storage.locationsJson | quote }}}
+            - {name: FEATURE_SERVER_CATALOG_CACHE_DIRECTORY, value: {{ .Values.cache.directory | quote }}}
+            - {name: FEATURE_SERVER_TEMP_DIRECTORY, value: {{ .Values.tmp.directory | quote }}}
+            {{- with .Values.env }}{{ toYaml . | nindent 12 }}{{- end }}
+            {{- range .Values.secretEnv }}
+            - name: {{ .name }}
+              valueFrom: {secretKeyRef: {name: {{ .secretName }}, key: {{ .key }}}}
+            {{- end }}
+          volumeMounts:
+            - {name: tmp, mountPath: {{ .Values.tmp.directory }}}
+            - {name: cache, mountPath: {{ .Values.cache.directory }}}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe: {httpGet: {path: {{ .Values.livenessProbe.path }}, port: http}, initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}, periodSeconds: {{ .Values.livenessProbe.periodSeconds }}, timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}, failureThreshold: {{ .Values.livenessProbe.failureThreshold }}}
+          readinessProbe: {httpGet: {path: {{ .Values.readinessProbe.path }}, port: http}, initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}, periodSeconds: {{ .Values.readinessProbe.periodSeconds }}, timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}, failureThreshold: {{ .Values.readinessProbe.failureThreshold }}}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: {{ .Values.tmp.sizeLimit }}}}
+        - {name: cache, emptyDir: {sizeLimit: {{ .Values.cache.sizeLimit }}}}

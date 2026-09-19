@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Pagination } from "@/components/ui/pagination";
 import { trackSearchQuery, trackTagFilter } from "@/lib/analytics";
 import type { DatasetTags, DatasetWithUrls } from "@/lib/api-client";
-import { getCollectionBySlug, getCollectionDatasets, getCollectionTagValues } from "@/lib/api-client";
+import { getCollectionBySlug, getCollectionDatasetsBySlug, getCollectionTagValues } from "@/lib/api-client";
 import { buildDataCatalogJsonLd, pageTitle, seoDescription } from "@/lib/seo";
 
 const SEARCH_DEBOUNCE_MS = 500;
@@ -144,7 +144,7 @@ export function collectionPageHref(collectionSlug: string, search: CollectionSea
 }
 
 interface FilteredDatasetFetchArgs {
-  collectionId: number;
+  collectionSlug: string;
   limit: number;
   offset: number;
   searchQuery?: string | undefined;
@@ -163,7 +163,7 @@ function trimmedSearchParam(searchQuery: string | undefined): string | undefined
 }
 
 async function loadFilteredDatasets({
-  collectionId,
+  collectionSlug,
   limit,
   offset,
   searchQuery,
@@ -171,9 +171,9 @@ async function loadFilteredDatasets({
   signal,
 }: FilteredDatasetFetchArgs): Promise<FilteredDatasetFetchResult | null> {
   const tagFiltersForAPI = tagFilters.length > 0 ? getTagFiltersForAPI(tagFilters) : undefined;
-  const response = await getCollectionDatasets({
+  const response = await getCollectionDatasetsBySlug({
     data: {
-      collectionId,
+      collectionSlug,
       search: trimmedSearchParam(searchQuery),
       includeUrls: false,
       limit,
@@ -349,9 +349,9 @@ export const Route = createFileRoute("/collections/$slug")({
 
       // Use getCollectionDatasets directly with the collection ID
       // Note: includeUrls=false to avoid N+1 query performance issues in backend
-      const datasetsResponse = await getCollectionDatasets({
+      const datasetsResponse = await getCollectionDatasetsBySlug({
         data: {
-          collectionId: collection.id,
+          collectionSlug: collection.collection_slug ?? collection.slug,
           includeUrls: false,
           limit: pageSize,
           offset: offset,
@@ -409,6 +409,7 @@ export const Route = createFileRoute("/collections/$slug")({
 // Component runs on client by default
 function CollectionDetailPage() {
   const { collection, datasetsResponse: initialResponse, resolvedSearchQuery } = Route.useLoaderData();
+  const collectionSlug = collection.collection_slug ?? collection.slug;
   const navigate = useNavigate({ from: Route.fullPath });
   const search = useSearch({ from: Route.fullPath });
 
@@ -482,7 +483,7 @@ function CollectionDetailPage() {
       abortControllerRef.current = abortController;
       return runFilteredDatasetRequest({
         fetchArgs: {
-          collectionId: collection.id,
+          collectionSlug,
           searchQuery,
           limit: currentLimit,
           offset: newOffset,
@@ -495,7 +496,7 @@ function CollectionDetailPage() {
         setIsLoading,
       });
     },
-    [collection.id, currentLimit, selectedTagFilters],
+    [collectionSlug, currentLimit, selectedTagFilters],
   );
 
   // Sync search query from URL (only when URL changes, not when local state changes)
@@ -522,12 +523,12 @@ function CollectionDetailPage() {
       trimmedQuery !== lastTrackedQueryRef.current
     ) {
       lastTrackedQueryRef.current = trimmedQuery;
-      trackSearchQuery(trimmedQuery, collection.slug, initialTotal, {
+      trackSearchQuery(trimmedQuery, collectionSlug, initialTotal, {
         hasTagFilters: false,
         queryLength: trimmedQuery.length,
       });
     }
-  }, [search.query, collection.slug, hasTagFilters, initialTotal, resolvedSearchQuery, searchQuery]);
+  }, [search.query, collectionSlug, hasTagFilters, initialTotal, resolvedSearchQuery, searchQuery]);
 
   useEffect(() => {
     setSelectedTagFilters(getTagFiltersFromAPI(parseTagFiltersParam(search.tag_filters)));
@@ -557,7 +558,7 @@ function CollectionDetailPage() {
 
         // Track search query after results are fetched
         if (searchQuery.trim() && result) {
-          trackSearchQuery(searchQuery, collection.slug, result.total, {
+          trackSearchQuery(searchQuery, collectionSlug, result.total, {
             hasTagFilters: true,
             queryLength: searchQuery.trim().length,
           });
@@ -570,7 +571,7 @@ function CollectionDetailPage() {
         clearTimeout(searchTimeoutRef.current);
       }
     };
-  }, [searchQuery, updateUrlParams, hasTagFilters, fetchDatasets, selectedTagFilters, collection.slug]);
+  }, [searchQuery, updateUrlParams, hasTagFilters, fetchDatasets, selectedTagFilters, collectionSlug]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -602,9 +603,9 @@ function CollectionDetailPage() {
     (newOffset: number) => {
       const nextSearch: CollectionSearch = { limit: currentLimit };
       if (search.query) nextSearch.query = search.query;
-      return collectionPageHref(collection.slug, nextSearch, newOffset);
+      return collectionPageHref(collectionSlug, nextSearch, newOffset);
     },
-    [collection.slug, currentLimit, search.query],
+    [collectionSlug, currentLimit, search.query],
   );
 
   // Handle tag filter change
@@ -617,7 +618,7 @@ function CollectionDetailPage() {
 
     const result = await fetchDatasets(searchQuery, 0, newFilters);
     if (result) {
-      trackTagFilter(collection.slug, key, values, result.total, searchQuery || undefined);
+      trackTagFilter(collectionSlug, key, values, result.total, searchQuery || undefined);
     }
   };
 
@@ -639,13 +640,13 @@ function CollectionDetailPage() {
             )}
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               <Button variant="outline" size="sm" asChild className="font-mono">
-                <Link to="/collections/$collectionSlug/map" params={{ collectionSlug: collection.slug }}>
+                <Link to="/collections/$collectionSlug/map" params={{ collectionSlug }}>
                   <MapIcon className="mr-2 h-4 w-4" />
                   Map Workspace
                 </Link>
               </Button>
               <Button variant="outline" size="sm" asChild className="font-mono">
-                <a href={`/api/collections/${collection.slug}`} target="_blank" rel="noopener noreferrer">
+                <a href={`/api/collections/${collectionSlug}`} target="_blank" rel="noopener noreferrer">
                   View Metadata
                 </a>
               </Button>
@@ -679,7 +680,7 @@ function CollectionDetailPage() {
         )}
 
         <DatasetResults
-          collectionSlug={collection.slug}
+          collectionSlug={collectionSlug}
           datasets={datasets}
           isLoading={isLoading}
           limit={currentLimit}

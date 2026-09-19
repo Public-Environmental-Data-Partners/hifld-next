@@ -1,28 +1,19 @@
 import { useCallback } from "react";
 import { z } from "zod";
-import type { Collection, ColumnSchema, DatasetTags, SpatialDatasetFileMetadata } from "@/lib/api-client";
-import {
-  type CatalogSchemaResponseInput,
-  shapeDatasetFileResponse,
-  shapeDatasetFileSchemaResponse,
-} from "./catalogShapes";
 import { failure, success, type WebMcpJsonValue, type WebMcpResult } from "./result";
 import { useWebMcpTool } from "./useWebMcpTool";
 
 const MAX_SEARCH_LIMIT = 20;
 const MAX_SCHEMA_LIMIT = 50;
-const READ_ANNOTATIONS: WebMCP.ToolAnnotations = { readOnlyHint: true, untrustedContentHint: true };
-const SEARCH_ANNOTATIONS: WebMCP.ToolAnnotations = { readOnlyHint: false, untrustedContentHint: true };
-const formatTypeSchema = z.enum(["geoparquet", "pmtiles", "geopackage", "shapefile", "geojson", "file_geodatabase"]);
-
-const emptyInputSchema = z.object({}).strict();
-const datasetInputSchema = z
-  .object({ collection: z.string().min(1).max(200), dataset: z.string().min(1).max(200) })
-  .strict();
-const fileInputSchema = datasetInputSchema.extend({ file: z.string().min(1).max(200) }).strict();
-const collectionSearchInputSchema = z
+const READ: WebMCP.ToolAnnotations = { readOnlyHint: true, untrustedContentHint: true };
+const SEARCH: WebMCP.ToolAnnotations = { readOnlyHint: false, untrustedContentHint: true };
+const slug = z.string().regex(/^[a-z0-9][a-z0-9_-]*$/);
+const emptyInput = z.object({}).strict();
+const datasetInput = z.object({ collection: slug, dataset: slug }).strict();
+const fileInput = datasetInput.extend({ file: slug }).strict();
+const searchInput = z
   .object({
-    collection: z.string().min(1).max(200),
+    collection: slug,
     query: z.string().max(200).optional(),
     tag_filters: z
       .record(z.string().min(1).max(100), z.union([z.string().max(200), z.array(z.string().max(200))]))
@@ -31,96 +22,57 @@ const collectionSearchInputSchema = z
     limit: z.number().int().positive().max(MAX_SEARCH_LIMIT).optional(),
   })
   .strict();
-const collectionDetailInputSchema = collectionSearchInputSchema
+const collectionInput = searchInput
   .omit({ collection: true })
   .extend({
-    slug: z.string().min(1).max(200),
+    slug,
     tag_key: z.string().min(1).max(100).optional(),
     tag_value: z.string().max(200).optional(),
   })
   .strict();
-const schemaInputSchema = fileInputSchema
+const schemaInput = fileInput
   .extend({
     version: z.union([z.string().min(1).max(100), z.number()]).optional(),
     offset: z.number().int().nonnegative().optional(),
     limit: z.number().int().positive().max(MAX_SCHEMA_LIMIT).optional(),
   })
   .strict();
-type EmptyInput = z.infer<typeof emptyInputSchema>;
 
-type SearchParams = {
-  query?: string;
-  tag_filters?: DatasetTags;
-  offset?: number;
-  limit?: number;
-};
-
-type CollectionSearchUrl = Omit<SearchParams, "tag_filters"> & { tag_filters?: string };
-
-export type CollectionSearchNavigation = (collectionSlug: string, search: CollectionSearchUrl) => Promise<void>;
-
+interface Tags {
+  [key: string]: string | string[];
+}
+type SearchParams = { query?: string; tag_filters?: Tags; offset?: number; limit?: number };
+type SearchUrl = Omit<SearchParams, "tag_filters"> & { tag_filters?: string };
+export type CollectionSearchNavigation = (collectionSlug: string, search: SearchUrl) => Promise<void>;
+type EmptyInput = z.infer<typeof emptyInput>;
+interface SourceOutput {
+  [key: string]: WebMcpJsonValue;
+}
 export async function applyDatasetSearch(
   navigate: CollectionSearchNavigation,
   collectionSlug: string,
-  search: CollectionSearchUrl,
-): Promise<void> {
+  search: SearchUrl,
+) {
   await navigate(collectionSlug, search);
 }
 
-type ApiErrorCode = "not_found" | "upstream_unavailable";
-
 class CatalogRequestError extends Error {
-  readonly code: ApiErrorCode;
-
-  constructor(code: ApiErrorCode) {
+  constructor(readonly code: "not_found" | "upstream_unavailable") {
     super(code);
-    this.code = code;
   }
 }
-
-function encodePath(value: string): string {
-  return encodeURIComponent(value);
-}
-
-function buildQuery(params: SearchParams): string {
-  const query = new URLSearchParams();
-  if (params.query?.trim()) query.set("query", params.query.trim());
-  if (params.tag_filters && Object.keys(params.tag_filters).length > 0) {
-    query.set("tag_filters", JSON.stringify(params.tag_filters));
-  }
-  if (params.limit !== undefined) query.set("limit", String(Math.min(params.limit, MAX_SEARCH_LIMIT)));
-  if (params.offset !== undefined) query.set("offset", String(params.offset));
-  return query.toString();
-}
-
-async function requestJson<T>(path: string, schema: z.ZodType<T>, signal: AbortSignal): Promise<T> {
-  const response = await fetch(path, { signal });
-  if (response.status === 404) throw new CatalogRequestError("not_found");
-  if (!response.ok) throw new CatalogRequestError("upstream_unavailable");
-  const parsed = schema.safeParse(await response.json());
-  if (!parsed.success) throw new CatalogRequestError("upstream_unavailable");
-  return parsed.data;
-}
-
-function failureFor(error: CatalogRequestError): WebMcpResult<WebMcpJsonValue> {
-  return error.code === "not_found"
-    ? failure("not_found", "The requested catalog item was not found.")
-    : failure("upstream_unavailable", "The catalog service is temporarily unavailable.");
-}
-
-const collectionSchema = z
+const linkSchema = z
+  .object({ rel: z.string(), href: z.string(), title: z.string().optional(), type: z.string().optional() })
+  .passthrough();
+const catalogSchema = z
   .object({
-    id: z.number().int().positive(),
-    slug: z.string().min(1),
-    name: z.string(),
-    description: z
-      .string()
-      .nullable()
-      .optional()
-      .transform((value) => value ?? undefined),
-    created_at: z.string(),
-    updated_at: z.string(),
-    links: z.record(z.string(), z.string()).optional(),
+    type: z.literal("Catalog"),
+    stac_version: z.string(),
+    id: z.string().min(1),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    keywords: z.array(z.string()).optional(),
+    links: z.array(linkSchema),
   })
   .strip();
 const columnSchema = z
@@ -128,7 +80,7 @@ const columnSchema = z
     name: z.string(),
     type: z.string(),
     description: z.string().nullable().optional(),
-    nullable: z.boolean(),
+    nullable: z.boolean().optional(),
     num_null_values: z.number().nullable().optional(),
     num_unique_values: z.number().nullable().optional(),
     example_values: z.array(z.string()).nullable().optional(),
@@ -137,567 +89,379 @@ const columnSchema = z
     length: z.number().nullable().optional(),
     possible_values: z.array(z.string()).nullable().optional(),
   })
-  .strip()
-  .transform(
-    (column): ColumnSchema => ({
-      name: column.name,
-      type: column.type,
-      ...(column.description != null ? { description: column.description } : {}),
-      nullable: column.nullable,
-      ...(column.num_null_values != null ? { num_null_values: column.num_null_values } : {}),
-      ...(column.num_unique_values != null ? { num_unique_values: column.num_unique_values } : {}),
-      ...(column.example_values != null ? { example_values: column.example_values } : {}),
-      ...(column.min != null ? { min: column.min } : {}),
-      ...(column.max != null ? { max: column.max } : {}),
-      ...(column.length != null ? { length: column.length } : {}),
-      ...(column.possible_values != null ? { possible_values: column.possible_values } : {}),
-    }),
-  );
-const metadataSchema = z
-  .object({
-    version: z.string(),
-    description: z.string().nullable().default(null),
-    size_bytes: z.number().nullable().optional(),
-    mime_type: z.string().nullable().optional(),
-    feature_count: z.number().nullable().optional(),
-    bounds: z.tuple([z.number(), z.number(), z.number(), z.number()]).nullable().optional(),
-    geometry_type: z.string().nullable().optional(),
-    invalid_geometry_count: z.number().nullable().optional(),
-    quality_check_passed: z.boolean().nullable().optional(),
-    columns_hash: z.string().nullable().optional(),
-    columns: z.array(columnSchema).nullable().optional(),
-  })
-  .strip()
-  .transform(
-    (metadata): SpatialDatasetFileMetadata => ({
-      version: metadata.version,
-      ...(metadata.description !== undefined ? { description: metadata.description } : {}),
-      ...(metadata.size_bytes !== undefined ? { size_bytes: metadata.size_bytes } : {}),
-      ...(metadata.mime_type != null ? { mime_type: metadata.mime_type } : {}),
-      ...(metadata.feature_count != null ? { feature_count: metadata.feature_count } : {}),
-      ...(metadata.bounds != null ? { bounds: metadata.bounds } : {}),
-      ...(metadata.geometry_type != null ? { geometry_type: metadata.geometry_type } : {}),
-      ...(metadata.invalid_geometry_count != null ? { invalid_geometry_count: metadata.invalid_geometry_count } : {}),
-      ...(metadata.quality_check_passed != null ? { quality_check_passed: metadata.quality_check_passed } : {}),
-      ...(metadata.columns_hash != null ? { columns_hash: metadata.columns_hash } : {}),
-      ...(metadata.columns != null ? { columns: metadata.columns } : {}),
-    }),
-  );
-const locationSchema = z.union([
-  z.object({ type: z.literal("file").optional(), version: z.string(), path: z.string() }).strip(),
-  z
-    .object({ type: z.literal("api").optional(), version: z.string(), url: z.string(), method: z.string().optional() })
-    .strip(),
-]);
-const sourceSchema = z
-  .object({
-    id: z.number().int().positive(),
-    version: z.union([z.string(), z.number()]).optional(),
-    url: z.string().optional(),
-    storage_uri: z.string().optional(),
-    glob_pattern: z.string().optional(),
-    source_type: z.enum(["file", "api"]),
-    location: locationSchema,
-    source_metadata: metadataSchema
-      .nullable()
-      .optional()
-      .transform((value) => value ?? undefined),
-    storage_location: z
-      .object({
-        id: z.number().int().positive(),
-        name: z.string(),
-        backend_type: z.literal("s3"),
-        description: z.string().optional(),
-        config: z
-          .object({
-            type: z.enum(["s3", "gcs", "seaweedfs"]).optional(),
-            version: z.string(),
-            base_url: z.string(),
-            bucket: z.string(),
-          })
-          .strip()
-          .optional(),
-        created_at: z.string(),
-        updated_at: z.string(),
-      })
-      .optional(),
-    created_at: z.string().optional(),
-    updated_at: z.string().optional(),
-  })
   .strip();
-const formatSchema = z
+const assetSchema = z
   .object({
-    format: z
-      .object({
-        id: z.number().int().positive(),
-        format_type: formatTypeSchema,
-        name: z.string(),
-        created_at: z.string(),
-        updated_at: z.string(),
-      })
-      .strip(),
-    sources: z.array(sourceSchema),
+    href: z.string(),
+    title: z.string().optional(),
+    type: z.string().optional(),
+    roles: z.array(z.string()).optional(),
+    "hifld:format_key": z.string().optional(),
+    "hifld:sha256": z.string().optional(),
+    "hifld:storage_location_slug": z.string().optional(),
   })
-  .strip();
-const fileSchema = z
+  .passthrough();
+const collectionSchema = z
   .object({
-    id: z.number().int().positive(),
-    dataset_id: z.number().int().positive(),
-    name: z.string(),
-    slug: z.string().min(1),
-    description: z
-      .string()
-      .nullable()
-      .optional()
-      .transform((value) => value ?? undefined),
-    layer_name: z
-      .string()
-      .nullable()
-      .optional()
-      .transform((value) => value ?? undefined),
-    source_file_path: z
-      .string()
-      .nullable()
-      .optional()
-      .transform((value) => value ?? undefined),
-    file_metadata: metadataSchema
-      .nullable()
-      .optional()
-      .transform((value) => value ?? undefined),
-    created_at: z.string(),
-    updated_at: z.string(),
-    formats: z.array(formatSchema).optional(),
+    type: z.literal("Collection"),
+    stac_version: z.string(),
+    id: z.string().min(1),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    links: z.array(linkSchema),
+    assets: z.record(z.string(), assetSchema),
+    "table:columns": z.array(columnSchema).optional(),
   })
-  .strip();
-const schemaFileSchema = z
+  .passthrough();
+const pageSchema = z
   .object({
-    id: z.number().int().positive(),
-    dataset_id: z.number().int().positive(),
-    name: z.string(),
-    slug: z.string().min(1),
-    description: z
-      .string()
-      .nullable()
-      .optional()
-      .transform((value) => value ?? undefined),
-    layer_name: z
-      .string()
-      .nullable()
-      .optional()
-      .transform((value) => value ?? undefined),
-  })
-  .strip();
-const datasetSchema = z
-  .object({
-    id: z.number().int().positive(),
-    slug: z.string().min(1),
-    name: z.string(),
-    description: z
-      .string()
-      .nullable()
-      .optional()
-      .transform((value) => value ?? undefined),
-    tags: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(),
-    collection_id: z.number().int().positive().optional(),
-    created_at: z.string(),
-    updated_at: z.string(),
-    files: z.array(fileSchema).optional(),
-    formats: z.array(formatSchema).optional(),
-  })
-  .strip();
-const datasetSummaryResponseSchema = z
-  .object({
-    id: z.number().int().positive(),
-    slug: z.string().min(1),
-    name: z.string(),
-    tags: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(),
-    collection_id: z.number().int().positive().optional(),
-  })
-  .strip();
-const datasetFileSummaryResponseSchema = z
-  .object({
-    id: z.number().int().positive(),
-    slug: z.string().min(1),
-    name: z.string(),
-  })
-  .strip();
-const datasetDetailResponseSchema = datasetSummaryResponseSchema
-  .extend({ files: z.array(datasetFileSummaryResponseSchema).optional() })
-  .strip();
-const collectionPageResponseSchema = z
-  .object({
-    links: z.record(z.string(), z.string()).optional(),
-    collection: collectionSchema,
-    datasets: z.array(datasetSummaryResponseSchema),
+    datasets: z.array(catalogSchema),
     total: z.number().int().nonnegative(),
     limit: z.number().int().positive(),
     offset: z.number().int().nonnegative(),
+    links: z.record(z.string(), z.string()).optional(),
   })
   .strict();
-const tagsResponseSchema = z
-  .object({
-    links: z.record(z.string(), z.string()).optional(),
-    tags: z.record(z.string(), z.union([z.string(), z.array(z.string())])),
-  })
-  .strip();
-const datasetResponseSchema = z
-  .object({
-    links: z.record(z.string(), z.string()).optional(),
-    collection: collectionSchema,
-    dataset: datasetDetailResponseSchema,
-  })
-  .strict();
+const tagsSchema = z.object({ tags: z.record(z.string(), z.union([z.string(), z.array(z.string())])) }).passthrough();
 
-const schemaResponseSchema = z
-  .object({
-    links: z.record(z.string(), z.string()).optional(),
-    collection: collectionSchema,
-    dataset: datasetSchema,
-    file: schemaFileSchema,
-    versions: z.array(z.union([z.string(), z.number()])),
-    selected_version: z.union([z.string(), z.number()]).nullable(),
-    schema: z
-      .object({
-        version: z.union([z.string(), z.number()]).nullable(),
-        format_type: formatTypeSchema,
-        format_name: z.string(),
-        source_id: z.number().int().positive(),
-        source_metadata: metadataSchema.nullable(),
-        columns: z.array(columnSchema),
-        total_columns: z.number().int().nonnegative().optional(),
-        column_offset: z.number().int().nonnegative().optional(),
-        column_limit: z.number().int().positive().optional(),
-        has_more: z.boolean().optional(),
-      })
-      .strip()
-      .nullable(),
-  })
-  .strip();
-const rawFileResponseSchema = z
-  .object({
-    links: z.record(z.string(), z.string()).optional(),
-    collection: collectionSchema,
-    dataset: datasetSchema,
-    file: fileSchema,
-  })
-  .strict();
-type CollectionPageResponse = z.infer<typeof collectionPageResponseSchema>;
-type SchemaResponse = z.infer<typeof schemaResponseSchema>;
-
-function schemaShapeInput(response: SchemaResponse): CatalogSchemaResponseInput {
-  return {
-    collection: response.collection,
-    dataset: response.dataset,
-    file: response.file,
-    versions: response.versions,
-    selected_version: response.selected_version,
-    schema: response.schema
-      ? {
-          version: response.schema.version,
-          format_type: response.schema.format_type,
-          format_name: response.schema.format_name,
-          source_id: response.schema.source_id,
-          source_metadata: response.schema.source_metadata,
-          columns: response.schema.columns,
-          ...(response.schema.total_columns !== undefined ? { total_columns: response.schema.total_columns } : {}),
-          ...(response.schema.column_offset !== undefined ? { column_offset: response.schema.column_offset } : {}),
-          ...(response.schema.column_limit !== undefined ? { column_limit: response.schema.column_limit } : {}),
-          ...(response.schema.has_more !== undefined ? { has_more: response.schema.has_more } : {}),
-        }
-      : null,
-  };
+const enc = encodeURIComponent;
+function queryString(p: SearchParams) {
+  const q = new URLSearchParams();
+  if (p.query?.trim()) q.set("query", p.query.trim());
+  if (p.tag_filters && Object.keys(p.tag_filters).length) q.set("tag_filters", JSON.stringify(p.tag_filters));
+  if (p.limit !== undefined) q.set("limit", String(Math.min(p.limit, MAX_SEARCH_LIMIT)));
+  if (p.offset !== undefined) q.set("offset", String(p.offset));
+  return q.toString();
 }
-
-interface CollectionSummary {
-  [key: string]: WebMcpJsonValue;
-  id: number;
-  slug: string;
-  name: string;
-  description: string | null;
-  link: string;
-}
-
-interface DatasetSummary {
-  [key: string]: WebMcpJsonValue;
-  id: number;
-  slug: string;
-  name: string;
-  collection_id: number | null;
-  tags: { [key: string]: WebMcpJsonValue };
-  link: string;
-}
-
-interface FileSummary {
-  [key: string]: WebMcpJsonValue;
-  id: number;
-  slug: string;
-  name: string;
-  link: string;
-}
-
-function collectionSummary(collection: Collection): CollectionSummary {
-  return {
-    id: collection.id,
-    slug: collection.slug,
-    name: collection.name,
-    description: collection.description ?? null,
-    link: `/api/collections/${encodePath(collection.slug)}`,
-  };
-}
-
-function tagsSummary(tags: DatasetTags | undefined): { [key: string]: WebMcpJsonValue } {
-  const result: { [key: string]: WebMcpJsonValue } = {};
-  for (const [key, value] of Object.entries(tags ?? {})) {
-    result[key] = Array.isArray(value) ? [...value] : value;
-  }
-  return result;
-}
-
-function datasetSummary(dataset: z.infer<typeof datasetSummaryResponseSchema>, collectionSlug: string): DatasetSummary {
-  return {
-    id: dataset.id,
-    slug: dataset.slug,
-    name: dataset.name,
-    collection_id: dataset.collection_id ?? null,
-    tags: tagsSummary(dataset.tags),
-    link: `/api/collections/${encodePath(collectionSlug)}/datasets/${encodePath(dataset.slug)}`,
-  };
-}
-
-function fileSummary(
-  file: { id: number; slug: string; name: string },
-  collectionSlug: string,
-  datasetSlug: string,
-): FileSummary {
-  return {
-    id: file.id,
-    slug: file.slug,
-    name: file.name,
-    link: `/api/collections/${encodePath(collectionSlug)}/datasets/${encodePath(datasetSlug)}/files/${encodePath(file.slug)}`,
-  };
-}
-
-function errorResult(error: Error): WebMcpResult<WebMcpJsonValue> {
-  return error instanceof CatalogRequestError ? failureFor(error) : failure("internal_error");
-}
-
-type SearchInputFields = {
-  query?: string | undefined;
-  tag_filters?: DatasetTags | undefined;
-  offset?: number | undefined;
-  limit?: number | undefined;
-};
-
-function searchParamsForInput(input: SearchInputFields): SearchParams {
+function searchParams(input: z.infer<typeof searchInput>): SearchParams {
   const params: SearchParams = {};
   if (input.query !== undefined) params.query = input.query;
-  if (input.tag_filters !== undefined) params.tag_filters = input.tag_filters;
   if (input.offset !== undefined) params.offset = input.offset;
   if (input.limit !== undefined) params.limit = input.limit;
+  if (input.tag_filters !== undefined) params.tag_filters = input.tag_filters;
   return params;
 }
-
-interface CollectionPageResult {
-  [key: string]: WebMcpJsonValue;
-  collection: CollectionSummary;
-  datasets: DatasetSummary[];
-  total: number;
-  offset: number;
-  limit: number;
+async function getJson<T>(path: string, schema: z.ZodType<T>, signal: AbortSignal): Promise<T> {
+  const response = await fetch(path, { signal });
+  if (response.status === 404) throw new CatalogRequestError("not_found");
+  if (!response.ok) throw new CatalogRequestError("upstream_unavailable");
+  const parsed = schema.safeParse(await response.json());
+  if (!parsed.success) throw new CatalogRequestError("upstream_unavailable");
+  return parsed.data;
 }
-
-function collectionPageResult(response: CollectionPageResponse, collectionSlug: string): CollectionPageResult {
+function failed(error: unknown): WebMcpResult<WebMcpJsonValue> {
+  if (error instanceof CatalogRequestError && error.code === "not_found")
+    return failure("not_found", "The requested catalog item was not found.");
+  if (error instanceof CatalogRequestError)
+    return failure("upstream_unavailable", "The catalog service is temporarily unavailable.");
+  return failure("internal_error");
+}
+function childSlug(href: string) {
+  try {
+    const parts = new URL(href, "https://invalid.local/").pathname.split("/").filter(Boolean);
+    if (!/[.]json$/.test(parts.at(-1) ?? "") || parts.length < 2) return undefined;
+    return slug.safeParse(decodeURIComponent(parts.at(-2) ?? "")).data;
+  } catch {
+    return undefined;
+  }
+}
+function datasetSummary(item: z.infer<typeof catalogSchema>, collection: string) {
+  const dataset = item.id.split("/").at(-1) ?? "";
+  if (item.id !== `${collection}/${dataset}` || !slug.safeParse(dataset).success)
+    throw new CatalogRequestError("upstream_unavailable");
   return {
-    collection: collectionSummary(response.collection),
-    datasets: response.datasets.map((dataset) => datasetSummary(dataset, collectionSlug)),
-    total: response.total,
-    offset: response.offset,
-    limit: response.limit,
+    id: item.id,
+    slug: dataset,
+    name: item.title ?? dataset,
+    tags: item.keywords ? { keywords: item.keywords } : {},
+    link: `/api/collections/${enc(collection)}/datasets/${enc(dataset)}`,
   };
 }
-
-function collectionDetailQuery(input: z.infer<typeof collectionDetailInputSchema>): string {
-  const params = searchParamsForInput(input);
-  if (input.tag_key !== undefined && input.tag_value !== undefined) {
-    params.tag_filters = { [input.tag_key]: input.tag_value };
+async function listChildren(root: z.infer<typeof catalogSchema>, signal: AbortSignal) {
+  return Promise.all(
+    root.links
+      .filter((x) => x.rel === "child")
+      .map(async (x) => {
+        const id = childSlug(x.href);
+        if (!id) throw new CatalogRequestError("upstream_unavailable");
+        if (x.title) return { id, slug: id, name: x.title, description: null, link: `/api/collections/${enc(id)}` };
+        const child = await getJson(`/api/collections/${enc(id)}`, catalogSchema, signal);
+        if (child.id !== id) throw new CatalogRequestError("upstream_unavailable");
+        return {
+          id,
+          slug: id,
+          name: child.title ?? id,
+          description: child.description ?? null,
+          link: `/api/collections/${enc(id)}`,
+        };
+      }),
+  );
+}
+function fileChildren(item: z.infer<typeof catalogSchema>, collection: string, dataset: string) {
+  if (item.id !== `${collection}/${dataset}`) throw new CatalogRequestError("upstream_unavailable");
+  return item.links
+    .filter((x) => x.rel === "child")
+    .map((x) => {
+      const file = childSlug(x.href);
+      if (!file) throw new CatalogRequestError("upstream_unavailable");
+      return {
+        id: `${collection}/${dataset}/${file}`,
+        slug: file,
+        name: x.title ?? file,
+        link: `/api/collections/${enc(collection)}/datasets/${enc(dataset)}/files/${enc(file)}`,
+      };
+    });
+}
+function selectedVersion(item: z.infer<typeof collectionSchema>, collection: string, dataset: string, file: string) {
+  const prefix = `${collection}/${dataset}/${file}/`;
+  if (!item.id.startsWith(prefix) || !item.id.slice(prefix.length))
+    throw new CatalogRequestError("upstream_unavailable");
+  return item.id.slice(prefix.length);
+}
+function fileShape(
+  item: z.infer<typeof collectionSchema>,
+  collection: string,
+  dataset: string,
+  file: string,
+): WebMcpJsonValue {
+  const version = selectedVersion(item, collection, dataset, file);
+  const formats = new Map<string, SourceOutput[]>();
+  const querySources: SourceOutput[] = [];
+  for (const [assetKey, asset] of Object.entries(item.assets)) {
+    const format = asset["hifld:format_key"] ?? assetKey.split("-")[0] ?? assetKey;
+    const querySource =
+      format === "geoparquet"
+        ? {
+            alias: `source_${querySources.length}`,
+            collection_slug: collection,
+            dataset_slug: dataset,
+            file_slug: file,
+            version,
+            asset_key: assetKey,
+            ...(asset["hifld:storage_location_slug"]
+              ? { storage_location_slug: asset["hifld:storage_location_slug"] }
+              : {}),
+          }
+        : null;
+    if (querySource) querySources.push(querySource);
+    const sources = formats.get(format) ?? [];
+    sources.push({ asset_key: assetKey, version, source_type: "file", summary: null, query_source: querySource });
+    formats.set(format, sources);
   }
-  return buildQuery(params);
+  const self = `/api/collections/${enc(collection)}/datasets/${enc(dataset)}/files/${enc(file)}`;
+  return {
+    collection: { slug: collection, name: collection, links: { self: `/api/collections/${enc(collection)}` } },
+    dataset: {
+      slug: dataset,
+      name: dataset,
+      tags: {},
+      links: { self: `/api/collections/${enc(collection)}/datasets/${enc(dataset)}` },
+    },
+    file: { slug: file, name: item.title ?? file, layer_name: null, summary: null, links: { self } },
+    formats: [...formats].map(([format_type, sources]) => ({ format_type, name: format_type, sources })),
+    query_sources: querySources,
+    links: { self },
+  };
 }
 
 export function CatalogTools({ applySearch, enabled }: { applySearch: CollectionSearchNavigation; enabled: boolean }) {
-  const listCollections = useCallback(async (_input: EmptyInput, signal: AbortSignal) => {
+  const listCollections = useCallback(async (_: EmptyInput, signal: AbortSignal) => {
     try {
-      const collections = await requestJson("/api/collections", z.array(collectionSchema), signal);
-      return success("Loaded collections.", { collections: collections.map(collectionSummary) });
-    } catch (error) {
-      return errorResult(error instanceof Error ? error : new Error("catalog request failed"));
-    }
-  }, []);
-
-  const getCollection = useCallback(async (input: z.infer<typeof collectionDetailInputSchema>, signal: AbortSignal) => {
-    try {
-      const query = collectionDetailQuery(input);
-      const suffix = query ? `?${query}` : "";
-      const [response, tagsResponse] = await Promise.all([
-        requestJson(`/api/collections/${encodePath(input.slug)}${suffix}`, collectionPageResponseSchema, signal),
-        requestJson(`/api/collections/${encodePath(input.slug)}/datasets/tags`, tagsResponseSchema, signal),
-      ]);
-      return success("Loaded collection.", {
-        ...collectionPageResult(response, input.slug),
-        tags: tagsSummary(tagsResponse.tags),
+      return success("Loaded collections.", {
+        collections: await listChildren(await getJson("/api/collections", catalogSchema, signal), signal),
       });
-    } catch (error) {
-      return errorResult(error instanceof Error ? error : new Error("catalog request failed"));
+    } catch (e) {
+      return failed(e);
     }
   }, []);
-
+  const getCollection = useCallback(async (input: z.infer<typeof collectionInput>, signal: AbortSignal) => {
+    try {
+      const params = searchParams({ ...input, collection: input.slug });
+      if (input.tag_key !== undefined && input.tag_value !== undefined)
+        params.tag_filters = { [input.tag_key]: input.tag_value };
+      const qs = queryString(params);
+      const base = `/api/collections/${enc(input.slug)}`;
+      const [catalog, page, tags] = await Promise.all([
+        getJson(base, catalogSchema, signal),
+        getJson(`${base}/datasets${qs ? `?${qs}` : ""}`, pageSchema, signal),
+        getJson(`${base}/datasets/tags`, tagsSchema, signal),
+      ]);
+      if (catalog.id !== input.slug) throw new CatalogRequestError("upstream_unavailable");
+      return success("Loaded collection.", {
+        collection: {
+          id: catalog.id,
+          slug: input.slug,
+          name: catalog.title ?? input.slug,
+          description: catalog.description ?? null,
+          link: base,
+        },
+        datasets: page.datasets.map((x) => datasetSummary(x, input.slug)),
+        total: page.total,
+        limit: page.limit,
+        offset: page.offset,
+        tags: tags.tags,
+      });
+    } catch (e) {
+      return failed(e);
+    }
+  }, []);
   const searchDatasets = useCallback(
-    async (input: z.infer<typeof collectionSearchInputSchema>, signal: AbortSignal) => {
+    async (input: z.infer<typeof searchInput>, signal: AbortSignal) => {
       try {
-        const params = searchParamsForInput(input);
-        const query = buildQuery(params);
-        const response = await requestJson(
-          `/api/collections/${encodePath(input.collection)}${query ? `?${query}` : ""}`,
-          collectionPageResponseSchema,
+        const params = searchParams(input);
+        const qs = queryString(params);
+        const page = await getJson(
+          `/api/collections/${enc(input.collection)}/datasets${qs ? `?${qs}` : ""}`,
+          pageSchema,
           signal,
         );
-        const urlSearch: CollectionSearchUrl = {};
-        if (params.query !== undefined) urlSearch.query = params.query;
-        if (params.offset !== undefined) urlSearch.offset = params.offset;
-        if (params.limit !== undefined) urlSearch.limit = params.limit;
-        if (input.tag_filters !== undefined) urlSearch.tag_filters = JSON.stringify(input.tag_filters);
-        await applyDatasetSearch(applySearch, input.collection, urlSearch);
-        return success("Updated the visible dataset search.", collectionPageResult(response, input.collection));
-      } catch (error) {
-        return errorResult(error instanceof Error ? error : new Error("catalog request failed"));
+        const nav: SearchUrl = {};
+        if (input.query !== undefined) nav.query = input.query;
+        if (input.offset !== undefined) nav.offset = input.offset;
+        if (input.limit !== undefined) nav.limit = input.limit;
+        if (input.tag_filters !== undefined) nav.tag_filters = JSON.stringify(input.tag_filters);
+        await applyDatasetSearch(applySearch, input.collection, nav);
+        return success("Updated the visible dataset search.", {
+          datasets: page.datasets.map((x) => datasetSummary(x, input.collection)),
+          total: page.total,
+          limit: page.limit,
+          offset: page.offset,
+        });
+      } catch (e) {
+        return failed(e);
       }
     },
     [applySearch],
   );
-
-  const getDataset = useCallback(async (input: z.infer<typeof datasetInputSchema>, signal: AbortSignal) => {
+  const getDataset = useCallback(async (input: z.infer<typeof datasetInput>, signal: AbortSignal) => {
     try {
-      const response = await requestJson(
-        `/api/collections/${encodePath(input.collection)}/datasets/${encodePath(input.dataset)}`,
-        datasetResponseSchema,
+      const item = await getJson(
+        `/api/collections/${enc(input.collection)}/datasets/${enc(input.dataset)}`,
+        catalogSchema,
         signal,
       );
       return success("Loaded dataset.", {
-        collection: collectionSummary(response.collection),
-        dataset: datasetSummary(response.dataset, input.collection),
-        files: (response.dataset.files ?? []).map((file) => fileSummary(file, input.collection, input.dataset)),
+        dataset: datasetSummary(item, input.collection),
+        files: fileChildren(item, input.collection, input.dataset),
       });
-    } catch (error) {
-      return errorResult(error instanceof Error ? error : new Error("catalog request failed"));
+    } catch (e) {
+      return failed(e);
     }
   }, []);
-
-  const getDatasetFile = useCallback(async (input: z.infer<typeof fileInputSchema>, signal: AbortSignal) => {
+  const getFile = useCallback(async (input: z.infer<typeof fileInput>, signal: AbortSignal) => {
     try {
-      const response = await requestJson(
-        `/api/collections/${encodePath(input.collection)}/datasets/${encodePath(input.dataset)}/files/${encodePath(input.file)}`,
-        rawFileResponseSchema,
-        signal,
+      return success(
+        "Loaded dataset file.",
+        fileShape(
+          await getJson(
+            `/api/collections/${enc(input.collection)}/datasets/${enc(input.dataset)}/files/${enc(input.file)}`,
+            collectionSchema,
+            signal,
+          ),
+          input.collection,
+          input.dataset,
+          input.file,
+        ),
       );
-      const shaped = shapeDatasetFileResponse(
-        response,
-        window.location.origin,
-        input.collection,
-        input.dataset,
-        input.file,
-      );
-      return success<WebMcpJsonValue>("Loaded dataset file.", JSON.parse(JSON.stringify(shaped)) as WebMcpJsonValue);
-    } catch (error) {
-      return errorResult(error instanceof Error ? error : new Error("catalog request failed"));
+    } catch (e) {
+      return failed(e);
     }
   }, []);
-
-  const getDatasetFileSchema = useCallback(async (input: z.infer<typeof schemaInputSchema>, signal: AbortSignal) => {
+  const getSchema = useCallback(async (input: z.infer<typeof schemaInput>, signal: AbortSignal) => {
     try {
       const params = new URLSearchParams();
       if (input.version !== undefined) params.set("version", String(input.version));
-      params.set("column_offset", String(input.offset ?? 0));
-      params.set("column_limit", String(Math.min(input.limit ?? MAX_SCHEMA_LIMIT, MAX_SCHEMA_LIMIT)));
-      const response = await requestJson(
-        `/api/collections/${encodePath(input.collection)}/datasets/${encodePath(input.dataset)}/files/${encodePath(input.file)}/schema?${params}`,
-        schemaResponseSchema,
-        signal,
-      );
-      const shaped = shapeDatasetFileSchemaResponse(
-        schemaShapeInput(response),
-        window.location.origin,
-        input.collection,
-        input.dataset,
-        input.file,
-      );
-      return success<WebMcpJsonValue>(
-        "Loaded dataset file schema.",
-        JSON.parse(JSON.stringify(shaped)) as WebMcpJsonValue,
-      );
-    } catch (error) {
-      return errorResult(error instanceof Error ? error : new Error("catalog request failed"));
+      const base = `/api/collections/${enc(input.collection)}/datasets/${enc(input.dataset)}/files/${enc(input.file)}`;
+      const item = await getJson(`${base}${params.size ? `?${params}` : ""}`, collectionSchema, signal);
+      const version = selectedVersion(item, input.collection, input.dataset, input.file);
+      const all = item["table:columns"] ?? [];
+      const offset = input.offset ?? 0;
+      const limit = Math.min(input.limit ?? MAX_SCHEMA_LIMIT, MAX_SCHEMA_LIMIT);
+      const columns = all.slice(offset, offset + limit);
+      const data = {
+        selected_version: version,
+        versions: [version],
+        file: { slug: input.file, name: item.title ?? input.file, layer_name: null },
+        dataset: { slug: input.dataset, name: input.dataset, tags: {} },
+        collection: { slug: input.collection, name: input.collection },
+        links: { self: base, file: base },
+        schema: {
+          version,
+          format_type: "geoparquet",
+          format_name: "GeoParquet",
+          source_id: `${item.id}/geoparquet`,
+          summary: null,
+          columns,
+          total_columns: all.length,
+          column_offset: offset,
+          column_limit: limit,
+          has_more: offset + columns.length < all.length,
+        },
+      };
+      return success("Loaded dataset file schema.", JSON.parse(JSON.stringify(data)) as WebMcpJsonValue);
+    } catch (e) {
+      return failed(e);
     }
   }, []);
-
   useWebMcpTool({
     name: "list_collections",
     routeKind: "catalog",
     title: "List collections",
     description: "List HIFLD collections.",
-    schema: emptyInputSchema,
+    schema: emptyInput,
     execute: listCollections,
     enabled,
-    annotations: READ_ANNOTATIONS,
+    annotations: READ,
   });
   useWebMcpTool({
     name: "get_collection",
     routeKind: "catalog",
     title: "Get collection",
     description: "Get collection metadata, tags, and a bounded dataset page.",
-    schema: collectionDetailInputSchema,
+    schema: collectionInput,
     execute: getCollection,
     enabled,
-    annotations: READ_ANNOTATIONS,
+    annotations: READ,
   });
   useWebMcpTool({
     name: "search_datasets",
     routeKind: "catalog",
     title: "Search datasets",
     description: "Search datasets in one collection and update its visible search.",
-    schema: collectionSearchInputSchema,
+    schema: searchInput,
     execute: searchDatasets,
     enabled,
-    annotations: SEARCH_ANNOTATIONS,
+    annotations: SEARCH,
   });
   useWebMcpTool({
     name: "get_dataset",
     routeKind: "catalog",
     title: "Get dataset",
-    description: "Get bounded metadata and files for one dataset.",
-    schema: datasetInputSchema,
+    description: "Get one dataset and its file children.",
+    schema: datasetInput,
     execute: getDataset,
     enabled,
-    annotations: READ_ANNOTATIONS,
+    annotations: READ,
   });
   useWebMcpTool({
     name: "get_dataset_file",
     routeKind: "catalog",
     title: "Get dataset file",
-    description: "Get bounded metadata, versions, formats, and canonical links for one file.",
-    schema: fileInputSchema,
-    execute: getDatasetFile,
+    description: "Get the selected version STAC Collection and query source identities.",
+    schema: fileInput,
+    execute: getFile,
     enabled,
-    annotations: READ_ANNOTATIONS,
+    annotations: READ,
   });
   useWebMcpTool({
     name: "get_dataset_file_schema",
     routeKind: "schema",
     title: "Get dataset file schema",
-    description: "Get one bounded page of columns for a dataset file.",
-    schema: schemaInputSchema,
-    execute: getDatasetFileSchema,
+    description: "Get one bounded page of table:columns from a dataset file version.",
+    schema: schemaInput,
+    execute: getSchema,
     enabled,
-    annotations: READ_ANNOTATIONS,
+    annotations: READ,
   });
   return null;
 }

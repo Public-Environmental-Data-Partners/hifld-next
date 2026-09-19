@@ -29,10 +29,12 @@ def _source() -> ExecutionSource:
     resolved = ResolvedSource(
         source=QuerySourceRef(
             alias="roads",
-            collection_id=1,
-            dataset_id=2,
-            file_id=3,
-            file_source_id=4,
+            collection_slug="hifld",
+            dataset_slug="roads",
+            file_slug="roads",
+            version="v1.0.0",
+            asset_key="geoparquet",
+            storage_location_slug="public-gcs",
         ),
         version="v1",
         format_type="geoparquet",

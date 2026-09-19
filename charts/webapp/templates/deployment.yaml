@@ -40,12 +40,18 @@ spec:
             - name: http
               containerPort: {{ .Values.containerPort }}
               protocol: TCP
-          {{- if or .Values.publicOrigin .Values.env .Values.secretEnv }}
+          {{- if or .Values.publicOrigin .Values.catalog.sqliteUrl .Values.env .Values.secretEnv }}
           env:
             {{- if .Values.publicOrigin }}
             - name: WEBAPP_PUBLIC_ORIGIN
               value: {{ .Values.publicOrigin | quote }}
             {{- end }}
+            - name: CATALOG_SQLITE_URL
+              value: {{ .Values.catalog.sqliteUrl | quote }}
+            - name: CATALOG_STORAGE_LOCATIONS_JSON
+              value: {{ .Values.catalog.storageLocationsJson | quote }}
+            - name: TMPDIR
+              value: {{ .Values.catalog.tmpDirectory | quote }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -85,6 +91,18 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          volumeMounts:
+            - name: catalog-cache
+              mountPath: {{ .Values.catalog.cacheDirectory }}
+            - name: tmp
+              mountPath: {{ .Values.catalog.tmpDirectory }}
+      volumes:
+        - name: catalog-cache
+          emptyDir:
+            sizeLimit: {{ .Values.catalog.cacheSizeLimit }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.catalog.tmpSizeLimit }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

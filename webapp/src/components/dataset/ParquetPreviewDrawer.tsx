@@ -15,8 +15,8 @@ interface ParquetPreviewDrawerProps {
   onClose: () => void;
 }
 
-function uniqueLocationOptions(options: ParquetPreviewOption[]): Array<{ id: number; name: string }> {
-  const locations = new Map<number, { id: number; name: string }>();
+function uniqueLocationOptions(options: ParquetPreviewOption[]): Array<{ id: string; name: string }> {
+  const locations = new Map<string, { id: string; name: string }>();
   for (const option of options) {
     if (!locations.has(option.storageLocationId)) {
       locations.set(option.storageLocationId, {
@@ -28,7 +28,7 @@ function uniqueLocationOptions(options: ParquetPreviewOption[]): Array<{ id: num
   return Array.from(locations.values());
 }
 
-function uniqueVersionOptions(options: ParquetPreviewOption[], storageLocationId: number): Array<string | number> {
+function uniqueVersionOptions(options: ParquetPreviewOption[], storageLocationId: string): Array<string | number> {
   const versions = new Map<string, string | number>();
   for (const option of options) {
     if (option.storageLocationId !== storageLocationId) {
@@ -77,7 +77,7 @@ function ParquetPickerRow({
   );
   const currentSourceId = selectedOption?.sourceId ?? fileOptions[0]?.sourceId;
 
-  const selectFirstFile = (storageLocationId: number, version: string | number) => {
+  const selectFirstFile = (storageLocationId: string, version: string | number) => {
     const nextOption = options.find(
       (option) => option.storageLocationId === storageLocationId && String(option.version) === String(version),
     );
@@ -96,7 +96,7 @@ function ParquetPickerRow({
           <Select
             value={currentLocationId ? String(currentLocationId) : ""}
             onValueChange={(value) => {
-              const storageLocationId = Number(value);
+              const storageLocationId = value;
               const nextVersion = uniqueVersionOptions(options, storageLocationId)[0];
               if (nextVersion !== undefined) {
                 selectFirstFile(storageLocationId, nextVersion);
@@ -148,7 +148,7 @@ function ParquetPickerRow({
           <Select
             value={currentSourceId ? String(currentSourceId) : ""}
             onValueChange={(value) => {
-              const nextOption = options.find((option) => option.sourceId === Number(value));
+              const nextOption = options.find((option) => option.sourceId === value);
               if (nextOption) {
                 onSelectOption(nextOption);
               }

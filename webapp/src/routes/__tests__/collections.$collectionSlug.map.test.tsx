@@ -18,6 +18,7 @@ import {
   Route as CollectionMapRoute,
   closeMapPopup,
   popupProperties,
+  sourceDescriptorFromLayerId,
   type ResolvedDescriptor,
   resolvedToMapLayer,
   searchDatasetsForMapImport,
@@ -26,6 +27,7 @@ import {
 vi.mock("@/lib/api-client", () => ({
   getCollectionBySlug: vi.fn(),
   getCollectionDatasets: vi.fn(),
+  getCollectionDatasetsBySlug: vi.fn(),
   getDatasetFileBySlug: vi.fn(),
 }));
 
@@ -62,6 +64,7 @@ const dataset: Dataset = {
 
 const source: DatasetSource = {
   id: 15,
+  asset_key: "pmtiles",
   version: "v1.0.0",
   url: "https://example.test/hospitals.pmtiles",
   source_type: "file",
@@ -71,6 +74,7 @@ const source: DatasetSource = {
   },
   storage_location: {
     id: 4,
+    slug: "production-gcs",
     name: "Production GCS",
     backend_type: "s3",
     created_at: "2024-01-01T00:00:00Z",
@@ -93,16 +97,14 @@ const descriptor: SourceDescriptor = {
   collectionSlug: collection.slug,
   datasetSlug: dataset.slug,
   fileSlug: "hospitals",
-  formatType: "pmtiles",
-  storageLocationId: 4,
   version: "v1.0.0",
-  sourceId: source.id,
+  assetKey: "pmtiles",
+  storageLocationSlug: "production-gcs",
 };
 
 const descriptorV2: SourceDescriptor = {
   ...descriptor,
   version: "v1.1.0",
-  sourceId: sourceV2.id,
 };
 
 const file: DatasetFile = {
@@ -167,9 +169,9 @@ describe("collection map route", () => {
     vi.mocked(apiClient.getDatasetFileBySlug).mockResolvedValue({ dataset, file });
   });
 
-  it("opens the desktop selected-features drawer larger by default", () => {
-    expect(MAP_CANVAS_DESKTOP_DEFAULT_SIZE).toBe("45%");
-    expect(MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE).toBe("55%");
+  it("keeps most of the map visible when the desktop drawer opens", () => {
+    expect(MAP_CANVAS_DESKTOP_DEFAULT_SIZE).toBe("70%");
+    expect(MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE).toBe("30%");
   });
 
   it("resolves an initial source search param on the canonical map URL", async () => {
@@ -218,32 +220,27 @@ describe("collection map route", () => {
     expect(deps).toEqual({ source: "encoded-source", sources: undefined });
   });
 
-  it("searches importable datasets with lightweight collection results", async () => {
+  it("searches importable datasets through the normalized catalog adapter", async () => {
+    const page = { items: [dataset], total: 1, limit: 12, offset: 0 };
+    vi.mocked(apiClient.getCollectionDatasetsBySlug).mockResolvedValue(page);
+    // The collection endpoint now returns a STAC Catalog, not a dataset list.
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        datasets: [dataset],
-        total: 1,
-        limit: 12,
-        offset: 0,
-      }),
+      json: async () => ({ type: "Catalog", id: "hifld", links: [] }),
     });
     vi.stubGlobal("fetch", fetchMock);
-
-    await expect(
-      searchDatasetsForMapImport({
+    try {
+      await expect(searchDatasetsForMapImport({
         collectionSlug: collection.slug,
-        query: "hospitals",
-      }),
-    ).resolves.toEqual({
-      items: [dataset],
-      total: 1,
-      limit: 12,
-      offset: 0,
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith("/api/collections/hifld?limit=12&offset=0&omit=description&search=hospitals");
-    expect(apiClient.getCollectionDatasets).not.toHaveBeenCalled();
+        query: "  hospitals  ",
+      })).resolves.toEqual(page);
+      expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledWith({
+        data: { collectionSlug: "hifld", search: "hospitals", limit: 12, offset: 0 },
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("keeps dataset search results constrained and touch-scrollable on mobile", () => {
@@ -392,6 +389,50 @@ describe("collection map route", () => {
     });
   });
 
+  it("accepts a Portolan PMTiles asset whose identity includes a content suffix", () => {
+    const portolanSource: DatasetSource = {
+      ...source,
+      asset_key: "pmtiles-fc1c85bbf3ae",
+    };
+    const portolanDescriptor: SourceDescriptor = {
+      ...descriptor,
+      assetKey: "pmtiles-fc1c85bbf3ae",
+    };
+    const portolanFile: DatasetFile = {
+      ...file,
+      formats: file.formats?.map((entry) =>
+        entry.format.format_type === "pmtiles" ? { ...entry, sources: [portolanSource] } : entry,
+      ),
+    };
+
+    expect(
+      resolvedToMapLayer({
+        descriptor: portolanDescriptor,
+        dataset,
+        file: portolanFile,
+        source: portolanSource,
+      }),
+    ).toMatchObject({
+      pmtilesUrl: "https://example.test/hospitals.pmtiles",
+      visible: true,
+    });
+  });
+
+  it("restores a content-suffixed Portolan asset identity from a loaded layer ID", () => {
+    expect(
+      sourceDescriptorFromLayerId(
+        "hifld:agricultural-minerals-operations:agricultural-minerals-operations:v1.0.0:pmtiles-fc1c85bbf3ae:seaweedfs-local-published",
+      ),
+    ).toEqual({
+      collectionSlug: "hifld",
+      datasetSlug: "agricultural-minerals-operations",
+      fileSlug: "agricultural-minerals-operations",
+      version: "v1.0.0",
+      assetKey: "pmtiles-fc1c85bbf3ae",
+      storageLocationSlug: "seaweedfs-local-published",
+    });
+  });
+
   it("derives one route import and one picker import without duplicates after synchronization", () => {
     const initialLayer = resolvedToMapLayer({ descriptor, dataset, file, source });
     const pickerLayer = resolvedToMapLayer({ descriptor: descriptorV2, dataset, file, source: sourceV2 });
@@ -414,7 +455,6 @@ describe("collection map route", () => {
           collection_slug: "hifld",
           dataset_slug: "hospitals",
           file_slug: "hospitals",
-          source_id: 15,
           version: "v1.0.0",
           import_source: "route",
           loaded_layer_count: 1,
@@ -435,7 +475,6 @@ describe("collection map route", () => {
           collection_slug: "hifld",
           dataset_slug: "hospitals",
           file_slug: "hospitals",
-          source_id: 16,
           version: "v1.1.0",
           import_source: "picker",
           loaded_layer_count: 2,
@@ -471,7 +510,6 @@ describe("collection map route", () => {
           collection_slug: "hifld",
           dataset_slug: "hospitals",
           file_slug: "hospitals",
-          source_id: 15,
           version: "v1.0.0",
           import_source: "route",
           loaded_layer_count: 2,

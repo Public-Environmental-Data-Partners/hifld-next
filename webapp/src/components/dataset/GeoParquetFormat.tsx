@@ -8,8 +8,8 @@ interface GeoParquetFormatProps {
   formatEntry: NonNullable<DatasetWithUrls["formats"]>[0];
   geoparquetUrl: string;
   storageUri?: string;
-  selectedSource: { storageLocationId: number; version: string | number } | null;
-  onSourceChange: (storageLocationId: number, version: string | number) => void;
+  selectedSource: { storageLocationId: string; version: string | number } | null;
+  onSourceChange: (storageLocationId: string, version: string | number) => void;
 }
 
 export function GeoParquetFormat({
@@ -48,7 +48,6 @@ export function GeoParquetFormat({
                   label="GeoParquet"
                   analyticsContext={{
                     format: "geoparquet",
-                    storage_location_id: selectedSource?.storageLocationId,
                     version: selectedSource?.version,
                   }}
                 />

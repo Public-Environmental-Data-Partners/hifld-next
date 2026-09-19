@@ -3,9 +3,9 @@ import { buildSourceFileUrl } from "./sourceUrls";
 import { compareVersionValues } from "./versionLabel";
 
 export interface ParquetPreviewSelection {
-  storageLocationId: number;
+  storageLocationId: string;
   version: string | number;
-  sourceId: number;
+  sourceId: string;
 }
 
 export interface ParquetPreviewOption extends ParquetPreviewSelection {
@@ -23,6 +23,13 @@ function sourcePath(source: DatasetSource): string | null {
   return isFileLocation(source.location) ? source.location.path : null;
 }
 
+function parquetFileLabel(path: string): string {
+  const segments = path.split("/").filter(Boolean);
+  const fileName = segments.at(-1) ?? "data.parquet";
+  const firstPartition = segments.findIndex((segment) => /^[^=]+=[^=]+$/.test(segment));
+  return firstPartition >= 0 ? segments.slice(firstPartition).join("/") : fileName;
+}
+
 export function parquetPreviewOptionFromSource(source: DatasetSource): ParquetPreviewOption | null {
   const path = sourcePath(source);
   const url = buildSourceFileUrl(source);
@@ -33,7 +40,7 @@ export function parquetPreviewOptionFromSource(source: DatasetSource): ParquetPr
     return null;
   }
 
-  if (storageLocationId === undefined || storageLocationId === 0 || !storageLocationName) {
+  if (!storageLocationId || !storageLocationName) {
     return null;
   }
 
@@ -44,7 +51,7 @@ export function parquetPreviewOptionFromSource(source: DatasetSource): ParquetPr
     sourceId: source.id,
     url,
     path,
-    fileName: path.split("/").pop() || "data.parquet",
+    fileName: parquetFileLabel(path),
   };
 }
 

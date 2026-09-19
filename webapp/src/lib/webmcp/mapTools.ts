@@ -35,10 +35,12 @@ const styleFieldsSchema = z
 
 const catalogLayerInputSchema = z
   .object({
-    collection_id: z.number().int().positive(),
-    dataset_id: z.number().int().positive(),
-    file_id: z.number().int().positive(),
-    file_source_id: z.number().int().positive(),
+    collection_slug: z.string().min(1),
+    dataset_slug: z.string().min(1),
+    file_slug: z.string().min(1),
+    version: z.string().min(1),
+    asset_key: z.string().min(1),
+    storage_location_slug: z.string().min(1).optional(),
     label: z.string().trim().min(1).max(80).optional(),
     visible: z.boolean().optional(),
   })
@@ -73,10 +75,12 @@ const selectionSchema = z
   .strict();
 
 export interface MapCatalogLayerInput {
-  collection_id: number;
-  dataset_id: number;
-  file_id: number;
-  file_source_id: number;
+  collection_slug: string;
+  dataset_slug: string;
+  file_slug: string;
+  version: string;
+  asset_key: string;
+  storage_location_slug?: string | undefined;
   label?: string | undefined;
   visible?: boolean | undefined;
 }
@@ -455,7 +459,7 @@ export function useMapWebMcpTools({
     name: "add_dataset_layer",
     title: "Add dataset layer",
     description:
-      "Add a catalog dataset layer to the map. Pass a file_source_id returned by get_dataset_file; a GeoParquet query source resolves to its same-version PMTiles map source.",
+      "Add a catalog dataset layer to the map. Pass the slug, version, asset key, and optional storage location returned by get_dataset_file; a GeoParquet asset resolves to its same-version PMTiles map asset.",
     schema: catalogLayerInputSchema,
     execute: addLayer,
     enabled,

@@ -304,7 +304,6 @@ function SelectedFeatureActions({ feature }: { feature: SelectedMapFeature }) {
                 datasetSlug: catalogFeature.datasetSlug,
                 fileSlug: catalogFeature.fileSlug,
                 version: catalogFeature.version,
-                sourceId: catalogFeature.sourceId,
                 feature: catalogFeature,
               }}
               trigger={
@@ -1040,31 +1039,30 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
     this.syncSelectionScope();
   }
 
-  override componentDidUpdate(prevProps: FeatureTablePanelProps) {
-    if (prevProps.features !== this.props.features) {
+  override componentDidUpdate(prevProps: FeatureTablePanelProps, prevState: FeatureTablePanelState) {
+    if (prevProps.features !== this.props.features || prevState.selectedLayerKey !== this.state.selectedLayerKey) {
       this.syncSelectionScope();
     }
   }
 
   private syncSelectionScope() {
     const groups = buildFeatureGroupOptions(this.props.features);
-    const canDiff = isComparableFeatureDiffSelection(this.props.features);
     const currentGroup = groups.find((group) => group.key === this.state.selectedLayerKey);
     const nextGroup = currentGroup ?? groups[0];
     const nextVersion =
       nextGroup?.versions.find((version) => version === this.state.selectedVersion) ?? nextGroup?.versions[0] ?? "";
     const nextLayerKey = nextGroup?.key ?? "";
-    const versions = comparableFeatureDiffVersions(this.props.features);
+    const diffFeatures = this.props.features.filter((feature) => layerKeyForFeature(feature) === nextLayerKey);
+    const canDiff = isComparableFeatureDiffSelection(diffFeatures);
+    const versions = comparableFeatureDiffVersions(diffFeatures);
     const currentLeftVersion = versions.includes(this.state.leftVersion) ? this.state.leftVersion : (versions[0] ?? "");
     const currentRightVersion =
       versions.includes(this.state.rightVersion) && this.state.rightVersion !== currentLeftVersion
         ? this.state.rightVersion
         : (versions.find((version) => version !== currentLeftVersion) ?? "");
-    const leftKeys = new Set(
-      featureDiffMatchKeyOptions(this.props.features, currentLeftVersion).map((option) => option.key),
-    );
+    const leftKeys = new Set(featureDiffMatchKeyOptions(diffFeatures, currentLeftVersion).map((option) => option.key));
     const rightKeys = new Set(
-      featureDiffMatchKeyOptions(this.props.features, currentRightVersion).map((option) => option.key),
+      featureDiffMatchKeyOptions(diffFeatures, currentRightVersion).map((option) => option.key),
     );
     const currentMatchKeyPairs = this.state.matchKeyPairs.filter(
       (pair) => leftKeys.has(pair.left) && rightKeys.has(pair.right),
@@ -1072,7 +1070,7 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
     const nextMatchKeyPairs =
       currentMatchKeyPairs.length > 0
         ? currentMatchKeyPairs
-        : defaultFeatureDiffMatchKeyPairs(this.props.features, currentLeftVersion, currentRightVersion);
+        : defaultFeatureDiffMatchKeyPairs(diffFeatures, currentLeftVersion, currentRightVersion);
     const nextActiveTab = canDiff ? this.state.activeTab : "selected";
 
     if (
@@ -1116,7 +1114,8 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
       diffColumnMode,
       sort,
     } = this.state;
-    const canDiff = isComparableFeatureDiffSelection(features);
+    const diffFeatures = features.filter((feature) => layerKeyForFeature(feature) === selectedLayerKey);
+    const canDiff = isComparableFeatureDiffSelection(diffFeatures);
 
     return (
       <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
@@ -1193,7 +1192,7 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
             />
           ) : (
             <DiffTable
-              features={features}
+              features={diffFeatures}
               s2Level={s2Level}
               onS2LevelChange={onS2LevelChange}
               leftVersion={leftVersion}
@@ -1203,7 +1202,7 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
                 this.setState({
                   leftVersion: nextVersionValue,
                   rightVersion: nextRightVersion,
-                  matchKeyPairs: defaultFeatureDiffMatchKeyPairs(features, nextVersionValue, nextRightVersion),
+                  matchKeyPairs: defaultFeatureDiffMatchKeyPairs(diffFeatures, nextVersionValue, nextRightVersion),
                 });
               }}
               onRightVersionChange={(nextVersionValue) => {
@@ -1211,7 +1210,7 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
                 this.setState({
                   leftVersion: nextLeftVersion,
                   rightVersion: nextVersionValue,
-                  matchKeyPairs: defaultFeatureDiffMatchKeyPairs(features, nextLeftVersion, nextVersionValue),
+                  matchKeyPairs: defaultFeatureDiffMatchKeyPairs(diffFeatures, nextLeftVersion, nextVersionValue),
                 });
               }}
               matchKeyPairs={matchKeyPairs}

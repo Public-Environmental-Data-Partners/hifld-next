@@ -18,16 +18,18 @@ NOW = datetime(2033, 5, 18, 3, 33, 20, tzinfo=UTC)
 def source(alias: str = "roads", source_id: int = 4) -> QuerySourceRef:
     return QuerySourceRef(
         alias=alias,
-        collection_id=1,
-        dataset_id=2,
-        file_id=3,
-        file_source_id=source_id,
+        collection_slug="hifld",
+        dataset_slug="roads",
+        file_slug="roads",
+        version="v1.0.0",
+        asset_key=f"geoparquet-{source_id}",
+        storage_location_slug="public-gcs",
     )
 
 
 def payload(
     *,
-    token_version: int = 1,
+    token_version: int = 2,
     canonical_sql: str = "SELECT id FROM roads ORDER BY id",
     sources: tuple[QuerySourceRef, ...] | None = None,
     geometry_column: str | None = None,
@@ -64,7 +66,7 @@ def test_token_encoding_is_deterministic_and_round_trips() -> None:
     assert codec.decode(first, now=NOW) == payload()
     raw = base64.urlsafe_b64decode(first + "=" * (-len(first) % 4))
     decoded = json.loads(zlib.decompress(raw[: -hashlib.sha256().digest_size]))
-    assert decoded["token_version"] == 1
+    assert decoded["token_version"] == 2
     assert decoded["issued_at"] == int(NOW.timestamp())
 
 
@@ -150,9 +152,30 @@ def test_token_rejects_future_issue_time() -> None:
 
 def test_token_rejects_unsupported_version() -> None:
     codec = QueryTokenCodec(SECRET)
-    token = codec.encode(payload(token_version=2))
+    token = codec.encode(payload(token_version=3))
 
     with pytest.raises(QueryTokenError):
+        codec.decode(token, now=NOW)
+
+
+def test_token_rejects_authenticated_legacy_numeric_source_payload() -> None:
+    codec = QueryTokenCodec(SECRET)
+    data = json.loads(payload().model_dump_json())
+    data["token_version"] = 1
+    data["issued_at"] = int(NOW.timestamp())
+    data["expires_at"] = int((NOW + timedelta(hours=2)).timestamp())
+    data["sources"] = [
+        {
+            "alias": "roads",
+            "collection_id": 1,
+            "dataset_id": 2,
+            "file_id": 3,
+            "file_source_id": 4,
+        }
+    ]
+    token = encode_raw(json.dumps(data, sort_keys=True, separators=(",", ":")).encode())
+
+    with pytest.raises(QueryTokenError, match="payload is invalid"):
         codec.decode(token, now=NOW)
 
 

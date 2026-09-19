@@ -28,10 +28,12 @@ class _RequestModel(BaseModel):
 
 class QuerySourceHttpRequest(_RequestModel):
     alias: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
-    collection_id: int = Field(gt=0)
-    dataset_id: int = Field(gt=0)
-    file_id: int = Field(gt=0)
-    file_source_id: int = Field(gt=0)
+    collection_slug: str
+    dataset_slug: str
+    file_slug: str
+    version: str
+    asset_key: str
+    storage_location_slug: str | None = None
 
 
 class QueryHttpRequest(_RequestModel):
@@ -77,10 +79,12 @@ class QueryHttpService(Protocol):
 def _source_payload(source: QuerySourceHttpRequest) -> dict[str, JsonValue]:
     return {
         "alias": source.alias,
-        "collection_id": source.collection_id,
-        "dataset_id": source.dataset_id,
-        "file_id": source.file_id,
-        "file_source_id": source.file_source_id,
+        "collection_slug": source.collection_slug,
+        "dataset_slug": source.dataset_slug,
+        "file_slug": source.file_slug,
+        "version": source.version,
+        "asset_key": source.asset_key,
+        "storage_location_slug": source.storage_location_slug,
     }
 
 

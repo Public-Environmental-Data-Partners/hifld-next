@@ -76,6 +76,20 @@ def test_local_seaweed_is_resolved_from_catalog_storage_config() -> None:
     assert spec.seaweedfs.tls is False
 
 
+def test_compose_seaweed_dns_is_resolved_from_server_config() -> None:
+    config = BucketStorageConfig(
+        type="seaweedfs",
+        base_url="http://seaweedfs:8888",
+        bucket="hifld",
+        endpoint_url="http://seaweedfs:8333",
+    )
+
+    spec = StorageResolver().resolve(source(config, "s3://hifld/a.parquet"))
+
+    assert spec.seaweedfs is not None
+    assert spec.seaweedfs.endpoint == "seaweedfs:8333"
+
+
 @pytest.mark.parametrize(
     "uri", ["s3://other/a.parquet", "s3://hifld/datasets/%2e%2e/secret.parquet"]
 )
@@ -98,12 +112,6 @@ def test_catalog_bucket_scope_and_traversal_are_rejected(uri: str) -> None:
             type="s3",
             base_url="https://s3.amazonaws.com/catalog",
             bucket="catalog",
-        ),
-        BucketStorageConfig(
-            type="seaweedfs",
-            base_url="https://storage.example.test",
-            bucket="catalog",
-            endpoint_url="https://storage.example.test:8333",
         ),
     ],
 )

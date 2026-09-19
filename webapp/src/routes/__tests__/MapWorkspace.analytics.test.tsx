@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SourceDescriptor } from "@/components/map/sourceDescriptors";
 import type { Collection, Dataset, DatasetFile, DatasetSource } from "@/lib/api-client";
 
-const { getDatasetBySlug, getDatasetFileBySlug, trackDatasetImportedIntoMap } = vi.hoisted(() => ({
+const { getCollectionDatasetsBySlug, getDatasetBySlug, getDatasetFileBySlug, trackDatasetImportedIntoMap } = vi.hoisted(() => ({
+  getCollectionDatasetsBySlug: vi.fn(),
   getDatasetBySlug: vi.fn(),
   getDatasetFileBySlug: vi.fn(),
   trackDatasetImportedIntoMap: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock("@/lib/analytics", () => ({
 
 vi.mock("@/lib/api-client", () => ({
   getCollectionBySlug: vi.fn(),
+  getCollectionDatasetsBySlug,
   getDatasetBySlug,
   getDatasetFileBySlug,
 }));
@@ -74,12 +76,14 @@ const dataset: Dataset = {
 
 const source: DatasetSource = {
   id: 15,
+  asset_key: "pmtiles",
   version: "v1.0.0",
   url: "https://example.test/hospitals.pmtiles",
   source_type: "file",
   location: { version: "v1.0.0", path: "hospitals.pmtiles" },
   storage_location: {
     id: 4,
+    slug: "production-gcs",
     name: "Production GCS",
     backend_type: "s3",
     created_at: "2024-01-01T00:00:00Z",
@@ -99,10 +103,9 @@ const descriptor: SourceDescriptor = {
   collectionSlug: collection.slug,
   datasetSlug: dataset.slug,
   fileSlug: "hospitals",
-  formatType: "pmtiles",
-  storageLocationId: 4,
   version: "v1.0.0",
-  sourceId: source.id,
+  assetKey: "pmtiles",
+  storageLocationSlug: "production-gcs",
 };
 
 const file: DatasetFile = {
@@ -140,10 +143,9 @@ describe("MapWorkspace map-import analytics", () => {
     getDatasetBySlug.mockResolvedValue({ ...dataset, files: [file] });
     getDatasetFileBySlug.mockResolvedValue({ dataset, file });
     trackDatasetImportedIntoMap.mockClear();
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ datasets: [{ ...dataset, files: [file] }], total: 1, limit: 12, offset: 0 }),
-    }));
+    getCollectionDatasetsBySlug.mockResolvedValue({
+      items: [{ ...dataset, files: [file] }], total: 1, limit: 12, offset: 0,
+    });
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: false,
       media: query,
@@ -195,7 +197,6 @@ describe("MapWorkspace map-import analytics", () => {
         collection_slug: "hifld",
         dataset_slug: "hospitals",
         file_slug: "hospitals",
-        source_id: 15,
         version: "v1.0.0",
         import_source: "route",
         loaded_layer_count: 1,
@@ -216,7 +217,6 @@ describe("MapWorkspace map-import analytics", () => {
         collection_slug: "hifld",
         dataset_slug: "hospitals",
         file_slug: "hospitals",
-        source_id: 16,
         version: "v1.1.0",
         import_source: "picker",
         loaded_layer_count: 2,
@@ -238,7 +238,6 @@ describe("MapWorkspace map-import analytics", () => {
         collection_slug: "hifld",
         dataset_slug: "hospitals",
         file_slug: "hospitals",
-        source_id: 15,
         version: "v1.0.0",
         import_source: "route",
         loaded_layer_count: 1,
@@ -257,7 +256,6 @@ describe("MapWorkspace map-import analytics", () => {
         collection_slug: "hifld",
         dataset_slug: "hospitals",
         file_slug: "hospitals",
-        source_id: 15,
         version: "v1.0.0",
         import_source: "picker",
         loaded_layer_count: 1,

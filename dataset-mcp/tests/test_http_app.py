@@ -535,10 +535,11 @@ def test_health_and_assets_bypass_expensive_request_concurrency(
                             "sources": [
                                 {
                                     "alias": "roads",
-                                    "collection_id": 1,
-                                    "dataset_id": 2,
-                                    "file_id": 3,
-                                    "file_source_id": 4,
+                                    "collection_slug": "hifld",
+                                    "dataset_slug": "roads",
+                                    "file_slug": "roads",
+                                    "version": "v1.0.0",
+                                    "asset_key": "geoparquet",
                                 }
                             ],
                             "sql": "SELECT id FROM roads",
@@ -744,10 +745,11 @@ def test_http_app_wires_query_resources_to_the_shared_query_service() -> None:
                         "sources": [
                             {
                                 "alias": "roads",
-                                "collection_id": 1,
-                                "dataset_id": 2,
-                                "file_id": 3,
-                                "file_source_id": 4,
+                                "collection_slug": "hifld",
+                                "dataset_slug": "roads",
+                                "file_slug": "roads",
+                                "version": "v1.0.0",
+                                "asset_key": "geoparquet",
                             }
                         ],
                         "sql": "SELECT id FROM roads",

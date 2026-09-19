@@ -1,57 +1,51 @@
 # dataset-mcp
 
 Stateless FastMCP Apps service for catalog discovery and bounded server-side
-ClickHouse queries. The production image builds the nested React app and runs
-as a non-root user. A separate internal ClickHouse service provides request-local
-SQL execution, native object-store glob discovery, shared filesystem caching and
-fixed CRS projection functions. See [query engine setup and compatibility](../ops/clickhouse/README.md).
+DuckDB queries. The production image builds the nested React app, installs
+DuckDB `httpfs` and `spatial` extensions at image-build time, and runs as a
+non-root user with a read-only root filesystem. Runtime scratch space is the
+dedicated 4 GiB spill volume configured by the Helm chart.
 
 ## Local development
 
-### Map query preflight
-
-`view_map` validates and executes a bounded one-row preview of each query layer
-before returning a map. A failed preparation returns a tool error naming the
-layer, not a pending map. Successful responses include `layers[].preview`
-(`rows`, `limit`, `warnings`), column metadata and result status. Preview rows
-also appear in the text response; geometry values are summaries, not GeoJSON.
-Empty results are explicitly identified. The widget reuses the prepared tile
-credentials without repeating preparation. External tile sources are unchanged.
-
-Test new SQL with `query_parquet` and a small returned-page limit before mapping.
-Use the same source references, SQL and CRS. Preview success does not guarantee
-tile rendering, and a page limit does not bound aggregate or join execution cost.
-Spatial-only joins and geometry grouping remain engine compatibility limitations;
-their known errors now provide sanitized explanations instead of a generic failure.
-
-### Starting locally
-
-Start ClickHouse with `docker compose up -d --build clickhouse` from the repository
-root, export the ClickHouse settings documented in `.env.example`, then start the
-service on port 8001:
+Start the service on port 8001 with no configuration:
 
 ```bash
 cd dataset-mcp
 uv run fastapi dev
 ```
 
-Local development defaults the dataset-api URL to `http://127.0.0.1:8000` and
-uses unsigned reads against the repository's local SeaweedFS setup. Set
-`DATASET_MCP_CATALOG_BASE_URL` only when dataset-api is
-running elsewhere. Object locations and non-secret storage configuration come
-from dataset-api; dataset-mcp does not maintain a second storage-profile
-configuration.
+Local development defaults the catalog URL to `http://127.0.0.1:8000` and uses
+the fixed `access` / `secret` credentials from the repository's local SeaweedFS
+setup. For the unified catalog, point `DATASET_MCP_CATALOG_BASE_URL` at the
+webapp that serves the public STAC routes (normally `http://127.0.0.1:3000`).
+The public STAC documents contain canonical asset hrefs, but they do not grant
+access to arbitrary object stores. Configure the matching server-controlled
+storage registry before running queries:
+
+```bash
+export DATASET_MCP_CATALOG_BASE_URL=http://127.0.0.1:3000
+export DATASET_MCP_CATALOG_STORAGE_LOCATIONS='{"seaweedfs-local-published":{"type":"seaweedfs","base_url":"http://localhost:8333","endpoint_url":"http://localhost:8333","bucket":"hifld-local-published"}}'
+```
+
+An asset is queryable only when its href matches one registry entry's exact
+origin and bucket prefix. User-supplied source references may select a known
+storage slug, but cannot supply a URL, bucket, endpoint, or credentials.
 
 The production service is configured through the `DATASET_MCP_` environment
 prefix and is exposed on port 8000. Required settings are:
 
-- `DATASET_MCP_CATALOG_BASE_URL`: the internal dataset-api base URL.
+- `DATASET_MCP_CATALOG_BASE_URL`: the webapp base URL serving the public STAC
+  catalog API.
+- `DATASET_MCP_CATALOG_STORAGE_LOCATIONS`: a JSON object mapping trusted storage
+  slugs to `type`, `base_url`, `bucket`, and optional `endpoint_url`. Docker
+  Compose and Helm reuse the same value as `CATALOG_STORAGE_LOCATIONS_JSON`.
 - `DATASET_MCP_QUERY_TOKEN_SECRET`: at least 32 bytes, used to sign stateless
   query and tile tokens.
 
-ClickHouse endpoint and query/control credentials are also required as described
-in the engine setup. `DATASET_MCP_PUBLIC_ORIGIN` is optional. No DuckDB runtime
-or extensions are installed in the production image. `/healthz` is the
+`DATASET_MCP_PUBLIC_ORIGIN` is optional. DuckDB's `httpfs` and `spatial`
+extensions are installed into `/opt/duckdb/extensions` while the image is
+built; the container never downloads extensions at startup. `/healthz` is the
 Kubernetes and container health endpoint; MCP traffic is served at `/mcp`.
 
 The first-party webapp keeps the MCP transport same-origin by default. Its
@@ -84,7 +78,7 @@ service:
   `offset` is non-negative and `page_size` is 1 through 1,000.
 
 Stable problem codes are returned for policy, timeout, capacity, token, and
-geometry failures. They do not expose raw database errors, SQL, object paths,
+geometry failures. They do not expose DuckDB errors, SQL, object paths,
 credentials, or token values. Query MVT is loaded directly from the public
 `GET /api/queries/{query_id}/tiles/{z}/{x}/{y}.mvt` URL, with the same token
 header; the webapp does not proxy tiles. Query IDs do not identify persisted
@@ -103,80 +97,13 @@ when needed, `storage.allowedPorts`) for the object-store network ranges; use
 `networkPolicy.extraEgress` for an in-cluster S3-compatible endpoint. Do not
 allow arbitrary egress or pass storage URLs through tool arguments.
 
-## Mixed-source maps
-
-`view_map(title, layers, basemap="street", camera=None)` accepts explicitly typed
-layer sources. Common styling (`color`, `color_property`, `opacity`,
-`point_radius`, etc.) and `visible` remain on each layer.
-
-- `query`: `inputs` contains catalog references and SQL aliases; `sql` is required.
-  Optional `geometry_column` selects the output geometry. `result_crs` sets the
-  common working CRS of all geometry sources before SQL runs (default EPSG:4326).
-  Native bbox columns are not reprojected.
-- `catalog`: `collection_id`, `dataset_id`, `file_id`, and `file_source_id` select
-  an exact published PMTiles source. `get_dataset_file` returns `map_sources`
-  alongside all existing file formats and GeoParquet `query_sources`.
-- `pmtiles`: a public HTTPS archive `url` and optional `source_layer`.
-- `tilejson`: a public HTTPS metadata `url` and optional `source_layer`.
-- `vector_tiles`: public HTTPS XYZ `tiles` templates, required `source_layer`,
-  and optional `minzoom`, `maxzoom`, and `bounds`.
-
-For example, the following layer sources can be mixed in one map:
-
-```json
-{"type":"pmtiles","url":"https://example.org/data.pmtiles","source_layer":"flood"}
-```
-
-```json
-{"type":"tilejson","url":"https://example.org/tiles.json","source_layer":"roads"}
-```
-
-```json
-{"type":"vector_tiles","tiles":["https://example.org/{z}/{x}/{y}.pbf"],"source_layer":"hospitals","maxzoom":14}
-```
-
-Only query sources invoke ClickHouse. Other sources load directly in the browser and
-must allow cross-origin requests; PMTiles hosting must support HTTP byte ranges.
-`source_layer` is inferred only when metadata declares exactly one vector layer.
-Metadata failures are reported per layer without blocking other layers. Rendering
-uses geometry-type filters so polygon vertices are not displayed as points.
-
-The widget declares public HTTPS connections in its MCP resource CSP; script and
-frame permissions are not broadened. Hosts may impose stricter network policies.
-External sources never receive HIFLD query tokens. Local/private URLs, embedded
-credentials, non-vector PMTiles, and invalid metadata are rejected. URLs are not
-server-side fetch instructions or SQL source inputs.
-
-The result includes a durable `map_spec`; `refresh_map` refreshes query tokens and
-re-resolves catalog sources. External-only maps do not schedule token refreshes.
-"Configured map" means configuration was accepted, not that tiles have rendered.
-Existing `view_query_map` and `refresh_query_map` remain supported.
-
-### Runtime feedback to the agent
-
-The widget publishes `map_status` through the host's `updateModelContext`
-capability. It reports `loading`, `loaded`, `partial`, or `failed`, with named
-per-layer outcomes (including `hidden`) and sanitized error guidance. `loaded`
-means sources loaded for the current viewport, not that the entire dataset was
-read or that any particular features are present. Failed layers are not marked
-loaded merely because MapLibre becomes idle. Unchanged snapshots are deduplicated
-and delivery is serialized.
-
-Validation failures are reported before map initialization. Tile error updates
-include HTTP status when available, but never raw error bodies, SQL, or query
-tokens. If the host does not support context updates or rejects them, the widget
-asks the user to share its status with the agent. Context updates do not force a
-new agent turn or retroactively change the original tool response. An older
-cached widget must be reloaded to receive this behavior; the resource URI is
-unchanged.
-
 ## Interactive query maps
 
 Regular discovery, metadata, row, and query tools return text and structured
 content without opening an app. `view_query_map` opens the map-only MCP App and
 accepts one through eight named spatial query layers. Each layer contains the
 same trusted `sources`, safe read-only `sql`, optional geometry/CRS selection,
-and constrained style accepted by `query_parquet`. The agent must provide a
+and constrained style accepted by `query_geoparquet`. The agent must provide a
 meaningful map title and unique layer names; query-ID labels are never
 generated.
 
@@ -187,14 +114,13 @@ durable map definition. Before the earliest token expires, the component calls
 the app-only `refresh_query_map` tool to re-run that definition and replace all
 runtime query IDs and tokens. This also restores maps from saved conversations
 when the host restores the MCP App result and supports proxied server-tool
-calls. Tokens remain stateless and do not require a query registry. Successfully
-encoded tiles can be reused from a bounded per-process cache.
+calls. Nothing is stored in memory, Valkey, or a result registry.
 
 Each layer receives an absolute sandbox-compatible
 `${publicOrigin}/tiles/{query_id}/{z}/{x}/{y}.mvt` URL. The component matches
 that query ID to its layer token and sends `X-HIFLD-Query-Token`; the server
 verifies that the path ID matches the signed token before re-running the
-bounded ClickHouse tile query on a cache miss. The component renders independent MapLibre sources
+bounded DuckDB tile query. The component renders independent MapLibre sources
 in input order, fits their combined bounds unless the agent supplies a camera,
 and displays one named solid-color legend group per layer.
 
@@ -203,173 +129,7 @@ HIFLD webapp and also supports its Esri World Imagery satellite mode. Arbitrary
 style URLs, raw MapLibre expressions, partial maps, GeoJSON conversion, and
 alternate tile fallbacks are not accepted.
 
-The app uses a bundled classic worker (`maplibre-gl-worker.cjs`) because module
-Blob workers fail to initialize in opaque-origin sandboxed iframes. The existing
-module-worker assets remain available. Browser tests exercise the built UI,
-worker, MVT decoding, token headers, and point selection in both sandbox modes:
-
-```bash
-npm run --workspace @hifld/dataset-mcp-ui build
-npx playwright install chromium
-npm run --workspace @hifld/dataset-mcp-ui test:browser
-```
-
-### Query tools without the map UI
-
-Tile GET requests monitor HTTP disconnects: abandoned work is cancelled through
-the worker pool, and its HTTP concurrency slot is released only after cleanup.
-This covers both `/tiles/...` routes and `/api/queries/.../tiles/...`; POST bodies
-are unaffected. Browser cancellation must reach the application through any
-proxy for this to take effect. MapLibre's existing cancellation behavior is
-retained; no additional frontend debounce is imposed.
-
-Map errors have a dismiss button at the standard top-left inset. Dismissing a
-message hides repeated copies for the current map, not the underlying failed
-layer status or agent feedback. Distinct errors can still appear.
-
-Before building spatial SQL, call `inspect_query_source(source)` with one
-`get_dataset_file.query_sources` reference. It uses the existing bounded worker
-to inspect actual Parquet columns with `SELECT * LIMIT 0`, including generated
-Hive fields absent from older catalog statistics. Geometry CRS is returned when
-GeoParquet metadata declares it; unknown CRS remains null. Numeric bbox structs are candidates,
-not verified GeoParquet covering metadata. No feature rows or query tokens are
-returned. Metadata/object listing can still require remote reads.
-
-`get_dataset_file.query_hints` summarizes partition names and observed string
-values from catalog paths; these may not be exhaustive. Query references are
-deduplicated by source ID. Match hints to inspected columns, then use partition
-and scalar bbox filters before exact spatial joins. Camera bounds do not filter
-SQL. Prefer transforming the small query region/point set into the source CRS
-over transforming every large-source geometry in the initial predicate. These
-are generic, metadata-driven hints, not dataset-specific SQL rewrites.
-
-`query_parquet` replaces the MCP tool name `query_geoparquet`; reconnect clients
-to refresh tool discovery. Its arguments and paginated response are unchanged.
-Raw geometry values remain size summaries. For bounded geometry output, select
-`ST_AsGeoJSON(geometry)` (a JSON string) and transform to EPSG:4326 first when
-needed. Cell and response byte limits still apply. Catalog source resolution
-and the list of supported catalog formats are unchanged by this rename.
-
-`generate_mvt_tile_url(sources, sql, geometry_column?, result_crs?)` returns only:
-
-```json
-{
-  "tile_url": "https://example.org/tiles/query-id/{z}/{x}/{y}.mvt",
-  "headers": {"X-HIFLD-Query-Token": "signed-query-token"},
-  "expires_at": "2026-09-10T22:00:00Z",
-  "source_layer": "hifld",
-  "geometry_column": "geometry",
-  "result_crs": "EPSG:3857"
-}
-```
-
-The SQL must return a GEOMETRY column. CRS-tagged geometry is inferred; otherwise
-provide the SQL result's CRS explicitly. This tool does not guess CRS from source
-coordinates or convert GeoJSON text back into geometry. Specify geometry_column
-when more than one geometry is returned. Send the returned headers on tile GETs
-and regenerate the URL after expiry. The token is a capability: keep it out of
-logs and do not append it to the URL. A one-row validation probe preserves the
-full SQL for per-tile execution; it does not impose SQL LIMIT 1 on the tiles.
-No full result cache, global bounds scan, or feature collection is created.
-Existing SQL restrictions, tile feature/byte caps, deadlines, source
-revalidation, and worker memory limits apply.
-
-### Query scheduling and tile budgets
-
-Tile execution allows up to 60 seconds. The former two-process DuckDB worker
-pool is no longer used. Independent ClickHouse HTTP queries default to two
-threads and a 1 GiB per-query memory limit; the server profile caps queries at
-60 seconds. Caller cancellation sends KILL QUERY through a separate restricted
-control connection. The ClickHouse pod has its own resource and disposable cache
-limits; aggregate concurrency must be load-tested within that pod's memory budget.
-
-HTTP tile admission is separate from execution: `DATASET_MCP_MAX_CONCURRENCY`
-(default 8) bounds simultaneous HTTP requests per query ID, with a global tile
-allowance eight times that value. Non-tile MCP/query requests retain their own
-allowance. Cancellation holds capacity until cleanup finishes.
-
-Production enables a per-process successful-tile cache:
-
-- `DATASET_MCP_TILE_CACHE_MAX_BYTES`: 268435456 (256 MiB, with estimated key overhead).
-- `DATASET_MCP_TILE_CACHE_MAX_ENTRIES`: 4096, also bounding empty tiles.
-- `DATASET_MCP_TILE_CACHE_TTL_SECONDS`: 60 seconds, independent of token lifetime.
-- `DATASET_MCP_TILE_CACHE_MAX_IN_FLIGHT`: 64 distinct computations, including retirement.
-
-Keys include canonical SQL, resolved source version/URIs/storage endpoint,
-geometry/CRS, XYZ, and feature cap. New tokens can reuse tiles. Every hit still
-validates the token and resolves its sources. Failures are not cached. Concurrent
-requests share one computation; cancelling the last waiter cancels and awaits
-cleanup. Replicas do not share cached tiles, but can execute the same stateless
-token with the same signing secret and source access.
-
-Trusted Parquet source lists explicitly enable Hive partitioning. Predicates
-such as `state_fips = '36'` can therefore prune partition files, in addition to
-the row-group pruning enabled by explicit `bbox` predicates. These settings do
-not eliminate object-storage reads or guarantee a particular tile latency.
-
-Simple unchanged-geometry selections use GeoParquet `covering` declarations from
-every source object, carrying their numeric field paths as hidden scalar columns.
-Inline tile bounds allow statistics pushdown; rebuilding the fields with
-`struct_pack` prevents the desired simple predicates. Discovery uses a 32-entry,
-60-second per-worker cache, separated by object list, geometry, and storage endpoint.
-Missing/inconsistent declarations, ambiguous geometry, modified stars, joins,
-aggregates, limits, and transformed geometry disable automatic carry-through.
-The worker does not guess a covering from a column named `bbox`.
-
-Automatic covering supports EPSG:4326, EPSG:3857, and tested NAD83 EPSG:4269.
-Other CRSs use exact intersection in the rendering CRS without unsafe
-corner-derived prefilters. Explicit source filters remain useful for complex
-queries. Existing feature/byte limits still apply to encoded tiles.
-
-Examples: `SELECT NAME, geometry FROM hospitals WHERE COUNTYFIPS = '36061'`
-with EPSG:3857 for source 21101; `SELECT geometry FROM roads WHERE class = 'primary'`
-with that result's CRS; or a spatial join that selects one named geometry from
-the joined tables. Use query_parquet instead for scalar aggregates.
-
-## Temporary map argument diagnostics
-
-`view_query_map` HTTP calls emit `mcp_argument_types` JSON log records at
-`http_ingress` (decoded HTTP JSON) and `tool_dispatch` (FastMCP's public middleware
-hook before tool-specific Pydantic validation). Match the generated `request_id`
-across both records. The Helm chart sets `DATASET_MCP_BUILD_REVISION` from the image
-tag; local runs report `unknown` unless this environment variable is set.
-
-Only the fixed tool name, stage, generated ID, revision, and the types of `layers`
-and `camera` are logged. `missing` differs from `null`. No argument values, SQL,
-client request IDs, or headers are added to these records. Existing framework
-validation warnings are unchanged and may still include invalid input values.
-
-After deployment through the normal workflow, retry a simple Claude map and a
-direct MCP call, then inspect:
-
-```bash
-kubectl -n hifld-next logs deployment/dataset-mcp --since=10m | rg mcp_argument_types
-```
-
-A string at ingress places the conversion upstream of the application. An array
-at ingress and string at dispatch places it between those boundaries. Arrays at
-both boundaries require investigating the remaining dispatch/validation path;
-the dispatch hook is not instrumentation inside Pydantic itself.
-
-At validation, view_query_map now also accepts one JSON-encoded layers or camera
-parameter for connector compatibility. Correctly typed values are unchanged;
-decoded values still undergo the same shape, range, and query checks. Malformed
-JSON, double encoding, and invalid layer/camera shapes remain errors. The
-advertised schemas still ask clients for actual arrays/objects. Diagnostics
-observe the original input types before this compatibility decoding.
-
-Capture tees incoming chunks unchanged and is capped at 1 MiB per request. Invalid
-or oversized JSON skips the ingress record without changing normal processing;
-a missing ingress record is not evidence of conversion. Non-map tools are not
-logged. Remove the two diagnostic middleware registrations, their module, and
-the chart revision variable after the investigation.
-
 ## Opt-in storage acceptance tests
-
-Current ClickHouse live tests and their environment settings are documented in
-[engine verification](../ops/clickhouse/README.md#verification). The following
-DuckDB tests are retained only as legacy regression references, not production
-engine acceptance tests.
 
 The normal test suite does not require network access. To exercise a real
 public GCS object through the DuckDB worker, set:

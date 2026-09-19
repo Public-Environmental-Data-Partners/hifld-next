@@ -567,6 +567,27 @@ describe("useMapInitialization helpers", () => {
     expect(element.style.top).toBe("96px");
   });
 
+  it("keeps the pinned popup inside the map after the data drawer shrinks it", () => {
+    const parent = document.createElement("div");
+    const element = document.createElement("div");
+    parent.append(element);
+    Object.defineProperties(parent, {
+      clientWidth: { value: 600 },
+      clientHeight: { value: 320 },
+    });
+    Object.defineProperties(element, {
+      offsetWidth: { value: 280 },
+      offsetHeight: { value: 240 },
+    });
+    syncPinnedPopupPosition({
+      map: { project: () => ({ x: 550, y: 400 }) },
+      lngLat: { lng: -77, lat: 39 },
+      element,
+    });
+    expect(element.style.left).toBe("312px");
+    expect(element.style.top).toBe("72px");
+  });
+
   it("hides existing rendered layers with map layout visibility", () => {
     const map = {
       getStyle: vi.fn(() => ({

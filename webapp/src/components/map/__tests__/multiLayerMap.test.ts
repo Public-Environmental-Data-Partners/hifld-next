@@ -16,10 +16,9 @@ const descriptor: SourceDescriptor = {
   collectionSlug: "hifld",
   datasetSlug: "hospitals",
   fileSlug: "hospitals",
-  formatType: "pmtiles",
-  storageLocationId: 4,
   version: "v1.1.0",
-  sourceId: 7,
+  assetKey: "pmtiles",
+  storageLocationSlug: "production-gcs",
 };
 
 describe("multi-layer map helpers", () => {
@@ -69,7 +68,7 @@ describe("multi-layer map helpers", () => {
       pmtilesUrl: "https://example.test/hospitals.pmtiles",
     });
 
-    expect(loadedLayer.id).toContain("hifld:hospitals:hospitals:pmtiles:4:v1.1.0:7");
+    expect(loadedLayer.id).toContain("hifld:hospitals:hospitals:v1.1.0:pmtiles:production-gcs");
     expect(loadedLayer.mapSourceId).toBe(`source-${loadedLayer.id}`);
     expect(loadedLayer.storageLocationName).toBe("Production GCS");
   });

@@ -27,5 +27,10 @@ geoserver/binaries/
 node_modules/
 **/node_modules/
 
+# Python runtime/test caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+
 # Isolated agent implementation worktrees
 .worktrees/

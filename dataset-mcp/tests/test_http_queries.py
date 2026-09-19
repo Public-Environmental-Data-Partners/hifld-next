@@ -105,10 +105,11 @@ def query_request() -> dict[str, JsonValue]:
         "sources": [
             {
                 "alias": "roads",
-                "collection_id": 1,
-                "dataset_id": 2,
-                "file_id": 3,
-                "file_source_id": 4,
+                "collection_slug": "hifld",
+                "dataset_slug": "roads",
+                "file_slug": "roads",
+                "version": "v1.0.0",
+                "asset_key": "geoparquet",
             }
         ],
         "sql": "SELECT id FROM roads",

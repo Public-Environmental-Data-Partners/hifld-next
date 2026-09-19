@@ -3,12 +3,12 @@ import { compareVersionValues } from "./versionLabel";
 
 export { compareVersionValues } from "./versionLabel";
 
-export function getLocationOptions(formatEntry?: DatasetFormat): Array<{ id: number; name: string }> {
+export function getLocationOptions(formatEntry?: DatasetFormat): Array<{ id: string; name: string }> {
   if (!formatEntry?.sources) {
     return [];
   }
 
-  const locations = new Map<number, { id: number; name: string }>();
+  const locations = new Map<string, { id: string; name: string }>();
   for (const source of formatEntry.sources) {
     const locationId = source.storage_location?.id;
     const locationName = source.storage_location?.name;
@@ -22,7 +22,7 @@ export function getLocationOptions(formatEntry?: DatasetFormat): Array<{ id: num
 
 export function getVersionSourcesForLocation(
   formatEntry: DatasetFormat | undefined,
-  locationId: number | null | undefined,
+  locationId: string | null | undefined,
 ): DatasetSource[] {
   if (!formatEntry?.sources || !locationId) {
     return [];
@@ -45,7 +45,7 @@ export function getVersionSourcesForLocation(
   );
 }
 
-export function getComparableLocations(formatEntry?: DatasetFormat): Array<{ id: number; name: string }> {
+export function getComparableLocations(formatEntry?: DatasetFormat): Array<{ id: string; name: string }> {
   return getLocationOptions(formatEntry).filter(
     (location) => getVersionSourcesForLocation(formatEntry, location.id).length >= 2,
   );

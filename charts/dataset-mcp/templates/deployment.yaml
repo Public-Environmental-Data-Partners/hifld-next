@@ -32,6 +32,8 @@ spec:
               valueFrom: {secretKeyRef: {name: {{ .Values.clickhouse.secretName }}, key: {{ .Values.clickhouse.controlPasswordKey }}}}
             - {name: DATASET_MCP_BUILD_REVISION, value: {{ .Values.image.tag | quote }}}
             - {name: DATASET_MCP_CATALOG_BASE_URL, value: {{ .Values.catalog.baseUrl | quote }}}
+            - name: DATASET_MCP_CATALOG_STORAGE_LOCATIONS
+              value: {{ .Values.catalog.storageLocations | toJson | quote }}
             - name: DATASET_MCP_QUERY_TOKEN_SECRET
               valueFrom: {secretKeyRef: {name: {{ .Values.tokenSecret.name }}, key: {{ .Values.tokenSecret.key }}}}
             - name: DATASET_MCP_HTTP_ALLOWED_HOSTS

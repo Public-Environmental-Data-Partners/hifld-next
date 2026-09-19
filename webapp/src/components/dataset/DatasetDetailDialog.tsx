@@ -6,7 +6,7 @@ import { GeoParquetFormat } from "./GeoParquetFormat";
 import { PMTilesFormat } from "./PMTilesFormat";
 
 interface SelectedFormatSource {
-  storageLocationId: number;
+  storageLocationId: string;
   version: string | number;
 }
 
@@ -17,7 +17,7 @@ interface SelectedFormatSources {
 interface DatasetDetailDialogProps {
   dataset: DatasetWithUrls;
   selectedSources: SelectedFormatSources;
-  onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
+  onSourceChange: (formatType: string, storageLocationId: string, version: string | number) => void;
   pmtilesUrl: string | null;
   geoparquetUrl: string | null;
   featureCount: number | undefined;

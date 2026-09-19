@@ -4,7 +4,7 @@ from typing import TypedDict
 
 from pydantic import TypeAdapter
 
-from app.catalog.models import DatasetFileResponse, QuerySourceRef
+from app.catalog.models import QuerySourceRef, StacVersionCollection
 from app.catalog.query_hints import catalog_query_hints
 
 type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
@@ -20,42 +20,40 @@ _metadata_adapter: TypeAdapter[dict[str, JSONValue]] = TypeAdapter(dict[str, JSO
 
 
 def shape_file_metadata(
-    response: DatasetFileResponse, alias_prefix: str = "source"
+    response: StacVersionCollection, alias_prefix: str = "source"
 ) -> FileMetadataShape:
     """Remove expensive inline columns while preserving schema provenance."""
-    metadata = (
-        _metadata_adapter.validate_python(
-            response.file.file_metadata.model_dump(mode="json", exclude={"columns"})
-        )
-        if response.file.file_metadata
-        else None
+    parts = response.id.split("/")
+    if len(parts) != 4:
+        return {"metadata": None, "query_sources": [], "query_hints": []}
+    metadata = _metadata_adapter.validate_python(
+        {
+            "feature_count": response.feature_count,
+            "bounds": response.extent.spatial.bbox[0] if response.extent.spatial.bbox else None,
+            "geometry_type": response.geometry_type,
+            "crs": response.native_crs,
+            "column_count": len(response.table_columns),
+            "columns_available": bool(response.table_columns),
+        }
     )
-    if metadata is not None:
-        columns = response.file.file_metadata.columns if response.file.file_metadata else None
-        metadata["column_count"] = len(columns) if columns is not None else 0
-        metadata["columns_available"] = columns is not None
     refs: list[QuerySourceRef] = []
     index = 0
-    seen: set[int] = set()
-    for format_entry in response.file.formats:
-        if format_entry.format.format_type != "geoparquet":
+    for asset_key, asset in response.assets.items():
+        if not (asset_key == "geoparquet" or asset_key.startswith("geoparquet-")):
             continue
-        for source in format_entry.sources:
-            if source.source_type != "file" or source.storage_location is None:
-                continue
-            if source.id in seen:
-                continue
-            seen.add(source.id)
-            refs.append(
-                QuerySourceRef(
-                    alias=f"{alias_prefix}_{index}",
-                    collection_id=response.collection.id,
-                    dataset_id=response.dataset.id,
-                    file_id=response.file.id,
-                    file_source_id=source.id,
-                )
+        if asset.type != "application/vnd.apache.parquet" or "data" not in asset.roles:
+            continue
+        refs.append(
+            QuerySourceRef(
+                alias=f"{alias_prefix}_{index}",
+                collection_slug=parts[0],
+                dataset_slug=parts[1],
+                file_slug=parts[2],
+                version=parts[3],
+                asset_key=asset_key,
             )
-            index += 1
+        )
+        index += 1
     return {
         "metadata": metadata,
         "query_sources": refs,

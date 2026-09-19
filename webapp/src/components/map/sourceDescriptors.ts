@@ -1,16 +1,17 @@
 import { z } from "zod";
 import { compareVersionValues } from "@/components/dataset/versionLabel";
-import type { DatasetFile, DatasetFormat, DatasetSource, FormatType } from "@/lib/api-client";
+import type { DatasetFile, DatasetFormat, DatasetSource } from "@/lib/api-client";
 
-const sourceDescriptorSchema = z.object({
-  collectionSlug: z.string().min(1),
-  datasetSlug: z.string().min(1),
-  fileSlug: z.string().min(1),
-  formatType: z.custom<FormatType>((value) => typeof value === "string" && value.length > 0),
-  storageLocationId: z.number().int().positive(),
-  version: z.union([z.string().min(1), z.number()]),
-  sourceId: z.number().int().positive().optional(),
-});
+const sourceDescriptorSchema = z
+  .object({
+    collectionSlug: z.string().min(1),
+    datasetSlug: z.string().min(1),
+    fileSlug: z.string().min(1),
+    version: z.string().min(1),
+    assetKey: z.string().min(1),
+    storageLocationSlug: z.string().min(1).optional(),
+  })
+  .strict();
 
 export type SourceDescriptor = z.infer<typeof sourceDescriptorSchema>;
 
@@ -46,45 +47,40 @@ export function sourceDescriptorId(descriptor: SourceDescriptor): string {
     descriptor.collectionSlug,
     descriptor.datasetSlug,
     descriptor.fileSlug,
-    descriptor.formatType,
-    descriptor.storageLocationId,
     String(descriptor.version),
-    descriptor.sourceId ?? "source",
+    descriptor.assetKey,
+    descriptor.storageLocationSlug ?? "default",
   ].join(":");
 }
 
 function sourceMatchesDescriptor(source: DatasetSource, descriptor: SourceDescriptor): boolean {
-  if (descriptor.sourceId !== undefined && source.id === descriptor.sourceId) {
-    return true;
-  }
   return (
-    source.storage_location?.id === descriptor.storageLocationId &&
+    source.asset_key === descriptor.assetKey &&
+    (descriptor.storageLocationSlug === undefined ||
+      source.storage_location?.slug === descriptor.storageLocationSlug) &&
     String(source.version ?? "1") === String(descriptor.version)
   );
 }
 
 export function findSourceForDescriptor(file: DatasetFile, descriptor: SourceDescriptor): DatasetSource | null {
-  const formatEntry = file.formats?.find((entry) => entry.format.format_type === descriptor.formatType);
-  const source = formatEntry?.sources.find((entry) => sourceMatchesDescriptor(entry, descriptor));
+  const source = (file.formats ?? [])
+    .flatMap((entry) => entry.sources)
+    .find((entry) => sourceMatchesDescriptor(entry, descriptor));
   return source ?? null;
 }
 
-export function findPmtilesSourceForCatalogSource(file: DatasetFile, sourceId: number): DatasetSource | null {
-  const requestedSource = file.formats?.flatMap((entry) => entry.sources).find((source) => source.id === sourceId);
+export function findPmtilesSourceForCatalogSource(
+  file: DatasetFile,
+  requestedSource: DatasetSource,
+): DatasetSource | null {
   const pmtiles = file.formats?.find((entry) => entry.format.format_type === "pmtiles");
-  if (!requestedSource || !pmtiles) return null;
+  if (!pmtiles) return null;
 
-  const directSource = pmtiles.sources.find((source) => source.id === sourceId);
-  if (directSource) return directSource;
-
-  const requestedLocationId = requestedSource.storage_location?.id;
-  if (requestedLocationId === undefined) return null;
-  const requestedVersion = String(requestedSource.version ?? requestedSource.location.version ?? "1");
+  const requestedLocationSlug = requestedSource.storage_location?.slug;
+  const requestedVersion = requestedSource.version;
   return (
     pmtiles.sources.find(
-      (source) =>
-        source.storage_location?.id === requestedLocationId &&
-        String(source.version ?? source.location.version ?? "1") === requestedVersion,
+      (source) => source.storage_location?.slug === requestedLocationSlug && source.version === requestedVersion,
     ) ?? null
   );
 }
@@ -106,18 +102,16 @@ export function firstSourceDescriptorForFormat({
   const source = [...(formatEntry?.sources ?? [])].sort((left, right) =>
     compareVersionValues(left.version ?? "1", right.version ?? "1"),
   )[0];
-  const storageLocationId = source?.storage_location?.id;
-  if (!source || storageLocationId === undefined) {
+  if (!source?.asset_key) {
     return null;
   }
   return {
     collectionSlug,
     datasetSlug,
     fileSlug,
-    formatType: formatEntry.format.format_type,
-    storageLocationId,
-    version: source.version ?? "1",
-    sourceId: source.id,
+    version: String(source.version ?? "1"),
+    assetKey: source.asset_key,
+    ...(source.storage_location?.slug === undefined ? {} : { storageLocationSlug: source.storage_location.slug }),
   };
 }
 
@@ -125,26 +119,22 @@ export function descriptorForSource({
   collectionSlug,
   datasetSlug,
   fileSlug,
-  formatType,
   source,
 }: {
   collectionSlug: string;
   datasetSlug: string;
   fileSlug: string;
-  formatType: FormatType;
   source: DatasetSource;
 }): SourceDescriptor | null {
-  const storageLocationId = source.storage_location?.id;
-  if (storageLocationId === undefined) {
+  if (!source.asset_key) {
     return null;
   }
   return {
     collectionSlug,
     datasetSlug,
     fileSlug,
-    formatType,
-    storageLocationId,
-    version: source.version ?? "1",
-    sourceId: source.id,
+    version: String(source.version ?? "1"),
+    assetKey: source.asset_key,
+    ...(source.storage_location?.slug === undefined ? {} : { storageLocationSlug: source.storage_location.slug }),
   };
 }

@@ -5,7 +5,7 @@
 Add an OGC API - Features service that exposes every queryable GeoParquet
 version in the HIFLD Portolan catalog through pygeoapi and DuckDB. The service
 must discover newly published versions from the shared SQLite catalog, add them
-without an image rebuild or process restart, preserve immutable version access,
+without an image rebuild or process restart, support overwrites of version labels,
 provide a stable latest alias, and select trusted GCS or SeaweedFS assets without
 accepting arbitrary client URLs.
 
@@ -30,9 +30,9 @@ single `_catalog/catalog.sqlite` artifact.
 - Replace pygeoapi's fixed application global with an atomic, immutable API
   snapshot registry. New catalog generations are built off the request path and
   swapped without restarting workers.
-- Advertise an immutable OGC collection for every queryable version and a stable
+- Advertise a version-addressed OGC collection for every queryable spatial version and a stable
   latest alias for every collection-scoped logical file.
-- Use `{collection_slug}~{dataset_slug}~{file_slug}~{version}` for immutable OGC
+- Use `{collection_slug}~{dataset_slug}~{file_slug}~{version}` for versioned OGC
   IDs and `{collection_slug}~{dataset_slug}~{file_slug}` for latest aliases.
 - Pin pygeoapi and DuckDB versions and test the custom application boundary,
   because pygeoapi does not currently expose a supported in-process reload
@@ -43,6 +43,15 @@ single `_catalog/catalog.sqlite` artifact.
 - Use the catalog migration's four-dataset SeaweedFS fixture suite as a required
   end-to-end gate, including a new dataset promoted while the feature server is
   running.
+- Poll the SQLite object directly by ETag/generation; there is no separate
+  catalog state marker.
+- Use full slug/asset identities throughout. No numeric catalog IDs or
+  `/by-slug` routes are required.
+- Derive API-only feature IDs from DuckDB's originating filename and physical
+  file-row number, with an object revision discriminator. No source ID column
+  is required and no identifier column is added to Parquet.
+- Preserve non-spatial datasets in the catalog but omit them from feature
+  resources. Transform spatial request bounds and output CRS in DuckDB at runtime.
 
 ## Scope
 
@@ -56,10 +65,11 @@ The first release includes:
 - Attribute selection and equality filters supported by pygeoapi's feature
   contract.
 - A documented, tested CQL2 subset translated into parameterized DuckDB SQL.
-- Immutable version collections and latest aliases.
+- Replaceable version collections and latest aliases.
 - GCS HTTPS range reads and local SeaweedFS S3-compatible reads.
 - Single-file and catalog-declared partitioned GeoParquet sources.
-- Hot in-process catalog refresh from the shared SQLite object.
+- Hot in-process catalog refresh from the shared SQLite object, including
+  same-version replacements and cache invalidation.
 - Links from OGC collections to their canonical Portolan Collection documents.
 - Health, readiness, metrics, timeouts, memory limits, and query concurrency
   limits suitable for a public endpoint.
@@ -76,6 +86,10 @@ The first release does not include:
 - Serving Shapefile, GeoPackage, File Geodatabase, or GeoJSON directly through
   DuckDB. Those remain downloadable Portolan assets; the feature service reads
   the canonical GeoParquet representation.
+- Spatial feature endpoints for non-spatial or all-null-geometry tables. These
+  remain discoverable and downloadable through the HIFLD catalog.
+- Rewriting Parquet or adding columns to supply OGC feature identifiers.
+- Historical-byte retention or stable feature links across object replacements.
 - Literal simultaneous activation across all worker processes. Workers converge
   within the refresh objective and report their active generation.
 
@@ -120,7 +134,7 @@ The implementation adds a focused Python service:
 ```text
 feature-server/
   app/                    reloadable ASGI application and health routes
-  catalog/                state polling, SQLite parsing, resource projection
+  catalog/                SQLite object polling, parsing, resource projection
   provider/               DuckDB GeoParquet pygeoapi provider
   storage/                trusted environment storage policy
   tests/                  contract, security, reload, and integration tests
@@ -146,8 +160,8 @@ Portolan and OGC use related but deliberately different identifiers:
 
 | Meaning | Identifier |
 | --- | --- |
-| Portolan immutable Collection | `hifld/electric-substations/substations/v1.0.0` |
-| OGC immutable collection | `hifld~electric-substations~substations~v1.0.0` |
+| Portolan version Collection | `hifld/electric-substations/substations/v1.0.0` |
+| OGC version collection | `hifld~electric-substations~substations~v1.0.0` |
 | OGC latest alias | `hifld~electric-substations~substations` |
 
 The tilde delimiter is URI path-safe and is excluded from current slug and
@@ -158,7 +172,7 @@ depending on hierarchical-ID behavior in general OGC clients.
 The first component is the current dataset-api Collection namespace, not the
 STAC Collection type. Including it allows two collection namespaces to reuse the
 same dataset and file slugs without producing the same OGC ID. Collection slugs
-are immutable for the same reason Portolan Collection IDs are immutable; a
+are stable namespaces, independently of replaceable asset bytes; a
 renamed namespace is published as a new identity rather than silently retargeting
 existing OGC URLs.
 
@@ -168,19 +182,29 @@ or extension metadata:
 - HIFLD collection slug
 - dataset slug
 - file slug
-- immutable version
+- version label
 - whether the identifier is a latest alias
 - canonical Portolan Collection href
 
-The immutable ID always resolves to the same GeoParquet bytes. The latest alias
-is generated from SQLite's explicit `is_latest` row and changes atomically with a
-catalog refresh. It is not computed by sorting version strings.
+The versioned ID resolves to the currently published bytes for that version
+label; the publisher may overwrite them. The latest alias is generated from
+SQLite's `is_latest` row, derived from the file Catalog's latest-version link,
+and changes with catalog refresh. It is not computed by lexical version sorting.
 
-Both aliases are advertised in `/collections`. A client that needs reproducible
-results uses the versioned ID. The latest response links to the versioned OGC
-collection it currently represents.
+Both identifiers are advertised in `/collections`. The latest response links to
+the versioned OGC collection it currently represents, but neither URL guarantees
+historical reproducibility. A replacement updates catalog generation, source
+revisions, schema, counts, extents, and query caches. A metadata snapshot is
+immutable in memory; that does not imply the referenced object bytes are immutable.
 
 ## Dynamic pygeoapi configuration
+
+Resource projection depends on a database-neutral, typed catalog repository
+interface. The initial SQLite adapter owns SQL and returns normalized spatial
+version, column, asset, and object records; the projector does not open SQL
+connections or contain SQLite queries. A future PostgreSQL adapter can provide
+the same records. SQLite object polling and validation remain outside this
+interface in the current bootstrap/refresh implementation.
 
 `pygeoapi-base.yml` contains only settings that genuinely require application
 startup:
@@ -193,8 +217,11 @@ startup:
 
 It contains no generated dataset `resources` section. At refresh time, the
 catalog projector reads typed rows from SQLite and constructs one pygeoapi
-resource definition for each immutable GeoParquet version plus one latest alias
-per collection-scoped file.
+resource definition for each eligible spatial GeoParquet version plus one latest
+alias per collection-scoped file whose selected latest version is eligible.
+Non-spatial and all-null-geometry records are intentionally skipped, not treated
+as invalid catalog generations. If latest is non-spatial, do not silently point
+the alias at an older spatial version; older eligible version routes may remain.
 
 A projected resource contains:
 
@@ -202,9 +229,10 @@ A projected resource contains:
 - spatial and temporal extents;
 - schema and queryable fields already computed by the pipeline;
 - storage CRS and geometry column;
-- stable feature-ID column;
+- physical-row feature-ID encoding policy (no persisted ID column);
 - feature count and quality status;
-- exact GeoParquet objects or a catalog-owned partition specification;
+- exact GeoParquet objects, their logical relative paths and current revisions,
+  and available partition/covering metadata;
 - selected storage-location slug; and
 - provider limits.
 
@@ -237,21 +265,25 @@ within one request.
 
 The background refresh sequence is:
 
-1. Poll `_catalog/catalog-state.json` with `If-None-Match` at the configured
-   interval.
-2. If unchanged, do nothing.
-3. Download `_catalog/catalog.sqlite` to a temporary local file.
-4. Verify size, checksum, storage generation, SQLite application ID, schema
-   version, catalog generation, and `PRAGMA quick_check`.
+1. Poll `_catalog/catalog.sqlite` directly using the conditional object-read
+   protocol in the catalog migration spec. No state-marker file exists.
+2. If unchanged from the active validated object, do nothing.
+3. Download the complete changed SQLite object to a temporary local file, tying
+   its size/checksum metadata to the same revision through a conditional or
+   generation-addressed read. Retry an object-replacement race.
+4. Verify size, checksum, SQLite application ID, supported schema version,
+   embedded catalog generation, and `PRAGMA quick_check`.
 5. Parse all dynamic resources through narrow typed models.
 6. Resolve each asset through the environment's allowlisted storage policy.
 7. Build the candidate pygeoapi configuration and OpenAPI document off the
    request thread.
 8. Instantiate the candidate API and run metadata-level smoke checks.
-9. Atomically assign the candidate snapshot to `registry.current`.
+9. Atomically assign the candidate snapshot to `registry.current` and record its
+   ETag/generation as active only after successful activation. Failed candidates
+   remain retryable even if the object ETag has not changed again.
 10. Retire the old SQLite repository and generation-scoped DuckDB pools only
-    after in-flight references are released or a conservative grace period
-    expires.
+    after in-flight references are released. A grace period cannot close
+    resources still owned by a request.
 
 Any failure leaves the current snapshot untouched. A cold-start instance does
 not become ready until it has one valid snapshot.
@@ -259,9 +291,9 @@ not become ready until it has one valid snapshot.
 ### Multiple workers
 
 Gunicorn or another ASGI process manager gives each worker separate memory. Each
-worker therefore runs the same lightweight state watcher and independently
-builds the same immutable generation. State and database downloads are conditional
-and infrequent; they are not performed per request.
+worker therefore runs the same lightweight SQLite object watcher and independently
+builds the same metadata generation. Database downloads are conditional and
+infrequent; they are not performed per request.
 
 During convergence, different workers may serve adjacent catalog generations.
 Every response includes `X-Catalog-Generation`, and readiness reports the active
@@ -270,9 +302,10 @@ metrics alert when workers remain behind the published generation longer than
 the refresh objective.
 
 Strict cross-process activation would require a coordinator and request routing
-barrier. That complexity is not justified because all versioned collections are
-immutable and latest-alias movement is backward compatible. No individual
-request sees a mixed snapshot.
+barrier. The service instead permits bounded convergence and detects stale asset
+revisions. No individual request sees a mixed metadata snapshot; an overlapping
+asset overwrite may require a bounded stale-source response. Unchanged assets
+continue serving normally. Do not claim synchronized activation or frozen bytes.
 
 ### pygeoapi compatibility boundary
 
@@ -296,7 +329,7 @@ construction private. It supports:
 - `query` with offset, limit, result type, bbox, datetime when configured,
   selected properties, property predicates, approved sorting, and the approved
   CQL2 subset;
-- `get` by stable feature ID;
+- `get` by API-only physical-row feature ID;
 - queryable/schema reporting from catalog metadata; and
 - accurate `numberReturned`, with `numberMatched` only when requested or cheap
   enough under the configured policy.
@@ -318,7 +351,8 @@ Before reuse, test it against this contract:
 - no runtime extension installation;
 - no arbitrary source URLs or SQL;
 - correct identifier quoting and parameter binding;
-- deterministic feature IDs;
+- physical-row feature IDs consistent across filters, sorting, paging, and
+  multi-file scans of unchanged objects;
 - bounded counts, offsets, memory, threads, and temporary storage;
 - GCS and SeaweedFS behavior;
 - partitioned GeoParquet behavior;
@@ -347,26 +381,105 @@ requires proportionally increasing memory and spill storage.
 Connections may retain DuckDB's external-file and Parquet metadata caches. They
 must not retain request-specific views, results, filters, or client state.
 
-## Stable feature IDs
+## Source feature IDs and API-only physical-row fallback
 
-OGC feature-by-ID requires a stable identifier. The catalog record names the ID
-column and records how it was produced.
+Prefer an existing `id` or `objectid` column (case-insensitive name matching,
+retaining its exact source name) when publication verifies non-null, unique
+string or integer values across the complete selected asset, including every
+partition. Prefer `id` when both qualify. A conventional column name alone is
+not sufficient evidence. Record the selected column in the generated runtime
+metadata and revalidate on replacement; provider construction must not scan
+remote data to rediscover this choice. If neither qualifies, use the physical-row
+fallback below. No identifier field is added to the source files.
 
-The pipeline uses this precedence:
+For the native strategy, use the source value as the top-level GeoJSON `id` and
+resolve item requests against that column using bound parameters. Property
+selection does not remove the identifier. Native identifiers represent the
+upstream entity and can survive overwrites when the source retains that key;
+they do not promise historical feature contents. Paging remains revision-bound
+for either strategy. When the selected strategy changes, do not reinterpret an
+old opaque physical identifier as a native key.
 
-1. A configured source column that quality checks prove is non-null and unique.
-2. A pipeline-generated `hifld_id` column for datasets without a suitable key.
+Datasets need no existing unique identifier column. GeoParquet preserves the
+source attributes; neither the publisher nor the feature service adds `hifld_id`
+or another feature-ID column to the stored files. For the fallback, the provider derives an
+identifier while reading using DuckDB's `filename` and `file_row_number`
+metadata, enabled by `read_parquet(..., filename=true, file_row_number=true)`.
+These are virtual read-time values, not changes to the Parquet schema.
 
-The generated value is deterministic for an immutable converted version and is
-collision-checked during quality processing. The exact derivation is versioned
-as part of the conversion policy. The provider never uses an unqualified
-`row_number()` over a filtered query because that would change IDs between
-requests.
+The identifier encodes a versioned tuple:
 
-The ID column may be hidden from default property output while remaining in the
-GeoJSON Feature `id`. Queryables describe it as the identifier. Changing the ID
-policy creates a new dataset version rather than changing identifiers inside an
-existing version.
+```text
+(asset key, catalog-relative object path, object content revision, physical row position)
+```
+
+The OGC collection path supplies collection/dataset/file/version scope. The
+object path is the full path within the selected logical asset, including
+partition directories, not just a basename or a file-list ordinal. It is
+independent of storage endpoint and replica. The content revision is a
+catalog-recorded checksum shared by equivalent replicas; storage-specific
+generation/ETag values bind actual reads to the selected replica's bytes.
+Use a reversible, versioned, URL-safe string encoding with bounded length and
+strict parsing. Do not expose raw storage credentials or accept arbitrary URLs.
+
+For example, a query spanning multiple files can return:
+
+| Originating relative object | Physical row position | Distinguishing identity components |
+| --- | ---: | --- |
+| `state=NY/part-000.parquet` | 42 | NY/part-000, its revision, 42 |
+| `state=CA/part-000.parquet` | 42 | CA/part-000, its revision, 42 |
+| `state=NY/part-001.parquet` | 42 | NY/part-001, its revision, 42 |
+
+Filtering, bbox selection, sorting, projection, and paging do not change those
+physical positions. Every row retains its originating object when multiple
+partitions are scanned together. The provider never uses result-set
+`row_number()`, response offsets, partition-list order, or thread execution order
+to construct an ID. IDs refer to original file positions before filtering,
+including when DuckDB prunes row groups.
+
+Feature responses expose the encoded string as the top-level GeoJSON `id`.
+Source properties remain unchanged, including any original `id`, `filename`, or
+`file_row_number` attribute. Internal metadata names must be collision-safe;
+the spike must prove how to obtain virtual metadata when a source uses those
+names. Do not silently shadow or rename source attributes. Queryable/schema
+metadata distinguishes the API identifier from source columns; selecting a
+subset of properties does not remove the top-level feature ID.
+
+For `GET /collections/{collectionId}/items/{featureId}`, decode the tuple,
+validate it against that collection's current approved asset/object records,
+resolve the object through storage policy, and select its physical row. Validate
+the row position as a non-negative integer. Malformed IDs return a safe 400;
+unknown objects/rows or IDs for obsolete content revisions return 404. Never
+resolve a decoded path outside the approved catalog object set. Echo the same ID
+in the returned feature.
+
+IDs remain stable across queries, replicas with equivalent bytes, and process
+restarts while the object path and contents are unchanged. Overwriting or
+repartitioning may invalidate them, even without a version-label change. No
+historical files or cross-publication feature registry are retained for this
+purpose. A content revision discriminator prevents an old link from silently
+returning a different row after replacement.
+
+The implementation spike must test virtual-row numbering with filtering,
+row-group pruning, multi-partition scans, sorting, and pagination; confirm
+metadata-name collision handling; and benchmark item-by-ID against large remote
+files. A physical-row predicate is not assumed to be an efficient indexed seek.
+
+### Paging and overwrites
+
+Use deterministic order with object path and physical row position as unique
+tie-breakers, including for property sorting. A next link targets the resolved
+versioned collection and carries an opaque fingerprint of the selected asset
+object set/revisions. Subsequent pages reject a changed fingerprint with a safe
+409 stale-result response and instructions to restart. A catalog update unrelated
+to those objects need not invalidate a traversal. This does not retain old bytes
+or guarantee continuation across overwrites.
+
+Connection/file metadata caches are scoped by source object revision as well as
+catalog/storage configuration. Pin reads to a storage revision where supported;
+otherwise the spike must establish revision checks and safe failure on concurrent
+replacement. An asset modified before its updated SQLite index is published
+must not be queried using stale schema metadata or mislabeled feature IDs.
 
 ## Spatial query execution
 
@@ -376,12 +489,20 @@ prune row groups before applying exact geometry intersection. The pipeline's
 Portolan data gate ensures the required statistics and spatial ordering exist.
 
 The request bbox is interpreted in CRS84 unless an enabled OGC CRS parameter
-declares another supported CRS. Bounds are transformed into the storage CRS for
-pruning, and output geometries are transformed to the requested response CRS.
-All Portolan Collection extents remain WGS84 as required by STAC.
+declares another supported CRS. DuckDB transforms request bounds into the
+storage CRS before applying numeric covering predicates. Exact intersection
+then uses geometries in a common CRS, and output geometry is transformed on the
+fly to CRS84 by default or another explicitly supported response CRS. No
+reprojection of stored Parquet is required for feature serving. Never compare
+CRS84 numbers directly to projected bbox columns. Handle axis order,
+antimeridian crossing, and conservative transformed envelopes explicitly. The
+catalog supplies authoritative storage CRS; unknown CRS is not assumed to be
+WGS84. Portolan Collection extents remain separately transformed WGS84 metadata.
 
-Partitioned datasets use only the partition objects or trusted glob described by
-the catalog. Client text never reaches DuckDB's `read_parquet` path argument.
+Partitioned datasets use only the exact objects projected from the catalog's
+declared partition metadata. Resolve the set at publication/rebuild time, not
+by a request-time arbitrary glob. Client text never reaches DuckDB's
+`read_parquet` path argument without catalog membership resolution.
 The provider selects candidate partitions using catalog metadata before opening
 them where the partition scheme permits.
 
@@ -410,6 +531,8 @@ The service rejects:
 - non-HTTPS public URLs;
 - alternates with an unexpected endpoint;
 - paths containing unresolved traversal segments;
+- decoded feature IDs outside the selected collection/asset or referring to a
+  different object revision;
 - catalog records with conflicting checksums or storage identities;
 - request parameters that attempt to name a file, table, URL, or DuckDB
   function; and
@@ -426,7 +549,7 @@ links to:
 
 - its canonical Portolan `collection.json`;
 - the HIFLD webapp dataset/file page;
-- the immutable OGC version when the current identifier is a latest alias;
+- the version-addressed OGC collection when the identifier is a latest alias;
 - downloadable non-GeoParquet formats through the webapp or Portolan metadata;
   and
 - the PMTiles visual derivative when available.
@@ -464,7 +587,7 @@ links to its quality report.
 ## Performance design
 
 Catalog refresh is metadata work. SQLite parsing and Python resource creation
-are linear in the number of advertised immutable versions and aliases. YAML
+are linear in the number of advertised spatial versions and aliases. YAML
 serialization is absent. OpenAPI generation is also linear but may instantiate
 each provider, which is why provider construction must remain local and lazy.
 
@@ -511,7 +634,7 @@ Metrics include:
 - DuckDB connection recycle reasons; and
 - errors by stable safe code.
 
-Structured logs include collection ID, immutable version, catalog generation,
+Structured logs include collection ID, version label, catalog generation,
 storage-location slug, request class, duration, and safe outcome. They exclude
 SQL text, property values, signed URLs, credentials, and raw storage exceptions.
 
@@ -522,7 +645,10 @@ SQL text, property values, signed URLs, credentials, and raw storage exceptions.
   from activating; it does not evict the previous generation.
 - An individual remote asset failure returns a bounded service error for that
   collection and does not make catalog metadata endpoints unavailable.
-- Immutable version collections remain addressable after a latest alias moves.
+- Version collections remain addressable after a latest alias moves while their
+  assets remain published, but same-version overwrites may change their content.
+- Overwrites invalidate source caches and old physical-row IDs; stale pagination
+  fingerprints fail explicitly rather than mixing revisions across pages.
 - If one worker lags, the generation header makes the condition visible and an
   alert triggers after the allowed convergence interval.
 - Retired snapshots remain alive for in-flight requests, then close their SQLite
@@ -535,24 +661,44 @@ SQL text, property values, signed URLs, credentials, and raw storage exceptions.
 - OGC conformance tests pass for every claimed OGC API - Features conformance
   class.
 - Collection list, collection detail, queryables/schema, item list, hits, and
-  item-by-ID work for both immutable IDs and latest aliases.
+  item-by-ID work for both versioned collection IDs and latest aliases.
 - IDs map reversibly to collection slug, dataset slug, file slug, and version,
   and tilde is rejected inside each component.
 - Repeated dataset, file, and version slugs under different collection
   namespaces produce distinct OGC resources and never share a latest alias.
 - The latest alias follows SQLite's explicit latest record after refresh while
-  the prior immutable ID remains unchanged.
-- Publishing a new GeoParquet version becomes queryable on running workers
-  without an image rebuild, process restart, or dropped request.
-- A request started before a snapshot swap completes entirely against its
-  captured generation.
+  previously published version paths remain distinct.
+- Publishing a new or replaced spatial GeoParquet version becomes queryable on
+  running workers without an image rebuild or process restart.
+- A request started before a snapshot swap uses its captured metadata generation;
+  unchanged assets finish normally and an overlapping overwrite returns a safe
+  stale-source error if the expected bytes are unavailable.
 - Bad checksums, corrupt SQLite, invalid resource definitions, and failed
   OpenAPI generation leave the previous snapshot active.
+- Direct conditional SQLite refresh and cold start work without a state marker,
+  including a publisher crash before/after object replacement, failed-precondition
+  races, and retry of an unchanged but previously failed candidate.
 - Provider constructors perform no remote Parquet reads during OpenAPI or
   snapshot generation.
-- Bbox tests prove row-group pruning and exact intersection behavior.
-- Feature IDs are stable across paging, filtering, worker processes, and service
-  restarts for an immutable version.
+- Bbox tests prove row-group pruning and exact intersection behavior for native
+  geographic and projected CRS, with on-the-fly output transformation. In
+  particular, CRS84 bbox coordinates must not be compared directly to EPSG:3857
+  covering values. Test axis order and antimeridian cases.
+- Feature IDs are stable across sorting, property selection, paging, filtering,
+  row-group pruning, worker processes, and restarts for unchanged object bytes.
+- A query spanning multiple partitions returns distinct IDs for equal physical
+  row numbers in different objects, including repeated basenames. Partition
+  enumeration order and worker concurrency do not affect IDs.
+- Item-by-ID returns the same feature observed in a filtered/multi-file result;
+  wrong-collection, malformed, out-of-range, and obsolete-revision IDs fail safely.
+- Source schemas and Parquet bytes are not modified to provide feature IDs.
+  Datasets without a unique field work; original attributes named `id`,
+  `filename`, and `file_row_number` are preserved without metadata collisions.
+- An overwrite under the same version label refreshes schema/counts/extents and
+  invalidates caches and obsolete IDs. Paging across changed object sets returns
+  an explicit stale-result error instead of silently mixing revisions.
+- Non-spatial and all-null-geometry datasets remain in the webapp catalog but
+  are absent from feature collections and aliases. They do not prevent refresh.
 - CQL/property-filter security tests reject injection, direct file access,
   unsupported functions, excessive complexity, and path substitution.
 - GCS and SeaweedFS integration tests return equivalent features for matching
@@ -564,8 +710,9 @@ SQL text, property values, signed URLs, credentials, and raw storage exceptions.
   GeoParquet/catalog generation is published, the already-running feature server
   advertises and queries its point features within the configured refresh TTL.
 - The hot update changes neither the bytes nor results of the three initial
-  immutable OGC collections, and requests that overlap the swap finish on their
-  captured generation.
+  baseline OGC collections, and requests that overlap this additive swap finish
+  on their captured generation. A separate overwrite wave tests changed bytes
+  and stale-reference behavior; baseline continuity is not an immutability rule.
 - The acceptance suite checks collection listing and detail, queryables, first
   page, item-by-ID, bbox filtering, attribute filtering, limits, Portolan links,
   and `X-Catalog-Generation` for each applicable fixture.
@@ -580,7 +727,8 @@ SQL text, property values, signed URLs, credentials, and raw storage exceptions.
 ### Phase 1: provider and reload spike
 
 Prove the pygeoapi provider contract, exact dependency versions, reloadable ASGI
-boundary, feature-ID strategy, GCS and SeaweedFS access, and generation swap.
+boundary, physical-row feature-ID strategy without Parquet mutation, GCS and
+SeaweedFS revision-safe reads, and direct SQLite generation swap.
 Benchmark full OpenAPI projection at the expected catalog cardinality before
 committing to an external provider fork.
 
@@ -602,9 +750,10 @@ hand-authored SQLite fixture.
 
 ### Phase 3: catalog refresh validation
 
-Publish new versions while traffic runs. Verify per-worker convergence, stable
-in-flight requests, latest-alias movement, immutable version continuity, failure
-rollback, and database cleanup.
+Publish new versions and overwrite existing version labels while traffic runs.
+Verify per-worker convergence, in-flight revision handling, latest-alias movement,
+source-cache invalidation, obsolete feature IDs, stale paging, failed-refresh
+fallback, and database cleanup. Do not require historical asset retention.
 
 ### Phase 4: public exposure
 
@@ -638,9 +787,9 @@ implementation based on measured test results.
 
 ### Large OpenAPI documents
 
-Advertising every historical version increases resource count and OpenAPI size.
+Advertising every currently published version increases resource count and OpenAPI size.
 Build off-thread, use lazy provider construction, benchmark 5,000 resources, and
-compress responses. Do not silently remove immutable versions merely to reduce
+compress responses. Do not silently remove published spatial versions merely to reduce
 the document.
 
 ### Remote-query variance
@@ -652,18 +801,22 @@ statistics, and expose cold/warm telemetry.
 ### Cross-worker convergence
 
 Workers refresh independently and may briefly disagree about the latest alias.
-Immutable IDs, per-response generation headers, last-known-good snapshots, and a
-bounded convergence alert make that behavior explicit without adding a catalog
-coordinator.
+Per-response generation headers, object revision checks, stale-reference errors,
+last-known-good metadata snapshots, and a bounded convergence alert make that
+behavior explicit without adding a catalog coordinator. Metadata snapshots do
+not preserve overwritten asset bytes.
 
 ## Result
 
 The feature server adds standards-based feature access without becoming another
-catalog authority. Portolan describes the immutable data, the one generated
+catalog authority. Portolan describes spatial and non-spatial data, the one generated
 SQLite database supplies fast runtime metadata, pygeoapi implements OGC
 semantics, and the custom DuckDB provider reads only trusted GeoParquet
-assets. New versions become available through an atomic in-process snapshot swap,
-with no generated pygeoapi files, container rebuild, or worker restart.
+spatial assets. DuckDB supplies physical file/row metadata for API-only feature
+IDs and transforms CRS at query time, without adding fields to Parquet. New and
+replaced versions become available through direct SQLite object refresh and an
+atomic in-process metadata snapshot swap, with no state marker, generated
+pygeoapi files, container rebuild, or worker restart.
 
 ## References
 
@@ -672,3 +825,5 @@ with no generated pygeoapi files, container rebuild, or worker restart.
 - [pygeoapi Flask application globals and generic collection routes](https://github.com/geopython/pygeoapi/blob/master/pygeoapi/flask_app.py)
 - [pygeoapi feature request handling](https://github.com/geopython/pygeoapi/blob/master/pygeoapi/api/itemtypes.py)
 - [Community DuckDB GeoParquet provider](https://github.com/waystones-nexus/pygeoapi-duckdb-geoparquet)
+- [DuckDB Parquet virtual filename and file-row metadata](https://duckdb.org/docs/lts/data/parquet/overview)
+- [OGC API - Features Core feature resources](https://docs.ogc.org/is/17-069r4/17-069r4.html#_feature)

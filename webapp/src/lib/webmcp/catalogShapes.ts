@@ -16,10 +16,12 @@ const MAX_SERIALIZED_CATALOG_RESULT = 1500;
 export const QuerySourceRefSchema = z
   .object({
     alias: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,62}$/),
-    collection_id: z.number().int().positive(),
-    dataset_id: z.number().int().positive(),
-    file_id: z.number().int().positive(),
-    file_source_id: z.number().int().positive(),
+    collection_slug: z.string().min(1),
+    dataset_slug: z.string().min(1),
+    file_slug: z.string().min(1),
+    version: z.string().min(1),
+    asset_key: z.string().min(1),
+    storage_location_slug: z.string().min(1).optional(),
   })
   .strict();
 
@@ -27,7 +29,6 @@ const CatalogLinksSchema = z.record(z.string(), z.string());
 
 const CatalogIdentitySchema = z
   .object({
-    id: z.number().int().positive(),
     slug: z.string(),
     name: z.string(),
     links: CatalogLinksSchema,
@@ -35,7 +36,6 @@ const CatalogIdentitySchema = z
   .strict();
 
 const CatalogDatasetSchema = CatalogIdentitySchema.extend({
-  collection_id: z.number().int().positive(),
   tags: z.record(z.string(), z.union([z.string(), z.array(z.string())])),
 }).strict();
 
@@ -56,7 +56,7 @@ const SpatialSummarySchema = z
 
 const CatalogSourceSchema = z
   .object({
-    id: z.number().int().positive(),
+    asset_key: z.string().min(1),
     version: z.union([z.string(), z.number()]),
     source_type: z.enum(["file", "api"]),
     summary: SpatialSummarySchema.nullable(),
@@ -66,7 +66,6 @@ const CatalogSourceSchema = z
 
 const CatalogFormatSchema = z
   .object({
-    id: z.number().int().positive(),
     format_type: z.enum(["geoparquet", "pmtiles", "geopackage", "shapefile", "geojson", "file_geodatabase"]),
     name: z.string(),
     sources: z.array(CatalogSourceSchema),
@@ -75,8 +74,6 @@ const CatalogFormatSchema = z
 
 const CatalogFileSchema = z
   .object({
-    id: z.number().int().positive(),
-    dataset_id: z.number().int().positive(),
     slug: z.string(),
     name: z.string(),
     layer_name: z.string().nullable(),
@@ -89,8 +86,6 @@ const CatalogSchemaIdentitySchema = CatalogIdentitySchema.omit({ links: true }).
 const CatalogSchemaDatasetSchema = CatalogDatasetSchema.omit({ links: true }).strict();
 const CatalogSchemaFileSchema = z
   .object({
-    id: z.number().int().positive(),
-    dataset_id: z.number().int().positive(),
     slug: z.string(),
     name: z.string(),
     layer_name: z.string().nullable(),
@@ -114,7 +109,7 @@ export type CatalogDatasetFileResponse = z.infer<typeof CatalogDatasetFileRespon
 export type CatalogDatasetFileShapeInput = DatasetFileResponse & { collection: Collection };
 
 function identity(value: Collection | Dataset, links: string): z.infer<typeof CatalogIdentitySchema> {
-  return { id: value.id, slug: value.slug, name: value.name, links: { self: links } };
+  return { slug: value.slug, name: value.name, links: { self: links } };
 }
 
 function summary(metadata: SpatialDatasetFileMetadata | null | undefined): z.infer<typeof SpatialSummarySchema> | null {
@@ -141,8 +136,8 @@ function sourceSummary(source: DatasetSource): z.infer<typeof SpatialSummarySche
   return summary(source.source_metadata);
 }
 
-function isQuerySource(source: DatasetSource, formatType: FormatType): boolean {
-  return formatType === "geoparquet" && source.source_type === "file" && source.storage_location != null;
+function isQuerySource(source: DatasetSource, formatType: FormatType): source is DatasetSource & { asset_key: string } {
+  return formatType === "geoparquet" && source.source_type === "file" && source.asset_key !== undefined;
 }
 
 function boundFileShape(value: CatalogDatasetFileResponse): CatalogDatasetFileResponse {
@@ -187,17 +182,20 @@ export function shapeDatasetFileResponse(
   const querySources: QuerySourceRef[] = [];
   let sourceIndex = 0;
   const formats = (response.file.formats ?? []).map((formatEntry) => ({
-    id: formatEntry.format.id,
     format_type: formatEntry.format.format_type,
     name: formatEntry.format.name,
     sources: (formatEntry.sources ?? []).map((source) => {
       const querySource = isQuerySource(source, formatEntry.format.format_type)
         ? {
             alias: `source_${sourceIndex}`,
-            collection_id: response.collection.id,
-            dataset_id: response.dataset.id,
-            file_id: response.file.id,
-            file_source_id: source.id,
+            collection_slug: response.collection.collection_slug ?? response.collection.slug,
+            dataset_slug: response.dataset.dataset_slug ?? response.dataset.slug,
+            file_slug: response.file.file_slug ?? response.file.slug,
+            version: String(source.version ?? "1"),
+            asset_key: source.asset_key,
+            ...(source.storage_location?.slug === undefined
+              ? {}
+              : { storage_location_slug: source.storage_location.slug }),
           }
         : null;
       if (querySource) {
@@ -205,7 +203,7 @@ export function shapeDatasetFileResponse(
         sourceIndex += 1;
       }
       return {
-        id: source.id,
+        asset_key: source.asset_key ?? formatEntry.format.format_type,
         version: sourceVersion(source),
         source_type: source.source_type,
         summary: sourceSummary(source),
@@ -217,12 +215,9 @@ export function shapeDatasetFileResponse(
     collection: identity(response.collection, collectionLink),
     dataset: {
       ...identity(response.dataset, datasetLink),
-      collection_id: response.dataset.collection_id ?? response.collection.id,
       tags: response.dataset.tags ?? {},
     },
     file: {
-      id: response.file.id,
-      dataset_id: response.file.dataset_id,
       slug: response.file.slug,
       name: response.file.name,
       layer_name: response.file.layer_name ?? null,
@@ -250,7 +245,7 @@ export type CatalogSchemaResponseInput = {
     version: string | number | null;
     format_type: FormatType;
     format_name: string;
-    source_id: number;
+    source_id: string;
     source_metadata: SpatialDatasetFileMetadata | null;
     columns: ColumnSchema[];
     total_columns?: number;
@@ -265,7 +260,7 @@ const CatalogSchemaDetailsSchema = z
     version: z.union([z.string(), z.number()]).nullable(),
     format_type: z.enum(["geoparquet", "pmtiles", "geopackage", "shapefile", "geojson", "file_geodatabase"]),
     format_name: z.string(),
-    source_id: z.number().int().positive(),
+    source_id: z.string().min(1),
     summary: SpatialSummarySchema.nullable(),
     columns: z.array(
       z
@@ -339,20 +334,15 @@ export function shapeDatasetFileSchemaResponse(
   const shaped: CatalogSchemaResponse = {
     links: { self: schemaLink, file: fileLink, dataset: datasetLink, collection: collectionLink },
     collection: {
-      id: response.collection.id,
       slug: response.collection.slug,
       name: response.collection.name,
     },
     dataset: {
-      id: response.dataset.id,
       slug: response.dataset.slug,
       name: response.dataset.name,
-      collection_id: response.dataset.collection_id ?? response.collection.id,
       tags: response.dataset.tags ?? {},
     },
     file: {
-      id: response.file.id,
-      dataset_id: response.file.dataset_id,
       slug: response.file.slug,
       name: response.file.name,
       layer_name: response.file.layer_name ?? null,

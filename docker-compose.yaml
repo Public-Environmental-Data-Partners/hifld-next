@@ -65,6 +65,53 @@ services:
     networks:
       - hifld-network
 
+  # OGC API - Features adapter over the shared Portolan SQLite catalog.
+  # Opt in with: docker compose --profile feature-server up -d feature-server
+  feature-server:
+    build:
+      context: .
+      dockerfile: feature-server/Dockerfile
+    image: ${FEATURE_SERVER_IMAGE:-hifld-feature-server:local}
+    environment:
+      FEATURE_SERVER_CATALOG_URL: ${FEATURE_SERVER_CATALOG_URL:-http://seaweedfs-filer:8333/hifld-local-published/_catalog/catalog.sqlite}
+      FEATURE_SERVER_CATALOG_POLL_SECONDS: ${FEATURE_SERVER_CATALOG_POLL_SECONDS:-30}
+      FEATURE_SERVER_STORAGE_LOCATIONS: ${FEATURE_SERVER_STORAGE_LOCATIONS:-{"seaweedfs-local-published":{"type":"seaweedfs","bucket":"hifld-local-published","prefix":"hifld","endpoint_url":"http://seaweedfs-filer:8333"}}}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-dummy}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-dummy}
+      FEATURE_SERVER_PUBLIC_URL: ${FEATURE_SERVER_PUBLIC_URL:-http://localhost:8002}
+      FEATURE_SERVER_CATALOG_CACHE_DIRECTORY: /var/lib/feature-server/cache
+      FEATURE_SERVER_TEMP_DIRECTORY: /var/lib/feature-server/spill
+    ports:
+      - "${FEATURE_SERVER_PORT:-8002}:8000"
+    volumes:
+      - feature_server_tmp:/var/lib/feature-server/spill
+      - feature_server_cache:/var/lib/feature-server/cache
+    depends_on:
+      feature-server-volume-init:
+        condition: service_completed_successfully
+      seaweedfs-filer:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)\""]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    profiles:
+      - feature-server
+    networks:
+      - hifld-network
+
+  feature-server-volume-init:
+    image: ${FEATURE_SERVER_IMAGE:-hifld-feature-server:local}
+    user: "0:0"
+    command: ["/bin/sh", "-c", "chown -R 65532:65532 /var/lib/feature-server"]
+    volumes:
+      - feature_server_tmp:/var/lib/feature-server/spill
+      - feature_server_cache:/var/lib/feature-server/cache
+    profiles:
+      - feature-server
+
   # SeaweedFS Master
   seaweedfs-master:
     image: chrislusf/seaweedfs:latest
@@ -118,6 +165,10 @@ volumes:
   seaweedfs_volume_data:
     driver: local
   seaweedfs_filer_data:
+    driver: local
+  feature_server_tmp:
+    driver: local
+  feature_server_cache:
     driver: local
 
 networks:

@@ -1,58 +1,22 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { getCollectionBySlug, getDatasetBySlug, getDatasetFileBySlug } from "@/lib/api-client";
-import { attachDownloadZipLinksToFile } from "@/lib/api-file-sources";
-import { collectionSelf, datasetSelf, fileSelf, requestOrigin } from "@/lib/api-links";
+import { env } from "@/env/server";
 import { jsonProblem } from "@/lib/api-problem";
+import { sqliteCatalogApi } from "@/lib/catalog-api";
+import { fetchCatalogStac } from "@/lib/catalog-stac";
 
 export const Route = createFileRoute("/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug")({
   server: {
     handlers: {
       GET: async ({ params, request }) => {
-        const collection = await getCollectionBySlug({
-          data: { slug: params.collectionSlug },
-        });
-        if (!collection) {
-          return jsonProblem(404, "Collection not found");
-        }
-
-        const dataset = await getDatasetBySlug({
-          data: {
-            collectionSlug: params.collectionSlug,
-            datasetSlug: params.datasetSlug,
-            includeUrls: false,
-          },
-        });
-        if (!dataset) {
-          return jsonProblem(404, "Dataset not found");
-        }
-
-        const result = await getDatasetFileBySlug({
-          data: {
-            collectionSlug: params.collectionSlug,
-            datasetSlug: params.datasetSlug,
-            fileSlug: params.fileSlug,
-          },
-        });
-        if (!result) {
-          return jsonProblem(404, "File not found");
-        }
-
-        const origin = requestOrigin(request);
-        const cs = params.collectionSlug;
-        const ds = params.datasetSlug;
-        const fs = params.fileSlug;
-        const file = attachDownloadZipLinksToFile(result.file, origin, cs, ds, fs);
-
-        return Response.json({
-          links: {
-            self: fileSelf(origin, cs, ds, fs),
-            dataset: datasetSelf(origin, cs, ds),
-            collection: collectionSelf(origin, cs),
-          },
-          collection,
-          dataset: result.dataset,
-          file,
-        });
+        const catalog = await sqliteCatalogApi();
+        if (!catalog || !env.CATALOG_SQLITE_URL) return jsonProblem(503, "Catalog metadata is unavailable");
+        const version = new URL(request.url).searchParams.get("version") ?? undefined;
+        const file = await catalog.file(params.collectionSlug, params.datasetSlug, params.fileSlug, version);
+        if (!file) return jsonProblem(404, "File not found");
+        if (!file.stac_href) return jsonProblem(404, "File version metadata not found");
+        const response = await fetchCatalogStac(env.CATALOG_SQLITE_URL, file.stac_href);
+        response.headers.set("X-Catalog-Generation", catalog.generation);
+        return response;
       },
     },
   },

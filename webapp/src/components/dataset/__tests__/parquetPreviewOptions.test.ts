@@ -76,6 +76,28 @@ describe("parquetPreviewOptions", () => {
     });
   });
 
+  test("uses partition-relative labels when parquet files share the same basename", () => {
+    const options = concreteParquetPreviewOptions(
+      geoparquetFormat([
+        source(1, "gs://bucket/hospitals/v1.0.0/geoparquet/state_fips=32/part-000.parquet", "v1.0.0"),
+        source(2, "gs://bucket/hospitals/v1.0.0/geoparquet/state_fips=36/part-000.parquet", "v1.0.0"),
+      ]),
+    );
+
+    expect(options.map((option) => option.fileName)).toEqual([
+      "state_fips=32/part-000.parquet",
+      "state_fips=36/part-000.parquet",
+    ]);
+  });
+
+  test("keeps a single parquet file label concise", () => {
+    const options = concreteParquetPreviewOptions(
+      geoparquetFormat([source(1, "gs://bucket/hospitals/v1.0.0/geoparquet/part-000.parquet", "v1.0.0")]),
+    );
+
+    expect(options[0]?.fileName).toBe("part-000.parquet");
+  });
+
   test("filters preview options by selected location and version", () => {
     const local = storageLocation(4, "SeaweedFS");
     const remote = storageLocation(7, "GCS");

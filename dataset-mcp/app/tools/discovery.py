@@ -33,7 +33,7 @@ class CatalogClient(Protocol):
         self, collection: str, dataset: str, identity: str, version: str | None
     ) -> Awaitable[JSONMapping]: ...
     def resolve_map_source(
-        self, collection_id: int, dataset_id: int, file_id: int, file_source_id: int
+        self, collection: str, dataset: str, file: str, version: str, asset_key: str
     ) -> Awaitable[JSONMapping]: ...
 
 

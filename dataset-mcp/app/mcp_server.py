@@ -259,9 +259,10 @@ def create_mcp_server(
     ) -> FastMCPToolResult:
         """Read rows using a source reference copied from get_dataset_file.query_sources.
 
-        The source object contains alias, collection_id, dataset_id, file_id,
-        and file_source_id. The server resolves its storage location; callers
-        cannot provide an object-store URL.
+        The source object contains alias, collection_slug, dataset_slug,
+        file_slug, version, asset_key, and optionally storage_location_slug.
+        The server resolves its storage location; callers cannot provide an
+        object-store URL.
         """
         try:
             return _result(

@@ -45,7 +45,6 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { PageLoader } from "@/components/ui/page-loader";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FeatureHoverPopup } from "@/components/viewer/FeatureHoverPopup";
@@ -75,15 +74,15 @@ import type {
   Collection,
   Dataset,
   DatasetFile,
+  DatasetFileResponse,
   DatasetSource,
   DatasetWithUrls,
   PaginatedResponse,
 } from "@/lib/api-client";
 import {
-  getCollectionById,
   getCollectionBySlug,
+  getCollectionDatasetsBySlug,
   getDatasetBySlug,
-  getDatasetFileById,
   getDatasetFileBySlug,
 } from "@/lib/api-client";
 import { createQuery, getQueryBounds, getQueryPage, QueryApiError, type QueryRequest } from "@/lib/query-api";
@@ -98,8 +97,8 @@ type MapSearch = {
 const MAP_DATASET_PAGE_SIZE = 12;
 const SEARCH_DEBOUNCE_MS = 500;
 const MOBILE_SETTINGS_MEDIA_QUERY = "(max-width: 767.98px)";
-export const MAP_CANVAS_DESKTOP_DEFAULT_SIZE = "45%";
-export const MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE = "55%";
+export const MAP_CANVAS_DESKTOP_DEFAULT_SIZE = "70%";
+export const MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE = "30%";
 export const DATASET_SEARCH_PANEL_CLASSNAME =
   "absolute top-full right-0 left-0 z-30 mt-2 min-w-0 rounded-md border bg-popover p-0 text-popover-foreground shadow-md";
 export const DATASET_SEARCH_LIST_CLASSNAME =
@@ -157,7 +156,6 @@ function datasetHasLoadedLayer(
         collectionSlug,
         datasetSlug: dataset.slug,
         fileSlug: file.slug,
-        formatType: "pmtiles",
         source,
       });
       if (!descriptor) continue;
@@ -220,24 +218,6 @@ export async function resolveDescriptor(descriptor: SourceDescriptor | null): Pr
   };
 }
 
-interface CollectionDatasetSearchApiResponse {
-  datasets: DatasetWithUrls[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-function collectionMapSearchUrl(collectionSlug: string, query: string): string {
-  const trimmedQuery = query.trim();
-  const params = new URLSearchParams({
-    limit: String(MAP_DATASET_PAGE_SIZE),
-    offset: "0",
-    omit: "description",
-  });
-  if (trimmedQuery) params.set("search", trimmedQuery);
-  return `/api/collections/${encodeURIComponent(collectionSlug)}?${params.toString()}`;
-}
-
 export async function searchDatasetsForMapImport({
   collectionSlug,
   query,
@@ -245,17 +225,14 @@ export async function searchDatasetsForMapImport({
   collectionSlug: string;
   query: string;
 }): Promise<PaginatedResponse<DatasetWithUrls>> {
-  const response = await fetch(collectionMapSearchUrl(collectionSlug, query));
-  if (!response.ok) {
-    throw new Error(`Dataset search failed: ${response.status}`);
-  }
-  const body = (await response.json()) as CollectionDatasetSearchApiResponse;
-  return {
-    items: body.datasets,
-    total: body.total,
-    limit: body.limit,
-    offset: body.offset,
-  };
+  return getCollectionDatasetsBySlug({
+    data: {
+      collectionSlug,
+      search: query.trim(),
+      limit: MAP_DATASET_PAGE_SIZE,
+      offset: 0,
+    },
+  });
 }
 
 export const Route = createFileRoute("/collections/$collectionSlug/map")({
@@ -348,7 +325,17 @@ function selectedMapFeatureFromHoverInfo(
 }
 
 export function resolvedToMapLayer(entry: ResolvedDescriptor): LoadedMapLayer | null {
-  if (entry.descriptor.formatType !== "pmtiles") return null;
+  const isPmtilesSource = entry.file.formats?.some(
+    (formatEntry) =>
+      formatEntry.format.format_type === "pmtiles" &&
+      formatEntry.sources.some(
+        (source) =>
+          source.asset_key === entry.source.asset_key &&
+          String(source.version ?? "1") === String(entry.source.version ?? "1") &&
+          source.storage_location?.slug === entry.source.storage_location?.slug,
+      ),
+  );
+  if (!isPmtilesSource) return null;
   const url = buildSourceFileUrl(entry.source);
   if (!url) return null;
   return buildLoadedMapLayer({
@@ -359,6 +346,75 @@ export function resolvedToMapLayer(entry: ResolvedDescriptor): LoadedMapLayer | 
     sourceMetadata: entry.source.source_metadata,
     pmtilesUrl: url,
   });
+}
+
+export function sourceDescriptorFromLayerId(layerId: string): SourceDescriptor | null {
+  const values = layerId.split(":");
+  if (values.length !== 6) return null;
+  const [collectionSlug, datasetSlug, fileSlug, version, assetKey, storageLocationSlug] = values;
+  if (!collectionSlug || !datasetSlug || !fileSlug || !version || !assetKey || !storageLocationSlug) return null;
+  return {
+    collectionSlug,
+    datasetSlug,
+    fileSlug,
+    version,
+    assetKey,
+    ...(storageLocationSlug === "default" ? {} : { storageLocationSlug }),
+  };
+}
+
+async function verifiedCatalogCollection(input: MapCatalogLayerInput, current: Collection): Promise<Collection> {
+  const resolved =
+    input.collection_slug === (current.collection_slug ?? current.slug)
+      ? current
+      : await getCollectionBySlug({ data: { slug: input.collection_slug } });
+  if (!resolved || (resolved.collection_slug ?? resolved.slug) !== input.collection_slug) {
+    throw new MapWorkspaceCommandError("The requested catalog collection could not be verified.");
+  }
+  return resolved;
+}
+
+function verifiedCatalogSource(input: MapCatalogLayerInput, response: DatasetFileResponse): DatasetSource {
+  if (
+    (response.dataset.dataset_slug ?? response.dataset.slug) !== input.dataset_slug ||
+    (response.file.file_slug ?? response.file.slug) !== input.file_slug
+  ) {
+    throw new MapWorkspaceCommandError("The requested catalog file could not be verified.");
+  }
+  const requested = response.file.formats
+    ?.flatMap((entry) => entry.sources)
+    .find(
+      (source) =>
+        source.asset_key === input.asset_key &&
+        String(source.version) === input.version &&
+        (input.storage_location_slug === undefined || source.storage_location?.slug === input.storage_location_slug),
+    );
+  const source = requested ? findPmtilesSourceForCatalogSource(response.file, requested) : null;
+  if (!source) throw new MapWorkspaceCommandError("A matching PMTiles source is not available.");
+  return source;
+}
+
+async function catalogMapLayer(input: MapCatalogLayerInput, currentCollection: Collection): Promise<LoadedMapLayer> {
+  const collection = await verifiedCatalogCollection(input, currentCollection);
+  const response = await getDatasetFileBySlug({
+    data: {
+      collectionSlug: input.collection_slug,
+      datasetSlug: input.dataset_slug,
+      fileSlug: input.file_slug,
+    },
+  });
+  if (!response) throw new MapWorkspaceCommandError("The requested catalog file could not be verified.");
+  const source = verifiedCatalogSource(input, response);
+  const descriptor = descriptorForSource({
+    collectionSlug: collection.collection_slug ?? collection.slug,
+    datasetSlug: response.dataset.dataset_slug ?? response.dataset.slug,
+    fileSlug: response.file.file_slug ?? response.file.slug,
+    source,
+  });
+  if (!descriptor) throw new MapWorkspaceCommandError("The requested PMTiles source could not be verified.");
+  const layer = resolvedToMapLayer({ descriptor, dataset: response.dataset, file: response.file, source });
+  if (!layer) throw new MapWorkspaceCommandError("The requested PMTiles layer could not be prepared.");
+  return layer;
 }
 
 export interface MapImportEvent {
@@ -389,7 +445,6 @@ export function newMapImportEvents({
           collection_slug: layer.descriptor.collectionSlug,
           dataset_slug: layer.descriptor.datasetSlug,
           file_slug: layer.descriptor.fileSlug,
-          source_id: layer.descriptor.sourceId,
           version: layer.descriptor.version,
           import_source: routeSourceDescriptorIds.has(descriptorId) ? "route" : "picker",
           loaded_layer_count: loadedLayers.length,
@@ -588,7 +643,7 @@ function StyleLayerCard({
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <CardContent className="min-w-0 pt-0">
+          <CardContent className="min-w-0 px-3 pt-0">
             <LayerStylingEditor
               activeLayer={layer}
               activeStyle={style}
@@ -853,72 +908,15 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
       preparedCatalogLayersRef.current.delete(input.layerId);
       return { ...prepared, name: input.label, label: input.label };
     }
-    const values = input.layerId.split(":");
-    if (values.length !== 7) return null;
-    const [collectionSlug, datasetSlug, fileSlug, formatType, storageLocationId, version, sourceId] = values;
-    const parsedStorageLocationId = Number(storageLocationId);
-    const parsedSourceId = Number(sourceId);
-    if (
-      !collectionSlug ||
-      !datasetSlug ||
-      !fileSlug ||
-      formatType !== "pmtiles" ||
-      !Number.isSafeInteger(parsedStorageLocationId) ||
-      parsedStorageLocationId < 1 ||
-      !Number.isSafeInteger(parsedSourceId) ||
-      parsedSourceId < 1
-    ) {
-      return null;
-    }
-    const resolved = await resolveDescriptor({
-      collectionSlug,
-      datasetSlug,
-      fileSlug,
-      formatType,
-      storageLocationId: parsedStorageLocationId,
-      version: version ?? "1",
-      sourceId: parsedSourceId,
-    });
+    const descriptor = sourceDescriptorFromLayerId(input.layerId);
+    if (!descriptor) return null;
+    const resolved = await resolveDescriptor(descriptor);
     return resolved ? resolvedToMapLayer(resolved) : null;
   }, []);
 
   const resolveCatalogLayer = useCallback(
     async (input: MapCatalogLayerInput): Promise<DatasetLayerInput> => {
-      const resolvedCollection =
-        input.collection_id === collection.id
-          ? collection
-          : await getCollectionById({ data: { id: input.collection_id } });
-      if (!resolvedCollection || resolvedCollection.id !== input.collection_id) {
-        throw new MapWorkspaceCommandError("The requested catalog collection could not be verified.");
-      }
-      const response = await getDatasetFileById({
-        data: {
-          collectionId: input.collection_id,
-          datasetId: input.dataset_id,
-          fileId: input.file_id,
-        },
-      });
-      if (response.dataset.id !== input.dataset_id || response.file.id !== input.file_id) {
-        throw new MapWorkspaceCommandError("The requested catalog file could not be verified.");
-      }
-      const source = findPmtilesSourceForCatalogSource(response.file, input.file_source_id);
-      if (!source) {
-        throw new MapWorkspaceCommandError("A matching PMTiles source is not available.");
-      }
-      const descriptor = descriptorForSource({
-        collectionSlug: resolvedCollection.slug,
-        datasetSlug: response.dataset.slug,
-        fileSlug: response.file.slug,
-        formatType: "pmtiles",
-        source,
-      });
-      if (!descriptor) {
-        throw new MapWorkspaceCommandError("The requested PMTiles source could not be verified.");
-      }
-      const layer = resolvedToMapLayer({ descriptor, dataset: response.dataset, file: response.file, source });
-      if (!layer) {
-        throw new MapWorkspaceCommandError("The requested PMTiles layer could not be prepared.");
-      }
+      const layer = await catalogMapLayer(input, collection);
       preparedCatalogLayersRef.current.set(layer.id, layer);
       return { layerId: layer.id, label: input.label ?? layer.label, kind: layer.kind };
     },
@@ -1150,7 +1148,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
       if (dataPanelHasOpenedRef.current) {
         panel.expand();
       } else {
-        panel.resize(isMobileMapLayout ? "62%" : MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE);
+        panel.resize(isMobileMapLayout ? "40%" : MAP_SELECTED_FEATURES_DESKTOP_DEFAULT_SIZE);
         dataPanelHasOpenedRef.current = true;
       }
     } else {
@@ -1238,7 +1236,6 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
           collectionSlug: collection.slug,
           datasetSlug: selectedDataset.slug,
           fileSlug: selectedFile.slug,
-          formatType: "pmtiles",
           source: selectedSource,
         })
       : null;
@@ -1379,15 +1376,15 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const queryResultsButtonLabel = queryResultsVisible ? "Hide results" : "View results";
 
   const settingsPanelContent = (
-    <div className="box-border w-full max-w-full min-w-0 overflow-hidden p-3 sm:p-4">
+    <div className="box-border w-full max-w-full min-w-0 overflow-hidden p-3">
       <Card className="w-full max-w-full min-w-0">
-        <CardHeader className="px-4 pb-3 sm:px-6">
+        <CardHeader className="px-3 pb-3">
           <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
             <Layers className="h-4 w-4" />
             Layers
           </CardTitle>
         </CardHeader>
-        <CardContent className="min-w-0 space-y-5 px-4 sm:px-6">
+        <CardContent className="min-w-0 space-y-5 px-3">
           <div className="min-w-0 space-y-2">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Dataset</div>
             <DatasetSearchCombobox
@@ -1638,7 +1635,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
       <ResizablePanel
         id="map-data-panel"
         defaultSize="0%"
-        minSize={isMobileMapLayout ? "42%" : "18%"}
+        minSize={isMobileMapLayout ? "25%" : "15%"}
         collapsible
         collapsedSize="0%"
         panelRef={dataPanelRef}
@@ -1768,7 +1765,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
         <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
           <ResizablePanel
             defaultSize="28%"
-            minSize="22%"
+            minSize="240px"
             maxSize="42%"
             collapsible
             collapsedSize="0%"
@@ -1776,7 +1773,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
             onResize={(panelSize) => setIsSettingsCollapsed(panelSize.asPercentage === 0)}
             className="min-w-0 overflow-hidden"
           >
-            <ScrollArea className="h-full">{settingsPanelContent}</ScrollArea>
+            <div className="h-full min-w-0 overflow-y-auto overflow-x-hidden">{settingsPanelContent}</div>
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel

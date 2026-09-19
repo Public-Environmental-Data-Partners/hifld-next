@@ -12,10 +12,9 @@ const descriptor: SourceDescriptor = {
   collectionSlug: "hifld",
   datasetSlug: "hospitals-3",
   fileSlug: "hospitals-3",
-  formatType: "pmtiles",
-  storageLocationId: 4,
   version: "v1.1.0",
-  sourceId: 17,
+  assetKey: "pmtiles",
+  storageLocationSlug: "seaweedfs",
 };
 
 const layer: LoadedMapLayer = {
@@ -74,7 +73,8 @@ describe("feature selection helpers", () => {
       datasetSlug: "hospitals-3",
       fileSlug: "hospitals-3",
       version: "v1.1.0",
-      sourceId: 17,
+      assetKey: "pmtiles",
+      storageLocationSlug: "seaweedfs",
       sourceLayerId: "hospitals-3",
       featureId: "42",
       centroid: { lng: -77.0365, lat: 38.8977 },

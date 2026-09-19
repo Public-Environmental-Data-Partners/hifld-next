@@ -19,7 +19,7 @@ vi.mock('@/lib/analytics', () => ({
 // Mock the API client
 vi.mock('@/lib/api-client', () => ({
   getCollectionBySlug: vi.fn(),
-  getCollectionDatasets: vi.fn(),
+  getCollectionDatasetsBySlug: vi.fn(),
   getCollectionTagValues: vi.fn(),
 }))
 
@@ -185,19 +185,19 @@ describe('CollectionDetailPage - API Integration Tests', () => {
       expect(parseTagFiltersParam('{bad-json')).toBeUndefined()
     })
 
-    it('should call getCollectionDatasets with correct limit and offset on initial load', async () => {
+    it('should call getCollectionDatasetsBySlug with correct limit and offset on initial load', async () => {
       const mockDatasets = createMockDatasets(1, 0)
       const mockResponse = createMockResponse(mockDatasets, 14, 1, 0)
-      vi.mocked(apiClient.getCollectionDatasets).mockResolvedValue(mockResponse)
+      vi.mocked(apiClient.getCollectionDatasetsBySlug).mockResolvedValue(mockResponse)
 
       const router = createTestRouter({ limit: 1, offset: 0 })
       router.navigate({ to: '/collections/hifld', search: { limit: 1, offset: 0 } })
 
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledWith(
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({
-              collectionId: 1,
+              collectionSlug: "hifld",
               limit: 1,
               offset: 0,
               includeUrls: false,
@@ -213,7 +213,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
       const page2Datasets = createMockDatasets(1, 1)
       const page2Response = createMockResponse(page2Datasets, 14, 1, 1)
 
-      vi.mocked(apiClient.getCollectionDatasets)
+      vi.mocked(apiClient.getCollectionDatasetsBySlug)
         .mockResolvedValueOnce(page1Response)
         .mockResolvedValueOnce(page2Response)
 
@@ -221,15 +221,15 @@ describe('CollectionDetailPage - API Integration Tests', () => {
       await router.navigate({ to: '/collections/hifld', search: { limit: 1, offset: 0 } })
 
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledTimes(1)
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledTimes(1)
       })
 
       // Navigate to next page
       await router.navigate({ to: '/collections/hifld', search: { limit: 1, offset: 1 } })
 
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledTimes(2)
-        expect(apiClient.getCollectionDatasets).toHaveBeenLastCalledWith(
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledTimes(2)
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenLastCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({
               offset: 1,
@@ -243,13 +243,13 @@ describe('CollectionDetailPage - API Integration Tests', () => {
     it('should respect limit parameter in API call', async () => {
       const mockDatasets = createMockDatasets(5, 0)
       const mockResponse = createMockResponse(mockDatasets, 14, 5, 0)
-      vi.mocked(apiClient.getCollectionDatasets).mockResolvedValue(mockResponse)
+      vi.mocked(apiClient.getCollectionDatasetsBySlug).mockResolvedValue(mockResponse)
 
       const router = createTestRouter({ limit: 5, offset: 0 })
       await router.navigate({ to: '/collections/hifld', search: { limit: 5, offset: 0 } })
 
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledWith(
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({
               limit: 5,
@@ -281,7 +281,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
       ).toBe('school')
     })
 
-    it('should call getCollectionDatasets with search query', async () => {
+    it('should call getCollectionDatasetsBySlug with search query', async () => {
       const searchResults = [
         {
           id: 1,
@@ -294,13 +294,13 @@ describe('CollectionDetailPage - API Integration Tests', () => {
         },
       ]
       const searchResponse = createMockResponse(searchResults, 1, 100, 0)
-      vi.mocked(apiClient.getCollectionDatasets).mockResolvedValue(searchResponse)
+      vi.mocked(apiClient.getCollectionDatasetsBySlug).mockResolvedValue(searchResponse)
 
       const router = createTestRouter({ query: 'school', limit: 100, offset: 0 })
       await router.navigate({ to: '/collections/hifld', search: { query: 'school', limit: 100, offset: 0 } })
 
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledWith(
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({
               search: 'school',
@@ -312,7 +312,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
 
     it('should reset offset to 0 when search query changes', async () => {
       const searchResponse = createMockResponse([], 0, 100, 0)
-      vi.mocked(apiClient.getCollectionDatasets)
+      vi.mocked(apiClient.getCollectionDatasetsBySlug)
         .mockResolvedValueOnce(createMockResponse(createMockDatasets(14, 0), 14, 100, 5))
         .mockResolvedValueOnce(searchResponse)
 
@@ -320,14 +320,14 @@ describe('CollectionDetailPage - API Integration Tests', () => {
       await router.navigate({ to: '/collections/hifld', search: { query: '', limit: 100, offset: 5 } })
 
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledTimes(1)
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledTimes(1)
       })
 
       // Change search query
       await router.navigate({ to: '/collections/hifld', search: { query: 'test', limit: 100, offset: 0 } })
 
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledWith(
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({
               search: 'test',
@@ -340,13 +340,13 @@ describe('CollectionDetailPage - API Integration Tests', () => {
 
     it('should handle empty search query correctly', async () => {
       const mockResponse = createMockResponse(createMockDatasets(14, 0), 14, 100, 0)
-      vi.mocked(apiClient.getCollectionDatasets).mockResolvedValue(mockResponse)
+      vi.mocked(apiClient.getCollectionDatasetsBySlug).mockResolvedValue(mockResponse)
 
       const router = createTestRouter({ query: '', limit: 100, offset: 0 })
       await router.navigate({ to: '/collections/hifld', search: { query: '', limit: 100, offset: 0 } })
 
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledWith(
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({
               search: undefined, // Empty query should be undefined
@@ -357,7 +357,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
     })
 
     it('tracks a URL-driven zero-result search from its matching loader response', async () => {
-      vi.mocked(apiClient.getCollectionDatasets).mockImplementation(({ data }) =>
+      vi.mocked(apiClient.getCollectionDatasetsBySlug).mockImplementation(({ data }) =>
         Promise.resolve(
           data.search === 'hospital'
             ? createMockResponse([], 0, 100, 0)
@@ -370,7 +370,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
       render(<RouterProvider router={router} />)
 
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledTimes(1)
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledTimes(1)
       })
 
       await act(async () => {
@@ -387,7 +387,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
   })
 
   describe('Tag Filters API calls', () => {
-    it('should call getCollectionDatasets with tagFilters when filters are applied', async () => {
+    it('should call getCollectionDatasetsBySlug with tagFilters when filters are applied', async () => {
       const filteredResults = [
         {
           id: 1,
@@ -401,7 +401,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
       ]
       const filteredResponse = createMockResponse(filteredResults, 1, 100, 0)
 
-      vi.mocked(apiClient.getCollectionDatasets)
+      vi.mocked(apiClient.getCollectionDatasetsBySlug)
         .mockResolvedValueOnce(createMockResponse(createMockDatasets(14, 0), 14, 100, 0))
         .mockResolvedValueOnce(filteredResponse)
 
@@ -411,7 +411,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
       // The component will call fetchDatasets when tag filters are applied
       // This is tested through the component's internal logic
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalled()
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalled()
       })
     })
 
@@ -421,7 +421,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
       const filteredResponse = new Promise<PaginatedResponse<DatasetWithUrls>>((resolve) => {
         resolveFilteredResponse = resolve
       })
-      vi.mocked(apiClient.getCollectionDatasets)
+      vi.mocked(apiClient.getCollectionDatasetsBySlug)
         .mockResolvedValueOnce(createMockResponse(createMockDatasets(14, 0), 14, 100, 0))
         .mockReturnValueOnce(filteredResponse)
 
@@ -444,7 +444,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
     it('does not track an aborted tag-filter request', async () => {
       const user = userEvent.setup()
       const unresolvedResponse = new Promise<PaginatedResponse<DatasetWithUrls>>(() => {})
-      vi.mocked(apiClient.getCollectionDatasets)
+      vi.mocked(apiClient.getCollectionDatasetsBySlug)
         .mockResolvedValueOnce(createMockResponse(createMockDatasets(14, 0), 14, 100, 0))
         .mockReturnValue(unresolvedResponse)
 
@@ -464,7 +464,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
     it('should call loader with correct parameters including collectionId', async () => {
       const mockDatasets = createMockDatasets(14, 0)
       const mockResponse = createMockResponse(mockDatasets, 14, 100, 0)
-      vi.mocked(apiClient.getCollectionDatasets).mockResolvedValue(mockResponse)
+      vi.mocked(apiClient.getCollectionDatasetsBySlug).mockResolvedValue(mockResponse)
 
       const router = createTestRouter({ limit: 100, offset: 0 })
       await router.navigate({ to: '/collections/hifld', search: { limit: 100, offset: 0 } })
@@ -477,10 +477,10 @@ describe('CollectionDetailPage - API Integration Tests', () => {
             }),
           })
         )
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledWith(
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({
-              collectionId: 1,
+              collectionSlug: "hifld",
               limit: 100,
               offset: 0,
               includeUrls: false,
@@ -494,7 +494,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
       const page1Response = createMockResponse(createMockDatasets(1, 0), 14, 1, 0)
       const page2Response = createMockResponse(createMockDatasets(1, 1), 14, 1, 1)
 
-      vi.mocked(apiClient.getCollectionDatasets)
+      vi.mocked(apiClient.getCollectionDatasetsBySlug)
         .mockResolvedValueOnce(page1Response)
         .mockResolvedValueOnce(page2Response)
 
@@ -502,14 +502,14 @@ describe('CollectionDetailPage - API Integration Tests', () => {
       await router.navigate({ to: '/collections/hifld', search: { limit: 1, offset: 0 } })
 
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledTimes(1)
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledTimes(1)
       })
 
       // Change offset - loader should re-run
       await router.navigate({ to: '/collections/hifld', search: { limit: 1, offset: 1 } })
 
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledTimes(2)
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledTimes(2)
       })
     })
   })
@@ -518,13 +518,13 @@ describe('CollectionDetailPage - API Integration Tests', () => {
     it('should handle limit=1 correctly', async () => {
       const singleDataset = createMockDatasets(1, 0)
       const response = createMockResponse(singleDataset, 14, 1, 0)
-      vi.mocked(apiClient.getCollectionDatasets).mockResolvedValue(response)
+      vi.mocked(apiClient.getCollectionDatasetsBySlug).mockResolvedValue(response)
 
       const router = createTestRouter({ limit: 1, offset: 0 })
       await router.navigate({ to: '/collections/hifld', search: { limit: 1, offset: 0 } })
 
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledWith(
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({
               limit: 1,
@@ -537,13 +537,13 @@ describe('CollectionDetailPage - API Integration Tests', () => {
 
     it('should handle default limit (100) when not specified', async () => {
       const mockResponse = createMockResponse(createMockDatasets(14, 0), 14, 100, 0)
-      vi.mocked(apiClient.getCollectionDatasets).mockResolvedValue(mockResponse)
+      vi.mocked(apiClient.getCollectionDatasetsBySlug).mockResolvedValue(mockResponse)
 
       const router = createTestRouter({})
       await router.navigate({ to: '/collections/hifld', search: {} })
 
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalledWith(
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalledWith(
           expect.objectContaining({
             data: expect.objectContaining({
               limit: 100, // Default limit
@@ -554,7 +554,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
     })
 
     it('should handle API errors gracefully', async () => {
-      vi.mocked(apiClient.getCollectionDatasets).mockRejectedValue(new Error('API Error'))
+      vi.mocked(apiClient.getCollectionDatasetsBySlug).mockRejectedValue(new Error('API Error'))
 
       const router = createTestRouter({ limit: 100, offset: 0 })
       
@@ -568,7 +568,7 @@ describe('CollectionDetailPage - API Integration Tests', () => {
 
       // Verify the API was called (error occurred during loader execution)
       await waitFor(() => {
-        expect(apiClient.getCollectionDatasets).toHaveBeenCalled()
+        expect(apiClient.getCollectionDatasetsBySlug).toHaveBeenCalled()
       })
     })
   })

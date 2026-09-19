@@ -1,161 +1,135 @@
-from pathlib import Path
-
 import pytest
 
-from app.catalog.models import (
-    BucketStorageConfig,
-    DatasetFileResponse,
-    QuerySourceRef,
-    StorageLocation,
-)
+from app.catalog.client import CatalogClientError
+from app.catalog.models import BucketStorageConfig, QuerySourceRef, StacVersionCollection
 from app.catalog.source_resolver import SourceResolver
-
-FIXTURE = Path(__file__).parent / "contract_fixtures" / "file_response.json"
 
 
 class FakeCatalog:
-    def __init__(self, response: DatasetFileResponse) -> None:
+    def __init__(self, response: StacVersionCollection) -> None:
         self.response = response
 
     async def get_dataset_file(
-        self, collection: int | str, dataset: int | str, file: int | str
-    ) -> DatasetFileResponse:
-        del collection, dataset, file
+        self,
+        collection: str,
+        dataset: str,
+        file: str,
+        *,
+        version: str | None = None,
+        **_: str | None,
+    ) -> StacVersionCollection:
+        del collection, dataset, file, version
         return self.response
 
 
-class NullCatalog:
-    async def get_dataset_file(
-        self, collection: int | str, dataset: int | str, file: int | str
-    ) -> None:
-        del collection, dataset, file
-        return None
+def ref(**updates: str) -> QuerySourceRef:
+    values = {
+        "alias": "roads",
+        "collection_slug": "hifld",
+        "dataset_slug": "roads",
+        "file_slug": "roads",
+        "version": "v1.0.0",
+        "asset_key": "geoparquet-abc",
+        "storage_location_slug": "local",
+    }
+    values.update(updates)
+    return QuerySourceRef.model_validate(values)
+
+
+def response(
+    *,
+    identifier: str = "hifld/roads/roads/v1.0.0",
+    href: str = "http://localhost:8333/hifld-local-published/hifld/roads/roads/v1.0.0/geoparquet/roads.parquet",
+    native_crs: str = "EPSG:4326",
+) -> StacVersionCollection:
+    return StacVersionCollection.model_validate(
+        {
+            "type": "Collection",
+            "stac_version": "1.1.0",
+            "id": identifier,
+            "description": "Roads",
+            "license": "other",
+            "links": [],
+            "extent": {
+                "spatial": {"bbox": [[-123, 24, -67, 49]]},
+                "temporal": {"interval": [[None, None]]},
+            },
+            "assets": {
+                "geoparquet-abc": {
+                    "href": href,
+                    "type": "application/vnd.apache.parquet",
+                    "title": "GeoParquet",
+                    "roles": ["data"],
+                    "file:size": 1,
+                    "file:checksum": "1220abc",
+                }
+            },
+            "table:columns": [{"name": "id", "type": "int64"}],
+            "hifld:native_crs": native_crs,
+        }
+    )
+
+
+def locations() -> dict[str, BucketStorageConfig]:
+    return {
+        "local": BucketStorageConfig(
+            type="seaweedfs",
+            base_url="http://localhost:8333",
+            endpoint_url="http://seaweedfs:8333",
+            bucket="hifld-local-published",
+        )
+    }
 
 
 @pytest.mark.asyncio
-async def test_resolver_requires_catalog_source_identity() -> None:
-    resolver = SourceResolver(NullCatalog())
-    with pytest.raises(AttributeError):
-        await resolver.resolve(
-            QuerySourceRef(
-                collection_id=1, dataset_id=2, file_id=3, file_source_id=4, alias="roads"
-            )
+async def test_resolver_verifies_hierarchy_and_maps_trusted_href() -> None:
+    resolved = await SourceResolver(FakeCatalog(response()), locations()).resolve(ref())
+    assert resolved.object_uris == (
+        "s3://hifld-local-published/hifld/roads/roads/v1.0.0/geoparquet/roads.parquet",
+    )
+    assert resolved.bbox == (-123.0, 24.0, -67.0, 49.0)
+    assert resolved.crs == "EPSG:4326"
+
+
+@pytest.mark.asyncio
+async def test_resolver_unquotes_json_string_crs_but_preserves_projjson() -> None:
+    quoted = await SourceResolver(
+        FakeCatalog(response(native_crs='"OGC:CRS84"')), locations()
+    ).resolve(ref())
+    projjson = '{"type":"GeographicCRS","name":"WGS 84"}'
+    structured = await SourceResolver(
+        FakeCatalog(response(native_crs=projjson)), locations()
+    ).resolve(ref())
+
+    assert quoted.crs == "OGC:CRS84"
+    assert structured.crs == projjson
+
+
+@pytest.mark.asyncio
+async def test_resolver_rejects_wrong_version_or_hierarchy() -> None:
+    with pytest.raises(CatalogClientError, match="source_identity_mismatch"):
+        await SourceResolver(
+            FakeCatalog(response(identifier="hifld/roads/roads/v2.0.0")), locations()
+        ).resolve(ref())
+
+
+@pytest.mark.asyncio
+async def test_resolver_rejects_unknown_explicit_storage() -> None:
+    with pytest.raises(CatalogClientError, match="source_storage_unknown"):
+        await SourceResolver(FakeCatalog(response()), locations()).resolve(
+            ref(storage_location_slug="missing")
         )
 
 
-def _response_with_sources(
-    *, glob_pattern: str | None, storage_uris: tuple[str, ...]
-) -> DatasetFileResponse:
-    response = DatasetFileResponse.model_validate_json(FIXTURE.read_text())
-    source = response.file.formats[0].sources[0]
-    source.storage_location = StorageLocation(
-        id=3,
-        slug="public-gcs",
-        name="Public GCS",
-        backend_type="s3",
-        config=BucketStorageConfig(
-            type="gcs",
-            base_url="https://storage.googleapis.com/catalog",
-            bucket="catalog",
-        ),
-    )
-    source.glob_pattern = glob_pattern
-    source.storage_uri = storage_uris[0]
-    duplicates = [source.model_copy(deep=True)]
-    for uri in storage_uris[1:]:
-        duplicate = source.model_copy(deep=True)
-        duplicate.storage_uri = uri
-        duplicates.append(duplicate)
-    response.file.formats[0].sources = duplicates
-    return response
-
-
 @pytest.mark.asyncio
-async def test_resolver_prefers_catalog_glob_without_expanding_in_application() -> None:
-    response = _response_with_sources(
-        glob_pattern="gs://catalog/roads/**/*.parquet",
-        storage_uris=(
-            "gs://catalog/roads/**/*.parquet",
-            "gs://catalog/roads/a.parquet",
-            "gs://catalog/roads/b.parquet",
-        ),
-    )
-    resolver = SourceResolver(FakeCatalog(response))
-    resolved = await resolver.resolve(
-        QuerySourceRef(collection_id=1, dataset_id=12, file_id=99, file_source_id=88, alias="roads")
-    )
-    assert resolved.object_uris == ("gs://catalog/roads/**/*.parquet",)
-    assert resolved.storage_config.type == "gcs"
-
-
-@pytest.mark.asyncio
-async def test_resolver_collects_concrete_storage_uris_for_expanded_sources() -> None:
-    response = _response_with_sources(
-        glob_pattern=None,
-        storage_uris=("gs://catalog/roads/a.parquet", "gs://catalog/roads/b.parquet"),
-    )
-    resolver = SourceResolver(FakeCatalog(response))
-    resolved = await resolver.resolve(
-        QuerySourceRef(collection_id=1, dataset_id=12, file_id=99, file_source_id=88, alias="roads")
-    )
-    assert resolved.object_uris == (
-        "gs://catalog/roads/a.parquet",
-        "gs://catalog/roads/b.parquet",
-    )
-
-
-@pytest.mark.asyncio
-async def test_resolver_does_not_duplicate_glob_with_legacy_expanded_entries() -> None:
-    response = _response_with_sources(
-        glob_pattern=None,
-        storage_uris=("gs://catalog/roads/**/*.parquet", "gs://catalog/roads/a.parquet"),
-    )
-    resolved = await SourceResolver(FakeCatalog(response)).resolve(
-        QuerySourceRef(collection_id=1, dataset_id=12, file_id=99, file_source_id=88, alias="roads")
-    )
-    assert resolved.object_uris == ("gs://catalog/roads/**/*.parquet",)
-
-
-@pytest.mark.asyncio
-async def test_resolver_allows_glob_pattern_for_seaweedfs_when_no_objects_exist() -> None:
-    response = _response_with_sources(
-        glob_pattern="s3://catalog/roads/**/*.parquet",
-        storage_uris=("",),
-    )
-    source = response.file.formats[0].sources[0]
-    source.storage_location.config = BucketStorageConfig(
-        type="seaweedfs",
-        base_url="http://localhost:8888",
-        bucket="catalog",
-        endpoint_url="http://localhost:8333",
-    )
-    resolver = SourceResolver(FakeCatalog(response))
-
-    resolved = await resolver.resolve(
-        QuerySourceRef(collection_id=1, dataset_id=12, file_id=99, file_source_id=88, alias="roads")
-    )
-
-    assert resolved.object_uris == ("s3://catalog/roads/**/*.parquet",)
-
-
-@pytest.mark.asyncio
-async def test_resolver_treats_seaweedfs_endpoint_query_as_a_concrete_uri() -> None:
-    storage_uri = "s3://catalog/roads/part-0.parquet?endpoint_url=http://localhost:8333"
-    response = _response_with_sources(
-        glob_pattern=None,
-        storage_uris=(storage_uri,),
-    )
-    source = response.file.formats[0].sources[0]
-    source.storage_location.config = BucketStorageConfig(
-        type="seaweedfs",
-        base_url="http://localhost:8888",
-        bucket="catalog",
-        endpoint_url="http://localhost:8333",
-    )
-    resolver = SourceResolver(FakeCatalog(response))
-
-    resolved = await resolver.resolve(
-        QuerySourceRef(collection_id=1, dataset_id=12, file_id=99, file_source_id=88, alias="roads")
-    )
-
-    assert resolved.object_uris == (storage_uri,)
+@pytest.mark.parametrize(
+    "href",
+    [
+        "http://evil.test/hifld-local-published/a.parquet",
+        "http://localhost:8333/other/a.parquet",
+        "http://localhost:8333/hifld-local-published/../secret.parquet",
+    ],
+)
+async def test_resolver_rejects_untrusted_or_traversing_asset_href(href: str) -> None:
+    with pytest.raises(CatalogClientError, match="source_location_invalid"):
+        await SourceResolver(FakeCatalog(response(href=href)), locations()).resolve(ref())

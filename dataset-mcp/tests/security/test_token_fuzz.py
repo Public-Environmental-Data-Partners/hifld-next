@@ -18,7 +18,12 @@ def _token() -> str:
         canonical_sql="SELECT id FROM roads ORDER BY id",
         sources=(
             QuerySourceRef(
-                alias="roads", collection_id=1, dataset_id=2, file_id=3, file_source_id=4
+                alias="roads",
+                collection_slug="hifld",
+                dataset_slug="roads",
+                file_slug="roads",
+                version="v1.0.0",
+                asset_key="geoparquet",
             ),
         ),
         issued_at=NOW,

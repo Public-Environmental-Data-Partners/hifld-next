@@ -25,6 +25,8 @@ describe("public/llms.txt", () => {
     expect(body).toContain("GET /api");
     expect(body).toContain("GET /api/openapi");
     expect(body).toContain("GET /api/collections/{slug}");
+    expect(body).toContain("GET /api/collections/{slug}/datasets");
+    expect(body).toContain("STAC Catalog");
     expect(body).toContain("search");
     expect(body).toContain(
       "GET /api/collections/{collectionSlug}/datasets/{datasetSlug}",
@@ -35,14 +37,19 @@ describe("public/llms.txt", () => {
     expect(body).toContain(
       "GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema",
     );
-    expect(body).toContain("latest schema-capable version");
-    expect(body).toContain("source URLs");
+    expect(body).toContain("table:columns");
+    expect(body).toContain("exact aliases");
+    expect(body).toContain("{format}-{hash}");
+    expect(body).toContain("hifld:*");
     expect(body).toContain("GeoParquet");
     expect(body).toContain("no `/items`, `/features`");
     expect(body).toContain("read-only");
     expect(body).toContain("JSON API remains read-only");
     expect(body).toContain("current browser workspace");
     expect(body).toContain("collection-first");
+    expect(body).toContain("not a STAC Item Search FeatureCollection");
+    expect(body).toContain("Numeric legacy IDs are invalid");
+    expect(body).not.toContain("latest schema-capable version");
   });
 
   it("lists the bounded contextual WebMCP surface without schemas", () => {
@@ -84,9 +91,10 @@ describe("public/llms.txt", () => {
     expect(body).toContain("MVT");
   });
 
-  it("does not document the stale collection dataset-listing route", () => {
+  it("documents the explicit collection dataset-listing route", () => {
     const body = readFileSync(llmsPath, "utf8");
-    expect(body).not.toContain("**GET /api/collections/{slug}/datasets**");
+    expect(body).toContain("**GET /api/collections/{slug}/datasets**");
+    expect(body).not.toContain("This API is **not** OGC API-Features or STAC");
   });
 
   it("documents scanner discovery, endpoint override, and native fallback", () => {

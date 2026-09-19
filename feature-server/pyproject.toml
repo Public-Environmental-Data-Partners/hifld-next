@@ -1,0 +1,44 @@
+[project]
+name = "hifld-feature-server"
+version = "0.1.0"
+description = "Reloadable OGC API Features adapter for HIFLD GeoParquet"
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb==1.5.5",
+    "httpx==0.28.1",
+    "pygeoapi==0.24.0",
+    "pydantic-settings==2.13.0",
+    "starlette==0.52.1",
+    "uvicorn[standard]==0.41.0",
+]
+
+[dependency-groups]
+dev = [
+    "basedpyright==1.38.2",
+    "pyright==1.1.407",
+    "pytest==9.1.1",
+    "ruff==0.16.5",
+]
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+include = ["app"]
+extraPaths = ["typings"]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
