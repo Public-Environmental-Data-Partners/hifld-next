@@ -20,6 +20,7 @@ def client_for(routes: dict[str, object], requests: list[str] | None = None) -> 
 
 @pytest.mark.asyncio
 async def test_list_collections_normalizes_stac_child_links() -> None:
+    requests: list[str] = []
     catalog = client_for(
         {
             "/api/collections": {
@@ -35,13 +36,25 @@ async def test_list_collections_normalizes_stac_child_links() -> None:
                         "title": "HIFLD",
                     },
                 ],
-            }
-        }
+            },
+            "/api/collections/hifld": {
+                "type": "Catalog",
+                "id": "hifld",
+                "title": "HIFLD Next",
+                "description": "Homeland infrastructure data",
+                "stac_version": "1.0.0",
+                "links": [],
+            },
+        },
+        requests,
     )
 
     collections = await catalog.list_collections()
 
-    assert [(item.slug, item.name) for item in collections] == [("hifld", "HIFLD")]
+    assert [(item.slug, item.name, item.description) for item in collections] == [
+        ("hifld", "HIFLD Next", "Homeland infrastructure data")
+    ]
+    assert requests == ["/api/collections", "/api/collections/hifld"]
 
 
 @pytest.mark.asyncio
@@ -91,6 +104,14 @@ async def test_collection_search_uses_datasets_route_and_webapp_envelope() -> No
                     }
                 ],
             },
+            "/api/collections/hifld": {
+                "type": "Catalog",
+                "id": "hifld",
+                "title": "HIFLD",
+                "description": "Homeland infrastructure data",
+                "stac_version": "1.0.0",
+                "links": [],
+            },
             "/api/collections/hifld/datasets": {
                 "datasets": [],
                 "total": 0,
@@ -120,6 +141,14 @@ async def test_collection_search_normalizes_stable_catalog_identity_keys() -> No
                         "title": "HIFLD",
                     }
                 ],
+            },
+            "/api/collections/hifld": {
+                "type": "Catalog",
+                "id": "hifld",
+                "title": "HIFLD",
+                "description": "Homeland infrastructure data",
+                "stac_version": "1.0.0",
+                "links": [],
             },
             "/api/collections/hifld/datasets": {
                 "datasets": [

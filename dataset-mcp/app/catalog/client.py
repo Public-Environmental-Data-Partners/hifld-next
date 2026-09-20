@@ -135,9 +135,6 @@ class CatalogClient:
             if link.rel != "child":
                 continue
             slug = _child_slug(link.href)
-            if link.title is not None:
-                collections.append(Collection(slug=slug, name=link.title))
-                continue
             catalog_model = await self._get_model(
                 f"/api/collections/{_path_slug(slug, 'collection')}", StacCatalog
             )
