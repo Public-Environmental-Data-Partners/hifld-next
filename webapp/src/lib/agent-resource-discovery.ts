@@ -98,6 +98,16 @@ export function buildAgentResourceDiscovery(origin: string): AgentResourceDiscov
         url: new URL("/api/openapi", origin).href,
         representativeQueries: ["What catalog API endpoints are available?", "How can I search HIFLD datasets?"],
       },
+      {
+        identifier: `urn:air:${host}:stac:openapi`,
+        displayName: "HIFLD Next STAC API Description",
+        type: "application/vnd.oai.openapi+json",
+        url: new URL("/stac/api", origin).href,
+        representativeQueries: [
+          "How can a STAC client list HIFLD Next version Collections?",
+          "Where is the HIFLD Next STAC API landing page?",
+        ],
+      },
     ],
   };
 }

@@ -24,9 +24,18 @@ Use this skill when you need to explore **collections**, **datasets**, and **fil
   server-only \`DATASET_MCP_QUERY_API_URL\`; internal service origins are never
   advertised by discovery documents.
 
+## Standard STAC clients
+
+Start at \`GET /stac\`. This API advertises STAC API Core and Collections;
+\`GET /stac/collections\` lists version-level Collections, and \`GET /stac/api\`
+describes the supported endpoints. A Collection ID is a full version path such
+as \`hifld/hospitals-3/hospitals-3/v1.0.0\`. Follow \`next\` links for more pages.
+The \`/api/collections\` tree remains a static STAC Catalog, not the API
+Collections listing. \`/features\` serves OGC data features, not STAC Items.
+
 ## Typical flow
 
-1. \`GET /api/collections\` — list collections.
+1. \`GET /api/collections\` — open the root static STAC Catalog and follow child links.
 2. \`GET /api/collections/{slug}/datasets\` — search datasets in one collection with \`search\` or \`query\`, \`tag_filters\`, \`limit\`, \`offset\`, \`omit\`, and \`include_urls\`. Use \`GET /api/datasets\` for the same paginated shape aggregated across all collections, or \`GET /api/collections/{slug}\` for the collection's raw STAC Catalog.
 3. \`GET /api/collections/{collectionSlug}/datasets/{datasetSlug}\` — open dataset detail by collection and dataset slug.
 4. \`GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}\` — inspect the raw STAC Collection, its assets, returned \`links\`, source URLs, and GeoParquet options.

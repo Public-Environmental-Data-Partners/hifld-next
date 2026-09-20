@@ -14,6 +14,22 @@
    webapp may expose contextual WebMCP tools that read catalog/query data and
    modify only the **current browser workspace**; they never write catalog data.
 
+## Standard STAC clients
+
+**GET /stac** is the STAC API landing page. It advertises STAC API Core and
+STAC API Collections 1.0.0. **GET /stac/collections** pages through version-level
+STAC Collections, and **GET /stac/collections/{collectionId}** opens one. The
+Collection ID is the full version path, for example
+`hifld/hospitals-3/hospitals-3/v1.0.0`; clients may percent-encode its slashes.
+The service description is **GET /stac/api**. Follow `next` links to page through
+all Collections.
+
+**GET /api/collections** remains the root of the static STAC catalog tree; it
+is not the STAC API Collections listing. `/stac` does not advertise STAC Item
+Search, STAC API Features, or Collection Search. `/features` serves OGC data
+features, not STAC Items. Use the custom `/api` dataset listing below for text
+search and tag filters.
+
 ## Search and pagination
 
 **GET /api/collections/{slug}/datasets** is the collection-scoped route that lists datasets with text search and paging. **GET /api/datasets** provides the same paginated shape aggregated across all collections. **GET /api/collections/{slug}** returns the collection's raw STAC Catalog instead.
@@ -109,6 +125,8 @@ not make the JSON catalog writable.
 
 ## Collections
 
+- [STAC API landing page](/stac): Core and Collections discovery for standard clients.
+- [STAC API Collections listing](/stac/collections): paginated version-level STAC Collections.
 - [Root catalog](/api/collections): raw STAC Catalog with child links to collection catalogs.
 - [Collection catalog](/api/collections/{slug}): raw STAC Catalog for one collection.
 - [Collection datasets](/api/collections/{slug}/datasets): custom paginated wrapper `{datasets,total,limit,offset,links}` whose `datasets` entries are raw STAC Catalogs. It is not a STAC Item Search FeatureCollection.

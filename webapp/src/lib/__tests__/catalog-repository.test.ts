@@ -57,6 +57,35 @@ function catalogDatabase(): string {
 }
 
 describe("CatalogRepository", () => {
+  it("pages published STAC version identities in stable path order", () => {
+    const path = catalogDatabase();
+    const db = new DatabaseSync(path);
+    db.exec(`
+      INSERT INTO versions (version_path, file_path, version_label, collection_href, spatial_status, feature_count, is_latest)
+        VALUES ('hifld/stations/stations/v2.0.0', 'hifld/stations/stations', 'v2.0.0', 'hifld/stations/stations/v2.0.0/collection.json', 'spatial', 4, 0);
+    `);
+    db.close();
+
+    const repository = new CatalogRepository(path);
+    expect(repository.listStacVersions({ after: null, limit: 1 })).toEqual([
+      {
+        version_path: "hifld/stations/stations/v1.0.0",
+        collection_href: "hifld/stations/stations/v1.0.0/collection.json",
+      },
+    ]);
+    expect(repository.listStacVersions({ after: "hifld/stations/stations/v1.0.0", limit: 1 })).toEqual([
+      {
+        version_path: "hifld/stations/stations/v2.0.0",
+        collection_href: "hifld/stations/stations/v2.0.0/collection.json",
+      },
+    ]);
+    expect(repository.getStacVersion("hifld/stations/stations/v1.0.0")?.collection_href).toBe(
+      "hifld/stations/stations/v1.0.0/collection.json",
+    );
+    expect(repository.getStacVersion("hifld/stations/stations/missing")).toBeNull();
+    repository.close();
+  });
+
   it("validates a published database and resolves only approved slug assets", () => {
     const path = catalogDatabase();
     expect(validateCatalogDatabase(path)).toMatchObject({ generation: "generation-1" });
@@ -240,6 +269,18 @@ describe("CatalogRepository", () => {
     await lifecycle.start();
 
     expect(lifecycle.status().generation).toBe("generation-1");
+    expect(
+      await lifecycle.withSnapshot(({ repository, catalogUrl, generation }) => ({
+        generation,
+        catalogUrl,
+        firstVersion: repository.listStacVersions({ after: null, limit: 1 })[0]?.version_path,
+      })),
+    ).toEqual({
+      generation: "generation-1",
+      catalogUrl:
+        "https://storage.test/bucket/releases/d8e9c0a1-9af9-4b7d-a9a2-70f2e912c3c6/_catalog/catalog.sqlite",
+      firstVersion: "hifld/stations/stations/v1.0.0",
+    });
     expect(calls).toEqual([
       "https://storage.test/bucket/_catalog/current.json",
       "https://storage.test/bucket/releases/d8e9c0a1-9af9-4b7d-a9a2-70f2e912c3c6/_catalog/catalog.sqlite",

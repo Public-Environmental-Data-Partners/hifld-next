@@ -9,7 +9,7 @@ describe("RFC 9727 api-catalog linkset", () => {
   it("buildApiCatalogLinkset has anchor, service-desc, service-doc, status", () => {
     const doc = buildApiCatalogLinkset("https://catalog.example");
     expect(Array.isArray(doc.linkset)).toBe(true);
-    expect(doc.linkset).toHaveLength(1);
+    expect(doc.linkset).toHaveLength(2);
     const entry = doc.linkset[0]!;
     expect(entry.anchor).toBe("https://catalog.example/api");
 
@@ -31,6 +31,10 @@ describe("RFC 9727 api-catalog linkset", () => {
         type: "application/json",
       },
     ]);
+    expect(doc.linkset[1]).toMatchObject({
+      anchor: "https://catalog.example/stac",
+      "service-desc": [{ href: "https://catalog.example/stac/api" }],
+    });
   });
 
   it("Content-Type includes RFC 9727 profile parameter", () => {

@@ -31,6 +31,9 @@ describe("agent resource discovery", () => {
       expect(entry.representativeQueries.length).toBeGreaterThanOrEqual(2);
       expect(entry.representativeQueries.length).toBeLessThanOrEqual(5);
     }
+    expect(catalog.entries).toEqual(
+      expect.arrayContaining([expect.objectContaining({ url: "https://hifld.publicenvirodata.org/stac/api" })]),
+    );
   });
 
   it("uses a validated public endpoint and never leaks invalid configuration", () => {

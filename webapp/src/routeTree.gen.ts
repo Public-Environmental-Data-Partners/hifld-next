@@ -31,12 +31,17 @@ import { Route as ApiQueriesRouteImport } from './routes/api/queries'
 import { Route as CollectionsIndexRouteImport } from './routes/collections.index'
 import { Route as CollectionsSlugRouteImport } from './routes/collections.$slug'
 import { Route as CommonsIndexRouteImport } from './routes/commons.index'
+import { Route as StacIndexRouteImport } from './routes/stac/index'
+import { Route as StacApiRouteImport } from './routes/stac/api'
+import { Route as StacCollectionsRouteImport } from './routes/stac/collections'
 import { Route as Char91DotwellKnownChar93AgentSkillsIndexChar91DotChar93jsonRouteImport } from './routes/[.well-known]/agent-skills/index[.]json'
 import { Route as Char91DotwellKnownChar93McpServerCardChar91DotChar93jsonRouteImport } from './routes/[.well-known]/mcp/server-card[.]json'
 import { Route as ApiCollectionsSlugRouteImport } from './routes/api/collections.$slug'
 import { Route as ApiDatasetsIdRouteImport } from './routes/api/datasets.$id'
 import { Route as ApiDatasetsStatsRouteImport } from './routes/api/datasets.stats'
 import { Route as CollectionsCollectionSlugMapRouteImport } from './routes/collections.$collectionSlug.map'
+import { Route as StacCollectionsSplatRouteImport } from './routes/stac/collections.$'
+import { Route as StacCollectionsCollectionIdRouteImport } from './routes/stac/collections.$collectionId'
 import { Route as Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRouteImport } from './routes/[.well-known]/agent-skills/hifld-catalog/SKILL[.]md'
 import { Route as ApiCollectionsSlugDatasetsRouteImport } from './routes/api/collections.$slug.datasets'
 import { Route as ApiQueriesQueryIdBoundsRouteImport } from './routes/api/queries.$queryId.bounds'
@@ -168,6 +173,21 @@ const CommonsIndexRoute = CommonsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => CommonsRoute,
 } as any)
+const StacIndexRoute = StacIndexRouteImport.update({
+  id: '/stac/',
+  path: '/stac/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StacApiRoute = StacApiRouteImport.update({
+  id: '/stac/api',
+  path: '/stac/api',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StacCollectionsRoute = StacCollectionsRouteImport.update({
+  id: '/stac/collections',
+  path: '/stac/collections',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const Char91DotwellKnownChar93AgentSkillsIndexChar91DotChar93jsonRoute =
   Char91DotwellKnownChar93AgentSkillsIndexChar91DotChar93jsonRouteImport.update(
     {
@@ -202,6 +222,17 @@ const CollectionsCollectionSlugMapRoute =
     id: '/$collectionSlug/map',
     path: '/$collectionSlug/map',
     getParentRoute: () => CollectionsRoute,
+  } as any)
+const StacCollectionsSplatRoute = StacCollectionsSplatRouteImport.update({
+  id: '/$',
+  path: '/$',
+  getParentRoute: () => StacCollectionsRoute,
+} as any)
+const StacCollectionsCollectionIdRoute =
+  StacCollectionsCollectionIdRouteImport.update({
+    id: '/$collectionId',
+    path: '/$collectionId',
+    getParentRoute: () => StacCollectionsRoute,
   } as any)
 const Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRoute =
   Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRouteImport.update(
@@ -355,16 +386,21 @@ export interface FileRoutesByFullPath {
   '/api/openapi': typeof ApiOpenapiRoute
   '/api/queries': typeof ApiQueriesRouteWithChildren
   '/collections/$slug': typeof CollectionsSlugRoute
+  '/stac/api': typeof StacApiRoute
+  '/stac/collections': typeof StacCollectionsRouteWithChildren
   '/about/': typeof AboutIndexRoute
   '/api/': typeof ApiIndexRoute
   '/collections/': typeof CollectionsIndexRoute
   '/commons/': typeof CommonsIndexRoute
+  '/stac/': typeof StacIndexRoute
   '/.well-known/agent-skills/index.json': typeof Char91DotwellKnownChar93AgentSkillsIndexChar91DotChar93jsonRoute
   '/.well-known/mcp/server-card.json': typeof Char91DotwellKnownChar93McpServerCardChar91DotChar93jsonRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRouteWithChildren
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
+  '/stac/collections/$': typeof StacCollectionsSplatRoute
+  '/stac/collections/$collectionId': typeof StacCollectionsCollectionIdRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRoute
   '/api/collections/$slug/datasets': typeof ApiCollectionsSlugDatasetsRoute
   '/api/queries/$queryId/bounds': typeof ApiQueriesQueryIdBoundsRoute
@@ -400,16 +436,21 @@ export interface FileRoutesByTo {
   '/api/openapi': typeof ApiOpenapiRoute
   '/api/queries': typeof ApiQueriesRouteWithChildren
   '/collections/$slug': typeof CollectionsSlugRoute
+  '/stac/api': typeof StacApiRoute
+  '/stac/collections': typeof StacCollectionsRouteWithChildren
   '/about': typeof AboutIndexRoute
   '/api': typeof ApiIndexRoute
   '/collections': typeof CollectionsIndexRoute
   '/commons': typeof CommonsIndexRoute
+  '/stac': typeof StacIndexRoute
   '/.well-known/agent-skills/index.json': typeof Char91DotwellKnownChar93AgentSkillsIndexChar91DotChar93jsonRoute
   '/.well-known/mcp/server-card.json': typeof Char91DotwellKnownChar93McpServerCardChar91DotChar93jsonRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRouteWithChildren
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
+  '/stac/collections/$': typeof StacCollectionsSplatRoute
+  '/stac/collections/$collectionId': typeof StacCollectionsCollectionIdRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRoute
   '/api/collections/$slug/datasets': typeof ApiCollectionsSlugDatasetsRoute
   '/api/queries/$queryId/bounds': typeof ApiQueriesQueryIdBoundsRoute
@@ -447,16 +488,21 @@ export interface FileRoutesById {
   '/api/openapi': typeof ApiOpenapiRoute
   '/api/queries': typeof ApiQueriesRouteWithChildren
   '/collections/$slug': typeof CollectionsSlugRoute
+  '/stac/api': typeof StacApiRoute
+  '/stac/collections': typeof StacCollectionsRouteWithChildren
   '/about/': typeof AboutIndexRoute
   '/api/': typeof ApiIndexRoute
   '/collections/': typeof CollectionsIndexRoute
   '/commons/': typeof CommonsIndexRoute
+  '/stac/': typeof StacIndexRoute
   '/.well-known/agent-skills/index.json': typeof Char91DotwellKnownChar93AgentSkillsIndexChar91DotChar93jsonRoute
   '/.well-known/mcp/server-card.json': typeof Char91DotwellKnownChar93McpServerCardChar91DotChar93jsonRoute
   '/api/collections/$slug': typeof ApiCollectionsSlugRouteWithChildren
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
+  '/stac/collections/$': typeof StacCollectionsSplatRoute
+  '/stac/collections/$collectionId': typeof StacCollectionsCollectionIdRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRoute
   '/api/collections/$slug/datasets': typeof ApiCollectionsSlugDatasetsRoute
   '/api/queries/$queryId/bounds': typeof ApiQueriesQueryIdBoundsRoute
@@ -497,16 +543,21 @@ export interface FileRouteTypes {
     | '/api/openapi'
     | '/api/queries'
     | '/collections/$slug'
+    | '/stac/api'
+    | '/stac/collections'
     | '/about/'
     | '/api/'
     | '/collections/'
     | '/commons/'
+    | '/stac/'
     | '/.well-known/agent-skills/index.json'
     | '/.well-known/mcp/server-card.json'
     | '/api/collections/$slug'
     | '/api/datasets/$id'
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/map'
+    | '/stac/collections/$'
+    | '/stac/collections/$collectionId'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
     | '/api/collections/$slug/datasets'
     | '/api/queries/$queryId/bounds'
@@ -542,16 +593,21 @@ export interface FileRouteTypes {
     | '/api/openapi'
     | '/api/queries'
     | '/collections/$slug'
+    | '/stac/api'
+    | '/stac/collections'
     | '/about'
     | '/api'
     | '/collections'
     | '/commons'
+    | '/stac'
     | '/.well-known/agent-skills/index.json'
     | '/.well-known/mcp/server-card.json'
     | '/api/collections/$slug'
     | '/api/datasets/$id'
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/map'
+    | '/stac/collections/$'
+    | '/stac/collections/$collectionId'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
     | '/api/collections/$slug/datasets'
     | '/api/queries/$queryId/bounds'
@@ -588,16 +644,21 @@ export interface FileRouteTypes {
     | '/api/openapi'
     | '/api/queries'
     | '/collections/$slug'
+    | '/stac/api'
+    | '/stac/collections'
     | '/about/'
     | '/api/'
     | '/collections/'
     | '/commons/'
+    | '/stac/'
     | '/.well-known/agent-skills/index.json'
     | '/.well-known/mcp/server-card.json'
     | '/api/collections/$slug'
     | '/api/datasets/$id'
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/map'
+    | '/stac/collections/$'
+    | '/stac/collections/$collectionId'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
     | '/api/collections/$slug/datasets'
     | '/api/queries/$queryId/bounds'
@@ -636,7 +697,10 @@ export interface RootRouteChildren {
   ApiHealthRoute: typeof ApiHealthRoute
   ApiOpenapiRoute: typeof ApiOpenapiRoute
   ApiQueriesRoute: typeof ApiQueriesRouteWithChildren
+  StacApiRoute: typeof StacApiRoute
+  StacCollectionsRoute: typeof StacCollectionsRouteWithChildren
   ApiIndexRoute: typeof ApiIndexRoute
+  StacIndexRoute: typeof StacIndexRoute
   Char91DotwellKnownChar93AgentSkillsIndexChar91DotChar93jsonRoute: typeof Char91DotwellKnownChar93AgentSkillsIndexChar91DotChar93jsonRoute
   Char91DotwellKnownChar93McpServerCardChar91DotChar93jsonRoute: typeof Char91DotwellKnownChar93McpServerCardChar91DotChar93jsonRoute
   Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRoute: typeof Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRoute
@@ -798,6 +862,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CommonsIndexRouteImport
       parentRoute: typeof CommonsRoute
     }
+    '/stac/': {
+      id: '/stac/'
+      path: '/stac'
+      fullPath: '/stac/'
+      preLoaderRoute: typeof StacIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stac/api': {
+      id: '/stac/api'
+      path: '/stac/api'
+      fullPath: '/stac/api'
+      preLoaderRoute: typeof StacApiRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stac/collections': {
+      id: '/stac/collections'
+      path: '/stac/collections'
+      fullPath: '/stac/collections'
+      preLoaderRoute: typeof StacCollectionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/.well-known/agent-skills/index.json': {
       id: '/.well-known/agent-skills/index.json'
       path: '/.well-known/agent-skills/index.json'
@@ -839,6 +924,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/collections/$collectionSlug/map'
       preLoaderRoute: typeof CollectionsCollectionSlugMapRouteImport
       parentRoute: typeof CollectionsRoute
+    }
+    '/stac/collections/$': {
+      id: '/stac/collections/$'
+      path: '/$'
+      fullPath: '/stac/collections/$'
+      preLoaderRoute: typeof StacCollectionsSplatRouteImport
+      parentRoute: typeof StacCollectionsRoute
+    }
+    '/stac/collections/$collectionId': {
+      id: '/stac/collections/$collectionId'
+      path: '/$collectionId'
+      fullPath: '/stac/collections/$collectionId'
+      preLoaderRoute: typeof StacCollectionsCollectionIdRouteImport
+      parentRoute: typeof StacCollectionsRoute
     }
     '/.well-known/agent-skills/hifld-catalog/SKILL.md': {
       id: '/.well-known/agent-skills/hifld-catalog/SKILL.md'
@@ -1147,6 +1246,20 @@ const ApiQueriesRouteWithChildren = ApiQueriesRoute._addFileChildren(
   ApiQueriesRouteChildren,
 )
 
+interface StacCollectionsRouteChildren {
+  StacCollectionsSplatRoute: typeof StacCollectionsSplatRoute
+  StacCollectionsCollectionIdRoute: typeof StacCollectionsCollectionIdRoute
+}
+
+const StacCollectionsRouteChildren: StacCollectionsRouteChildren = {
+  StacCollectionsSplatRoute: StacCollectionsSplatRoute,
+  StacCollectionsCollectionIdRoute: StacCollectionsCollectionIdRoute,
+}
+
+const StacCollectionsRouteWithChildren = StacCollectionsRoute._addFileChildren(
+  StacCollectionsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRouteWithChildren,
@@ -1167,7 +1280,10 @@ const rootRouteChildren: RootRouteChildren = {
   ApiHealthRoute: ApiHealthRoute,
   ApiOpenapiRoute: ApiOpenapiRoute,
   ApiQueriesRoute: ApiQueriesRouteWithChildren,
+  StacApiRoute: StacApiRoute,
+  StacCollectionsRoute: StacCollectionsRouteWithChildren,
   ApiIndexRoute: ApiIndexRoute,
+  StacIndexRoute: StacIndexRoute,
   Char91DotwellKnownChar93AgentSkillsIndexChar91DotChar93jsonRoute:
     Char91DotwellKnownChar93AgentSkillsIndexChar91DotChar93jsonRoute,
   Char91DotwellKnownChar93McpServerCardChar91DotChar93jsonRoute:

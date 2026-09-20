@@ -37,6 +37,21 @@ export function buildApiCatalogLinkset(origin: string) {
           },
         ],
       },
+      {
+        anchor: `${origin}/stac`,
+        "service-desc": [
+          {
+            href: `${origin}/stac/api`,
+            type: "application/vnd.oai.openapi+json;version=3.1",
+          },
+        ],
+        "service-doc": [
+          {
+            href: `${origin}/llms.txt`,
+            type: "text/markdown",
+          },
+        ],
+      },
     ],
   };
 }
