@@ -8,6 +8,7 @@
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { env } from "../env/server";
 import { type CatalogAsset, type CatalogFileResponse, sqliteCatalogApi } from "./catalog-api";
+import { activeCatalogStacUrl } from "./catalog-runtime";
 import {
   fetchStacCatalog,
   fetchStacVersionCollection,
@@ -298,17 +299,18 @@ export interface Collection {
   updated_at: string;
 }
 
-function publishedCatalogUrl(): string {
-  if (!env.CATALOG_SQLITE_URL) throw new Error("CATALOG_SQLITE_URL is required for published STAC metadata");
-  return env.CATALOG_SQLITE_URL;
-}
+export const publishedCatalogUrl = createServerOnlyFn(async (): Promise<string> => {
+  const url = await activeCatalogStacUrl();
+  if (!url) throw new Error("An active catalog STAC URL is required for published metadata");
+  return url;
+});
 
 async function publishedFileResponse(
   collectionSlug: string,
   datasetSlug: string,
   file: CatalogFileResponse,
 ): Promise<DatasetFileResponse> {
-  const sqliteUrl = publishedCatalogUrl();
+  const sqliteUrl = await publishedCatalogUrl();
   const [datasetStac, fileStac, versionEntries] = await Promise.all([
     fetchStacCatalog(sqliteUrl, `${collectionSlug}/${datasetSlug}/catalog.json`),
     fetchStacCatalog(sqliteUrl, `${file.file_path}/catalog.json`),
@@ -624,7 +626,7 @@ export const getDatasetBySlug = createServerFn({ method: "GET" })
     if (catalog) {
       const dataset = await catalog.dataset(data.collectionSlug, data.datasetSlug);
       if (!dataset) return null;
-      const datasetStac = await fetchStacCatalog(publishedCatalogUrl(), dataset.stac_href);
+      const datasetStac = await fetchStacCatalog(await publishedCatalogUrl(), dataset.stac_href);
       const result = catalogDataset(dataset, datasetStac);
       const files = await catalog.files(data.collectionSlug, data.datasetSlug);
       const responses = await Promise.all(
@@ -755,7 +757,7 @@ export const getCollections = createServerFn({ method: "GET" }).handler(async ()
       (await catalog.collections()).map(async (collection) =>
         catalogCollection(
           collection,
-          await fetchStacCatalog(publishedCatalogUrl(), `${collection.collection_path}/catalog.json`),
+          await fetchStacCatalog(await publishedCatalogUrl(), `${collection.collection_path}/catalog.json`),
         ),
       ),
     );
@@ -802,7 +804,7 @@ export const getCollectionBySlug = createServerFn({ method: "GET" })
       return collection
         ? catalogCollection(
             collection,
-            await fetchStacCatalog(publishedCatalogUrl(), `${collection.collection_path}/catalog.json`),
+            await fetchStacCatalog(await publishedCatalogUrl(), `${collection.collection_path}/catalog.json`),
           )
         : null;
     }
@@ -891,7 +893,7 @@ export const getCollectionDatasetsBySlug = createServerFn({ method: "GET" })
       });
       const items = await Promise.all(
         page.items.map(async (dataset) =>
-          catalogDataset(dataset, await fetchStacCatalog(publishedCatalogUrl(), dataset.stac_href)),
+          catalogDataset(dataset, await fetchStacCatalog(await publishedCatalogUrl(), dataset.stac_href)),
         ),
       );
       return { items, total: page.total, limit: page.limit, offset: page.offset };

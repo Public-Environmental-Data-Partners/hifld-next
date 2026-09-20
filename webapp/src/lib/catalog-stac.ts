@@ -45,7 +45,8 @@ export async function fetchCatalogStac(
   if (!upstream.ok) return new Response(null, { status: upstream.status });
   const headers = new Headers();
   headers.set("Content-Location", canonicalUrl);
-  for (const name of ["content-type", "content-length", "etag", "last-modified", "cache-control"]) {
+  headers.set("Content-Type", "application/json");
+  for (const name of ["content-length", "etag", "last-modified", "cache-control"]) {
     const value = upstream.headers.get(name);
     if (value) headers.set(name, value);
   }

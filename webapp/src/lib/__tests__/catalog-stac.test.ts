@@ -20,10 +20,10 @@ describe("catalog STAC pass-through", () => {
     },
   );
 
-  it("passes through the authored STAC bytes and content type", async () => {
+  it("passes through authored STAC bytes with a JSON media type even when storage uses a generic type", async () => {
     const bytes = '{"type":"Collection","table:columns":[{"name":"station_id"}]}';
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(bytes, { headers: { "Content-Type": "application/json", ETag: '"generation-1"' } }),
+      new Response(bytes, { headers: { "Content-Type": "application/octet-stream", ETag: '"generation-1"' } }),
     );
 
     const response = await fetchCatalogStac(
