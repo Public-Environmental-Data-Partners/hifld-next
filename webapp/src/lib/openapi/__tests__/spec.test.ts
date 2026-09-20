@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { buildOpenApiDocument } from "../spec";
 
 describe("buildOpenApiDocument", () => {
+  it("identifies the separate STAC API without claiming the custom /api routes are STAC API endpoints", () => {
+    const description = buildOpenApiDocument().info.description;
+    expect(description).toContain("/stac");
+    expect(description).toContain("STAC API Core and Collections");
+    expect(description).not.toContain("proxy dataset-api");
+  });
   it("returns OpenAPI 3.1 with core paths", () => {
     const doc = buildOpenApiDocument();
     expect(doc.openapi).toBe("3.1.0");

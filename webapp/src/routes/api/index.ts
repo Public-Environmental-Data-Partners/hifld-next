@@ -10,7 +10,7 @@ export const Route = createFileRoute("/api/")({
         const body = {
           title: "HIFLD Next public API",
           description:
-            "Read-only Portolan STAC Catalog and Collection metadata, paginated dataset search, and bounded same-origin query resources. OGC API Features is served separately at /features; there are no /items routes under /api dataset paths. Use collection and dataset slugs, not numeric IDs.",
+            "Read-only Portolan STAC Catalog and Collection metadata, paginated dataset search, and bounded same-origin query resources. Standard STAC API Core and Collections are at /stac; OGC data features are served separately at /features. There are no /items routes under /api dataset paths. Use collection and dataset slugs, not numeric IDs.",
           links: {
             self: `${origin}/api`,
             openapi: `${origin}/api/openapi`,
@@ -23,6 +23,8 @@ export const Route = createFileRoute("/api/")({
             features: `${origin}/features/collections`,
             health: `${origin}/api/health`,
             collections: `${origin}/api/collections`,
+            stac: `${origin}/stac`,
+            stac_openapi: `${origin}/stac/api`,
             example_collection_datasets: `${origin}/api/collections/hifld/datasets?search=wastewater&limit=25&omit=description`,
             create_query: `${origin}/api/queries`,
             query_page: `${origin}/api/queries/{query_id}/pages`,

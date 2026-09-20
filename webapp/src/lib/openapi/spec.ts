@@ -748,7 +748,7 @@ export function buildOpenApiDocument() {
       title: "HIFLD Next public webapp API",
       version: "1.0.0",
       description: [
-        "TanStack webapp JSON routes that proxy dataset-api. Start with GET /api or GET /llms.txt, then GET /api/openapi for the full contract.",
+        "TanStack webapp JSON routes backed by the published Portolan catalog. Start with GET /api or GET /llms.txt, then GET /api/openapi for the full custom API contract. Standard STAC API Core and Collections are served separately at /stac with their own /stac/api description.",
         "GET /api/collections and GET /api/collections/{slug} return authored STAC Catalog documents; this is not an OGC API-Features or STAC API /items surface.",
         "Search and pagination: only on GET /api/collections/{slug}/datasets using search, query, tag_filters, limit, offset, omit (not ?q= on other paths).",
         "Collection dataset listing defaults to limit=50 when omitted (breaking vs older unbounded responses).",

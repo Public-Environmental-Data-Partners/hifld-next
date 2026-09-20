@@ -60,6 +60,13 @@ describe("agent-skills discovery", () => {
     );
   });
 
+  it("points STAC clients to the dedicated API and identifies static catalog documents", () => {
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("GET /stac");
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("GET /stac/collections");
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("static STAC Catalog");
+    expect(HIFLD_CATALOG_SKILL_MD).not.toContain("`GET /api/collections` — list collections");
+  });
+
   it("lists exactly the 19 contextual WebMCP tools", () => {
     const tools = [
       "list_collections",

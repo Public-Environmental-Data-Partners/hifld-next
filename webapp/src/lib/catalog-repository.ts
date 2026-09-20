@@ -78,6 +78,10 @@ const versionSchema = z.object({
   feature_count: z.number().int().nonnegative(),
   is_latest: z.number().int().min(0).max(1),
 });
+const stacVersionSchema = z.object({
+  version_path: z.string().min(1),
+  collection_href: z.string().min(1),
+});
 
 const columnSchema = z.object({
   name: z.string().min(1),
@@ -142,6 +146,7 @@ export type CatalogCollection = z.infer<typeof collectionSchema>;
 export type CatalogDataset = z.infer<typeof datasetSchema> & { tags: CatalogTags };
 export type CatalogFile = z.infer<typeof fileSchema>;
 export type CatalogVersion = z.infer<typeof versionSchema>;
+export type CatalogStacVersion = z.infer<typeof stacVersionSchema>;
 
 export interface CatalogColumn {
   name: string;
@@ -224,6 +229,8 @@ export interface CatalogRepository {
   listFiles(collectionSlug: string, datasetSlug: string): Awaitable<CatalogFile[]>;
   getFile(collectionSlug: string, datasetSlug: string, fileSlug: string): Awaitable<CatalogFile | null>;
   listVersions(collectionSlug: string, datasetSlug: string, fileSlug: string): Awaitable<CatalogVersion[]>;
+  listStacVersions(query: { after: string | null; limit: number }): Awaitable<CatalogStacVersion[]>;
+  getStacVersion(id: string): Awaitable<CatalogStacVersion | null>;
   getFileVersion(
     collectionSlug: string,
     datasetSlug: string,
@@ -324,6 +331,23 @@ export class SQLiteCatalogRepository implements CatalogRepository {
       )
       .all()
       .map((row) => collectionSchema.parse(row));
+  }
+
+  listStacVersions(query: { after: string | null; limit: number }): CatalogStacVersion[] {
+    if (!Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > 51) {
+      throw new RangeError("STAC version page limit must be between 1 and 51");
+    }
+    return this.#db
+      .prepare(
+        "SELECT version_path, collection_href FROM versions WHERE version_path > ? ORDER BY version_path LIMIT ?",
+      )
+      .all(query.after ?? "", query.limit)
+      .map((row) => stacVersionSchema.parse(row));
+  }
+
+  getStacVersion(id: string): CatalogStacVersion | null {
+    const row = this.#db.prepare("SELECT version_path, collection_href FROM versions WHERE version_path = ?").get(id);
+    return row ? stacVersionSchema.parse(row) : null;
   }
 
   listDatasets(
@@ -618,11 +642,19 @@ export class CatalogLifecycle {
   }
 
   async withRepository<T>(read: (repository: CatalogRepository) => Awaitable<T>): Promise<T | null> {
+    return this.withSnapshot(({ repository }) => read(repository));
+  }
+
+  async withSnapshot<T>(
+    read: (snapshot: { repository: CatalogRepository; catalogUrl: string | null; generation: string }) => Awaitable<T>,
+  ): Promise<T | null> {
     const repository = this.#repository;
     if (!repository) return null;
+    const catalogUrl = this.#activeUrl;
+    const generation = repository.metadata.catalog_generation;
     this.#leases.set(repository, (this.#leases.get(repository) ?? 0) + 1);
     try {
-      return await read(repository);
+      return await read({ repository, catalogUrl, generation });
     } finally {
       const remaining = (this.#leases.get(repository) ?? 1) - 1;
       if (remaining === 0) {

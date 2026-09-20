@@ -52,6 +52,16 @@ describe("public/llms.txt", () => {
     expect(body).not.toContain("latest schema-capable version");
   });
 
+  it("distinguishes the STAC API from static catalog and OGC data features", () => {
+    const body = readFileSync(llmsPath, "utf8");
+    expect(body).toContain("GET /stac");
+    expect(body).toContain("GET /stac/collections");
+    expect(body).toContain("STAC API Core");
+    expect(body).toContain("STAC API Collections");
+    expect(body).toContain("static STAC");
+    expect(body).toContain("not STAC Items");
+  });
+
   it("lists the bounded contextual WebMCP surface without schemas", () => {
     const body = readFileSync(llmsPath, "utf8");
     const tools = [
