@@ -24,6 +24,7 @@ spec:
             - {name: FEATURE_SERVER_STORAGE_LOCATIONS, value: {{ .Values.storage.locationsJson | quote }}}
             - {name: FEATURE_SERVER_CATALOG_CACHE_DIRECTORY, value: {{ .Values.cache.directory | quote }}}
             - {name: FEATURE_SERVER_TEMP_DIRECTORY, value: {{ .Values.tmp.directory | quote }}}
+            - {name: TMPDIR, value: {{ .Values.tmp.directory | quote }}}
             {{- with .Values.env }}{{ toYaml . | nindent 12 }}{{- end }}
             {{- range .Values.secretEnv }}
             - name: {{ .name }}

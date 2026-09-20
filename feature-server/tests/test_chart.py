@@ -22,6 +22,7 @@ def test_chart_matches_feature_server_runtime_contract() -> None:
     assert "name: FEATURE_SERVER_STORAGE_LOCATIONS" in rendered
     assert "name: FEATURE_SERVER_CATALOG_CACHE_DIRECTORY" in rendered
     assert "name: FEATURE_SERVER_TEMP_DIRECTORY" in rendered
+    assert "name: TMPDIR" in rendered
     assert "path: /healthz" in rendered
     assert "path: /readyz" in rendered
     assert "readOnlyRootFilesystem: true" in rendered

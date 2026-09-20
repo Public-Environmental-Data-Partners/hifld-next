@@ -201,11 +201,17 @@ def test_pointer_selects_and_verifies_only_its_generation_scoped_catalog(
         return httpx.Response(200, content=content)
 
     activated: list[Path] = []
+    activation_urls: list[str] = []
+
+    def activate(path: Path) -> None:
+        activated.append(path)
+        activation_urls.append(fetcher.catalog_url)
+
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     fetcher = CatalogFetcher(
         "https://catalog.test/legacy/_catalog/catalog.sqlite",
         tmp_path,
-        activated.append,
+        activate,
         client=client,
         pointer_url="https://catalog.test/bucket/_catalog/current.json",
     )
@@ -218,6 +224,7 @@ def test_pointer_selects_and_verifies_only_its_generation_scoped_catalog(
     assert fetcher.catalog_url == (
         "https://catalog.test/bucket/releases/d8e9c0a1-9af9-4b7d-a9a2-70f2e912c3c6/_catalog/catalog.sqlite"
     )
+    assert activation_urls == [fetcher.catalog_url]
     assert requests == [
         "https://catalog.test/bucket/_catalog/current.json",
         "https://catalog.test/bucket/releases/d8e9c0a1-9af9-4b7d-a9a2-70f2e912c3c6/_catalog/catalog.sqlite",

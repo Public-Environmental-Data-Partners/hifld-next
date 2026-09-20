@@ -145,11 +145,16 @@ class CatalogFetcher:
                 ):
                     raise ValueError("catalog revision reused the active generation")
 
-                await asyncio.to_thread(self._activate, candidate)
+                previous_catalog_url = self._catalog_url
+                self._catalog_url = catalog_url
+                try:
+                    await asyncio.to_thread(self._activate, candidate)
+                except BaseException:
+                    self._catalog_url = previous_catalog_url
+                    raise
                 activated = True
                 self._active_etag = etag
                 self._active_generation = repository.generation
-                self._catalog_url = catalog_url
                 self._last_error = None
                 return RefreshResult.ACTIVATED
             except Exception as error:
