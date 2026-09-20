@@ -9,6 +9,7 @@ image:
 # during the bounded dual-read/rollback window.
 catalog:
   sqliteUrl: ""
+  pointerUrl: ""
   storageLocationsJson: ""
   cacheDirectory: /var/lib/hifld/catalog
   cacheSizeLimit: 1Gi

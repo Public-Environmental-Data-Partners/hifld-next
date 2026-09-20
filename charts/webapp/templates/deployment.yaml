@@ -46,8 +46,14 @@ spec:
             - name: WEBAPP_PUBLIC_ORIGIN
               value: {{ .Values.publicOrigin | quote }}
             {{- end }}
+            {{- if .Values.catalog.sqliteUrl }}
             - name: CATALOG_SQLITE_URL
               value: {{ .Values.catalog.sqliteUrl | quote }}
+            {{- end }}
+            {{- if .Values.catalog.pointerUrl }}
+            - name: CATALOG_RELEASE_POINTER_URL
+              value: {{ .Values.catalog.pointerUrl | quote }}
+            {{- end }}
             - name: CATALOG_STORAGE_LOCATIONS_JSON
               value: {{ .Values.catalog.storageLocationsJson | quote }}
             - name: TMPDIR
