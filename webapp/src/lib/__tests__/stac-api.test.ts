@@ -47,7 +47,7 @@ describe("STAC API adapter", () => {
     expect(result.links).toContainEqual({ rel: "root", href: `${origin}/stac`, type: "application/json" });
     expect(result.links).toContainEqual({ rel: "data", href: `${origin}/stac/collections`, type: "application/json" });
     expect(result.links).toContainEqual({ rel: "service-desc", href: `${origin}/stac/api`, type: "application/vnd.oai.openapi+json;version=3.1" });
-    expect(result.links).toContainEqual({ rel: "service-doc", href: `${origin}/llms.txt`, type: "text/plain" });
+    expect(result.links.some((link) => link.rel === "service-doc")).toBe(false);
     expect(result.links.some((link) => link.rel === "child")).toBe(false);
     expect(result.links.some((link) => link.rel === "search" || link.rel === "items")).toBe(false);
   });
