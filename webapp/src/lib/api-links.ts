@@ -11,8 +11,8 @@ export interface ApiLinkMap {
   [linkRelation: string]: string | undefined;
 }
 
-export function requestOrigin(request: Request): string {
-  return new URL(request.url).origin;
+export function requestOrigin(request: Request, publicOrigin?: string): string {
+  return new URL(publicOrigin ?? request.url).origin;
 }
 
 function enc(s: string): string {

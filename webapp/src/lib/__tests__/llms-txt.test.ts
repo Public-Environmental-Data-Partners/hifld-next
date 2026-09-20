@@ -102,6 +102,8 @@ describe("public/llms.txt", () => {
     expect(body).toContain("/.well-known/mcp/server-card.json");
     expect(body).toContain("/.well-known/ai-catalog.json");
     expect(body).toContain("/mcp");
+    expect(body).toContain("POST /mcp");
+    expect(body).toContain("/features/collections");
     expect(body).toContain("DATASET_MCP_PUBLIC_ENDPOINT");
     expect(body).toContain("document.modelContext");
     expect(body).toContain("navigator.modelContext");

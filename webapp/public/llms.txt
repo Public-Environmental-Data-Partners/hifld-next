@@ -8,8 +8,8 @@
 2. **[GET /api/openapi](/api/openapi)** - OpenAPI 3.1: every path, query param, and problem response shape.
 3. **[GET /.well-known/mcp/server-card.json](/.well-known/mcp/server-card.json)** - JSON MCP Server Card for Streamable HTTP discovery.
 4. **[GET /.well-known/ai-catalog.json](/.well-known/ai-catalog.json)** - JSON Agent Resource Discovery catalog (ARD) for scanners.
-5. **[GET /mcp](/mcp)** - same-origin Streamable HTTP MCP proxy.
-6. **[GET /api/collections](/api/collections)** and **GET /api/collections/{slug}** return authored **STAC Catalog** documents. This is not an OGC API-Features or STAC API item service: there are no `/items`, `/features`, `/download`, or `/map` JSON routes. Dataset paths use **string slugs**, not numeric IDs in collection-scoped URLs.
+5. **[POST /mcp](/mcp)** - same-origin Streamable HTTP MCP proxy (`GET` is not the handshake method).
+6. **[GET /api/collections](/api/collections)** and **GET /api/collections/{slug}** return authored **STAC Catalog** documents. The catalog API is not a STAC Item Search or OGC API-Features item service: there are no `/items`, `/features`, `/download`, or `/map` JSON routes under `/api` dataset paths. The separate OGC feature server is at **[/features/collections](/features/collections)**. Dataset paths use **string slugs**, not numeric IDs in collection-scoped URLs.
 7. The **JSON API remains read-only**. On supported browsers, this first-party
    webapp may expose contextual WebMCP tools that read catalog/query data and
    modify only the **current browser workspace**; they never write catalog data.
@@ -113,6 +113,7 @@ not make the JSON catalog writable.
 - [Collection catalog](/api/collections/{slug}): raw STAC Catalog for one collection.
 - [Collection datasets](/api/collections/{slug}/datasets): custom paginated wrapper `{datasets,total,limit,offset,links}` whose `datasets` entries are raw STAC Catalogs. It is not a STAC Item Search FeatureCollection.
 - [Tag facets](/api/collections/{slug}/datasets/tags): values for building `tag_filters`.
+- [OGC API Features](/features/collections): spatial collections and feature items, separate from the STAC metadata API.
 
 ## Global dataset views
 
