@@ -4,5 +4,5 @@ export function formatOptionalDate(timestamp: string | null | undefined): string
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return null;
 
-  return date.toLocaleString();
+  return `${date.toLocaleString("en-US", { timeZone: "UTC" })} UTC`;
 }

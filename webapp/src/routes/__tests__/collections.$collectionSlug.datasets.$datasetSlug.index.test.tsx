@@ -9,8 +9,8 @@ describe("dataset timestamp display", () => {
     expect(formatOptionalDate("")).toBeNull();
     expect(formatOptionalDate("not-a-date")).toBeNull();
 
-    const timestamp = "2024-01-01T00:00:00Z";
-    expect(formatOptionalDate(timestamp)).toBe(new Date(timestamp).toLocaleString());
+    const timestamp = "2024-07-03T00:00:00Z";
+    expect(formatOptionalDate(timestamp)).toBe("7/3/2024, 12:00:00 AM UTC");
   });
 });
 
