@@ -283,9 +283,11 @@ async def lifespan(application: Starlette):
     """Poll the sole catalog object; a failed refresh preserves the last snapshot."""
     del application
     catalog_url = os.environ.get("FEATURE_SERVER_CATALOG_URL")
-    if catalog_url is None:
+    pointer_url = os.environ.get("FEATURE_SERVER_CATALOG_POINTER_URL")
+    if catalog_url is None and pointer_url is None:
         yield
         return
+    direct_catalog_url = catalog_url or "https://invalid.local/_catalog/catalog.sqlite"
     temporary_directory = Path(os.environ.get("FEATURE_SERVER_CATALOG_CACHE_DIRECTORY", "/tmp"))
     interval = float(os.environ.get("FEATURE_SERVER_CATALOG_POLL_SECONDS", "30"))
     locations = os.environ.get("FEATURE_SERVER_STORAGE_LOCATIONS")
@@ -298,12 +300,17 @@ async def lifespan(application: Starlette):
             build_snapshot(
                 candidate,
                 owned_path=True,
-                catalog_url=catalog_url,
+                catalog_url=fetcher.catalog_url,
                 storage_registry=storage_registry,
             )
         )
 
-    fetcher = CatalogFetcher(catalog_url, temporary_directory, activate)
+    fetcher = CatalogFetcher(
+        direct_catalog_url,
+        temporary_directory,
+        activate,
+        pointer_url=pointer_url,
+    )
     await fetcher.refresh()
     stop_event = asyncio.Event()
     task = asyncio.create_task(fetcher.run(interval, stop_event))

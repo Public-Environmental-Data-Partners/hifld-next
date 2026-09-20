@@ -19,6 +19,7 @@ spec:
           ports: [{name: http, containerPort: {{ .Values.containerPort }}, protocol: TCP}]
           env:
             - {name: FEATURE_SERVER_CATALOG_URL, value: {{ .Values.catalog.url | quote }}}
+            - {name: FEATURE_SERVER_CATALOG_POINTER_URL, value: {{ .Values.catalog.pointerUrl | quote }}}
             - {name: FEATURE_SERVER_CATALOG_POLL_SECONDS, value: {{ .Values.catalog.pollSeconds | quote }}}
             - {name: FEATURE_SERVER_STORAGE_LOCATIONS, value: {{ .Values.storage.locationsJson | quote }}}
             - {name: FEATURE_SERVER_CATALOG_CACHE_DIRECTORY, value: {{ .Values.cache.directory | quote }}}

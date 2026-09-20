@@ -12,15 +12,20 @@ type PublishedStacFailureKind = "transport" | "http" | "body" | "json" | "schema
 interface PublishedStacFailureDetails {
   causeCode?: string;
   contentLength?: string | null;
+  errorMessage?: string;
   errorName?: string;
   httpStatus?: number;
   receivedTextLength?: number;
 }
 
-function errorDetails(error: unknown): Pick<PublishedStacFailureDetails, "causeCode" | "errorName"> {
+export function publishedStacErrorDetails(
+  error: unknown,
+): Pick<PublishedStacFailureDetails, "causeCode" | "errorMessage" | "errorName"> {
   const errorName = error instanceof Error ? error.name : "NonError";
+  const errorMessage = error instanceof Error ? error.message.replaceAll(/\s+/g, " ").slice(0, 160) : undefined;
   const cause = z.object({ code: z.string().optional() }).safeParse(error instanceof Error ? error.cause : undefined);
-  return cause.success && cause.data.code ? { errorName, causeCode: cause.data.code } : { errorName };
+  const details = errorMessage ? { errorName, errorMessage } : { errorName };
+  return cause.success && cause.data.code ? { ...details, causeCode: cause.data.code } : details;
 }
 
 function reportPublishedStacFailure(
@@ -125,7 +130,7 @@ export async function publishedDatasets(
         try {
           return { href, response: await fetchCatalogStac(sqliteUrl, href) };
         } catch (error) {
-          reportPublishedStacFailure(href, "transport", errorDetails(error));
+          reportPublishedStacFailure(href, "transport", publishedStacErrorDetails(error));
           return null;
         }
       }),
@@ -147,7 +152,7 @@ export async function publishedDatasets(
         try {
           text = await response.text();
         } catch (error) {
-          reportPublishedStacFailure(href, "body", { contentLength, ...errorDetails(error) });
+          reportPublishedStacFailure(href, "body", { contentLength, ...publishedStacErrorDetails(error) });
           return null;
         }
         try {
@@ -161,7 +166,7 @@ export async function publishedDatasets(
           reportPublishedStacFailure(href, "json", {
             contentLength,
             receivedTextLength: text.length,
-            ...errorDetails(error),
+            ...publishedStacErrorDetails(error),
           });
         }
         return null;

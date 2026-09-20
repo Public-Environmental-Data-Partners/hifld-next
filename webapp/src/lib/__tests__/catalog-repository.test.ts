@@ -1,14 +1,16 @@
 import { DatabaseSync } from "node:sqlite";
-import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CatalogLifecycle, CatalogRepository, validateCatalogDatabase } from "@/lib/catalog-repository";
 
 const paths: string[] = [];
 
 afterEach(() => {
   for (const path of paths.splice(0)) rmSync(path, { recursive: true, force: true });
+  vi.unstubAllGlobals();
 });
 
 function catalogDatabase(): string {
@@ -201,6 +203,47 @@ describe("CatalogRepository", () => {
     writeFileSync(sourcePath, "not a catalog");
     expect(await lifecycle.refresh()).toBe(false);
     expect(lifecycle.status().generation).toBe("generation-1");
+    await lifecycle.close();
+  });
+
+  it("activates only the SQLite release selected by a valid pointer", async () => {
+    const bytes = readFileSync(catalogDatabase());
+    const checksum = createHash("sha256").update(bytes).digest("hex");
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.endsWith("/_catalog/current.json")) {
+          return new Response(
+            JSON.stringify({
+              protocol_version: 1,
+              generation: "d8e9c0a1-9af9-4b7d-a9a2-70f2e912c3c6",
+              catalog_key: "releases/d8e9c0a1-9af9-4b7d-a9a2-70f2e912c3c6/_catalog/catalog.sqlite",
+              root_key: "releases/d8e9c0a1-9af9-4b7d-a9a2-70f2e912c3c6/catalog.json",
+              sha256: checksum,
+              size_bytes: bytes.byteLength,
+              published_at: "2026-09-19T20:00:00Z",
+            }),
+            { headers: { etag: '"pointer-1"' } },
+          );
+        }
+        return new Response(bytes, { headers: { etag: '"catalog-1"' } });
+      }),
+    );
+    const lifecycle = new CatalogLifecycle({
+      kind: "pointer",
+      url: "https://storage.test/bucket/_catalog/current.json",
+    });
+
+    await lifecycle.start();
+
+    expect(lifecycle.status().generation).toBe("generation-1");
+    expect(calls).toEqual([
+      "https://storage.test/bucket/_catalog/current.json",
+      "https://storage.test/bucket/releases/d8e9c0a1-9af9-4b7d-a9a2-70f2e912c3c6/_catalog/catalog.sqlite",
+    ]);
     await lifecycle.close();
   });
 });

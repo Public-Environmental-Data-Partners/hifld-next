@@ -74,6 +74,7 @@ services:
     image: ${FEATURE_SERVER_IMAGE:-hifld-feature-server:local}
     environment:
       FEATURE_SERVER_CATALOG_URL: ${FEATURE_SERVER_CATALOG_URL:-http://seaweedfs-filer:8333/hifld-local-published/_catalog/catalog.sqlite}
+      FEATURE_SERVER_CATALOG_POINTER_URL: ${FEATURE_SERVER_CATALOG_POINTER_URL:-}
       FEATURE_SERVER_CATALOG_POLL_SECONDS: ${FEATURE_SERVER_CATALOG_POLL_SECONDS:-30}
       FEATURE_SERVER_STORAGE_LOCATIONS: ${FEATURE_SERVER_STORAGE_LOCATIONS:-{"seaweedfs-local-published":{"type":"seaweedfs","bucket":"hifld-local-published","prefix":"hifld","endpoint_url":"http://seaweedfs-filer:8333"}}}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-dummy}

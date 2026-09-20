@@ -8,6 +8,15 @@ import { z } from "zod";
 export const CATALOG_APPLICATION_ID = 1212761676;
 export const CATALOG_SCHEMA_VERSION = 2;
 const CATALOG_SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [1, CATALOG_SCHEMA_VERSION];
+const releasePointerSchema = z.object({
+  protocol_version: z.literal(1),
+  generation: z.string().uuid(),
+  catalog_key: z.string(),
+  root_key: z.string(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  size_bytes: z.number().int().positive(),
+  published_at: z.string().datetime(),
+});
 
 const metadataSchema = z.object({
   schema_version: z.number().int(),
@@ -555,7 +564,10 @@ export class SQLiteCatalogRepository implements CatalogRepository {
   }
 }
 
-export type CatalogSource = { kind: "file"; path: string } | { kind: "url"; url: string };
+export type CatalogSource =
+  | { kind: "file"; path: string }
+  | { kind: "url"; url: string }
+  | { kind: "pointer"; url: string };
 
 export interface CatalogRuntimeStatus {
   generation: string | null;
@@ -575,6 +587,7 @@ export class CatalogLifecycle {
   #fingerprint: string | null = null;
   #lastSuccessfulRefresh: string | null = null;
   #lastError: string | null = null;
+  #activeUrl: string | null = null;
   #refreshing: Promise<boolean> | null = null;
   #leases = new Map<CatalogRepository, number>();
   #retired = new Set<CatalogRepository>();
@@ -598,6 +611,10 @@ export class CatalogLifecycle {
 
   repository(): CatalogRepository | null {
     return this.#repository;
+  }
+
+  activeUrl(): string | null {
+    return this.#activeUrl;
   }
 
   async withRepository<T>(read: (repository: CatalogRepository) => Awaitable<T>): Promise<T | null> {
@@ -641,6 +658,7 @@ export class CatalogLifecycle {
       const previous = this.#repository;
       this.#repository = candidate;
       this.#fingerprint = fingerprint;
+      this.#activeUrl = source.url;
       this.#lastSuccessfulRefresh = new Date().toISOString();
       this.#lastError = null;
       if (previous) {
@@ -663,13 +681,47 @@ export class CatalogLifecycle {
     this.#directory = null;
   }
 
-  async #sourceSnapshot(): Promise<{ fingerprint: string; write: (path: string) => Promise<void> }> {
+  async #sourceSnapshot(): Promise<{
+    fingerprint: string;
+    url: string | null;
+    write: (path: string) => Promise<void>;
+  }> {
     const source = this.#source;
     if (source.kind === "file") {
       const sourceStat = await stat(source.path);
       return {
         fingerprint: `${sourceStat.size}:${sourceStat.mtimeMs}`,
+        url: null,
         write: async (path) => copyFile(source.path, path),
+      };
+    }
+
+    if (source.kind === "pointer") {
+      const response = await fetch(source.url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Catalog release pointer fetch failed: ${response.status}`);
+      const pointer = releasePointerSchema.parse(await response.json());
+      const releasePrefix = `releases/${pointer.generation}/`;
+      if (
+        !pointer.catalog_key.startsWith(releasePrefix) ||
+        pointer.catalog_key !== `${releasePrefix}_catalog/catalog.sqlite` ||
+        pointer.root_key !== `${releasePrefix}catalog.json`
+      ) {
+        throw new Error("Catalog release pointer escapes its selected release");
+      }
+      const catalogUrl = releaseCatalogUrl(source.url, pointer.catalog_key);
+      return {
+        fingerprint: response.headers.get("etag") ?? `${pointer.generation}:${pointer.sha256}`,
+        url: catalogUrl,
+        write: async (path) => {
+          const catalog = await fetch(catalogUrl, { cache: "no-store" });
+          if (!catalog.ok) throw new Error(`Catalog release download failed: ${catalog.status}`);
+          const bytes = new Uint8Array(await catalog.arrayBuffer());
+          if (bytes.byteLength !== pointer.size_bytes)
+            throw new Error("Catalog release content length does not match pointer");
+          const checksum = createHash("sha256").update(bytes).digest("hex");
+          if (checksum !== pointer.sha256) throw new Error("Catalog release checksum does not match pointer");
+          await writeFile(path, bytes);
+        },
       };
     }
 
@@ -683,6 +735,7 @@ export class CatalogLifecycle {
     const expectedLength = z.coerce.number().int().nonnegative().parse(contentLength);
     return {
       fingerprint: etag,
+      url: source.url,
       write: async (path) => {
         const response = await fetch(source.url, {
           headers: { "If-Match": etag },
@@ -699,6 +752,19 @@ export class CatalogLifecycle {
       },
     };
   }
+}
+
+function releaseCatalogUrl(pointerUrl: string, catalogKey: string): string {
+  const pointer = new URL(pointerUrl);
+  const suffix = "/_catalog/current.json";
+  if (!pointer.pathname.endsWith(suffix))
+    throw new Error("Catalog release pointer URL must end with /_catalog/current.json");
+  const rootPath = pointer.pathname.slice(0, -suffix.length + 1);
+  const resolved = new URL(pointer);
+  resolved.pathname = `${rootPath}${catalogKey}`;
+  resolved.search = "";
+  resolved.hash = "";
+  return resolved.href;
 }
 
 /** @deprecated Use `SQLiteCatalogRepository` for an explicit concrete dependency. */

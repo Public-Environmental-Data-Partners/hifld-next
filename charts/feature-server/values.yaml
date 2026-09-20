@@ -18,10 +18,12 @@ service:
 
 containerPort: 8000
 
-# The catalog is a mutable, publisher-owned SQLite object. The application
-# validates it and swaps disposable local snapshots without a pod restart.
+# The direct URL is a compatibility fallback. Prefer pointerUrl after publishing
+# an immutable release bundle; readers verify the pointer-selected SQLite before
+# atomically swapping their disposable local snapshot.
 catalog:
   url: ""
+  pointerUrl: ""
   pollSeconds: 30
 
 storage:

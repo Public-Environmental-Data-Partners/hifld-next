@@ -36,7 +36,12 @@ export async function fetchCatalogStac(
   fetcher: typeof fetch = fetch,
 ): Promise<Response> {
   const canonicalUrl = catalogStacUrl(sqliteUrl, href);
-  const upstream = await fetcher(canonicalUrl, { cache: "no-store" });
+  // Nitro can coalesce identical upstream fetches across concurrent requests.
+  // A Response body is a one-shot stream, so isolate each proxy request while
+  // retaining the canonical location supplied to callers.
+  const requestUrl = new URL(canonicalUrl);
+  requestUrl.searchParams.set("__catalog_request", crypto.randomUUID());
+  const upstream = await fetcher(requestUrl.href, { cache: "no-store" });
   if (!upstream.ok) return new Response(null, { status: upstream.status });
   const headers = new Headers();
   headers.set("Content-Location", canonicalUrl);
@@ -44,5 +49,9 @@ export async function fetchCatalogStac(
     const value = upstream.headers.get(name);
     if (value) headers.set(name, value);
   }
-  return new Response(upstream.body, { status: upstream.status, headers });
+  // Materialize the small JSON document before crossing Nitro's response
+  // boundary. Passing a ReadableStream through here leaves concurrent callers
+  // sharing a body that only one of them may consume.
+  const body = await upstream.arrayBuffer();
+  return new Response(body, { status: upstream.status, headers });
 }

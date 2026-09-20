@@ -21,7 +21,7 @@ describe("schema STAC alias", () => {
     const response = await handler({ request: new Request("http://app.test/api/collections/hifld/datasets/roads/files/roads/schema?version=v1.0.0&column_limit=1"), params: { collectionSlug: "hifld", datasetSlug: "roads", fileSlug: "roads" } });
     expect(await response.text()).toBe(body);
     expect(mocks.file).toHaveBeenCalledWith("hifld", "roads", "roads", "v1.0.0");
-    expect(mocks.fetch).toHaveBeenCalledWith("http://storage.test/published/hifld/roads/roads/v1.0.0/collection.json", expect.anything());
+    expect(mocks.fetch).toHaveBeenCalledWith(expect.stringContaining("http://storage.test/published/hifld/roads/roads/v1.0.0/collection.json?__catalog_request="), expect.anything());
   });
 
   it("defaults to latest and returns 404 without STAC metadata", async () => {

@@ -17,6 +17,7 @@ def render_chart() -> str:
 def test_chart_matches_feature_server_runtime_contract() -> None:
     rendered = render_chart()
     assert "name: FEATURE_SERVER_CATALOG_URL" in rendered
+    assert "name: FEATURE_SERVER_CATALOG_POINTER_URL" in rendered
     assert "name: FEATURE_SERVER_CATALOG_POLL_SECONDS" in rendered
     assert "name: FEATURE_SERVER_STORAGE_LOCATIONS" in rendered
     assert "name: FEATURE_SERVER_CATALOG_CACHE_DIRECTORY" in rendered

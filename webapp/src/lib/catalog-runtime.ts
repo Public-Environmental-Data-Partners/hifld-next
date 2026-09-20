@@ -8,6 +8,7 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 function configuredSource(): CatalogSource | null {
   if (env.CATALOG_SQLITE_PATH) return { kind: "file", path: env.CATALOG_SQLITE_PATH };
+  if (env.CATALOG_RELEASE_POINTER_URL) return { kind: "pointer", url: env.CATALOG_RELEASE_POINTER_URL };
   if (env.CATALOG_SQLITE_URL) return { kind: "url", url: env.CATALOG_SQLITE_URL };
   return null;
 }
@@ -36,6 +37,13 @@ export async function activeCatalogLifecycle(): Promise<CatalogLifecycle | null>
     await starting;
   }
   return lifecycle;
+}
+
+/** The exact immutable SQLite URL currently backing both queries and STAC. */
+export async function activeCatalogStacUrl(): Promise<string | null> {
+  if (!env.CATALOG_RELEASE_POINTER_URL) return env.CATALOG_SQLITE_URL ?? null;
+  const active = await activeCatalogLifecycle();
+  return active?.activeUrl() ?? null;
 }
 
 export async function catalogRuntimeHealth(): Promise<{

@@ -43,7 +43,7 @@ describe("collection STAC responses", () => {
     if (!handler) throw new Error("Missing root handler");
     const response = await handler({ request: new Request("http://app.test/api/collections"), params: {} });
     expect(await response.text()).toBe(body);
-    expect(mocks.fetch).toHaveBeenCalledWith("http://storage.test/published/catalog.json", expect.anything());
+    expect(mocks.fetch).toHaveBeenCalledWith(expect.stringContaining("http://storage.test/published/catalog.json?__catalog_request="), expect.anything());
     expect(response.headers.get("X-Catalog-Generation")).toBe("generation-1");
   });
 
@@ -55,7 +55,7 @@ describe("collection STAC responses", () => {
     const response = await handler({ request: new Request("http://app.test/api/collections/hifld"), params: { slug: "hifld" } });
     expect(await response.text()).toBe(body);
     expect(mocks.datasets).not.toHaveBeenCalled();
-    expect(mocks.fetch).toHaveBeenCalledWith("http://storage.test/published/hifld/catalog.json", expect.anything());
+    expect(mocks.fetch).toHaveBeenCalledWith(expect.stringContaining("http://storage.test/published/hifld/catalog.json?__catalog_request="), expect.anything());
     expect(response.headers.get("etag")).toBe('"stac-1"');
   });
 
@@ -116,7 +116,7 @@ describe("collection STAC responses", () => {
       if (!handler) throw new Error("Missing listing handler");
       const response = await handler({ request: new Request(`http://app.test/api/collections/hifld/datasets${query}`), params: { slug: "hifld" } });
       expect(await response.json()).toMatchObject({ datasets: [document], total: 2 });
-      expect(mocks.fetch).toHaveBeenCalledWith("http://storage.test/published/hifld/water/catalog.json", expect.anything());
+      expect(mocks.fetch).toHaveBeenCalledWith(expect.stringContaining("http://storage.test/published/hifld/water/catalog.json?__catalog_request="), expect.anything());
     },
   );
 

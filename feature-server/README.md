@@ -32,6 +32,10 @@ uv run basedpyright
 uv run pytest
 ```
 
-Required environment includes `FEATURE_SERVER_CATALOG_URL` and
-`FEATURE_SERVER_STORAGE_LOCATIONS`. The process is ready only after it validates
-and activates a catalog.
+Required environment includes `FEATURE_SERVER_STORAGE_LOCATIONS` and either
+`FEATURE_SERVER_CATALOG_URL` (direct compatibility mode) or
+`FEATURE_SERVER_CATALOG_POINTER_URL` (the preferred immutable-release mode).
+When a pointer is configured, the server validates its generation-scoped SQLite
+key, size, SHA-256, and embedded catalog generation before activation. A failed
+refresh keeps the last known-good snapshot active. The process is ready only
+after it validates and activates a catalog.

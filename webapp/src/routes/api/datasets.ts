@@ -1,16 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { env } from "@/env/server";
 import { type ApiLinkMap, buildLinkHeader } from "@/lib/api-links";
 import { jsonProblem } from "@/lib/api-problem";
 import { sqliteCatalogApi } from "@/lib/catalog-api";
 import { parseCollectionApiQuery, publishedDatasets } from "@/lib/catalog-listing";
+import { activeCatalogStacUrl } from "@/lib/catalog-runtime";
 
 export const Route = createFileRoute("/api/datasets")({
   server: {
     handlers: {
       GET: async ({ request }) => {
         const catalog = await sqliteCatalogApi();
-        if (!catalog || !env.CATALOG_SQLITE_URL) return jsonProblem(503, "Catalog metadata is unavailable");
+        const catalogUrl = await activeCatalogStacUrl();
+        if (!catalog || !catalogUrl) return jsonProblem(503, "Catalog metadata is unavailable");
         const query = parseCollectionApiQuery(new URL(request.url).searchParams);
         if (query instanceof Response) return query;
         const hrefs: string[] = [];
@@ -25,7 +26,7 @@ export const Route = createFileRoute("/api/datasets")({
           total += page.total;
           hrefs.push(...page.items.map((dataset) => dataset.stac_href));
         }
-        const datasets = await publishedDatasets(env.CATALOG_SQLITE_URL, hrefs);
+        const datasets = await publishedDatasets(catalogUrl, hrefs);
         if (datasets instanceof Response) return datasets;
         const pageUrl = (offset: number) => {
           const url = new URL(request.url);
