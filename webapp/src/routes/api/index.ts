@@ -1,15 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { env } from "@/env/server";
 import { requestOrigin } from "@/lib/api-links";
 
 export const Route = createFileRoute("/api/")({
   server: {
     handlers: {
       GET: ({ request }) => {
-        const origin = requestOrigin(request);
+        const origin = requestOrigin(request, env.WEBAPP_PUBLIC_ORIGIN);
         const body = {
           title: "HIFLD Next public API",
           description:
-            "Read-only JSON metadata and download links for geospatial datasets, plus bounded same-origin query resources for the first-party workspace. This is not OGC API-Features or STAC: there are no /items, /features, or numeric dataset IDs in URLs. Use collection and dataset slugs; follow links in each JSON response.",
+            "Read-only Portolan STAC Catalog and Collection metadata, paginated dataset search, and bounded same-origin query resources. OGC API Features is served separately at /features; there are no /items routes under /api dataset paths. Use collection and dataset slugs, not numeric IDs.",
           links: {
             self: `${origin}/api`,
             openapi: `${origin}/api/openapi`,
@@ -19,9 +20,10 @@ export const Route = createFileRoute("/api/")({
             mcp_server_card: `${origin}/.well-known/mcp/server-card.json`,
             ai_catalog: `${origin}/.well-known/ai-catalog.json`,
             mcp: `${origin}/mcp`,
+            features: `${origin}/features/collections`,
             health: `${origin}/api/health`,
             collections: `${origin}/api/collections`,
-            example_collection_datasets: `${origin}/api/collections/hifld?search=wastewater&limit=25&omit=description`,
+            example_collection_datasets: `${origin}/api/collections/hifld/datasets?search=wastewater&limit=25&omit=description`,
             create_query: `${origin}/api/queries`,
             query_page: `${origin}/api/queries/{query_id}/pages`,
             query_bounds: `${origin}/api/queries/{query_id}/bounds`,
@@ -29,7 +31,7 @@ export const Route = createFileRoute("/api/")({
           },
           hints: {
             search_params_on_collection_list_only:
-              "Use GET /api/collections/{slug} with query params: search, tag_filters, limit, offset, omit (not q= on other paths).",
+              "Use GET /api/collections/{slug}/datasets with query params: search, tag_filters, limit, offset, omit (not q= on other paths). GET /api/collections/{slug} returns the raw STAC Catalog.",
             discovery:
               "Read /llms.txt and GET /api/openapi before guessing URLs. Scanner clients can read the JSON MCP Server Card and ARD at their well-known paths, then use same-origin /mcp.",
             bulk_analysis:

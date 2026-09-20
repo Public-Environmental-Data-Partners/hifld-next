@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { env } from "@/env/server";
 import { buildLinkHeader, collectionDatasetsPaginationLinks, requestOrigin } from "@/lib/api-links";
 import { jsonProblem } from "@/lib/api-problem";
 import { sqliteCatalogApi } from "@/lib/catalog-api";
@@ -28,7 +29,7 @@ export const Route = createFileRoute("/api/collections/$slug/datasets")({
         );
         if (datasets instanceof Response) return datasets;
         const links = collectionDatasetsPaginationLinks(
-          requestOrigin(request),
+          requestOrigin(request, env.WEBAPP_PUBLIC_ORIGIN),
           params.slug,
           collectionLinkBase(query),
           {

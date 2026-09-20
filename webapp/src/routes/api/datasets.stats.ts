@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { json } from "@tanstack/react-start";
+import { env } from "@/env/server";
 import { globalDatasetStatsSelf, requestOrigin } from "@/lib/api-links";
 import { jsonProblem } from "@/lib/api-problem";
 import { getDatasetStats } from "@/lib/datasets";
@@ -10,7 +11,7 @@ export const Route = createFileRoute("/api/datasets/stats")({
       GET: async ({ request }) => {
         try {
           const stats = await getDatasetStats();
-          const origin = requestOrigin(request);
+          const origin = requestOrigin(request, env.WEBAPP_PUBLIC_ORIGIN);
           return json({
             links: { self: globalDatasetStatsSelf(origin) },
             ...stats,

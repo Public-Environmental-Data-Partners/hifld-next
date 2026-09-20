@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { env } from "@/env/server";
 import { requestOrigin } from "@/lib/api-links";
 import { jsonProblem } from "@/lib/api-problem";
 
 function apiNotFound(request: Request) {
-  const origin = requestOrigin(request);
+  const origin = requestOrigin(request, env.WEBAPP_PUBLIC_ORIGIN);
   const path = new URL(request.url).pathname;
 
   let detail =

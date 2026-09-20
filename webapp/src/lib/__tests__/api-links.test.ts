@@ -17,6 +17,13 @@ describe("requestOrigin", () => {
     const r = new Request("https://example.org:8443/foo/bar?x=1");
     expect(requestOrigin(r)).toBe("https://example.org:8443");
   });
+
+  it("uses the configured public origin behind an internal HTTP proxy", () => {
+    const r = new Request("http://hifld.publicenvirodata.org/api/collections/hifld/datasets");
+    expect(requestOrigin(r, "https://hifld.publicenvirodata.org")).toBe(
+      "https://hifld.publicenvirodata.org",
+    );
+  });
 });
 
 describe("path URLs", () => {
