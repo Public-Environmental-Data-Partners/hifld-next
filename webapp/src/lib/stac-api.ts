@@ -41,7 +41,6 @@ export function buildStacLanding(publishedRoot: StacDocument, origin: string) {
         href: `${origin}/stac/api`,
         type: "application/vnd.oai.openapi+json;version=3.1",
       },
-      { rel: "service-doc", href: `${origin}/llms.txt`, type: "text/plain" },
       ...publishedRoot.links.filter((link) => !replaced.has(link.rel)),
     ],
   };
