@@ -20,6 +20,17 @@ def root(name: str) -> dict[str, object]:
     }
 
 
+def collection(name: str) -> dict[str, object]:
+    return {
+        "type": "Catalog",
+        "stac_version": "1.1.0",
+        "id": "public",
+        "title": name,
+        "description": "Published collection",
+        "links": [],
+    }
+
+
 @pytest.mark.asyncio
 async def test_catalog_reuses_stac_reads_only_within_one_request(
     caplog: pytest.LogCaptureFixture,
@@ -27,10 +38,15 @@ async def test_catalog_reuses_stac_reads_only_within_one_request(
     caplog.set_level("INFO", logger="uvicorn.error.catalog")
     calls = 0
 
-    def handler(_: httpx.Request) -> httpx.Response:
+    def handler(request: httpx.Request) -> httpx.Response:
         nonlocal calls
         calls += 1
-        return httpx.Response(200, json=root(str(calls)))
+        payload = (
+            root("root title")
+            if request.url.path == "/api/collections"
+            else collection(str(calls // 2))
+        )
+        return httpx.Response(200, json=payload)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         catalog = CatalogClient("http://catalog.test", http)
@@ -39,11 +55,11 @@ async def test_catalog_reuses_stac_reads_only_within_one_request(
             first.name = "modified by caller"
             second = await catalog.resolve_collection("public")
             assert second.name == "1"
-            assert calls == 1
+            assert calls == 2
         with catalog_request_scope():
             assert (await catalog.resolve_collection("public")).name == "2"
         await catalog.resolve_collection("public")
-        assert calls == 3
+        assert calls == 6
     assert "cache_hit=true" in caplog.text
     assert "elapsed_ms=" in caplog.text
     assert "catalog.test" not in caplog.text
@@ -53,10 +69,24 @@ async def test_catalog_reuses_stac_reads_only_within_one_request(
 async def test_catalog_cache_does_not_cross_client_boundaries() -> None:
     async with (
         httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda _: httpx.Response(200, json=root("One")))
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    json=root("root title")
+                    if request.url.path == "/api/collections"
+                    else collection("One"),
+                )
+            )
         ) as first,
         httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda _: httpx.Response(200, json=root("Two")))
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    json=root("root title")
+                    if request.url.path == "/api/collections"
+                    else collection("Two"),
+                )
+            )
         ) as second,
     ):
         with catalog_request_scope():
@@ -71,13 +101,18 @@ async def test_catalog_cache_does_not_cross_client_boundaries() -> None:
 @pytest.mark.asyncio
 async def test_concurrent_http_requests_have_separate_catalog_scopes() -> None:
     calls = 0
+    child_calls = 0
 
-    async def catalog_handler(_: httpx.Request) -> httpx.Response:
-        nonlocal calls
+    async def catalog_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls, child_calls
         calls += 1
-        name = str(calls)
+        if request.url.path == "/api/collections":
+            payload = root("root title")
+        else:
+            child_calls += 1
+            payload = collection(str(child_calls))
         await asyncio.sleep(0)
-        return httpx.Response(200, json=root(name))
+        return httpx.Response(200, json=payload)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(catalog_handler)) as catalog_http:
         catalog = CatalogClient("http://catalog.test", catalog_http)
@@ -93,7 +128,7 @@ async def test_concurrent_http_requests_have_separate_catalog_scopes() -> None:
         ) as http:
             results = await asyncio.gather(http.get("/"), http.get("/"))
             assert {result.json()["name"] for result in results} == {"1", "2"}
-            assert calls == 2
+            assert calls == 4
 
 
 @pytest.mark.asyncio
