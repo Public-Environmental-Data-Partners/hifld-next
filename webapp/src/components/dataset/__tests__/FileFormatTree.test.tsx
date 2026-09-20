@@ -100,7 +100,7 @@ describe("FileFormatTree", () => {
     );
 
     expect(details).toEqual([
-      expect.objectContaining({ label: "Cataloged", value: expect.stringContaining("May 24, 2026") }),
+      { label: "Cataloged", value: "May 24, 2026, 2:30 PM UTC" },
       { label: "Size", value: "1.5 KB" },
     ]);
     expect(details.some((detail) => detail.label === "Last metadata update")).toBe(false);

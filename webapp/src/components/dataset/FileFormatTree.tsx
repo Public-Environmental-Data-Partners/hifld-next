@@ -36,10 +36,12 @@ function formatSourceTimestamp(timestamp: string | undefined): string | null {
   if (!timestamp) return null;
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat("en-US", {
+  const formatted = new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
+    timeZone: "UTC",
   }).format(date);
+  return `${formatted} UTC`;
 }
 
 export function sourceLifecycleDetails(source: DatasetSource | undefined): SourceLifecycleDetail[] {
