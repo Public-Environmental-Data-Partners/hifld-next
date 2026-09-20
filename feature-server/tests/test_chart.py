@@ -27,3 +27,20 @@ def test_chart_matches_feature_server_runtime_contract() -> None:
     assert "readOnlyRootFilesystem: true" in rendered
     assert "sizeLimit: 1Gi" in rendered
     assert "sizeLimit: 2Gi" in rendered
+
+
+def test_chart_can_limit_external_health_check_ingress() -> None:
+    rendered = subprocess.run(
+        [
+            "helm",
+            "template",
+            "feature-server",
+            str(CHART),
+            "--set-string",
+            "networkPolicy.ingressCidrs[0]=35.191.0.0/16",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert 'cidr: "35.191.0.0/16"' in rendered

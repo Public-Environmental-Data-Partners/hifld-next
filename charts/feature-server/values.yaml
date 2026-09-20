@@ -62,6 +62,7 @@ readinessProbe: {path: /readyz, initialDelaySeconds: 10, periodSeconds: 10, time
 networkPolicy:
   enabled: true
   dnsCidrs: [169.254.20.10/32]
+  ingressCidrs: []
   extraEgress: []
 nodeSelector: {}
 tolerations: []
