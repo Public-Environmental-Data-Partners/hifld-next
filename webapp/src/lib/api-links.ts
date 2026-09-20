@@ -42,7 +42,7 @@ export function collectionDatasetsListUrl(
     omit?: string | undefined;
   },
 ): string {
-  const u = new URL(`${origin}/api/collections/${enc(collectionSlug)}`);
+  const u = new URL(`${origin}/api/collections/${enc(collectionSlug)}/datasets`);
   const q = params.query ?? params.search;
   if (q) u.searchParams.set("query", q);
   if (params.include_urls) u.searchParams.set("include_urls", "true");
@@ -68,6 +68,32 @@ export function datasetSelf(
 
 export function fileSelf(origin: string, collectionSlug: string, datasetSlug: string, fileSlug: string): string {
   return `${origin}/api/collections/${enc(collectionSlug)}/datasets/${enc(datasetSlug)}/files/${enc(fileSlug)}`;
+}
+
+export function datasetMetadataSelf(origin: string, collectionSlug: string, datasetSlug: string): string {
+  return `${datasetSelf(origin, collectionSlug, datasetSlug)}/metadata`;
+}
+
+export function fileMetadataSelf(
+  origin: string,
+  collectionSlug: string,
+  datasetSlug: string,
+  fileSlug: string,
+  version?: string | number | null,
+): string {
+  const url = new URL(`${fileSelf(origin, collectionSlug, datasetSlug, fileSlug)}/metadata`);
+  if (version != null) url.searchParams.set("version", String(version));
+  return url.href;
+}
+
+export function fileMetadataPath(
+  collectionSlug: string,
+  datasetSlug: string,
+  fileSlug: string,
+  version?: string | number | null,
+): string {
+  const url = new URL(fileMetadataSelf("https://local.invalid", collectionSlug, datasetSlug, fileSlug, version));
+  return `${url.pathname}${url.search}`;
 }
 
 export function schemaSelf(
@@ -109,7 +135,7 @@ export function sourceDownloadZip(
   collectionSlug: string,
   datasetSlug: string,
   fileSlug: string,
-  sourceId: number,
+  sourceId: string,
 ): string {
   return `${origin}/api/collections/${enc(collectionSlug)}/datasets/${enc(datasetSlug)}/files/${enc(fileSlug)}/sources/${sourceId}/download-zip`;
 }
@@ -120,7 +146,7 @@ export function globalDatasetsListSelf(origin: string, opts?: { search?: string 
   return u.href;
 }
 
-export function globalDatasetByIdSelf(origin: string, id: number): string {
+export function globalDatasetByIdSelf(origin: string, id: string): string {
   return `${origin}/api/datasets/${id}`;
 }
 

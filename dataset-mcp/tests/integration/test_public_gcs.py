@@ -22,10 +22,11 @@ def test_public_gcs_uri_is_restricted_to_configured_bucket() -> None:
     source = ResolvedSource(
         source={
             "alias": "roads",
-            "collection_id": 1,
-            "dataset_id": 2,
-            "file_id": 3,
-            "file_source_id": 4,
+            "collection_slug": "hifld",
+            "dataset_slug": "roads",
+            "file_slug": "roads",
+            "version": "v1.0.0",
+            "asset_key": "geoparquet",
         },
         version="v1",
         format_type="geoparquet",
@@ -54,10 +55,11 @@ def test_public_gcs_object_is_reachable_when_explicitly_configured() -> None:
     source = ResolvedSource(
         source={
             "alias": "dataset",
-            "collection_id": 1,
-            "dataset_id": 2,
-            "file_id": 3,
-            "file_source_id": 4,
+            "collection_slug": "hifld",
+            "dataset_slug": "roads",
+            "file_slug": "roads",
+            "version": "v1.0.0",
+            "asset_key": "geoparquet",
         },
         version="acceptance",
         format_type="geoparquet",
@@ -112,10 +114,11 @@ def test_public_gcs_multipart_objects_are_queried_as_concrete_urls() -> None:
     source = ResolvedSource(
         source={
             "alias": "dataset",
-            "collection_id": 1,
-            "dataset_id": 2,
-            "file_id": 3,
-            "file_source_id": 4,
+            "collection_slug": "hifld",
+            "dataset_slug": "roads",
+            "file_slug": "roads",
+            "version": "v1.0.0",
+            "asset_key": "geoparquet",
         },
         version="acceptance",
         format_type="geoparquet",

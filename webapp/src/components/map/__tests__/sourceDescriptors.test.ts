@@ -15,20 +15,20 @@ const descriptor: SourceDescriptor = {
   collectionSlug: "hifld",
   datasetSlug: "hospitals",
   fileSlug: "hospitals",
-  formatType: "geoparquet",
-  storageLocationId: 4,
+  assetKey: "geoparquet",
+  storageLocationSlug: "prod-4",
   version: "v1.1.0",
-  sourceId: 42,
 };
 
-function source(id: number, formatVersion: string, locationId: number): DatasetSource {
+function source(id: number, formatVersion: string, locationId: number, assetKey = "geoparquet"): DatasetSource {
   return {
-    id,
+    asset_key: assetKey,
     version: formatVersion,
     source_type: "file",
-    location: { version: "v1", path: `data/${formatVersion}/${id}.parquet` },
+    location: { version: "v1", path: `/download/${id}` },
     storage_location: {
       id: locationId,
+      slug: `prod-${locationId}`,
       name: "prod",
       backend_type: "s3",
       created_at: "2026-01-01T00:00:00Z",
@@ -46,13 +46,6 @@ function format(formatType: DatasetFormat["format"]["format_type"], sources: Dat
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     },
-    dataset_format: {
-      id: 1,
-      dataset_id: 1,
-      format_id: 1,
-      created_at: "2026-01-01T00:00:00Z",
-      updated_at: "2026-01-01T00:00:00Z",
-    },
     sources,
   };
 }
@@ -61,8 +54,9 @@ function file(formats: DatasetFormat[]): DatasetFile {
   return {
     id: 10,
     dataset_id: 1,
-    name: "Hospitals",
+    file_slug: "hospitals",
     slug: "hospitals",
+    name: "Hospitals",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     formats,
@@ -74,12 +68,24 @@ describe("source descriptors", () => {
     const encoded = encodeSourceDescriptor(descriptor);
 
     expect(decodeSourceDescriptor(encoded)).toEqual(descriptor);
-    expect(sourceDescriptorId(descriptor)).toBe("hifld:hospitals:hospitals:geoparquet:4:v1.1.0:42");
+    expect(sourceDescriptorId(descriptor)).toBe("hifld:hospitals:hospitals:v1.1.0:geoparquet:prod-4");
   });
 
   it("returns null for malformed query state", () => {
     expect(decodeSourceDescriptor("%7Bbad-json")).toBeNull();
     expect(decodeSourceDescriptor("")).toBeNull();
+  });
+
+  it("rejects legacy numeric descriptors instead of resolving them accidentally", () => {
+    expect(decodeSourceDescriptor(encodeURIComponent(JSON.stringify({
+      collectionSlug: "hifld",
+      datasetSlug: "hospitals",
+      fileSlug: "hospitals",
+      formatType: "geoparquet",
+      storageLocationId: 4,
+      version: "v1.1.0",
+      sourceId: 42,
+    })))).toBeNull();
   });
 
   it("selects a concrete source for a descriptor", () => {
@@ -88,7 +94,7 @@ describe("source descriptors", () => {
       descriptor,
     );
 
-    expect(selected?.id).toBe(42);
+    expect(selected?.asset_key).toBe("geoparquet");
   });
 
   it("builds a descriptor for the newest available format source", () => {
@@ -96,14 +102,13 @@ describe("source descriptors", () => {
       collectionSlug: "hifld",
       datasetSlug: "hospitals",
       fileSlug: "hospitals",
-      formatEntry: format("pmtiles", [source(1, "v1.0.0", 4), source(2, "v1.1.0", 4)]),
+      formatEntry: format("pmtiles", [source(1, "v1.0.0", 4, "pmtiles"), source(2, "v1.1.0", 4, "pmtiles")]),
     });
 
     expect(selected).toMatchObject({
-      formatType: "pmtiles",
-      storageLocationId: 4,
       version: "v1.1.0",
-      sourceId: 2,
+      assetKey: "pmtiles",
+      storageLocationSlug: "prod-4",
     });
   });
 
@@ -111,11 +116,11 @@ describe("source descriptors", () => {
     const selected = findPmtilesSourceForCatalogSource(
       file([
         format("geoparquet", [source(42, "v1.1.0", 4)]),
-        format("pmtiles", [source(50, "v1.0.0", 4), source(51, "v1.1.0", 4)]),
+        format("pmtiles", [source(50, "v1.0.0", 4, "pmtiles"), source(51, "v1.1.0", 4, "pmtiles")]),
       ]),
-      42,
+      source(42, "v1.1.0", 4),
     );
 
-    expect(selected?.id).toBe(51);
+    expect(selected?.asset_key).toBe("pmtiles");
   });
 });

@@ -14,20 +14,22 @@ import {
 import { hasSchemaMetadata } from "@/components/dataset/schemaSources";
 import { buildSourceFileUrl } from "@/components/dataset/sourceUrls";
 import { compareVersionValues } from "@/components/dataset/versionLabel";
+import { hasUsablePmtilesAsset } from "@/components/map/mapEligibility";
 import { descriptorForSource, encodeSourceDescriptor } from "@/components/map/sourceDescriptors";
 import { Button } from "@/components/ui/button";
 import { PageLoader } from "@/components/ui/page-loader";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Separator } from "@/components/ui/separator";
 import type { DatasetFile } from "@/lib/api-client";
-import { getCollectionBySlug, getDatasetBySlug, getDatasetFileById, getDatasetFileBySlug } from "@/lib/api-client";
+import { getCollectionBySlug, getDatasetBySlug, getDatasetFileBySlug } from "@/lib/api-client";
+import { formatOptionalDate } from "@/lib/date";
 import { buildDatasetJsonLd, datasetKeywords, pageTitle, plainTextForSeo, seoDescription } from "@/lib/seo";
 
 type FileFormat = NonNullable<DatasetFile["formats"]>[number];
 type FileSource = FileFormat["sources"][number];
 
 interface SelectedSource {
-  storageLocationId: number;
+  storageLocationId: string;
   version: string | number;
 }
 
@@ -35,8 +37,19 @@ interface SelectedSourcesByFormat {
   [formatType: string]: SelectedSource;
 }
 
-function latestSourcesByLocation(sources: FileSource[]): Map<number, { source: FileSource; version: string | number }> {
-  const sourcesByLocation = new Map<number, { source: FileSource; version: string | number }>();
+export function fileTimestampEntries(
+  createdAt: string | null | undefined,
+  updatedAt: string | null | undefined,
+): Array<{ label: string; value: string }> {
+  const entries = [
+    { label: "Created", value: formatOptionalDate(createdAt) },
+    { label: "Updated", value: formatOptionalDate(updatedAt) },
+  ];
+  return entries.flatMap((entry) => (entry.value ? [{ label: entry.label, value: entry.value }] : []));
+}
+
+function latestSourcesByLocation(sources: FileSource[]): Map<string, { source: FileSource; version: string | number }> {
+  const sourcesByLocation = new Map<string, { source: FileSource; version: string | number }>();
   for (const source of sources) {
     const locId = source.storage_location?.id;
     const version = source.version || "1";
@@ -57,7 +70,7 @@ function initialSelectedSources(file: DatasetFile): SelectedSourcesByFormat {
   for (const formatEntry of file.formats ?? []) {
     const firstEntry = Array.from(latestSourcesByLocation(formatEntry.sources).values())[0];
     const storageLocationId = firstEntry?.source.storage_location?.id;
-    if (firstEntry && storageLocationId !== undefined && storageLocationId !== 0) {
+    if (firstEntry && storageLocationId) {
       initial[formatEntry.format.format_type] = {
         storageLocationId,
         version: firstEntry.version,
@@ -85,38 +98,17 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
         throw notFound();
       }
 
-      // Try to get dataset to find file ID (for optimization)
-      // If files are already loaded (e.g., from parent route), we can use IDs
       const dataset = await getDatasetBySlug({
         data: {
           collectionSlug: params.collectionSlug,
           datasetSlug: params.datasetSlug,
-          includeUrls: false, // We don't need full URLs here, just to find the file ID
+          includeUrls: false,
         },
       });
       if (!dataset) {
         throw notFound();
       }
 
-      // If dataset has files loaded, find file by slug and use ID-based endpoint
-      const file = dataset.files?.find((f) => f.slug === params.fileSlug);
-      if (file?.id && dataset.id) {
-        // Use ID-based endpoint for better performance (no slug lookups needed)
-        const result = await getDatasetFileById({
-          data: {
-            collectionId: collection.id,
-            datasetId: dataset.id,
-            fileId: file.id,
-          },
-        });
-        if (!result) {
-          throw notFound();
-        }
-        return { collection, dataset: result.dataset, file: result.file };
-      }
-
-      // Fallback to slug-based lookup if file not found in dataset files
-      // (This happens when includeUrls=false doesn't return files)
       const result = await getDatasetFileBySlug({
         data: {
           collectionSlug: params.collectionSlug,
@@ -146,7 +138,7 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
     )}/files/${encodeURIComponent(params.fileSlug)}`;
     const metadataUrl = `/api/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
       params.datasetSlug,
-    )}/files/${encodeURIComponent(params.fileSlug)}`;
+    )}/files/${encodeURIComponent(params.fileSlug)}/metadata`;
 
     const jsonLd = buildDatasetJsonLd({
       name: fileName,
@@ -232,15 +224,16 @@ function FileDetailPage() {
 
   // Extract URLs from selected sources
   const pmtilesUrl = getUrlFromSource(pmtilesSource);
-  const pmtilesDescriptor = pmtilesSource
-    ? descriptorForSource({
-        collectionSlug,
-        datasetSlug,
-        fileSlug,
-        formatType: "pmtiles",
-        source: pmtilesSource,
-      })
-    : null;
+  const hasMapAsset = hasUsablePmtilesAsset(pmtilesSource);
+  const pmtilesDescriptor =
+    hasMapAsset && pmtilesSource
+      ? descriptorForSource({
+          collectionSlug,
+          datasetSlug,
+          fileSlug,
+          source: pmtilesSource,
+        })
+      : null;
   const mapSearch = {
     ...(pmtilesDescriptor ? { source: encodeSourceDescriptor(pmtilesDescriptor) } : {}),
   };
@@ -305,12 +298,14 @@ function FileDetailPage() {
           </div>
           <div className="space-y-3 border-y py-4">
             <div className="grid gap-2 sm:grid-cols-2">
-              <Button asChild className="h-12 justify-start px-4 sm:justify-center">
-                <Link to="/collections/$collectionSlug/map" params={{ collectionSlug }} search={mapSearch}>
-                  <MapIcon className="h-4 w-4 mr-2 shrink-0" />
-                  Map Viewer
-                </Link>
-              </Button>
+              {hasMapAsset && (
+                <Button asChild className="h-12 justify-start px-4 sm:justify-center">
+                  <Link to="/collections/$collectionSlug/map" params={{ collectionSlug }} search={mapSearch}>
+                    <MapIcon className="h-4 w-4 mr-2 shrink-0" />
+                    Map Viewer
+                  </Link>
+                </Button>
+              )}
               {parquetPreviewOptions.length > 0 && (
                 <Button
                   variant="outline"
@@ -330,7 +325,7 @@ function FileDetailPage() {
                 className="h-10 justify-start px-3 font-normal text-muted-foreground"
               >
                 <a
-                  href={`/api/collections/${collectionSlug}/datasets/${datasetSlug}/files/${fileSlug}`}
+                  href={`/api/collections/${encodeURIComponent(collectionSlug)}/datasets/${encodeURIComponent(datasetSlug)}/files/${encodeURIComponent(fileSlug)}/metadata`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -443,8 +438,11 @@ function FileDetailPage() {
         <Separator />
 
         <div className="text-xs text-muted-foreground space-y-1">
-          <p>Created: {new Date(file.created_at).toLocaleString()}</p>
-          <p>Updated: {new Date(file.updated_at).toLocaleString()}</p>
+          {fileTimestampEntries(file.created_at, file.updated_at).map(({ label, value }) => (
+            <p key={label}>
+              {label}: {value}
+            </p>
+          ))}
         </div>
       </div>
     </div>

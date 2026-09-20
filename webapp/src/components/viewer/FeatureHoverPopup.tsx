@@ -39,10 +39,13 @@ export function FeatureHoverPopup({
   return (
     <div
       ref={popupRef}
-      className="absolute z-10 max-w-md rounded-md border bg-background/95 shadow-md"
-      style={{ left: hoverInfo.x + 12, top: hoverInfo.y + 12 }}
+      className="absolute z-10 flex max-h-[min(16rem,calc(100%-1rem))] w-80 max-w-[calc(100%-1rem)] flex-col overflow-hidden rounded-md border bg-background/95 shadow-md"
+      style={{
+        left: `clamp(8px, ${hoverInfo.x + 12}px, calc(100% - 20rem - 8px))`,
+        top: `clamp(8px, ${hoverInfo.y + 12}px, calc(100% - 16rem - 8px))`,
+      }}
     >
-      <div className="border-b">
+      <div className="shrink-0 border-b">
         <div className="flex items-center justify-between gap-2 px-3 py-2 min-w-0">
           <div className="text-xs text-muted-foreground truncate min-w-0 flex-1">{layerId}</div>
           <div className="flex shrink-0 items-center gap-1">
@@ -88,7 +91,7 @@ export function FeatureHoverPopup({
       </div>
       <div
         data-testid="feature-popup-scroll"
-        className="max-h-[min(12rem,calc(100dvh-14rem))] touch-pan-y overflow-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
+        className="min-h-0 max-h-[min(12rem,calc(100dvh-14rem))] touch-pan-y overflow-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
       >
         <Table>
           <TableHeader>
@@ -143,7 +146,6 @@ function FeaturePopupActions({ selectedMapFeature }: { selectedMapFeature: Catal
               datasetSlug: selectedMapFeature.datasetSlug,
               fileSlug: selectedMapFeature.fileSlug,
               version: selectedMapFeature.version,
-              sourceId: selectedMapFeature.sourceId,
               feature: selectedMapFeature,
             }}
             trigger={

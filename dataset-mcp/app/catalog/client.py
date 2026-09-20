@@ -1,4 +1,4 @@
-"""Typed client for the internal dataset catalog API."""
+"""Typed client for the webapp's public slug-based catalog API."""
 
 import logging
 import re
@@ -6,24 +6,28 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from time import perf_counter
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 from pydantic import BaseModel, ValidationError
 
 from app.catalog.models import (
     Collection,
-    DatasetFilePayload,
-    DatasetFileResponse,
+    Dataset,
+    DatasetFile,
     DatasetFileSchema,
     DatasetFileSchemaResult,
-    DatasetFileVersionsResponse,
-    DatasetFormat,
+    DatasetFileSummary,
     DatasetPage,
     DatasetSearchRequest,
     DatasetWithFiles,
+    FileLocation,
     FileSource,
     SchemaSummary,
+    SpatialDatasetFileMetadata,
+    StacCatalog,
+    StacDatasetPage,
+    StacVersionCollection,
 )
 
 
@@ -37,7 +41,6 @@ class CatalogClientError(RuntimeError):
 
 _SLUG_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$")
 _LOGGER = logging.getLogger("uvicorn.error.catalog")
-
 type _ReadKey = tuple[httpx.AsyncClient, str, type[BaseModel], tuple[tuple[str, str | int], ...]]
 _request_reads: ContextVar[dict[_ReadKey, BaseModel] | None] = ContextVar(
     "catalog_request_reads", default=None
@@ -46,7 +49,7 @@ _request_reads: ContextVar[dict[_ReadKey, BaseModel] | None] = ContextVar(
 
 @contextmanager
 def catalog_request_scope() -> Generator[None]:
-    """Reuse validated reads in one request, never across token revalidations."""
+    """Reuse validated STAC reads within one inbound request only."""
     reads: dict[_ReadKey, BaseModel] = {}
     token = _request_reads.set(reads)
     try:
@@ -63,8 +66,17 @@ def _path_slug(value: str, field: str) -> str:
     return quote(value, safe="")
 
 
+def _child_slug(href: str) -> str:
+    path_parts = [part for part in urlsplit(href).path.split("/") if part]
+    if len(path_parts) < 2 or path_parts[-1] != "catalog.json":
+        raise CatalogClientError("catalog_contract_invalid", "catalog child link is invalid")
+    slug = path_parts[-2]
+    _path_slug(slug, "collection")
+    return slug
+
+
 class CatalogClient:
-    """Call dataset-api and validate each response at the HTTP boundary."""
+    """Call the webapp catalog API and validate each response at the HTTP boundary."""
 
     def __init__(
         self, base_url: str, client: httpx.AsyncClient | None = None, timeout: float = 15.0
@@ -80,7 +92,7 @@ class CatalogClient:
     async def _get_model(
         self, path: str, model: type[BaseModel], params: dict[str, str | int] | None = None
     ) -> BaseModel:
-        reads = _request_reads.get() if model in (Collection, DatasetFilePayload) else None
+        reads = _request_reads.get()
         key: _ReadKey = (
             self._client,
             f"{self._base_url}{path}",
@@ -115,30 +127,36 @@ class CatalogClient:
                 "catalog_contract_invalid", "catalog response did not match its contract"
             ) from exc
 
-    async def _get_list(self, path: str) -> list[Collection]:
-        try:
-            response = await self._client.get(f"{self._base_url}{path}")
-        except httpx.HTTPError as exc:
-            raise CatalogClientError("catalog_unavailable", "catalog request failed") from exc
-        if response.status_code == 404:
-            raise CatalogClientError("catalog_not_found", "catalog resource was not found")
-        if response.is_error:
-            raise CatalogClientError("catalog_unavailable", "catalog request failed")
-        try:
-            payload = response.json()
-            return [Collection.model_validate(item) for item in payload]
-        except (ValueError, TypeError, ValidationError) as exc:
-            raise CatalogClientError(
-                "catalog_contract_invalid", "catalog response did not match its contract"
-            ) from exc
-
     async def list_collections(self) -> list[Collection]:
-        return await self._get_list("/api/collections")
+        root_model = await self._get_model("/api/collections", StacCatalog)
+        root = StacCatalog.model_validate(root_model)
+        collections: list[Collection] = []
+        for link in root.links:
+            if link.rel != "child":
+                continue
+            slug = _child_slug(link.href)
+            if link.title is not None:
+                collections.append(Collection(slug=slug, name=link.title))
+                continue
+            catalog_model = await self._get_model(
+                f"/api/collections/{_path_slug(slug, 'collection')}", StacCatalog
+            )
+            catalog = StacCatalog.model_validate(catalog_model)
+            if catalog.id != slug:
+                raise CatalogClientError(
+                    "catalog_contract_invalid",
+                    "collection catalog identity did not match its route",
+                )
+            collections.append(
+                Collection(
+                    slug=slug,
+                    name=catalog.title or catalog.id,
+                    description=catalog.description,
+                )
+            )
+        return collections
 
-    async def resolve_collection(self, identity: int | str) -> Collection:
-        if isinstance(identity, int):
-            model = await self._get_model(f"/api/collections/{identity}", Collection)
-            return Collection.model_validate(model)
+    async def resolve_collection(self, identity: str) -> Collection:
         for collection in await self.list_collections():
             if collection.slug == identity:
                 return collection
@@ -147,127 +165,156 @@ class CatalogClient:
     async def search_datasets(self, request: DatasetSearchRequest) -> DatasetPage:
         collection = await self.resolve_collection(request.collection)
         model = await self._get_model(
-            f"/api/collections/{collection.id}/datasets", DatasetPage, request.to_query_params()
+            f"/api/collections/{_path_slug(collection.slug, 'collection')}/datasets",
+            StacDatasetPage,
+            request.to_query_params(),
         )
-        return DatasetPage.model_validate(model)
+        envelope = StacDatasetPage.model_validate(model)
+        return DatasetPage(
+            items=[_dataset_from_catalog(item, collection.slug) for item in envelope.datasets],
+            total=envelope.total,
+            limit=envelope.limit,
+            offset=envelope.offset,
+        )
 
-    async def get_dataset(self, collection: int | str, dataset: int | str) -> DatasetWithFiles:
-        dataset_path = str(dataset) if isinstance(dataset, int) else _path_slug(dataset, "dataset")
-        resolved = await self.resolve_collection(collection)
+    async def get_dataset(self, collection: str, dataset: str) -> DatasetWithFiles:
         path = (
-            f"/api/collections/{resolved.id}/datasets/{dataset_path}/files"
-            if isinstance(dataset, int)
-            else (f"/api/collections/{resolved.id}/datasets/by-slug/{dataset_path}/files")
+            f"/api/collections/{_path_slug(collection, 'collection')}"
+            f"/datasets/{_path_slug(dataset, 'dataset')}"
         )
-        model = await self._get_model(path, DatasetWithFiles)
-        return DatasetWithFiles.model_validate(model)
+        model = await self._get_model(path, StacCatalog)
+        catalog = StacCatalog.model_validate(model)
+        expected = f"{collection}/{dataset}"
+        if catalog.id != expected:
+            raise CatalogClientError(
+                "catalog_contract_invalid", "dataset catalog identity did not match its route"
+            )
+        files = [
+            _file_from_child(link.href, expected, link.title)
+            for link in catalog.links
+            if link.rel == "child"
+        ]
+        return DatasetWithFiles(
+            slug=dataset,
+            name=catalog.title or dataset,
+            description=catalog.description,
+            tags=catalog.hifld_tags,
+            files=files,
+        )
 
     async def get_dataset_file(
-        self, collection: int | str, dataset: int | str, file: int | str
-    ) -> DatasetFileResponse:
-        dataset_path = str(dataset) if isinstance(dataset, int) else _path_slug(dataset, "dataset")
-        file_path = str(file) if isinstance(file, int) else _path_slug(file, "file")
-        resolved = await self.resolve_collection(collection)
-        if isinstance(dataset, int):
-            path = f"/api/collections/{resolved.id}/datasets/{dataset}/files/{file_path}"
-        else:
-            path = (
-                f"/api/collections/{resolved.id}/datasets/by-slug/{dataset_path}/files/{file_path}"
-            )
-        model = await self._get_model(path, DatasetFilePayload)
-        payload = DatasetFilePayload.model_validate(model)
-        return DatasetFileResponse(
-            collection=resolved,
-            dataset=payload.dataset,
-            file=payload.file,
+        self,
+        collection: str,
+        dataset: str,
+        file: str,
+        *,
+        version: str | None = None,
+        asset_key: str | None = None,
+        storage_location_slug: str | None = None,
+    ) -> StacVersionCollection:
+        path = (
+            f"/api/collections/{_path_slug(collection, 'collection')}"
+            f"/datasets/{_path_slug(dataset, 'dataset')}"
+            f"/files/{_path_slug(file, 'file')}"
         )
-
-    async def get_file_versions(
-        self, collection: int | str, dataset: int | str, file: int | str
-    ) -> DatasetFileVersionsResponse:
-        resolved = await self.resolve_collection(collection)
-        if isinstance(file, int):
-            if not isinstance(dataset, int):
-                dataset_page = await self.get_dataset(resolved.id, dataset)
-                dataset_id = dataset_page.id
-            else:
-                dataset_id = dataset
-            path = f"/api/collections/{resolved.id}/datasets/{dataset_id}/files/{file}/versions"
-        else:
-            detail = await self.get_dataset_file(resolved.id, dataset, file)
-            dataset_id = detail.dataset.id
-            file_id = detail.file.id
-            path = f"/api/collections/{resolved.id}/datasets/{dataset_id}/files/{file_id}/versions"
-        model = await self._get_model(path, DatasetFileVersionsResponse)
-        return DatasetFileVersionsResponse.model_validate(model)
+        params: dict[str, str | int] = {}
+        if version is not None:
+            params["version"] = version
+        del asset_key, storage_location_slug
+        model = await self._get_model(path, StacVersionCollection, params)
+        collection_model = StacVersionCollection.model_validate(model)
+        prefix = f"{collection}/{dataset}/{file}/"
+        if not collection_model.id.startswith(prefix) or collection_model.id.count("/") != 3:
+            raise CatalogClientError(
+                "catalog_contract_invalid", "file collection identity did not match its route"
+            )
+        return collection_model
 
     async def get_dataset_file_schema(
         self,
-        collection: int | str,
-        dataset: int | str,
-        file: int | str,
+        collection: str,
+        dataset: str,
+        file: str,
         version: str | int | None = None,
     ) -> DatasetFileSchemaResult:
-        detail = await self.get_dataset_file(collection, dataset, file)
-        versions = await self.get_file_versions(collection, detail.dataset.id, detail.file.id)
-        candidates: list[tuple[FileSource, DatasetFormat]] = []
-        for entry in versions.formats:
-            for source in entry.sources:
-                if source.source_metadata is not None and source.source_metadata.columns:
-                    candidates.append((source, entry))
-        if version is not None:
-            candidates = [item for item in candidates if str(item[0].version) == str(version)]
-            if not candidates:
-                raise CatalogClientError("schema_version_not_found", "schema version was not found")
-        if not candidates:
-            return DatasetFileSchemaResult(
-                collection=detail.collection,
-                dataset=detail.dataset,
-                file=detail.file,
-                versions=[source.version for entry in versions.formats for source in entry.sources],
-                selected_version=None,
-                schema=None,
-            )
-        candidates.sort(
-            key=lambda item: (
-                _column_count(item[0]),
-                item[1].format.format_type == "geoparquet",
+        selected = await self.get_dataset_file(
+            collection, dataset, file, version=str(version) if version is not None else None
+        )
+        selected_version = selected.id.rsplit("/", 1)[-1]
+        quality = selected.quality
+        metadata = SpatialDatasetFileMetadata(
+            feature_count=selected.feature_count,
+            bounds=selected.extent.spatial.bbox[0] if selected.extent.spatial.bbox else None,
+            geometry_type=selected.geometry_type,
+            invalid_geometry_count=quality.invalid_geometry_count if quality else None,
+            quality_check_passed=quality.passed if quality else None,
+            columns_hash=quality.columns_hash if quality else None,
+            columns=selected.table_columns,
+            crs=selected.native_crs,
+        )
+        asset_key, asset = next(
+            (
+                (key, value)
+                for key, value in selected.assets.items()
+                if key.startswith("geoparquet-") or key == "geoparquet"
             ),
-            reverse=True,
+            (None, None),
         )
-        selected, format_entry = candidates[0]
-        metadata = selected.source_metadata
-        if metadata is None:
-            raise CatalogClientError("schema_not_found", "no schema metadata is available")
-        summary = SchemaSummary(
-            columnCount=len(metadata.columns) if metadata.columns else 0,
-            featureCount=metadata.feature_count,
-            geometryType=metadata.geometry_type,
-            invalidGeometryCount=metadata.invalid_geometry_count,
-            qualityCheckPassed=metadata.quality_check_passed,
-            columnsHash=metadata.columns_hash,
-        )
-        schema = DatasetFileSchema(
-            version=selected.version,
-            format_type=format_entry.format.format_type if format_entry.format else "geoparquet",
-            format_name=format_entry.format.name if format_entry.format else "GeoParquet",
-            source_id=selected.id,
-            storage_location=selected.storage_location,
-            source=selected,
-            source_metadata=metadata,
-            summary=summary,
-            columns=metadata.columns if metadata.columns else [],
-        )
+        schema = None
+        if asset_key is not None and asset is not None:
+            source = FileSource(
+                asset_key=asset_key,
+                version=selected_version,
+                source_type="file",
+                location=FileLocation(path=asset.href),
+                source_metadata=metadata,
+            )
+            schema = DatasetFileSchema(
+                version=selected_version,
+                format_type="geoparquet",
+                format_name="GeoParquet",
+                source=source,
+                source_metadata=metadata,
+                summary=SchemaSummary(
+                    columnCount=len(selected.table_columns),
+                    featureCount=selected.feature_count,
+                    geometryType=selected.geometry_type,
+                    invalidGeometryCount=quality.invalid_geometry_count if quality else None,
+                    qualityCheckPassed=quality.passed if quality else None,
+                    columnsHash=quality.columns_hash if quality else None,
+                ),
+                columns=selected.table_columns,
+            )
         return DatasetFileSchemaResult(
-            collection=detail.collection,
-            dataset=detail.dataset,
-            file=detail.file,
-            versions=[source.version for entry in versions.formats for source in entry.sources],
-            selected_version=selected.version,
+            collection=Collection(slug=collection, name=collection),
+            dataset=Dataset(slug=dataset, name=dataset),
+            file=DatasetFile(slug=file, name=selected.title or file),
+            versions=[selected_version],
+            selected_version=selected_version,
             schema=schema,
         )
 
 
-def _column_count(source: FileSource) -> int:
-    metadata = source.source_metadata
-    return len(metadata.columns) if metadata is not None and metadata.columns else 0
+def _dataset_from_catalog(catalog: StacCatalog, collection: str) -> Dataset:
+    prefix = f"{collection}/"
+    if not catalog.id.startswith(prefix) or catalog.id.count("/") != 1:
+        raise CatalogClientError(
+            "catalog_contract_invalid", "dataset catalog identity did not match its collection"
+        )
+    slug = catalog.id.removeprefix(prefix)
+    _path_slug(slug, "dataset")
+    return Dataset(
+        slug=slug,
+        name=catalog.title or slug,
+        description=catalog.description,
+        tags=catalog.hifld_tags,
+    )
+
+
+def _file_from_child(href: str, dataset_id: str, title: str | None) -> DatasetFileSummary:
+    parts = [part for part in urlsplit(href).path.split("/") if part]
+    if len(parts) < 2 or parts[-1] != "catalog.json":
+        raise CatalogClientError("catalog_contract_invalid", "dataset child link is invalid")
+    slug = parts[-2]
+    _path_slug(slug, "file")
+    return DatasetFileSummary(slug=slug, name=title or slug)

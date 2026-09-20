@@ -25,7 +25,9 @@ def test_catalog_collection_fixture_parses() -> None:
 
 def test_catalog_dataset_page_fixture_parses() -> None:
     page = DatasetPage.model_validate_json(fixture("dataset_page.json"))
-    assert page.items[0].id == 12
+    assert page.items[0].slug == "stations"
+    assert "id" not in page.items[0].model_dump()
+    assert "collection_id" not in page.items[0].model_dump()
 
 
 def test_catalog_dataset_fixture_parses() -> None:

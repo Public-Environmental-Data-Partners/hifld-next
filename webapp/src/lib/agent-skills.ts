@@ -27,12 +27,14 @@ Use this skill when you need to explore **collections**, **datasets**, and **fil
 ## Typical flow
 
 1. \`GET /api/collections\` — list collections.
-2. \`GET /api/collections/{slug}\` — search datasets in one collection with \`search\` or \`query\`, \`tag_filters\`, \`limit\`, \`offset\`, \`omit\`, and \`include_urls\`.
+2. \`GET /api/collections/{slug}/datasets\` — search datasets in one collection with \`search\` or \`query\`, \`tag_filters\`, \`limit\`, \`offset\`, \`omit\`, and \`include_urls\`. Use \`GET /api/datasets\` for the same paginated shape aggregated across all collections, or \`GET /api/collections/{slug}\` for the collection's raw STAC Catalog.
 3. \`GET /api/collections/{collectionSlug}/datasets/{datasetSlug}\` — open dataset detail by collection and dataset slug.
-4. \`GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}\` — inspect file metadata, formats, sources, returned \`links\`, source URLs, and GeoParquet options.
-5. \`GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema\` — inspect schema/data dictionary metadata. Omit \`version\` to use the latest schema-capable version.
+4. \`GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}\` — inspect the raw STAC Collection, its assets, returned \`links\`, source URLs, and GeoParquet options.
+5. \`GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema\` — inspect schema/data dictionary metadata. Omit \`version\` to use the latest version.
 6. For local analysis, download returned source URLs or GeoParquet and use DuckDB, GeoPandas, or similar tools.
 7. Follow \`links\` and relation URLs from responses rather than inventing path shapes.
+
+Published STAC documents use absolute links and asset URLs, so clients can follow them directly from API responses. The response \`Content-Location\` identifies the canonical storage document. Older or offline catalogs may retain relative links; open their canonical URL before traversing them.
 
 ## Contextual WebMCP (supported browsers only)
 
@@ -69,7 +71,7 @@ same-origin.
 ## Constraints
 
 - The JSON API remains read-only; WebMCP only changes the current browser workspace.
-- This API is not OGC API-Features or STAC: no \`/items\`, \`/features\`, \`/download\`, or \`/map\` JSON routes.
+- This API is not an OGC API-Features or STAC Item Search service: it returns authored STAC Catalog and Collection documents, but has no \`/items\`, \`/features\`, \`/download\`, or \`/map\` JSON routes.
 
 Unknown paths under \`/api\` return \`404\` with \`application/problem+json\` and links back to \`/api\` and OpenAPI.
 `;

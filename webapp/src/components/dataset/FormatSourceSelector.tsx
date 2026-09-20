@@ -5,26 +5,26 @@ import { compareVersionValues, formatVersionLabel, parseVersionValue } from "./v
 interface FormatSourceSelectorProps {
   formatType: string;
   formatEntry: NonNullable<DatasetWithUrls["formats"]>[0];
-  selectedSource: { storageLocationId: number; version: string | number } | null;
-  onSourceChange: (storageLocationId: number, version: string | number) => void;
+  selectedSource: { storageLocationId: string; version: string | number } | null;
+  onSourceChange: (storageLocationId: string, version: string | number) => void;
 }
 
 type SourceType = NonNullable<DatasetWithUrls["formats"]>[0]["sources"][0];
 
 interface LocationData {
-  id: number;
+  id: string;
   location: SourceType["storage_location"];
   versions: Array<{ version: string | number; source: SourceType }>;
 }
 
 function sourceLocations(sources: SourceType[]): LocationData[] {
-  const locations = new Map<number, LocationData>();
+  const locations = new Map<string, LocationData>();
 
   for (const source of sources) {
     const locId = source.storage_location?.id;
     if (!locId) continue;
 
-    const version = source.version || 1;
+    const version = source.version || "1";
     const existing = locations.get(locId);
     if (existing) {
       existing.versions.push({ version, source });
@@ -58,7 +58,7 @@ export function FormatSourceSelector({
   }
 
   // Determine current location and version
-  const currentLocationId = selectedSource?.storageLocationId || locations[0]?.id || 0;
+  const currentLocationId = selectedSource?.storageLocationId || locations[0]?.id || "";
   const currentLocation = locations.find((location) => location.id === currentLocationId) ?? locations[0];
   const availableVersions = currentLocation?.versions || [];
 
@@ -79,7 +79,7 @@ export function FormatSourceSelector({
         <Select
           value={defaultLocationId.toString()}
           onValueChange={(value) => {
-            const locId = parseInt(value, 10);
+            const locId = value;
             const location = locations.find((entry) => entry.id === locId);
             const nextVersion = location?.versions[0]?.version;
             if (nextVersion !== undefined) {

@@ -26,9 +26,15 @@ from tests.test_query_tools import Service
 
 class Catalog:
     async def resolve_map_source(
-        self, collection_id: int, dataset_id: int, file_id: int, file_source_id: int
+        self, collection: str, dataset: str, file: str, version: str, asset_key: str
     ) -> dict[str, str]:
-        assert (collection_id, dataset_id, file_id, file_source_id) == (3, 12, 99, 44)
+        assert (collection, dataset, file, version, asset_key) == (
+            "hifld",
+            "roads",
+            "roads",
+            "v1.0.0",
+            "pmtiles",
+        )
         return {"type": "pmtiles", "url": "https://cdn.example/roads.pmtiles"}
 
 
@@ -106,7 +112,11 @@ async def test_view_map_combines_query_catalog_and_explicit_sources() -> None:
             MapLayerInput(
                 layer_name="Catalog",
                 source=CatalogMapSourceInput(
-                    collection_id=3, dataset_id=12, file_id=99, file_source_id=44
+                    collection_slug="hifld",
+                    dataset_slug="roads",
+                    file_slug="roads",
+                    version="v1.0.0",
+                    asset_key="pmtiles",
                 ),
                 visible=False,
             ),

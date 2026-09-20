@@ -1,74 +1,52 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { json } from "@tanstack/react-start";
-import { type Collection, type DatasetWithUrls, getCollectionById } from "@/lib/api-client";
-import {
-  collectionSelf,
-  datasetSelf,
-  globalDatasetByIdSelf,
-  globalDatasetsListSelf,
-  requestOrigin,
-} from "@/lib/api-links";
+import { type ApiLinkMap, buildLinkHeader } from "@/lib/api-links";
 import { jsonProblem } from "@/lib/api-problem";
-import { getDatasets } from "@/lib/datasets";
-
-interface DatasetLinks {
-  self: string;
-  collection?: string;
-}
+import { sqliteCatalogApi } from "@/lib/catalog-api";
+import { parseCollectionApiQuery, publishedDatasets } from "@/lib/catalog-listing";
+import { activeCatalogStacUrl } from "@/lib/catalog-runtime";
 
 export const Route = createFileRoute("/api/datasets")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        try {
-          const url = new URL(request.url);
-          const rawSearch = url.searchParams.get("search")?.trim();
-          const search = rawSearch && rawSearch.length > 0 ? rawSearch : undefined;
-          const datasets = await getDatasets(search);
-          const origin = requestOrigin(request);
-          const colCache = new Map<number, Collection | null>();
-
-          const resolveCol = async (cid: number | undefined) => {
-            if (cid === undefined) return null;
-            if (colCache.has(cid)) return colCache.get(cid) ?? null;
-            const c = await getCollectionById({ data: { id: cid } });
-            colCache.set(cid, c);
-            return c;
-          };
-
-          const body: Array<DatasetWithUrls & { links: DatasetLinks }> = [];
-          for (const d of datasets) {
-            const col = await resolveCol(d.collection_id);
-            const links: DatasetLinks = {
-              self: col
-                ? datasetSelf(origin, col.slug, d.slug, {
-                    include_urls: true,
-                  })
-                : globalDatasetByIdSelf(origin, d.id),
-            };
-            if (col) {
-              links.collection = collectionSelf(origin, col.slug);
-            }
-            body.push({ ...d, links });
-          }
-
-          const listSelf = globalDatasetsListSelf(origin, search === undefined ? undefined : { search });
-          return new Response(JSON.stringify(body), {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-              Link: `<${listSelf}>; rel="self"`,
-            },
+        const catalog = await sqliteCatalogApi();
+        const catalogUrl = await activeCatalogStacUrl();
+        if (!catalog || !catalogUrl) return jsonProblem(503, "Catalog metadata is unavailable");
+        const query = parseCollectionApiQuery(new URL(request.url).searchParams);
+        if (query instanceof Response) return query;
+        const hrefs: string[] = [];
+        let total = 0;
+        for (const collection of await catalog.collections()) {
+          const page = await catalog.datasets(collection.collection_slug, {
+            ...(query.search ? { search: query.search } : {}),
+            ...(query.tagFilters ? { tagFilters: query.tagFilters } : {}),
+            limit: Math.max(0, query.limit - hrefs.length),
+            offset: Math.max(0, query.offset - total),
           });
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          return jsonProblem(502, "Failed to list datasets", msg);
+          total += page.total;
+          hrefs.push(...page.items.map((dataset) => dataset.stac_href));
         }
+        const datasets = await publishedDatasets(catalogUrl, hrefs);
+        if (datasets instanceof Response) return datasets;
+        const pageUrl = (offset: number) => {
+          const url = new URL(request.url);
+          url.searchParams.set("limit", String(query.limit));
+          url.searchParams.set("offset", String(offset));
+          return url.href;
+        };
+        const links: ApiLinkMap = {
+          self: pageUrl(query.offset),
+          first: pageUrl(0),
+          last: pageUrl(total ? Math.floor((total - 1) / query.limit) * query.limit : 0),
+        };
+        if (query.offset > 0) links.prev = pageUrl(Math.max(0, query.offset - query.limit));
+        if (query.offset + query.limit < total) links.next = pageUrl(query.offset + query.limit);
+        const headers = new Headers({ "X-Catalog-Generation": catalog.generation });
+        const linkHeader = buildLinkHeader(links);
+        if (linkHeader) headers.set("Link", linkHeader);
+        return Response.json({ datasets, total, limit: query.limit, offset: query.offset, links }, { headers });
       },
-
-      POST: async () => {
-        return json({ error: "Dataset creation is handled by dataset-api import script" }, { status: 405 });
-      },
+      POST: async () => jsonProblem(405, "Catalog data is managed by publication jobs"),
     },
   },
 });

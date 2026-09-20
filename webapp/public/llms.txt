@@ -9,16 +9,16 @@
 3. **[GET /.well-known/mcp/server-card.json](/.well-known/mcp/server-card.json)** - JSON MCP Server Card for Streamable HTTP discovery.
 4. **[GET /.well-known/ai-catalog.json](/.well-known/ai-catalog.json)** - JSON Agent Resource Discovery catalog (ARD) for scanners.
 5. **[GET /mcp](/mcp)** - same-origin Streamable HTTP MCP proxy.
-6. This API is **not** OGC API-Features or STAC: no `/items`, `/features`, `/download`, or `/map` JSON routes. Dataset paths use **string slugs**, not numeric IDs in the URL (not `/api/collections/hifld/3418`).
+6. **[GET /api/collections](/api/collections)** and **GET /api/collections/{slug}** return authored **STAC Catalog** documents. This is not an OGC API-Features or STAC API item service: there are no `/items`, `/features`, `/download`, or `/map` JSON routes. Dataset paths use **string slugs**, not numeric IDs in collection-scoped URLs.
 7. The **JSON API remains read-only**. On supported browsers, this first-party
    webapp may expose contextual WebMCP tools that read catalog/query data and
    modify only the **current browser workspace**; they never write catalog data.
 
-## Search and pagination (one place only)
+## Search and pagination
 
-**GET /api/collections/{slug}** is the only route that lists datasets in a collection with text search and paging.
+**GET /api/collections/{slug}/datasets** is the collection-scoped route that lists datasets with text search and paging. **GET /api/datasets** provides the same paginated shape aggregated across all collections. **GET /api/collections/{slug}** returns the collection's raw STAC Catalog instead.
 
-Supported query parameters on that route only:
+Supported query parameters on these listing routes:
 
 - `search` or `query` - text filter (do not use `q=` on made-up paths like `.../items`)
 - `tag_filters` - use **[GET /api/collections/{slug}/datasets/tags](/api/collections/hifld/datasets/tags)** to discover values
@@ -29,7 +29,7 @@ Supported query parameters on that route only:
 Example (replace host with your origin):
 
 ```
-GET /api/collections/hifld?search=wastewater&limit=25&omit=description
+GET /api/collections/hifld/datasets?search=wastewater&limit=25&omit=description
 ```
 
 Then open one dataset by collection and dataset slug:
@@ -38,19 +38,25 @@ Then open one dataset by collection and dataset slug:
 GET /api/collections/{collectionSlug}/datasets/{datasetSlug}
 ```
 
-Then file metadata (slug from the dataset JSON):
+Then selected-version file metadata (slug from the dataset Catalog child links):
 
 ```
 GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}
 ```
 
-Then schema metadata/data dictionary:
+The file response is a raw STAC Collection with assets. Omit `version` for the latest version; assets are keyed by `{format}-{hash}`, and `hifld:*` asset fields preserve query-source identities. Schema columns are in `table:columns`.
+
+The metadata and schema paths are exact aliases of those raw STAC documents:
 
 ```
 GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema
+GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/metadata
+GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/metadata
 ```
 
-Omit `version` on the schema endpoint to use the latest schema-capable version.
+The file metadata and schema aliases accept the same optional `version` and otherwise select the latest version. They do not return a separate database envelope or paginated schema view model.
+
+Published STAC documents use absolute links and asset URLs, so clients can follow them directly from API responses. The response `Content-Location` identifies the canonical storage document. Older or offline catalogs may retain relative links; open their canonical URL before traversing them.
 
 Unknown paths under `/api` return **404** with **application/problem+json** and a `links` object pointing back to `/api`, OpenAPI, and this file.
 
@@ -103,20 +109,21 @@ not make the JSON catalog writable.
 
 ## Collections
 
-- [List collections](/api/collections): array of collections; each item includes `links.self`.
-- [Collection + datasets](/api/collections/{slug}): paginated envelope; see "Search and pagination" above.
+- [Root catalog](/api/collections): raw STAC Catalog with child links to collection catalogs.
+- [Collection catalog](/api/collections/{slug}): raw STAC Catalog for one collection.
+- [Collection datasets](/api/collections/{slug}/datasets): custom paginated wrapper `{datasets,total,limit,offset,links}` whose `datasets` entries are raw STAC Catalogs. It is not a STAC Item Search FeatureCollection.
 - [Tag facets](/api/collections/{slug}/datasets/tags): values for building `tag_filters`.
 
 ## Global dataset views
 
-- [Dataset list](/api/datasets): aggregated across collections (capped; see OpenAPI).
+- [Dataset list](/api/datasets): the same custom paginated STAC-Catalog wrapper aggregated across collections; supports `search`/`query`, `tag_filters`, `limit`, and `offset`.
 - [Dataset stats](/api/datasets/stats): aggregate counters.
-- [Dataset by id](/api/datasets/{id}): detail for a numeric id (path is `/api/datasets/{id}`, not `/api/collections/.../3418`).
+- [Dataset by identity](/api/datasets/{id}): raw dataset STAC Catalog for a URL-encoded `collection/dataset` identity. Numeric legacy IDs are invalid.
 
 ## Files and downloads
 
-- File metadata and sources: `/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}` (see OpenAPI). Use response `links` and source URLs; zip proxy uses `.../sources/{id}/download-zip`. Errors use `application/problem+json`.
-- Schema metadata: `/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema`; omit `version` for the latest schema-capable version.
+- File metadata and assets: `/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}` is the selected-version raw STAC Collection. Omit `version` for latest.
+- Schema alias: `/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema` returns that same raw Collection; read `table:columns`.
 
 ## Bulk analysis
 
@@ -124,4 +131,4 @@ For statewide filters or heavy analytics, **download GeoParquet (or other format
 
 ## Upstream
 
-- JSON routes **proxy** **dataset-api** (`DATASET_API_URL` at deploy time). This file describes routes on **this** origin only.
+- Catalog metadata routes read the published Portolan STAC catalog; download-zip and legacy compatibility paths may use **dataset-api** (`DATASET_API_URL` at deploy time). This file describes routes on **this** origin only.

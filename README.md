@@ -22,11 +22,38 @@ Start local Postgres and SeaweedFS:
 docker compose up -d dataset-api-postgres seaweedfs-master seaweedfs-volume seaweedfs-filer
 ```
 
+The Portolan OGC API - Features service is opt-in and reads the shared catalog
+without replacing the dataset API:
+
+```bash
+docker compose --profile feature-server up -d feature-server
+```
+
+It is available at `http://localhost:8002`; `/healthz` is liveness and
+`/readyz` becomes ready after a valid catalog snapshot is loaded. The profile
+uses disposable cache/tmp volumes and does not install DuckDB extensions at
+runtime. Keep the dataset-api/Postgres services running during the migration
+observation window so rollback remains possible.
+
 Useful local endpoints:
 
 - SeaweedFS filer UI/API: `http://localhost:8888`
 - SeaweedFS S3 API: `http://localhost:8333`
 - Dataset API Postgres: `localhost:5433`
+
+### Local Portolan catalog
+
+The isolated Portolan workflow uses `hifld-local-staging` for original source
+assets and `hifld-local-published` for promoted originals, GeoParquet, PMTiles,
+STAC metadata and `_catalog/catalog.sqlite`. Existing buckets are not cleared.
+STAC JSON is the metadata authority; the database is its query projection.
+
+Host-based consumer configuration is in
+[`ops/local-portolan.env.example`](ops/local-portolan.env.example). Source it
+before starting the webapp or feature server. The feature-server Compose profile
+defaults to the published bucket using the internal SeaweedFS S3 endpoint.
+See [the local workflow instructions](docs/local-portolan.md) for fixture setup,
+Dagster execution and verification.
 
 ## Development
 
@@ -68,6 +95,7 @@ This repo publishes application images to GHCR:
 
 - `ghcr.io/public-environmental-data-partners/hifld-next/dataset-api`
 - `ghcr.io/public-environmental-data-partners/hifld-next/webapp`
+- `ghcr.io/public-environmental-data-partners/hifld-next/feature-server`
 
 The `Publish app images` workflow tags both images with the full commit SHA and also publishes `latest` from `main`. Images are portable and do not bake deployment-specific runtime configuration.
 

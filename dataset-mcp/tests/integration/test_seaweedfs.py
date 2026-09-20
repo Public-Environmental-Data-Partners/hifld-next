@@ -29,10 +29,11 @@ def test_seaweedfs_source_gets_request_scoped_secret_and_path_style() -> None:
     source = ResolvedSource(
         source={
             "alias": "roads",
-            "collection_id": 1,
-            "dataset_id": 2,
-            "file_id": 3,
-            "file_source_id": 4,
+            "collection_slug": "hifld",
+            "dataset_slug": "roads",
+            "file_slug": "roads",
+            "version": "v1.0.0",
+            "asset_key": "geoparquet",
         },
         version="v1",
         format_type="geoparquet",
@@ -71,10 +72,11 @@ def test_seaweedfs_endpoint_is_reachable_when_explicitly_configured() -> None:
     source = ResolvedSource(
         source={
             "alias": "dataset",
-            "collection_id": 1,
-            "dataset_id": 2,
-            "file_id": 3,
-            "file_source_id": 4,
+            "collection_slug": "hifld",
+            "dataset_slug": "roads",
+            "file_slug": "roads",
+            "version": "v1.0.0",
+            "asset_key": "geoparquet",
         },
         version="acceptance",
         format_type="geoparquet",

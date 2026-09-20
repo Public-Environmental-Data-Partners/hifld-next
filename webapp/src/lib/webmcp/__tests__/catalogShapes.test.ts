@@ -71,6 +71,7 @@ function makeResponse(): CatalogDatasetFileShapeInput {
           sources: [
             {
               id: 88,
+              asset_key: "geoparquet",
               version: "2026-01-02",
               source_type: "file",
               location: { version: "v1", path: "private/stations.parquet" },
@@ -79,6 +80,7 @@ function makeResponse(): CatalogDatasetFileShapeInput {
               glob_pattern: "private/*.parquet",
               storage_location: {
                 id: 7,
+                slug: "private-storage",
                 name: "private storage",
                 backend_type: "s3",
                 config: { version: "v1", base_url: "https://private.example", bucket: "private" },
@@ -108,10 +110,12 @@ describe("catalog shaping", () => {
     expect(parsed.query_sources).toEqual([
       {
         alias: "source_0",
-        collection_id: 1,
-        dataset_id: 12,
-        file_id: 99,
-        file_source_id: 88,
+        collection_slug: "public-safety",
+        dataset_slug: "stations",
+        file_slug: "stations-file",
+        version: "2026-01-02",
+        asset_key: "geoparquet",
+        storage_location_slug: "private-storage",
       },
     ]);
     expect(serialized).not.toContain("storage_uri");
@@ -123,27 +127,25 @@ describe("catalog shaping", () => {
     expect(serialized.length <= 1500 || parsed.truncated === true).toBe(true);
   });
 
-  it("validates query source aliases and positive catalog IDs", () => {
+  it("validates query source aliases and rejects legacy numeric catalog IDs", () => {
     expect(() => QuerySourceRefSchema.parse({
       alias: "source_0",
-      collection_id: 1,
-      dataset_id: 2,
-      file_id: 3,
-      file_source_id: 4,
+      collection_slug: "hifld",
+      dataset_slug: "stations",
+      file_slug: "stations-file",
+      version: "v1.0.0",
+      asset_key: "geoparquet",
     })).not.toThrow();
     expect(() => QuerySourceRefSchema.parse({
       alias: "bad-alias",
-      collection_id: 1,
-      dataset_id: 2,
-      file_id: 3,
-      file_source_id: 4,
+      collection_slug: "hifld",
+      dataset_slug: "stations",
+      file_slug: "stations-file",
+      version: "v1.0.0",
+      asset_key: "geoparquet",
     })).toThrow();
     expect(() => QuerySourceRefSchema.parse({
-      alias: "source_0",
-      collection_id: 0,
-      dataset_id: 2,
-      file_id: 3,
-      file_source_id: 4,
+      alias: "source_0", collection_id: 0,
     })).toThrow();
   });
 });

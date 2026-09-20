@@ -30,7 +30,7 @@ def create_production_app(
 
     configured = settings or Settings.model_validate({})
     catalog = CatalogClient(str(configured.catalog_base_url))
-    source_resolver = SourceResolver(catalog)
+    source_resolver = SourceResolver(catalog, configured.catalog_storage_locations)
     storage_resolver = StorageResolver()
     del install_extensions, seaweedfs_credentials
     executor = ClickHouseExecutor(

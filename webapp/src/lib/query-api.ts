@@ -125,10 +125,12 @@ export const QueryCellSchema: z.ZodType<QueryCell> = z.lazy(() =>
 export const QuerySourceRefSchema = z
   .object({
     alias: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,62}$/),
-    collection_id: z.number().int().positive(),
-    dataset_id: z.number().int().positive(),
-    file_id: z.number().int().positive(),
-    file_source_id: z.number().int().positive(),
+    collection_slug: z.string().min(1),
+    dataset_slug: z.string().min(1),
+    file_slug: z.string().min(1),
+    version: z.string().min(1),
+    asset_key: z.string().min(1),
+    storage_location_slug: z.string().min(1).optional(),
   })
   .strict();
 

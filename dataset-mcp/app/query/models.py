@@ -77,7 +77,7 @@ class QueryResult(QueryModel):
 
 
 class QueryTokenPayload(QueryModel):
-    token_version: int = 1
+    token_version: int = 2
     canonical_sql: str
     sources: tuple[QuerySourceRef, ...] = Field(min_length=1, max_length=8)
     geometry_column: str | None = None

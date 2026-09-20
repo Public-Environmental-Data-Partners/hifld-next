@@ -99,8 +99,8 @@ class StorageResolver:
             raise StorageResolutionError("local SeaweedFS storage has no endpoint")
         endpoint = urlparse(endpoint_url)
         if (
-            endpoint.scheme != "http"
-            or endpoint.hostname not in {"localhost", "127.0.0.1", "::1"}
+            endpoint.scheme not in {"http", "https"}
+            or endpoint.hostname is None
             or not endpoint.netloc
             or endpoint.username is not None
             or endpoint.password is not None
@@ -109,7 +109,9 @@ class StorageResolver:
             or endpoint.query
             or endpoint.fragment
         ):
-            raise StorageResolutionError("SeaweedFS endpoint must be local HTTP")
+            raise StorageResolutionError(
+                "SeaweedFS endpoint must be a server-configured HTTP origin"
+            )
         result: list[str] = []
         for uri in uris:
             bucket, key = _s3_parts(uri)
@@ -120,5 +122,6 @@ class StorageResolver:
             seaweedfs=DuckDbSeaweedSpec(
                 bucket=configured_bucket,
                 endpoint=endpoint.netloc,
+                tls=endpoint.scheme == "https",
             ),
         )

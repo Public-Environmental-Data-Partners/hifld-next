@@ -1,125 +1,106 @@
-"""Fail-closed resolution of catalog source identities into trusted paths."""
+"""Fail-closed resolution of STAC asset identities into trusted object paths."""
 
-from collections.abc import Iterable
-from urllib.parse import urlsplit
+from collections.abc import Mapping
+from urllib.parse import unquote, urlsplit
 
 from app.catalog.client import CatalogClient, CatalogClientError
-from app.catalog.models import (
-    BucketStorageConfig,
-    DatasetFormat,
-    FileLocation,
-    FileSource,
-    QuerySourceRef,
-)
+from app.catalog.models import BucketStorageConfig, QuerySourceRef, StacVersionCollection
 from app.query.models import ResolvedSource
 
 
-def _metadata_bounds(source: FileSource) -> tuple[float, float, float, float] | None:
-    metadata = source.source_metadata
-    if metadata is None or metadata.bounds is None or len(metadata.bounds) != 4:
-        return None
-    left, bottom, right, top = metadata.bounds
-    return left, bottom, right, top
-
-
 class SourceResolver:
-    def __init__(self, catalog: CatalogClient) -> None:
+    def __init__(
+        self,
+        catalog: CatalogClient,
+        storage_locations: Mapping[str, BucketStorageConfig],
+    ) -> None:
         self._catalog = catalog
+        self._storage_locations = dict(storage_locations)
 
     async def resolve(self, ref: QuerySourceRef) -> ResolvedSource:
-        try:
-            response = await self._catalog.get_dataset_file(
-                ref.collection_id, ref.dataset_id, ref.file_id
-            )
-        except CatalogClientError:
-            raise
-        if (
-            response.collection.id != ref.collection_id
-            or response.dataset.id != ref.dataset_id
-            or response.file.id != ref.file_id
-        ):
+        response = await self._catalog.get_dataset_file(
+            ref.collection_slug,
+            ref.dataset_slug,
+            ref.file_slug,
+            version=ref.version,
+        )
+        expected_id = "/".join((ref.collection_slug, ref.dataset_slug, ref.file_slug, ref.version))
+        if response.id != expected_id:
             raise CatalogClientError(
-                "source_identity_mismatch", "source does not belong to requested catalog file"
+                "source_identity_mismatch", "source does not belong to requested catalog version"
             )
-        matches: list[tuple[DatasetFormat, FileSource]] = []
-        for entry in response.file.formats:
-            if entry.format.format_type != "geoparquet":
-                continue
-            for source in entry.sources:
-                if source.id == ref.file_source_id:
-                    matches.append((entry, source))
-        if len(matches) != 1:
-            if not matches:
-                raise CatalogClientError("source_not_found", "catalog source was not found")
-            identity_groups = {
-                (
-                    str(source.version),
-                    source.storage_location.slug if source.storage_location else None,
-                )
-                for _, source in matches
-            }
-            if len(identity_groups) != 1:
+        asset = response.assets.get(ref.asset_key)
+        if asset is None or not _is_geoparquet(ref.asset_key, asset.type, asset.roles):
+            raise CatalogClientError("source_not_found", "catalog source was not found")
+
+        candidates = self._storage_locations.items()
+        if ref.storage_location_slug is not None:
+            config = self._storage_locations.get(ref.storage_location_slug)
+            if config is None:
                 raise CatalogClientError(
-                    "source_ambiguous", "catalog source has conflicting versions or storage"
+                    "source_storage_unknown", "storage location is not configured"
                 )
-        entry, source = matches[0]
-        if (
-            source.source_type != "file"
-            or source.storage_location is None
-            or not source.storage_location.slug
-            or not isinstance(source.storage_location.config, BucketStorageConfig)
-            or source.storage_location.config.type not in {"gcs", "seaweedfs"}
-        ):
+            candidates = ((ref.storage_location_slug, config),)
+        matches: list[tuple[str, BucketStorageConfig, str]] = []
+        for slug, config in candidates:
+            object_key = _trusted_object_key(asset.href, config)
+            if object_key is not None:
+                matches.append((slug, config, object_key))
+        if len(matches) != 1:
             raise CatalogClientError(
-                "source_not_queryable", "catalog source is not a file-backed GeoParquet source"
+                "source_location_invalid", "catalog asset href is outside trusted storage"
             )
-        location = source.location
-        if not isinstance(location, FileLocation):
-            raise CatalogClientError("source_location_invalid", "catalog source has no file path")
-        metadata = source.source_metadata
-        grouped_sources = [candidate for _, candidate in matches]
-        glob_patterns = _unique_non_empty(candidate.glob_pattern for candidate in grouped_sources)
-        storage_uris = _unique_non_empty(candidate.storage_uri for candidate in grouped_sources)
-        metadata_object_paths = metadata.object_paths if metadata is not None else ()
-        object_paths = _unique_non_empty(metadata_object_paths or ())
-        storage_config = source.storage_location.config
-        storage_globs = [uri for uri in storage_uris if _contains_glob(uri)]
-        concrete_storage_uris = [uri for uri in storage_uris if not _contains_glob(uri)]
-        concrete_object_paths = [path for path in object_paths if not _contains_glob(path)]
-        if glob_patterns:
-            paths = glob_patterns
-        elif storage_globs:
-            paths = storage_globs
-        elif concrete_storage_uris:
-            paths = concrete_storage_uris
-        elif concrete_object_paths:
-            paths = concrete_object_paths
-        else:
-            raise CatalogClientError(
-                "source_location_invalid", "catalog source has no trusted storage URI"
-            )
+        storage_slug, storage_config, object_key = matches[0]
+        scheme = "gs" if storage_config.type == "gcs" else "s3"
+        bbox = _bbox(response)
         return ResolvedSource(
             source=ref,
-            version=str(source.version),
-            format_type=entry.format.format_type,
-            storage_location_slug=source.storage_location.slug,
+            version=ref.version,
+            format_type="geoparquet",
+            storage_location_slug=storage_slug,
             storage_config=storage_config,
-            object_uris=tuple(paths),
-            bbox=_metadata_bounds(source),
-            crs=metadata.crs if metadata is not None else None,
+            object_uris=(f"{scheme}://{storage_config.bucket}/{object_key}",),
+            bbox=bbox,
+            crs=response.native_crs,
         )
 
 
-def _unique_non_empty(values: Iterable[str | None]) -> list[str]:
-    """Return stable, non-empty strings from a catalog-owned sequence."""
-    result: list[str] = []
-    for value in values:
-        if isinstance(value, str) and value and value not in result:
-            result.append(value)
-    return result
+def _is_geoparquet(asset_key: str, media_type: str, roles: list[str]) -> bool:
+    return (
+        (asset_key == "geoparquet" or asset_key.startswith("geoparquet-"))
+        and media_type == "application/vnd.apache.parquet"
+        and "data" in roles
+    )
 
 
-def _contains_glob(value: str) -> bool:
-    parsed = urlsplit(value)
-    candidate = parsed.path if parsed.scheme and parsed.netloc else value
-    return any(character in candidate for character in "*?[")
+def _bbox(response: StacVersionCollection) -> tuple[float, float, float, float] | None:
+    if not response.extent.spatial.bbox:
+        return None
+    value = response.extent.spatial.bbox[0]
+    if len(value) != 4:
+        return None
+    return value[0], value[1], value[2], value[3]
+
+
+def _trusted_object_key(href: str, config: BucketStorageConfig) -> str | None:
+    parsed = urlsplit(href)
+    decoded_path = unquote(parsed.path)
+    if any(part in {"", ".", ".."} for part in decoded_path.split("/")[1:]):
+        return None
+    if parsed.query or parsed.fragment or parsed.username or parsed.password:
+        return None
+    if parsed.scheme in {"gs", "s3"}:
+        expected_scheme = "gs" if config.type == "gcs" else "s3"
+        if parsed.scheme != expected_scheme or parsed.netloc != config.bucket:
+            return None
+        return decoded_path.lstrip("/") or None
+    base = urlsplit(config.base_url)
+    if parsed.scheme != base.scheme or parsed.netloc != base.netloc:
+        return None
+    base_parts = [part for part in unquote(base.path).split("/") if part]
+    if not base_parts or base_parts[-1] != config.bucket:
+        base_parts.append(config.bucket)
+    path_parts = [part for part in decoded_path.split("/") if part]
+    if path_parts[: len(base_parts)] != base_parts or len(path_parts) <= len(base_parts):
+        return None
+    return "/".join(path_parts[len(base_parts) :])

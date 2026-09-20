@@ -34,7 +34,8 @@ export interface CatalogSelectedMapFeature extends SelectedMapFeatureBase {
   datasetSlug: string;
   fileSlug: string;
   version: string;
-  sourceId?: number | undefined;
+  assetKey: string;
+  storageLocationSlug?: string | undefined;
 }
 
 export interface QuerySelectedMapFeature extends SelectedMapFeatureBase {
@@ -195,6 +196,50 @@ function queryCentroidForFeature(feature: maplibregl.MapGeoJSONFeature): { lng: 
   return feature.geometry.type === "Point" ? centroidForGeometry(feature.geometry) : null;
 }
 
+function normalizeSelectedFeature(
+  feature: maplibregl.MapGeoJSONFeature,
+  layersByMapSourceId: Map<string, LoadedMapLayer>,
+): SelectedMapFeature | null {
+  const source = typeof feature.source === "string" ? feature.source : "";
+  const loadedLayer = layersByMapSourceId.get(source);
+  if (!loadedLayer) return null;
+  const sourceLayerId = sourceLayerForFeature(feature);
+  const isQueryMvt = loadedLayer.kind === "query_mvt";
+  const featureId = isQueryMvt ? queryFeatureKey(feature) : featureKey(feature, sourceLayerId);
+  if (featureId === null) return null;
+  const common = {
+    id:
+      loadedLayer.kind === "query_mvt"
+        ? `query:${loadedLayer.queryId}:${sourceLayerId}:${featureId}`
+        : `${loadedLayer.id}:${sourceLayerId}:${featureId}`,
+    loadedLayerId: loadedLayer.id,
+    layerName: loadedLayer.name,
+    sourceLayerId,
+    featureId,
+    centroid: isQueryMvt ? queryCentroidForFeature(feature) : centroidForGeometry(feature.geometry),
+    properties: normalizeProperties(feature.properties, isQueryMvt),
+  };
+  if (isQueryMvt) {
+    // Query results deliberately do not masquerade as catalog datasets.
+    return {
+      ...common,
+      sourceKind: "query_mvt",
+      queryId: loadedLayer.queryId,
+    };
+  }
+  return {
+    ...common,
+    collectionSlug: loadedLayer.descriptor.collectionSlug,
+    datasetSlug: loadedLayer.descriptor.datasetSlug,
+    fileSlug: loadedLayer.descriptor.fileSlug,
+    version: String(loadedLayer.descriptor.version),
+    assetKey: loadedLayer.descriptor.assetKey,
+    ...(loadedLayer.descriptor.storageLocationSlug === undefined
+      ? {}
+      : { storageLocationSlug: loadedLayer.descriptor.storageLocationSlug }),
+  };
+}
+
 export function normalizeSelectedFeatures({
   features,
   loadedLayers,
@@ -204,50 +249,10 @@ export function normalizeSelectedFeatures({
 }): SelectedMapFeature[] {
   const layersByMapSourceId = new Map(loadedLayers.map((layer) => [layer.mapSourceId, layer]));
   const selected: SelectedMapFeature[] = [];
-
   for (const feature of features) {
-    const source = typeof feature.source === "string" ? feature.source : "";
-    const loadedLayer = layersByMapSourceId.get(source);
-    if (!loadedLayer) {
-      continue;
-    }
-    const sourceLayerId = sourceLayerForFeature(feature);
-    const isQueryMvt = loadedLayer.kind === "query_mvt";
-    const featureId = isQueryMvt ? queryFeatureKey(feature) : featureKey(feature, sourceLayerId);
-    if (featureId === null) {
-      continue;
-    }
-    const common = {
-      id:
-        loadedLayer.kind === "query_mvt"
-          ? `query:${loadedLayer.queryId}:${sourceLayerId}:${featureId}`
-          : `${loadedLayer.id}:${sourceLayerId}:${featureId}`,
-      loadedLayerId: loadedLayer.id,
-      layerName: loadedLayer.name,
-      sourceLayerId,
-      featureId,
-      centroid: isQueryMvt ? queryCentroidForFeature(feature) : centroidForGeometry(feature.geometry),
-      properties: normalizeProperties(feature.properties, isQueryMvt),
-    };
-    if (isQueryMvt) {
-      // Query results deliberately do not masquerade as catalog datasets.
-      selected.push({
-        ...common,
-        sourceKind: "query_mvt",
-        queryId: loadedLayer.queryId,
-      });
-      continue;
-    }
-    selected.push({
-      ...common,
-      collectionSlug: loadedLayer.descriptor.collectionSlug,
-      datasetSlug: loadedLayer.descriptor.datasetSlug,
-      fileSlug: loadedLayer.descriptor.fileSlug,
-      version: String(loadedLayer.descriptor.version),
-      sourceId: loadedLayer.descriptor.sourceId,
-    });
+    const normalized = normalizeSelectedFeature(feature, layersByMapSourceId);
+    if (normalized) selected.push(normalized);
   }
-
   return selected;
 }
 

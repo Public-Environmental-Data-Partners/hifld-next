@@ -38,7 +38,16 @@ const validResult = {
     layers: [
       {
         layer_name: "Capitols",
-        sources: [{ alias: "capitols", file_id: 1 }],
+        sources: [
+          {
+            alias: "capitols",
+            collection_slug: "hifld",
+            dataset_slug: "capitols",
+            file_slug: "capitols",
+            version: "v1.0.0",
+            asset_key: "geoparquet",
+          },
+        ],
         sql: "SELECT geometry, name FROM capitols",
         visible: true,
       },

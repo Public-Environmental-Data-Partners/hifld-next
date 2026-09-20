@@ -3,8 +3,8 @@ import type { BucketStorageLocationConfig, DatasetSource, FileLocation } from "@
 type StorageConfigType = "seaweedfs" | "gcs" | "s3" | string;
 
 interface UrlStorageLocationConfig extends BucketStorageLocationConfig {
-  type?: StorageConfigType;
-  endpoint_url?: string;
+  type?: StorageConfigType | undefined;
+  endpoint_url?: string | undefined;
 }
 
 function isFileLocation(location: DatasetSource["location"]): location is FileLocation {
@@ -18,7 +18,7 @@ function joinUrlPath(baseUrl: string, path: string): string {
 function buildBucketFileUrl(baseUrl: string, path: string, config: UrlStorageLocationConfig): string {
   const bucket = config.bucket;
   if (config.type === "seaweedfs" && bucket) {
-    return joinUrlPath(baseUrl, `buckets/${bucket}/${path}`);
+    return joinUrlPath(baseUrl, `${bucket}/${path}`);
   }
 
   return joinUrlPath(baseUrl, path);

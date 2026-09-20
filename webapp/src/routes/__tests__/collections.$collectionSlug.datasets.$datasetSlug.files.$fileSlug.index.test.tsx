@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { Route as FileDetailRoute } from "../collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.index";
+import {
+  fileTimestampEntries,
+  Route as FileDetailRoute,
+} from "../collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.index";
+
+describe("Dataset file detail timestamps", () => {
+  it("omits missing or invalid timestamps", () => {
+    expect(fileTimestampEntries(undefined, "not-a-date")).toEqual([]);
+  });
+});
 
 describe("Dataset file detail route head", () => {
   it("emits file-specific title, description, canonical, and Open Graph metadata", async () => {
@@ -55,7 +64,7 @@ describe("Dataset file detail route head", () => {
     expect(result.links).toContainEqual({
       rel: "alternate",
       type: "application/json",
-      href: "/api/collections/hifld/datasets/hospitals-3/files/hospitals-3",
+      href: "/api/collections/hifld/datasets/hospitals-3/files/hospitals-3/metadata",
       title: "File metadata JSON",
     });
   });

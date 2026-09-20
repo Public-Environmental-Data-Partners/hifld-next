@@ -7,7 +7,7 @@ import {
 } from "@/components/map/sourceDescriptors";
 import { PageLoader } from "@/components/ui/page-loader";
 import type { DatasetFile } from "@/lib/api-client";
-import { getCollectionBySlug, getDatasetBySlug, getDatasetFileById, getDatasetFileBySlug } from "@/lib/api-client";
+import { getCollectionBySlug, getDatasetBySlug, getDatasetFileBySlug } from "@/lib/api-client";
 
 interface ViewerRedirectData {
   source: SourceDescriptor | null;
@@ -49,27 +49,6 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
     });
     if (!dataset) {
       throw notFound();
-    }
-
-    const file = dataset.files?.find((entry) => entry.slug === params.fileSlug);
-    if (file?.id && dataset.id) {
-      const result = await getDatasetFileById({
-        data: {
-          collectionId: collection.id,
-          datasetId: dataset.id,
-          fileId: file.id,
-        },
-      });
-      if (!result) {
-        throw notFound();
-      }
-      return {
-        source: firstPmtilesDescriptor({
-          collectionSlug: params.collectionSlug,
-          datasetSlug: params.datasetSlug,
-          file: result.file,
-        }),
-      };
     }
 
     const result = await getDatasetFileBySlug({

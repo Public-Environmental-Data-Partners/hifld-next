@@ -24,20 +24,23 @@ def test_settings_require_catalog_and_token_secret() -> None:
     assert settings.clickhouse_username == "hifld_query"
     assert settings.clickhouse_password.get_secret_value() == ""
     assert settings.clickhouse_control_username == "hifld_control"
+    assert settings.catalog_storage_locations == {}
+
+
+def test_settings_parse_catalog_storage_registry_from_json() -> None:
+    settings = Settings(
+        catalog_base_url="http://webapp:3000",
+        query_token_secret="x" * 32,
+        catalog_storage_locations='{"local":{"type":"seaweedfs","base_url":"http://localhost:8333",'
+        '"endpoint_url":"http://seaweedfs:8333","bucket":"hifld-local-published"}}',
+    )
+
+    assert settings.catalog_storage_locations["local"].bucket == "hifld-local-published"
 
 
 def test_settings_reject_short_token_secret() -> None:
     with pytest.raises(ValidationError):
         Settings(catalog_base_url="http://dataset-api:8000", query_token_secret="short")
-
-
-def test_settings_reject_tile_timeout_over_sixty_seconds() -> None:
-    with pytest.raises(ValidationError):
-        Settings(
-            catalog_base_url="http://dataset-api:8000",
-            query_token_secret="x" * 32,
-            tile_timeout_seconds=60.1,
-        )
 
 
 def test_settings_reject_token_ttl_longer_than_codec_contract() -> None:

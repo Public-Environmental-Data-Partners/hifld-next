@@ -11,6 +11,7 @@ on:
       - "dataset-api/**"
       - "dataset-mcp/**"
       - "ops/clickhouse/**"
+      - "feature-server/**"
       - "charts/dataset-api/**"
       - "charts/dataset-discovery/**"
       - "charts/dataset-mcp/**"
@@ -29,6 +30,7 @@ on:
       - "dataset-api/**"
       - "dataset-mcp/**"
       - "ops/clickhouse/**"
+      - "feature-server/**"
       - "charts/dataset-api/**"
       - "charts/dataset-discovery/**"
       - "charts/dataset-mcp/**"
@@ -46,6 +48,7 @@ env:
   WEBAPP_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/webapp
   DATASET_MCP_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/dataset-mcp
   CLICKHOUSE_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/clickhouse
+  FEATURE_SERVER_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/feature-server
 
 jobs:
   build-only:
@@ -69,6 +72,10 @@ jobs:
           - name: dataset-mcp
             context: .
             file: dataset-mcp/Dockerfile
+            build_args: ""
+          - name: feature-server
+            context: .
+            file: feature-server/Dockerfile
             build_args: ""
     steps:
       - name: Checkout
@@ -139,6 +146,14 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.CLICKHOUSE_IMAGE }}:${{ github.sha }}
+      - name: Build and push feature-server
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: feature-server/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.FEATURE_SERVER_IMAGE }}:${{ github.sha }}
 
       - name: Promote complete main image set to latest
         if: github.ref == 'refs/heads/main'
@@ -148,3 +163,4 @@ jobs:
           docker buildx imagetools create --tag "${WEBAPP_IMAGE}:latest" "${WEBAPP_IMAGE}:${GITHUB_SHA}"
           docker buildx imagetools create --tag "${DATASET_MCP_IMAGE}:latest" "${DATASET_MCP_IMAGE}:${GITHUB_SHA}"
           docker buildx imagetools create --tag "${CLICKHOUSE_IMAGE}:latest" "${CLICKHOUSE_IMAGE}:${GITHUB_SHA}"
+          docker buildx imagetools create --tag "${FEATURE_SERVER_IMAGE}:latest" "${FEATURE_SERVER_IMAGE}:${GITHUB_SHA}"

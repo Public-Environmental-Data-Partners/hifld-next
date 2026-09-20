@@ -18,9 +18,7 @@ import {
   type DatasetSource,
   getCollectionBySlug,
   getDatasetBySlug,
-  getDatasetFileById,
   getDatasetFileBySlug,
-  getFileVersions,
 } from "@/lib/api-client";
 import { failure, success } from "@/lib/webmcp/result";
 import { useWebMcpTool } from "@/lib/webmcp/useWebMcpTool";
@@ -44,25 +42,6 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
     });
     if (!dataset) {
       throw notFound();
-    }
-
-    const file = dataset.files?.find((entry) => entry.slug === params.fileSlug);
-    if (file?.id && dataset.id) {
-      const fileResponse = await getDatasetFileById({
-        data: {
-          collectionId: collection.id,
-          datasetId: dataset.id,
-          fileId: file.id,
-        },
-      });
-      const versions = await getFileVersions({
-        data: {
-          collectionId: collection.id,
-          datasetId: dataset.id,
-          fileId: file.id,
-        },
-      });
-      return { collection, dataset: fileResponse.dataset, file: fileResponse.file, versions };
     }
 
     const fileResponse = await getDatasetFileBySlug({
@@ -118,7 +97,6 @@ export function pmtilesDescriptorForVersion({
     collectionSlug,
     datasetSlug,
     fileSlug,
-    formatType: "pmtiles",
     source: pmtilesSource,
   });
 }

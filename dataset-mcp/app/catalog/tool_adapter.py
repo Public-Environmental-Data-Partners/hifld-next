@@ -9,7 +9,7 @@ from typing import Protocol
 from pydantic import BaseModel, TypeAdapter
 
 from app.catalog.client import CatalogClient
-from app.catalog.models import DatasetSearchRequest
+from app.catalog.models import DatasetSearchRequest, StacAsset
 from app.catalog.shaping import shape_file_metadata
 
 type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
@@ -47,20 +47,11 @@ def _dump_model(model: BaseModel) -> dict[str, JSONValue]:
     return _json_mapping.validate_python(dumped)
 
 
-def _identity(value: JSONValue | None, field: str) -> int | str:
-    if isinstance(value, bool) or not isinstance(value, (int, str)):
-        raise ValueError(f"{field} must be a collection or dataset identity")
-    if isinstance(value, int):
-        if value <= 0:
-            raise ValueError(f"{field} must be positive")
-        return value
+def _identity(value: JSONValue | None, field: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a slug")
     if not value:
         raise ValueError(f"{field} must not be empty")
-    if value.isdecimal():
-        numeric = int(value)
-        if numeric <= 0:
-            raise ValueError(f"{field} must be positive")
-        return numeric
     return value
 
 
@@ -127,38 +118,42 @@ class CatalogToolAdapter:
             query_sources.append(_dump_model(source))
         payload["query_sources"] = query_sources
         payload["query_hints"] = list(shaped["query_hints"])
+        version = response.id.rsplit("/", maxsplit=1)[-1]
         map_sources: list[JSONValue] = []
-        for format_entry in response.file.formats:
-            if format_entry.format.format_type != "pmtiles":
+        for asset_key, asset in response.assets.items():
+            if not _is_pmtiles_asset(asset_key, asset):
                 continue
-            for source in format_entry.sources:
-                if source.url is None:
-                    continue
-                map_sources.append(
-                    {
-                        "type": "catalog",
-                        "collection_id": response.collection.id,
-                        "dataset_id": response.dataset.id,
-                        "file_id": response.file.id,
-                        "file_source_id": source.id,
-                    }
-                )
+            map_sources.append(
+                {
+                    "type": "catalog",
+                    "collection_slug": collection,
+                    "dataset_slug": dataset,
+                    "file_slug": identity,
+                    "version": version,
+                    "asset_key": asset_key,
+                }
+            )
         payload["map_sources"] = map_sources
         return payload
 
     async def resolve_map_source(
-        self, collection_id: int, dataset_id: int, file_id: int, file_source_id: int
+        self,
+        collection: str,
+        dataset: str,
+        file: str,
+        version: str,
+        asset_key: str,
     ) -> JSONMapping:
-        response = await self._catalog.get_dataset_file(collection_id, dataset_id, file_id)
-        if response.dataset.id != dataset_id or response.file.id != file_id:
-            raise ValueError("catalog map source does not match the requested dataset file")
-        for format_entry in response.file.formats:
-            if format_entry.format.format_type != "pmtiles":
-                continue
-            for source in format_entry.sources:
-                if source.id == file_source_id and source.url is not None:
-                    return {"type": "pmtiles", "url": source.url}
-        raise ValueError("catalog map source must reference an existing PMTiles asset")
+        response = await self._catalog.get_dataset_file(
+            _identity(collection, "collection"),
+            _identity(dataset, "dataset"),
+            _identity(file, "file"),
+            version=_identity(version, "version"),
+        )
+        asset = response.assets.get(_identity(asset_key, "asset_key"))
+        if asset is None or not _is_pmtiles_asset(asset_key, asset):
+            raise ValueError("catalog map source must reference an existing PMTiles asset")
+        return {"type": "pmtiles", "url": asset.href}
 
     async def get_dataset_file_schema(
         self, collection: str, dataset: str, identity: str, version: str | None
@@ -204,3 +199,10 @@ def _tag_filters(value: JSONValue | None) -> str | None:
         else:
             previous.append(tag_value)
     return json.dumps(filters, separators=(",", ":"), sort_keys=True)
+
+
+def _is_pmtiles_asset(asset_key: str, asset: StacAsset) -> bool:
+    """Identify published PMTiles assets without relying on legacy format rows."""
+    return (asset_key == "pmtiles" or asset_key.startswith("pmtiles-")) and (
+        asset.type.lower() == "application/vnd.pmtiles"
+    )

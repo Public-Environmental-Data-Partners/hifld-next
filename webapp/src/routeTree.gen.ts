@@ -38,18 +38,21 @@ import { Route as ApiDatasetsIdRouteImport } from './routes/api/datasets.$id'
 import { Route as ApiDatasetsStatsRouteImport } from './routes/api/datasets.stats'
 import { Route as CollectionsCollectionSlugMapRouteImport } from './routes/collections.$collectionSlug.map'
 import { Route as Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRouteImport } from './routes/[.well-known]/agent-skills/hifld-catalog/SKILL[.]md'
+import { Route as ApiCollectionsSlugDatasetsRouteImport } from './routes/api/collections.$slug.datasets'
 import { Route as ApiQueriesQueryIdBoundsRouteImport } from './routes/api/queries.$queryId.bounds'
 import { Route as ApiQueriesQueryIdPagesRouteImport } from './routes/api/queries.$queryId.pages'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug'
 import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug'
 import { Route as ApiCollectionsCollectionSlugDatasetsTagsRouteImport } from './routes/api/collections.$collectionSlug.datasets.tags'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugIndexRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.index'
+import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugMetadataRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug.metadata'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug'
 import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.index'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugCompareRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.compare'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.schema'
 import { Route as CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRouteImport } from './routes/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.viewer'
+import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugMetadataRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.metadata'
 import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.schema'
 import { Route as ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRouteImport } from './routes/api/collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.sources.$sourceId.download-zip'
 
@@ -208,6 +211,12 @@ const Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRoute
       getParentRoute: () => rootRouteImport,
     } as any,
   )
+const ApiCollectionsSlugDatasetsRoute =
+  ApiCollectionsSlugDatasetsRouteImport.update({
+    id: '/datasets',
+    path: '/datasets',
+    getParentRoute: () => ApiCollectionsSlugRoute,
+  } as any)
 const ApiQueriesQueryIdBoundsRoute = ApiQueriesQueryIdBoundsRouteImport.update({
   id: '/$queryId/bounds',
   path: '/$queryId/bounds',
@@ -241,6 +250,12 @@ const CollectionsCollectionSlugDatasetsDatasetSlugIndexRoute =
     id: '/',
     path: '/',
     getParentRoute: () => CollectionsCollectionSlugDatasetsDatasetSlugRoute,
+  } as any)
+const ApiCollectionsCollectionSlugDatasetsDatasetSlugMetadataRoute =
+  ApiCollectionsCollectionSlugDatasetsDatasetSlugMetadataRouteImport.update({
+    id: '/metadata',
+    path: '/metadata',
+    getParentRoute: () => ApiCollectionsCollectionSlugDatasetsDatasetSlugRoute,
   } as any)
 const CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute =
   CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteImport.update({
@@ -293,6 +308,15 @@ const CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute =
         CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute,
     } as any,
   )
+const ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugMetadataRoute =
+  ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugMetadataRouteImport.update(
+    {
+      id: '/metadata',
+      path: '/metadata',
+      getParentRoute: () =>
+        ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute,
+    } as any,
+  )
 const ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute =
   ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRouteImport.update(
     {
@@ -337,23 +361,26 @@ export interface FileRoutesByFullPath {
   '/commons/': typeof CommonsIndexRoute
   '/.well-known/agent-skills/index.json': typeof Char91DotwellKnownChar93AgentSkillsIndexChar91DotChar93jsonRoute
   '/.well-known/mcp/server-card.json': typeof Char91DotwellKnownChar93McpServerCardChar91DotChar93jsonRoute
-  '/api/collections/$slug': typeof ApiCollectionsSlugRoute
+  '/api/collections/$slug': typeof ApiCollectionsSlugRouteWithChildren
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRoute
+  '/api/collections/$slug/datasets': typeof ApiCollectionsSlugDatasetsRoute
   '/api/queries/$queryId/bounds': typeof ApiQueriesQueryIdBoundsRoute
   '/api/queries/$queryId/pages': typeof ApiQueriesQueryIdPagesRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/tags': typeof ApiCollectionsCollectionSlugDatasetsTagsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/': typeof CollectionsCollectionSlugDatasetsDatasetSlugIndexRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/metadata': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugMetadataRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/compare': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugCompareRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/metadata': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugMetadataRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute
 }
@@ -379,21 +406,24 @@ export interface FileRoutesByTo {
   '/commons': typeof CommonsIndexRoute
   '/.well-known/agent-skills/index.json': typeof Char91DotwellKnownChar93AgentSkillsIndexChar91DotChar93jsonRoute
   '/.well-known/mcp/server-card.json': typeof Char91DotwellKnownChar93McpServerCardChar91DotChar93jsonRoute
-  '/api/collections/$slug': typeof ApiCollectionsSlugRoute
+  '/api/collections/$slug': typeof ApiCollectionsSlugRouteWithChildren
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRoute
+  '/api/collections/$slug/datasets': typeof ApiCollectionsSlugDatasetsRoute
   '/api/queries/$queryId/bounds': typeof ApiQueriesQueryIdBoundsRoute
   '/api/queries/$queryId/pages': typeof ApiQueriesQueryIdPagesRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/tags': typeof ApiCollectionsCollectionSlugDatasetsTagsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugIndexRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/metadata': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugMetadataRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/compare': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugCompareRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/metadata': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugMetadataRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute
 }
@@ -423,23 +453,26 @@ export interface FileRoutesById {
   '/commons/': typeof CommonsIndexRoute
   '/.well-known/agent-skills/index.json': typeof Char91DotwellKnownChar93AgentSkillsIndexChar91DotChar93jsonRoute
   '/.well-known/mcp/server-card.json': typeof Char91DotwellKnownChar93McpServerCardChar91DotChar93jsonRoute
-  '/api/collections/$slug': typeof ApiCollectionsSlugRoute
+  '/api/collections/$slug': typeof ApiCollectionsSlugRouteWithChildren
   '/api/datasets/$id': typeof ApiDatasetsIdRoute
   '/api/datasets/stats': typeof ApiDatasetsStatsRoute
   '/collections/$collectionSlug/map': typeof CollectionsCollectionSlugMapRoute
   '/.well-known/agent-skills/hifld-catalog/SKILL.md': typeof Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRoute
+  '/api/collections/$slug/datasets': typeof ApiCollectionsSlugDatasetsRoute
   '/api/queries/$queryId/bounds': typeof ApiQueriesQueryIdBoundsRoute
   '/api/queries/$queryId/pages': typeof ApiQueriesQueryIdPagesRoute
   '/collections/$collectionSlug/datasets/$datasetSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/tags': typeof ApiCollectionsCollectionSlugDatasetsTagsRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/': typeof CollectionsCollectionSlugDatasetsDatasetSlugIndexRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/metadata': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugMetadataRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/compare': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugCompareRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRoute
   '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/': typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugIndexRoute
+  '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/metadata': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugMetadataRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip': typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute
 }
@@ -475,18 +508,21 @@ export interface FileRouteTypes {
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/map'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
+    | '/api/collections/$slug/datasets'
     | '/api/queries/$queryId/bounds'
     | '/api/queries/$queryId/pages'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/tags'
     | '/collections/$collectionSlug/datasets/$datasetSlug/'
+    | '/api/collections/$collectionSlug/datasets/$datasetSlug/metadata'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/compare'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/'
+    | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/metadata'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip'
   fileRoutesByTo: FileRoutesByTo
@@ -517,16 +553,19 @@ export interface FileRouteTypes {
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/map'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
+    | '/api/collections/$slug/datasets'
     | '/api/queries/$queryId/bounds'
     | '/api/queries/$queryId/pages'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/tags'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
+    | '/api/collections/$collectionSlug/datasets/$datasetSlug/metadata'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/compare'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
+    | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/metadata'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip'
   id:
@@ -560,18 +599,21 @@ export interface FileRouteTypes {
     | '/api/datasets/stats'
     | '/collections/$collectionSlug/map'
     | '/.well-known/agent-skills/hifld-catalog/SKILL.md'
+    | '/api/collections/$slug/datasets'
     | '/api/queries/$queryId/bounds'
     | '/api/queries/$queryId/pages'
     | '/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug'
     | '/api/collections/$collectionSlug/datasets/tags'
     | '/collections/$collectionSlug/datasets/$datasetSlug/'
+    | '/api/collections/$collectionSlug/datasets/$datasetSlug/metadata'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/compare'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
     | '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/'
+    | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/metadata'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
     | '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/sources/$sourceId/download-zip'
   fileRoutesById: FileRoutesById
@@ -805,6 +847,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof Char91DotwellKnownChar93AgentSkillsHifldCatalogSKILLChar91DotChar93mdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/collections/$slug/datasets': {
+      id: '/api/collections/$slug/datasets'
+      path: '/datasets'
+      fullPath: '/api/collections/$slug/datasets'
+      preLoaderRoute: typeof ApiCollectionsSlugDatasetsRouteImport
+      parentRoute: typeof ApiCollectionsSlugRoute
+    }
     '/api/queries/$queryId/bounds': {
       id: '/api/queries/$queryId/bounds'
       path: '/$queryId/bounds'
@@ -847,6 +896,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugIndexRouteImport
       parentRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugRoute
     }
+    '/api/collections/$collectionSlug/datasets/$datasetSlug/metadata': {
+      id: '/api/collections/$collectionSlug/datasets/$datasetSlug/metadata'
+      path: '/metadata'
+      fullPath: '/api/collections/$collectionSlug/datasets/$datasetSlug/metadata'
+      preLoaderRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugMetadataRouteImport
+      parentRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRoute
+    }
     '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug': {
       id: '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug'
       path: '/files/$fileSlug'
@@ -888,6 +944,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/viewer'
       preLoaderRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugViewerRouteImport
       parentRoute: typeof CollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
+    }
+    '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/metadata': {
+      id: '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/metadata'
+      path: '/metadata'
+      fullPath: '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/metadata'
+      preLoaderRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugMetadataRouteImport
+      parentRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute
     }
     '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema': {
       id: '/api/collections/$collectionSlug/datasets/$datasetSlug/files/$fileSlug/schema'
@@ -988,13 +1051,27 @@ const CommonsRouteChildren: CommonsRouteChildren = {
 const CommonsRouteWithChildren =
   CommonsRoute._addFileChildren(CommonsRouteChildren)
 
+interface ApiCollectionsSlugRouteChildren {
+  ApiCollectionsSlugDatasetsRoute: typeof ApiCollectionsSlugDatasetsRoute
+}
+
+const ApiCollectionsSlugRouteChildren: ApiCollectionsSlugRouteChildren = {
+  ApiCollectionsSlugDatasetsRoute: ApiCollectionsSlugDatasetsRoute,
+}
+
+const ApiCollectionsSlugRouteWithChildren =
+  ApiCollectionsSlugRoute._addFileChildren(ApiCollectionsSlugRouteChildren)
+
 interface ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren {
+  ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugMetadataRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugMetadataRoute
   ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute
   ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute
 }
 
 const ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren: ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteChildren =
   {
+    ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugMetadataRoute:
+      ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugMetadataRoute,
     ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute:
       ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSchemaRoute,
     ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugSourcesSourceIdDownloadZipRoute:
@@ -1007,11 +1084,14 @@ const ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChild
   )
 
 interface ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteChildren {
+  ApiCollectionsCollectionSlugDatasetsDatasetSlugMetadataRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugMetadataRoute
   ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren
 }
 
 const ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteChildren: ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteChildren =
   {
+    ApiCollectionsCollectionSlugDatasetsDatasetSlugMetadataRoute:
+      ApiCollectionsCollectionSlugDatasetsDatasetSlugMetadataRoute,
     ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRoute:
       ApiCollectionsCollectionSlugDatasetsDatasetSlugFilesFileSlugRouteWithChildren,
   }
@@ -1022,13 +1102,13 @@ const ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren =
   )
 
 interface ApiCollectionsRouteChildren {
-  ApiCollectionsSlugRoute: typeof ApiCollectionsSlugRoute
+  ApiCollectionsSlugRoute: typeof ApiCollectionsSlugRouteWithChildren
   ApiCollectionsCollectionSlugDatasetsDatasetSlugRoute: typeof ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren
   ApiCollectionsCollectionSlugDatasetsTagsRoute: typeof ApiCollectionsCollectionSlugDatasetsTagsRoute
 }
 
 const ApiCollectionsRouteChildren: ApiCollectionsRouteChildren = {
-  ApiCollectionsSlugRoute: ApiCollectionsSlugRoute,
+  ApiCollectionsSlugRoute: ApiCollectionsSlugRouteWithChildren,
   ApiCollectionsCollectionSlugDatasetsDatasetSlugRoute:
     ApiCollectionsCollectionSlugDatasetsDatasetSlugRouteWithChildren,
   ApiCollectionsCollectionSlugDatasetsTagsRoute:

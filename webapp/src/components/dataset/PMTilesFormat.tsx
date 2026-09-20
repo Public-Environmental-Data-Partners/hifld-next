@@ -7,8 +7,8 @@ import { FormatSourceSelector } from "./FormatSourceSelector";
 interface PMTilesFormatProps {
   formatEntry: NonNullable<DatasetWithUrls["formats"]>[0];
   pmtilesUrl: string;
-  selectedSource: { storageLocationId: number; version: string | number } | null;
-  onSourceChange: (storageLocationId: number, version: string | number) => void;
+  selectedSource: { storageLocationId: string; version: string | number } | null;
+  onSourceChange: (storageLocationId: string, version: string | number) => void;
 }
 
 export function PMTilesFormat({ formatEntry, pmtilesUrl, selectedSource, onSourceChange }: PMTilesFormatProps) {
@@ -32,7 +32,6 @@ export function PMTilesFormat({ formatEntry, pmtilesUrl, selectedSource, onSourc
           label="PMTiles"
           analyticsContext={{
             format: "pmtiles",
-            storage_location_id: selectedSource?.storageLocationId,
             version: selectedSource?.version,
           }}
         />

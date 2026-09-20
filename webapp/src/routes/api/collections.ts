@@ -1,18 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { type Collection, getCollections } from "@/lib/api-client";
-import { collectionSelf, requestOrigin } from "@/lib/api-links";
+import { jsonProblem } from "@/lib/api-problem";
+import { sqliteCatalogApi } from "@/lib/catalog-api";
+import { activeCatalogStacUrl } from "@/lib/catalog-runtime";
+import { fetchCatalogStac } from "@/lib/catalog-stac";
 
 export const Route = createFileRoute("/api/collections")({
   server: {
     handlers: {
-      GET: async ({ request }) => {
-        const collections = await getCollections();
-        const origin = requestOrigin(request);
-        const body = (collections as Collection[]).map((c) => ({
-          ...c,
-          links: { self: collectionSelf(origin, c.slug) },
-        }));
-        return Response.json(body);
+      GET: async () => {
+        const catalog = await sqliteCatalogApi();
+        const catalogUrl = await activeCatalogStacUrl();
+        if (!catalog || !catalogUrl) return jsonProblem(503, "Catalog metadata is unavailable");
+        const response = await fetchCatalogStac(catalogUrl, "catalog.json");
+        response.headers.set("X-Catalog-Generation", catalog.generation);
+        return response;
       },
     },
   },

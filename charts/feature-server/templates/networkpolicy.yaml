@@ -1,0 +1,29 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "feature-server.fullname" . }}
+  labels: {{- include "feature-server.labels" . | nindent 4 }}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: {{ include "feature-server.name" . }}, app.kubernetes.io/instance: {{ .Release.Name }}}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{namespaceSelector: {}}]
+      ports: [{protocol: TCP, port: {{ .Values.containerPort }}}]
+    {{- range .Values.networkPolicy.ingressCidrs }}
+    - from: [{ipBlock: {cidr: {{ . | quote }}}}]
+      ports: [{protocol: TCP, port: {{ $.Values.containerPort }}}]
+    {{- end }}
+  egress:
+    - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    {{- range .Values.networkPolicy.dnsCidrs }}
+    - to: [{ipBlock: {cidr: {{ . | quote }}}}]
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    {{- end }}
+    {{- range .Values.storage.allowedCidrs }}
+    - to: [{ipBlock: {cidr: {{ . | quote }}}}]
+      ports: [{{- range $.Values.storage.allowedPorts }}{protocol: TCP, port: {{ . }}}{{- end }}]
+    {{- end }}
+    {{- with .Values.networkPolicy.extraEgress }}{{ toYaml . | nindent 4 }}{{- end }}
+{{- end }}

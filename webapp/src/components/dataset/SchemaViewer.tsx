@@ -32,6 +32,11 @@ function formatRange(column: ColumnSchema): string {
   return `<= ${column.max}`;
 }
 
+function formatQualityStatus(value: boolean | null): string {
+  if (value == null) return "—";
+  return value ? "Passed" : "Failed";
+}
+
 function columnMatchesSearch(column: ColumnSchema, search: string): boolean {
   if (!search.trim()) return true;
   const needle = search.toLowerCase();
@@ -182,6 +187,7 @@ export function SchemaViewer({
 
       {selectedSchemaSource ? (
         <div className="grid gap-2 border-t pt-4 text-xs text-muted-foreground sm:grid-cols-2">
+          <div>Quality checks: {formatQualityStatus(summary.qualityCheckPassed)}</div>
           <div>Invalid geometry count: {formatCount(summary.invalidGeometryCount)}</div>
           <div>Columns hash: {summary.columnsHash ?? "—"}</div>
         </div>

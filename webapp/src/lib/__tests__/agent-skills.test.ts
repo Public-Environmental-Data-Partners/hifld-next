@@ -45,7 +45,7 @@ describe("agent-skills discovery", () => {
     expect(HIFLD_CATALOG_SKILL_MD).toContain(
       "GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema",
     );
-    expect(HIFLD_CATALOG_SKILL_MD).toContain("latest schema-capable version");
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("latest version");
     expect(HIFLD_CATALOG_SKILL_MD).toContain("source URLs");
     expect(HIFLD_CATALOG_SKILL_MD).toContain("GeoParquet");
     expect(HIFLD_CATALOG_SKILL_MD).toContain("no `/items`, `/features`");
@@ -86,8 +86,8 @@ describe("agent-skills discovery", () => {
     for (const tool of tools) expect(HIFLD_CATALOG_SKILL_MD).toContain(`\`${tool}\``);
   });
 
-  it("does not document the stale collection dataset-listing route", () => {
-    expect(HIFLD_CATALOG_SKILL_MD).not.toContain("`GET /api/collections/{slug}/datasets`");
+  it("documents the collection dataset-listing route", () => {
+    expect(HIFLD_CATALOG_SKILL_MD).toContain("`GET /api/collections/{slug}/datasets`");
   });
 
   it("documents scanner discovery and native WebMCP compatibility", () => {

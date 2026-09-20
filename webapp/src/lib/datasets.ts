@@ -24,7 +24,7 @@ export async function getDatasets(search?: string): Promise<DatasetWithUrls[]> {
 
 // Get a single dataset by ID (with URLs)
 // Wrapper for server function - can be called from loaders or components
-export async function getDatasetById(id: number): Promise<DatasetWithUrls | undefined> {
+export async function getDatasetById(id: string): Promise<DatasetWithUrls | undefined> {
   const dataset = await apiGetDatasetById({ data: { id, includeUrls: true } });
   return dataset || undefined;
 }

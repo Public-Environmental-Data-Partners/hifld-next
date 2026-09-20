@@ -1,8 +1,10 @@
 from typing import Annotated
 from urllib.parse import urlsplit
 
-from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
+from pydantic import AnyHttpUrl, Field, SecretStr, TypeAdapter, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from app.catalog.models import BucketStorageConfig
 
 
 class Settings(BaseSettings):
@@ -42,6 +44,18 @@ class Settings(BaseSettings):
     webapp_origins: Annotated[tuple[str, ...], NoDecode] = ()
     http_allowed_hosts: Annotated[tuple[str, ...], NoDecode] = ()
     max_concurrency: int = Field(default=8, ge=1, le=64)
+    catalog_storage_locations: Annotated[dict[str, BucketStorageConfig], NoDecode] = {}
+
+    @field_validator("catalog_storage_locations", mode="before")
+    @classmethod
+    def parse_catalog_storage_locations(
+        cls, value: str | dict[str, BucketStorageConfig]
+    ) -> dict[str, BucketStorageConfig]:
+        if isinstance(value, str):
+            import json
+
+            value = json.loads(value)
+        return TypeAdapter(dict[str, BucketStorageConfig]).validate_python(value)
 
     @field_validator("webapp_origins", mode="before")
     @classmethod

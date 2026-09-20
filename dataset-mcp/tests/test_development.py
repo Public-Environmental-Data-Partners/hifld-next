@@ -25,6 +25,32 @@ def test_development_settings_use_the_configured_catalog(tmp_path: Path) -> None
     assert str(settings.catalog_base_url) == "http://127.0.0.1:9000/"
 
 
+def test_development_settings_use_catalog_storage_and_clickhouse_environment(
+    tmp_path: Path,
+) -> None:
+    settings = development_settings(
+        {
+            "DATASET_MCP_CATALOG_STORAGE_LOCATIONS": (
+                '{"gcp":{"type":"gcs","base_url":"https://storage.googleapis.com/gcp",'
+                '"bucket":"gcp"}}'
+            ),
+            "DATASET_MCP_CLICKHOUSE_URL": "http://127.0.0.1:8123",
+            "DATASET_MCP_CLICKHOUSE_USERNAME": "hifld_query",
+            "DATASET_MCP_CLICKHOUSE_PASSWORD": "query-password",
+            "DATASET_MCP_CLICKHOUSE_CONTROL_USERNAME": "hifld_control",
+            "DATASET_MCP_CLICKHOUSE_CONTROL_PASSWORD": "control-password",
+            "DATASET_MCP_CLICKHOUSE_SEAWEED_ENDPOINT": "http://seaweedfs-filer:8333",
+        },
+        runtime_directory=tmp_path,
+    )
+
+    assert tuple(settings.catalog_storage_locations) == ("gcp",)
+    assert settings.clickhouse_username == "hifld_query"
+    assert settings.clickhouse_password.get_secret_value() == "query-password"
+    assert settings.clickhouse_control_password.get_secret_value() == "control-password"
+    assert settings.clickhouse_seaweed_endpoint == "http://seaweedfs-filer:8333"
+
+
 def test_development_settings_use_the_configured_public_origin(tmp_path: Path) -> None:
     settings = development_settings(
         {"DATASET_MCP_PUBLIC_ORIGIN": "http://localhost:9001"},

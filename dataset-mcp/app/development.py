@@ -37,6 +37,18 @@ def development_settings(
         "duckdb_temp_directory": str(runtime_root / "spill"),
         "duckdb_extension_directory": str(runtime_root / "extensions"),
     }
+    for setting, variable in (
+        ("catalog_storage_locations", "DATASET_MCP_CATALOG_STORAGE_LOCATIONS"),
+        ("clickhouse_url", "DATASET_MCP_CLICKHOUSE_URL"),
+        ("clickhouse_username", "DATASET_MCP_CLICKHOUSE_USERNAME"),
+        ("clickhouse_password", "DATASET_MCP_CLICKHOUSE_PASSWORD"),
+        ("clickhouse_control_username", "DATASET_MCP_CLICKHOUSE_CONTROL_USERNAME"),
+        ("clickhouse_control_password", "DATASET_MCP_CLICKHOUSE_CONTROL_PASSWORD"),
+        ("clickhouse_seaweed_endpoint", "DATASET_MCP_CLICKHOUSE_SEAWEED_ENDPOINT"),
+    ):
+        configured = environment.get(variable)
+        if configured is not None:
+            values[setting] = configured
     return Settings.model_validate(values)
 
 

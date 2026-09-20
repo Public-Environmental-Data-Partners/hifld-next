@@ -74,7 +74,16 @@ const mapResult = {
     layers: [
       {
         layer_name: "Roads",
-        sources: [{ alias: "roads", file_id: 1 }],
+        sources: [
+          {
+            alias: "roads",
+            collection_slug: "hifld",
+            dataset_slug: "roads",
+            file_slug: "roads",
+            version: "v1.0.0",
+            asset_key: "geoparquet",
+          },
+        ],
         sql: "SELECT geometry, traffic FROM roads",
         color: "#2166ac",
         color_property: "traffic",
@@ -82,7 +91,16 @@ const mapResult = {
       },
       {
         layer_name: "Bridges",
-        sources: [{ alias: "bridges", file_id: 2 }],
+        sources: [
+          {
+            alias: "bridges",
+            collection_slug: "hifld",
+            dataset_slug: "bridges",
+            file_slug: "bridges",
+            version: "v1.0.0",
+            asset_key: "geoparquet",
+          },
+        ],
         sql: "SELECT geometry, kind FROM bridges",
         visible: false,
       },

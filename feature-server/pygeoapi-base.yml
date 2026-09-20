@@ -1,0 +1,41 @@
+server:
+  bind:
+    host: 0.0.0.0
+    port: 8000
+  url: ${FEATURE_SERVER_PUBLIC_URL}
+  encoding: utf-8
+  gzip: true
+  language: en-US
+  cors: false
+  pretty_print: false
+  limits:
+    default_items: 100
+    max_items: 1000
+  admin: false
+  map:
+    url: https://tile.openstreetmap.org/{z}/{x}/{y}.png
+    attribution: OpenStreetMap contributors
+logging:
+  level: INFO
+  logfile: null
+  format: simple
+metadata:
+  identification:
+    title: HIFLD Next Features
+    description: Read-only HIFLD Next GeoParquet features
+    keywords: [HIFLD, GeoParquet]
+    terms_of_service: null
+    url: https://hifld-geoplatform.hub.arcgis.com/
+  license:
+    name: See collection metadata
+    url: null
+  provider:
+    name: HIFLD Next
+    url: https://hifld-geoplatform.hub.arcgis.com/
+  contact:
+    name: HIFLD Next
+  distribution:
+    name: pygeoapi
+    url: https://pygeoapi.io/
+    version: 0.24.0
+resources: {}

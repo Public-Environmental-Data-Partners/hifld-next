@@ -13,10 +13,12 @@ import {
 
 const source = {
   alias: "roads",
-  collection_id: 1,
-  dataset_id: 2,
-  file_id: 3,
-  file_source_id: 4,
+  collection_slug: "hifld",
+  dataset_slug: "roads",
+  file_slug: "primary-roads",
+  version: "v1.0.0",
+  asset_key: "geoparquet",
+  storage_location_slug: "gcs-public",
 };
 
 const page = {

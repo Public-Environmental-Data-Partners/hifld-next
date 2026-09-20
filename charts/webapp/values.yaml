@@ -5,6 +5,17 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
+# Server-only Portolan catalog settings. DATASET_API_URL remains available
+# during the bounded dual-read/rollback window.
+catalog:
+  sqliteUrl: ""
+  pointerUrl: ""
+  storageLocationsJson: ""
+  cacheDirectory: /var/lib/hifld/catalog
+  cacheSizeLimit: 1Gi
+  tmpDirectory: /var/lib/hifld/catalog-tmp
+  tmpSizeLimit: 256Mi
+
 serviceAccount:
   create: false
   name: ""
@@ -43,15 +54,17 @@ env:
 #     key: origin-trial-token
 secretEnv: []
 
-resources: {}
+resources:
+  requests: {cpu: 250m, memory: 512Mi}
+  limits: {cpu: "1", memory: 1Gi}
 
 podLabels: {}
 podAnnotations: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
-securityContext: {}
-podSecurityContext: {}
+securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+podSecurityContext: {seccompProfile: {type: RuntimeDefault}}
 
 livenessProbe:
   enabled: true

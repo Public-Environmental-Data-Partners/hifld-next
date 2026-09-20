@@ -5,6 +5,7 @@ import { FeatureTablePanel, formatDiffCellDisplay } from "../FeatureTablePanel";
 import type { SelectedFeatureProperties, SelectedMapFeature } from "../featureSelection";
 
 const originalResizeObserver = globalThis.ResizeObserver;
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
 
 beforeAll(() => {
   class TestResizeObserver implements ResizeObserver {
@@ -13,10 +14,16 @@ beforeAll(() => {
     disconnect() {}
   }
   globalThis.ResizeObserver = TestResizeObserver;
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: () => undefined });
 });
 
 afterAll(() => {
   globalThis.ResizeObserver = originalResizeObserver;
+  if (originalScrollIntoView) {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", originalScrollIntoView);
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+  }
 });
 
 function selectedFeature(
@@ -42,6 +49,39 @@ function selectedFeature(
 }
 
 describe("FeatureTablePanel", () => {
+  it("compares the selected layer when unrelated features are also selected", async () => {
+    const user = userEvent.setup();
+    render(
+      <FeatureTablePanel
+        features={[
+          selectedFeature("v1.0.0", { ID: "1", BEDS: "10" }),
+          selectedFeature("v1.1.0", { ID: "1", BEDS: "12" }),
+          selectedFeature("v1.0.0", { FLOOD_ZONE: "AE" }, {
+            id: "flood", datasetSlug: "nfhl", fileSlug: "nfhl", sourceLayerId: "flood",
+          }),
+        ]}
+        wasSelectionCapped={false}
+        s2Level={16}
+        onS2LevelChange={() => undefined}
+        onClear={() => undefined}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Version diff" }));
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.queryByText("left only")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Match row keys" }));
+    expect(screen.queryByRole("option", { name: "FLOOD_ZONE", exact: true })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Selected features" }));
+    screen.getByRole("combobox", { name: "Select layer" }).focus();
+    await user.keyboard("{Enter}{End}{Enter}");
+    expect(screen.queryByRole("button", { name: "Version diff" })).not.toBeInTheDocument();
+    screen.getByRole("combobox", { name: "Select layer" }).focus();
+    await user.keyboard("{Enter}{Home}{Enter}");
+    await user.click(screen.getByRole("button", { name: "Version diff" }));
+    expect(screen.getByText("12")).toBeInTheDocument();
+  });
+
   it("renders unified panel mode controls and collapses the panel", async () => {
     const user = userEvent.setup();
     const onCollapse = vi.fn();

@@ -44,7 +44,7 @@ describe("source URL helpers", () => {
     ).toBe("https://hifld.publicenvirodata.org/storage/nfhl/water-lines.pmtiles");
   });
 
-  it("builds SeaweedFS filer URLs with the bucket path", () => {
+  it("builds SeaweedFS S3 URLs with the bucket as the first path segment", () => {
     const source = makeFileSource(
       "http://localhost:8888",
       "12nm-territorial-sea/12nm-territorial-sea/v1.0.0/pmtiles/12nm-territorial-sea.pmtiles",
@@ -57,7 +57,7 @@ describe("source URL helpers", () => {
     }
 
     expect(buildSourceFileUrl(source)).toBe(
-      "http://localhost:8888/buckets/ignored-by-webapp/12nm-territorial-sea/12nm-territorial-sea/v1.0.0/pmtiles/12nm-territorial-sea.pmtiles",
+      "http://localhost:8888/ignored-by-webapp/12nm-territorial-sea/12nm-territorial-sea/v1.0.0/pmtiles/12nm-territorial-sea.pmtiles",
     );
   });
 

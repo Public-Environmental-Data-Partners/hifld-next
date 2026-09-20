@@ -72,7 +72,7 @@ function SourceLifecycleMetadata({ source }: { source: DatasetSource | undefined
 }
 
 interface SelectedFormatSource {
-  storageLocationId: number;
+  storageLocationId: string;
   version: string | number;
 }
 
@@ -156,7 +156,7 @@ function countDisplaySources(formatType: string, sources: DatasetSource[]): numb
     return sources.length;
   }
 
-  const uniqueLocations = new Set<number>();
+  const uniqueLocations = new Set<string>();
   for (const source of sources) {
     if (sourcePath(source).includes("*")) {
       continue;
@@ -193,8 +193,6 @@ function downloadAnalyticsContext({
   if (datasetSlug) context.dataset_slug = datasetSlug;
   if (fileSlug) context.file_slug = fileSlug;
   if (source) {
-    context.source_id = source.id;
-    if (source.storage_location?.id !== undefined) context.storage_location_id = source.storage_location.id;
     if (source.version !== undefined) context.version = source.version;
   }
   if (sizeBytes != null) context.expected_size_bytes = sizeBytes;
@@ -205,10 +203,10 @@ function downloadAnalyticsContext({
 interface FileFormatTreeProps {
   file: DatasetFile;
   selectedSources: SelectedFormatSources;
-  onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
+  onSourceChange: (formatType: string, storageLocationId: string, version: string | number) => void;
   onViewParquet?: (option: ParquetPreviewOption) => void;
   pmtilesUrl: string | null;
-  collectionId?: number;
+  collectionId?: string;
   collectionSlug?: string;
   datasetSlug?: string;
   fileSlug?: string;
@@ -218,7 +216,7 @@ interface GeoparquetTreeNodesProps {
   nodes: GeoparquetTreeNode[];
   formatEntry: DatasetFormat;
   selectedSources: SelectedFormatSources;
-  onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
+  onSourceChange: (formatType: string, storageLocationId: string, version: string | number) => void;
   expandedFormats: Set<string>;
   toggleFormat: (formatType: string) => void;
   collectionSlug?: string | undefined;
@@ -790,7 +788,7 @@ export function ArchiveFormatNode({
   name: string;
   icon: React.ReactNode;
   selectedSources: SelectedFormatSources;
-  onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
+  onSourceChange: (formatType: string, storageLocationId: string, version: string | number) => void;
   isExpanded: boolean;
   onToggle: () => void;
   collectionSlug?: string | undefined;
@@ -849,7 +847,7 @@ interface FormatFileNodeProps {
   formatType: string;
   formatEntry: NonNullable<DatasetFile["formats"]>[0];
   selectedSources: SelectedFormatSources;
-  onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
+  onSourceChange: (formatType: string, storageLocationId: string, version: string | number) => void;
   isExpanded: boolean;
   onToggle: () => void;
   children?: React.ReactNode;
@@ -926,7 +924,7 @@ interface FormatFolderNodeProps {
   formatType: string;
   formatEntry: NonNullable<DatasetFile["formats"]>[0];
   selectedSources: SelectedFormatSources;
-  onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
+  onSourceChange: (formatType: string, storageLocationId: string, version: string | number) => void;
   isExpanded: boolean;
   onToggle: () => void;
   children?: React.ReactNode;
@@ -994,7 +992,7 @@ interface SourceSelectorProps {
   formatType: string;
   formatEntry: NonNullable<DatasetFile["formats"]>[0];
   selectedSources: SelectedFormatSources;
-  onSourceChange: (formatType: string, storageLocationId: number, version: string | number) => void;
+  onSourceChange: (formatType: string, storageLocationId: string, version: string | number) => void;
 }
 
 function SourceSelector({ formatType, formatEntry, selectedSources, onSourceChange }: SourceSelectorProps) {
@@ -1030,7 +1028,7 @@ function SourceSelector({ formatType, formatEntry, selectedSources, onSourceChan
           <Select
             value={String(currentLocationId)}
             onValueChange={(value) => {
-              const locId = Number(value);
+              const locId = value;
               const nextVersion = getVersionSourcesForLocation(formatEntry, locId)[0]?.version ?? "1";
               onSourceChange(formatType, locId, nextVersion);
             }}

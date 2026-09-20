@@ -1,272 +1,264 @@
-import json
-from pathlib import Path
-
 import httpx
 import pytest
 
 from app.catalog.client import CatalogClient, CatalogClientError
 from app.catalog.models import DatasetSearchRequest
-from app.catalog.tool_adapter import CatalogToolAdapter, _identity, _tag_filters
-from app.tools import discovery
-
-FIXTURES = Path(__file__).parent / "contract_fixtures"
+from app.catalog.tool_adapter import CatalogToolAdapter, _identity
 
 
-def client_for(routes: dict[str, object]) -> CatalogClient:
+def client_for(routes: dict[str, object], requests: list[str] | None = None) -> CatalogClient:
     def handler(request: httpx.Request) -> httpx.Response:
+        if requests is not None:
+            requests.append(request.url.path)
         payload = routes.get(request.url.path)
-        if payload is None:
-            return httpx.Response(404, json={"detail": "not found"})
-        return httpx.Response(200, json=payload)
+        return httpx.Response(200, json=payload) if payload is not None else httpx.Response(404)
 
-    transport = httpx.MockTransport(handler)
-    return CatalogClient("http://catalog.test", httpx.AsyncClient(transport=transport))
-
-
-@pytest.mark.asyncio
-async def test_slug_collection_is_resolved_by_exact_list_match() -> None:
-    catalog = client_for(
-        {"/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}]}
+    return CatalogClient(
+        "http://catalog.test", httpx.AsyncClient(transport=httpx.MockTransport(handler))
     )
-    collection = await catalog.resolve_collection("public-safety")
-    assert collection.id == 3
 
 
 @pytest.mark.asyncio
-async def test_search_resolves_slug_then_uses_numeric_dataset_route() -> None:
+async def test_list_collections_normalizes_stac_child_links() -> None:
     catalog = client_for(
         {
-            "/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}],
-            "/api/collections/3/datasets": {"items": [], "total": 0, "limit": 10, "offset": 0},
+            "/api/collections": {
+                "type": "Catalog",
+                "id": "root",
+                "description": "Published catalogs",
+                "stac_version": "1.0.0",
+                "links": [
+                    {"rel": "self", "href": "catalog.json"},
+                    {
+                        "rel": "child",
+                        "href": "hifld/catalog.json",
+                        "title": "HIFLD",
+                    },
+                ],
+            }
         }
     )
-    page = await catalog.search_datasets(DatasetSearchRequest(collection="public-safety", limit=10))
+
+    collections = await catalog.list_collections()
+
+    assert [(item.slug, item.name) for item in collections] == [("hifld", "HIFLD")]
+
+
+@pytest.mark.asyncio
+async def test_list_collections_fetches_untitled_child_from_trusted_api_route() -> None:
+    requests: list[str] = []
+    catalog = client_for(
+        {
+            "/api/collections": {
+                "type": "Catalog",
+                "id": "root",
+                "description": "Published catalogs",
+                "stac_version": "1.0.0",
+                "links": [{"rel": "child", "href": "https://evil.test/hifld/catalog.json"}],
+            },
+            "/api/collections/hifld": {
+                "type": "Catalog",
+                "id": "hifld",
+                "title": "HIFLD",
+                "description": "Homeland infrastructure data",
+                "stac_version": "1.0.0",
+                "links": [],
+            },
+        },
+        requests,
+    )
+
+    collections = await catalog.list_collections()
+
+    assert collections[0].description == "Homeland infrastructure data"
+    assert requests == ["/api/collections", "/api/collections/hifld"]
+
+
+@pytest.mark.asyncio
+async def test_collection_search_uses_datasets_route_and_webapp_envelope() -> None:
+    catalog = client_for(
+        {
+            "/api/collections": {
+                "type": "Catalog",
+                "id": "root",
+                "description": "Published catalogs",
+                "stac_version": "1.0.0",
+                "links": [
+                    {
+                        "rel": "child",
+                        "href": "hifld/catalog.json",
+                        "title": "HIFLD",
+                    }
+                ],
+            },
+            "/api/collections/hifld/datasets": {
+                "datasets": [],
+                "total": 0,
+                "limit": 10,
+                "offset": 0,
+                "links": {},
+            },
+        }
+    )
+    page = await catalog.search_datasets(DatasetSearchRequest(collection="hifld", limit=10))
     assert page.total == 0
 
 
 @pytest.mark.asyncio
-async def test_get_dataset_parses_dataset_with_files_route() -> None:
-    payload = json.loads((FIXTURES / "dataset.json").read_text())
-    payload["files"][0]["formats"] = [{"format_count": 1}]
+async def test_collection_search_normalizes_stable_catalog_identity_keys() -> None:
     catalog = client_for(
         {
-            "/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}],
-            "/api/collections/3/datasets/by-slug/stations/files": payload,
+            "/api/collections": {
+                "type": "Catalog",
+                "id": "root",
+                "description": "Published catalogs",
+                "stac_version": "1.0.0",
+                "links": [
+                    {
+                        "rel": "child",
+                        "href": "hifld/catalog.json",
+                        "title": "HIFLD",
+                    }
+                ],
+            },
+            "/api/collections/hifld/datasets": {
+                "datasets": [
+                    {
+                        "type": "Catalog",
+                        "stac_version": "1.1.0",
+                        "id": "hifld/agricultural-minerals-operations",
+                        "title": "Agricultural Minerals Operations",
+                        "description": "Minerals",
+                        "links": [],
+                        "hifld:tags": {"theme": "energy"},
+                    }
+                ],
+                "total": 1,
+                "limit": 1,
+                "offset": 0,
+                "links": {},
+            },
         }
     )
-    dataset = await catalog.get_dataset("public-safety", "stations")
-    assert dataset.id == 12
-    assert dataset.files is not None
-    assert dataset.files[0].id == 99
-    assert dataset.files[0].formats[0].format_count == 1
 
-
-@pytest.mark.asyncio
-async def test_get_dataset_file_uses_resolved_collection_when_api_omits_it() -> None:
-    payload = json.loads((FIXTURES / "file_response.json").read_text())
-    payload.pop("collection")
-    catalog = client_for(
-        {
-            "/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}],
-            "/api/collections/3/datasets/by-slug/stations/files/stations-file": payload,
-        }
+    page = await catalog.search_datasets(
+        DatasetSearchRequest(collection="hifld", search="agricultural", limit=1)
     )
 
-    response = await catalog.get_dataset_file("public-safety", "stations", "stations-file")
-
-    assert response.collection.id == 3
-    assert response.dataset.id == 12
-    assert response.file.id == 99
+    assert page.items[0].slug == "agricultural-minerals-operations"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("dataset", "file"),
-    [("../secret", "stations-file"), ("stations", "../../secret")],
-)
-async def test_malicious_dataset_or_file_identity_is_rejected_before_catalog_request(
-    dataset: str, file: str
-) -> None:
-    catalog = client_for(
-        {"/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}]}
+async def test_file_request_uses_full_slug_hierarchy_and_asset_selectors() -> None:
+    path = "/api/collections/hifld/datasets/roads/files/roads"
+    catalog = client_for({path: version_collection()})
+    response = await catalog.get_dataset_file(
+        "hifld", "roads", "roads", version="v1.0.0", asset_key="geoparquet"
     )
-
-    with pytest.raises(CatalogClientError, match="catalog_identity_invalid"):
-        await catalog.get_dataset_file("public-safety", dataset, file)
+    assert response.id == "hifld/roads/roads/v1.0.0"
 
 
 @pytest.mark.asyncio
-async def test_404_is_stable_catalog_not_found_error() -> None:
-    catalog = client_for({})
-    with pytest.raises(Exception, match="catalog_not_found"):
-        await catalog.resolve_collection(42)
-
-
-@pytest.mark.asyncio
-async def test_tool_adapter_exposes_json_mapping_for_discovery_tools() -> None:
-    catalog = client_for(
-        {"/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}]}
-    )
-    adapter = CatalogToolAdapter(catalog)
-    result = await adapter.list_collections()
-    items = result["items"]
-    assert isinstance(items, list)
-    assert items[0]["id"] == 3
-    assert items[0]["slug"] == "public-safety"
-
-
-def test_tool_adapter_normalizes_numeric_identities() -> None:
-    assert _identity("12", "identity") == 12
-    assert _identity("public-safety", "identity") == "public-safety"
-    with pytest.raises(ValueError, match="positive"):
-        _identity("0", "identity")
-
-
-def test_tool_adapter_encodes_repeated_key_value_tags_as_catalog_json() -> None:
-    assert _tag_filters(["theme=safety", "theme=transport", "state=NY"]) == (
-        '{"state":"NY","theme":["safety","transport"]}'
-    )
-    with pytest.raises(ValueError, match="key=value"):
-        _tag_filters(["theme"])
-
-
-@pytest.mark.asyncio
-async def test_tool_adapter_file_shape_has_query_sources_and_no_nested_columns() -> None:
-    file_payload = json.loads((FIXTURES / "file_response.json").read_text())
-    dataset_payload = json.loads((FIXTURES / "dataset.json").read_text())
-    source_metadata = dataset_payload["files"][0]["formats"][0]["sources"][0]["source_metadata"]
-    file_payload["file"]["formats"][0]["sources"][0]["source_metadata"] = source_metadata
-    file_payload["file"]["formats"][0]["sources"][0]["storage_location"] = {
-        "id": 3,
-        "slug": "public-gcs",
-        "name": "Public GCS",
-        "backend_type": "s3",
+async def test_tool_adapter_exposes_and_resolves_pmtiles_with_slug_identity() -> None:
+    path = "/api/collections/hifld/datasets/roads/files/roads"
+    payload = version_collection()
+    assets = payload["assets"]
+    assert isinstance(assets, dict)
+    assets["pmtiles"] = {
+        "href": "https://tiles.example/hifld/roads.pmtiles",
+        "type": "application/vnd.pmtiles",
+        "title": "Vector tiles",
+        "roles": ["data"],
     }
-    catalog = client_for(
-        {
-            "/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}],
-            "/api/collections/3/datasets/by-slug/stations/files/stations-file": file_payload,
-        }
-    )
-    result = await discovery.get_dataset_file(
-        CatalogToolAdapter(catalog), "public-safety", "stations", "stations-file"
-    )
-    payload = result.structured_content
-    assert isinstance(payload["query_sources"], list)
-    assert len(payload["query_sources"]) == 1
-    source = payload["file"]["formats"][0]["sources"][0]
-    assert "columns" not in source["source_metadata"]
+    adapter = CatalogToolAdapter(client_for({path: payload}))
 
+    result = await adapter.get_dataset_file("hifld", "roads", "roads")
 
-@pytest.mark.asyncio
-async def test_tool_adapter_exposes_pmtiles_map_sources_and_resolves_exact_asset() -> None:
-    file_payload = json.loads((FIXTURES / "file_response.json").read_text())
-    file_payload["file"]["formats"] = [
-        {
-            "format": {"id": 8, "format_type": "pmtiles", "name": "PMTiles"},
-            "sources": [
-                {
-                    "id": 44,
-                    "version": "v1",
-                    "source_type": "file",
-                    "location": {"type": "file", "path": "roads.pmtiles"},
-                    "url": "https://cdn.example/roads.pmtiles",
-                }
-            ],
-        }
-    ]
-    catalog = client_for(
-        {
-            "/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}],
-            "/api/collections/3": {"id": 3, "slug": "public-safety", "name": "Public Safety"},
-            "/api/collections/3/datasets/12/files/99": file_payload,
-        }
-    )
-    adapter = CatalogToolAdapter(catalog)
-
-    payload = await adapter.get_dataset_file("3", "12", "99")
-    assert payload["map_sources"] == [
+    assert result["map_sources"] == [
         {
             "type": "catalog",
-            "collection_id": 3,
-            "dataset_id": 12,
-            "file_id": 99,
-            "file_source_id": 44,
+            "collection_slug": "hifld",
+            "dataset_slug": "roads",
+            "file_slug": "roads",
+            "version": "v1.0.0",
+            "asset_key": "pmtiles",
         }
     ]
-    assert await adapter.resolve_map_source(3, 12, 99, 44) == {
+    assert await adapter.resolve_map_source("hifld", "roads", "roads", "v1.0.0", "pmtiles") == {
         "type": "pmtiles",
-        "url": "https://cdn.example/roads.pmtiles",
+        "url": "https://tiles.example/hifld/roads.pmtiles",
     }
 
 
 @pytest.mark.asyncio
-async def test_tool_adapter_rejects_non_pmtiles_catalog_map_source() -> None:
-    file_payload = json.loads((FIXTURES / "file_response.json").read_text())
-    catalog = client_for(
-        {
-            "/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}],
-            "/api/collections/3": {"id": 3, "slug": "public-safety", "name": "Public Safety"},
-            "/api/collections/3/datasets/12/files/99": file_payload,
-        }
-    )
-    with pytest.raises(ValueError, match="PMTiles"):
-        await CatalogToolAdapter(catalog).resolve_map_source(3, 12, 99, 44)
+async def test_file_request_parses_canonical_versioned_catalog_response() -> None:
+    path = "/api/collections/hifld/datasets/roads/files/roads"
+    seen: list[httpx.Request] = []
 
-
-@pytest.mark.asyncio
-async def test_tool_adapter_schema_shape_exposes_paginated_columns() -> None:
-    file_payload = json.loads((FIXTURES / "file_response.json").read_text())
-    dataset_payload = json.loads((FIXTURES / "dataset.json").read_text())
-    source_metadata = dataset_payload["files"][0]["formats"][0]["sources"][0]["source_metadata"]
-    file_payload["file"]["formats"][0]["sources"][0]["source_metadata"] = source_metadata
-    versions_payload = {
-        "dataset_id": 12,
-        "file_id": 99,
-        "formats": file_payload["file"]["formats"],
-    }
-    catalog = client_for(
-        {
-            "/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}],
-            "/api/collections/3/datasets/by-slug/stations/files/stations-file": file_payload,
-            "/api/collections/3/datasets/12/files/99/versions": versions_payload,
-        }
-    )
-    result = await discovery.get_dataset_file_schema(
-        CatalogToolAdapter(catalog),
-        "public-safety",
-        "stations",
-        "stations-file",
-        column_limit=1,
-    )
-    payload = result.structured_content
-    assert payload["available_versions"] == ["2026-01-02"]
-    assert payload["columns"][0]["name"] == "geometry"
-    assert payload["columns"][0]["type"] == "geometry"
-    assert payload["columns"][0]["nullable"] is True
-    assert payload["total"] == 1
-
-
-@pytest.mark.asyncio
-async def test_schema_without_column_metadata_is_a_valid_empty_schema_result() -> None:
-    file_payload = json.loads((FIXTURES / "file_response.json").read_text())
-    versions_payload = {
-        "dataset_id": 12,
-        "file_id": 99,
-        "formats": file_payload["file"]["formats"],
-    }
-    catalog = client_for(
-        {
-            "/api/collections": [{"id": 3, "slug": "public-safety", "name": "Public Safety"}],
-            "/api/collections/3/datasets/by-slug/stations/files/stations-file": file_payload,
-            "/api/collections/3/datasets/12/files/99/versions": versions_payload,
-        }
-    )
-    result = await catalog.get_dataset_file_schema("public-safety", "stations", "stations-file")
-    assert result.schema_ is None
-    assert result.selected_version is None
-    assert result.versions == ["2026-01-02"]
-    with pytest.raises(Exception, match="schema_version_not_found"):
-        await catalog.get_dataset_file_schema(
-            "public-safety", "stations", "stations-file", version="2026-01-02"
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json=version_collection(),
         )
+
+    catalog = CatalogClient(
+        "http://catalog.test", httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    response = await catalog.get_dataset_file(
+        "hifld",
+        "roads",
+        "roads",
+        version="v1.0.0",
+        asset_key="geoparquet-abc",
+        storage_location_slug="seaweedfs-local-published",
+    )
+
+    assert seen[0].url.path == path
+    assert dict(seen[0].url.params) == {"version": "v1.0.0"}
+    assert response.id == "hifld/roads/roads/v1.0.0"
+    assert response.assets["geoparquet-abc"].file_size == 123
+    assert response.table_columns[0].type == "int64"
+
+
+@pytest.mark.asyncio
+async def test_path_traversal_slug_is_rejected() -> None:
+    with pytest.raises(CatalogClientError, match="catalog_identity_invalid"):
+        await client_for({}).get_dataset_file("hifld", "../secret", "roads")
+
+
+def test_tool_identity_accepts_only_slugs() -> None:
+    assert _identity("hifld", "collection") == "hifld"
+    with pytest.raises(ValueError, match="slug"):
+        _identity(12, "collection")
+
+
+def version_collection() -> dict[str, object]:
+    return {
+        "type": "Collection",
+        "stac_version": "1.1.0",
+        "id": "hifld/roads/roads/v1.0.0",
+        "title": "Roads",
+        "description": "Roads",
+        "license": "other",
+        "links": [],
+        "extent": {
+            "spatial": {"bbox": [[-123.0, 24.0, -67.0, 49.0]]},
+            "temporal": {"interval": [[None, None]]},
+        },
+        "assets": {
+            "geoparquet-abc": {
+                "href": "http://localhost:8333/hifld-local-published/hifld/roads/roads/v1.0.0/geoparquet/roads.parquet",
+                "type": "application/vnd.apache.parquet",
+                "title": "GeoParquet",
+                "roles": ["data"],
+                "file:size": 123,
+                "file:checksum": "1220abc",
+            }
+        },
+        "table:columns": [{"name": "OBJECTID", "type": "int64", "nullable": False}],
+        "hifld:feature_count": 5,
+        "hifld:native_crs": "EPSG:4326",
+        "hifld:geometry_type": "Point",
+        "hifld:quality": {"passed": True, "invalid_geometry_count": 0, "columns_hash": "abc"},
+    }

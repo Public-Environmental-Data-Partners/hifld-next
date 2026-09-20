@@ -8,6 +8,7 @@ describe("buildOpenApiDocument", () => {
     expect(doc.paths?.["/api"]).toBeDefined();
     expect(doc.paths?.["/api/collections"]).toBeDefined();
     expect(doc.paths?.["/api/collections/{slug}"]).toBeDefined();
+    expect(doc.paths?.["/api/collections/{slug}/datasets"]).toBeDefined();
     expect(doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}"]).toBeDefined();
     expect(doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}"]).toBeDefined();
     expect(doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema"]).toBeDefined();
@@ -18,57 +19,52 @@ describe("buildOpenApiDocument", () => {
     expect(String(doc.info?.description)).toContain("problem+json");
   });
 
-  it("documents global dataset detail by numeric id", () => {
+  it("documents raw STAC collection catalogs separately from dataset search", () => {
     const doc = buildOpenApiDocument();
-    const path = doc.paths?.["/api/datasets/{id}"];
-    const operation = path?.get;
+    const root = doc.paths?.["/api/collections"]?.get;
+    const collection = doc.paths?.["/api/collections/{slug}"]?.get;
+    const datasets = doc.paths?.["/api/collections/{slug}/datasets"]?.get;
 
-    expect(operation).toMatchObject({
-      summary: "Dataset detail by numeric id",
-      responses: {
-        200: {
-          content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/DatasetByIdResponse" },
-            },
-          },
-        },
-        400: { content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } } },
-        404: { content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } } },
-        502: { content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } } },
-      },
+    expect(root?.responses?.[200]).toMatchObject({
+      content: { "application/json": { schema: { $ref: "#/components/schemas/STACCatalog" } } },
     });
-    expect(operation?.parameters).toEqual(
+    expect(collection?.responses?.[200]).toMatchObject({
+      content: { "application/json": { schema: { $ref: "#/components/schemas/STACCatalog" } } },
+    });
+    expect(collection?.parameters).toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ in: "query", name: "search" })]),
+    );
+    expect(datasets?.summary).toContain("datasets");
+    expect(datasets?.parameters).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          name: "id",
-          in: "path",
-          required: true,
-          schema: { type: "integer" },
-        }),
+        expect.objectContaining({ in: "query", name: "search" }),
+        expect.objectContaining({ in: "query", name: "limit" }),
+        expect.objectContaining({ in: "query", name: "offset" }),
       ]),
     );
-    expect(operation?.responses?.[400]).toMatchObject({
-      content: { "application/problem+json": { schema: { $ref: "#/components/schemas/Problem" } } },
-    });
-    expect(doc.components?.schemas?.DatasetByIdResponse).toMatchObject({
+    expect(doc.components?.schemas?.STACCatalog).toMatchObject({
       type: "object",
       properties: {
-        links: { $ref: "#/components/schemas/DatasetByIdLinks" },
-        dataset: {
-          type: "object",
-          properties: {
-            id: { type: "number" },
-            slug: { type: "string" },
-            files: {
-              type: "array",
-              items: { $ref: "#/components/schemas/DatasetFile" },
-            },
-          },
-        },
+        type: { type: "string", enum: ["Catalog"] },
+        stac_version: { type: "string" },
+        id: { type: "string" },
+        links: { type: "array" },
       },
-      required: ["links", "dataset"],
+      required: ["type", "stac_version", "id", "description", "links"],
     });
+  });
+
+  it("documents raw STAC dataset/file responses and exact metadata aliases", () => {
+    const doc = buildOpenApiDocument();
+    const dataset = doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}"]?.get;
+    const file = doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}"]?.get;
+    const schema = doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema"]?.get;
+    expect(dataset?.responses?.[200]).toMatchObject({ content: { "application/json": { schema: { $ref: "#/components/schemas/STACCatalog" } } } });
+    expect(file?.responses?.[200]).toMatchObject({ content: { "application/json": { schema: { $ref: "#/components/schemas/STACCollection" } } } });
+    expect(schema?.responses?.[200]).toEqual(file?.responses?.[200]);
+    expect(doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}/metadata"]?.get?.responses?.[200]).toMatchObject({ content: dataset?.responses?.[200]?.content });
+    expect(doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/metadata"]?.get?.responses?.[200]).toMatchObject({ content: file?.responses?.[200]?.content });
+    expect(doc.components?.schemas?.STACCollection).toMatchObject({ properties: { assets: { type: "object" }, "table:columns": { type: "array" } } });
   });
 
   it("documents source lifecycle and source metadata fields exposed by file metadata", () => {
@@ -94,25 +90,14 @@ describe("buildOpenApiDocument", () => {
     });
   });
 
-  it("documents bounded schema paging and response fields", () => {
+  it("documents schema as an unwrapped selected-version STAC alias", () => {
     const doc = buildOpenApiDocument();
     const path = doc.paths?.["/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema"];
     const operation = path?.get;
 
-    expect(operation?.parameters).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: "column_offset", in: "query", required: false }),
-        expect.objectContaining({ name: "column_limit", in: "query", required: false }),
-      ]),
-    );
-    expect(doc.components?.schemas?.DatasetFileSchemaResponse).toMatchObject({
-      properties: {
-        total_columns: { type: "integer" },
-        column_offset: { type: "integer" },
-        column_limit: { type: "integer", maximum: 50 },
-        has_more: { type: "boolean" },
-      },
-    });
+    expect(operation?.parameters).toEqual(expect.arrayContaining([expect.objectContaining({ name: "version" })]));
+    expect(operation?.parameters).not.toEqual(expect.arrayContaining([expect.objectContaining({ name: "column_limit" })]));
+    expect(operation?.responses?.[200]).toMatchObject({ content: { "application/json": { schema: { $ref: "#/components/schemas/STACCollection" } } } });
   });
 
   it("documents bounded query creation, page, and extent contracts", () => {

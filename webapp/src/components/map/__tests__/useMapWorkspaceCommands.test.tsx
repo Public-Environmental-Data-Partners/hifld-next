@@ -1,6 +1,9 @@
+import { act, renderHook } from "@testing-library/react";
+import type maplibregl from "maplibre-gl";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { buildQueryMvtLayer } from "../multiLayerSources";
-import { fitMapWhenReady, resolveCameraLayerBounds, waitForMapMovement } from "../useMapWorkspaceCommands";
+import { resolveCameraLayerBounds, useMapWorkspaceCommands, waitForMapMovement } from "../useMapWorkspaceCommands";
 
 vi.mock("maplibre-gl", () => ({
   default: {
@@ -10,19 +13,52 @@ vi.mock("maplibre-gl", () => ({
 }));
 
 describe("useMapWorkspaceCommands", () => {
-  it("fits known bounds once the style is ready even while map tiles are loading", () => {
+  it.each([false, true])("preserves the camera with preloaded layers: %s", async (preloaded) => {
+    const layer = buildQueryMvtLayer({
+      queryId: "query_12345678901234567890",
+      label: "Worldwide stations",
+      sourceAliases: ["stations"],
+      geometryColumn: "geometry",
+      tileTemplate: "https://example.test/tiles/{z}/{x}/{y}.mvt",
+      bounds: [-180, -80, 180, 80],
+    });
     const map = {
-      loaded: () => false,
       isStyleLoaded: () => true,
-      once: vi.fn(),
       fitBounds: vi.fn(),
+      easeTo: vi.fn(),
+      once: vi.fn(),
+      getCenter: () => ({ lng: -77, lat: 39 }),
+      getZoom: () => 8,
+      getBearing: () => 0,
+      getPitch: () => 0,
+      isMoving: () => false,
     };
-
-    fitMapWhenReady(map, [-80, 37, -70, 44]);
-
-    expect(map.fitBounds).toHaveBeenCalledWith([-80, 37, -70, 44], { padding: 48, duration: 0 });
+    const mapRef = { current: map as unknown as maplibregl.Map };
+    const { result } = renderHook(() => {
+      const [loadedLayers, setLoadedLayers] = useState(preloaded ? [layer] : []);
+      return useMapWorkspaceCommands({
+        mapRef, loadedLayers, setLoadedLayers,
+        vectorLayers: [], layerStyles: {}, setLayerStyles: vi.fn(),
+        selectedFeatures: [], clearSelection: vi.fn(),
+        basemapMode: "street", setBasemapMode: vi.fn(),
+        resolveDatasetLayer: async () => layer,
+      });
+    });
+    if (!preloaded) {
+      await act(async () => {
+        await result.current.addDatasetLayer({ layerId: layer.id, label: layer.label, kind: layer.kind });
+      });
+    }
+    expect(map.fitBounds).not.toHaveBeenCalled();
+    expect(map.easeTo).not.toHaveBeenCalled();
     expect(map.once).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.setCamera({ target: { layerIds: [layer.id] } });
+    });
+    expect(map.fitBounds).toHaveBeenCalledWith(layer.bounds, { padding: 48 });
   });
+
 
   it("resolves missing query bounds before framing a layer target", async () => {
     const layer = buildQueryMvtLayer({
@@ -40,21 +76,6 @@ describe("useMapWorkspaceCommands", () => {
     expect(resolveLayerBounds).toHaveBeenCalledWith(layer);
   });
 
-  it("waits for map readiness before fitting initial or first-layer bounds", () => {
-    let styleLoadListener: (() => void) | undefined;
-    const map = {
-      isStyleLoaded: () => false,
-      once: (event: "style.load", listener: () => void) => {
-        if (event === "style.load") styleLoadListener = listener;
-      },
-      fitBounds: vi.fn(),
-    };
-
-    fitMapWhenReady(map, [-78, 38, -76, 40]);
-    expect(map.fitBounds).not.toHaveBeenCalled();
-    styleLoadListener?.();
-    expect(map.fitBounds).toHaveBeenCalledWith([-78, 38, -76, 40], { padding: 48, duration: 0 });
-  });
 
   it("resolves movement commands from moveend or a stable map error", async () => {
     let moveEndListener: (() => void) | undefined;

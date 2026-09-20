@@ -4,7 +4,14 @@ import { queryBoundsHandler } from "../api/queries.$queryId.bounds";
 import { queryPageHandler } from "../api/queries.$queryId.pages";
 
 const body = {
-  sources: [{ alias: "roads", collection_id: 1, dataset_id: 2, file_id: 3, file_source_id: 4 }],
+  sources: [{
+    alias: "roads",
+    collection_slug: "hifld",
+    dataset_slug: "roads",
+    file_slug: "roads",
+    version: "v1.0.0",
+    asset_key: "geoparquet",
+  }],
   sql: "SELECT id FROM roads",
   limit: 10,
 };

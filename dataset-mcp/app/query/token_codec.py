@@ -11,7 +11,7 @@ from app.catalog.models import QuerySourceRef
 from app.query.models import QueryTokenPayload
 from app.query.sql_policy import SqlPolicy, SqlPolicyError
 
-TOKEN_VERSION = 1
+TOKEN_VERSION = 2
 MAX_TOKEN_BYTES = 8 * 1024
 MAX_DECODED_BYTES = 64 * 1024
 MAX_SOURCES = 8
@@ -30,10 +30,12 @@ class _TokenModel(BaseModel):
 
 class _EncodedSource(_TokenModel):
     alias: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
-    collection_id: int = Field(gt=0)
-    dataset_id: int = Field(gt=0)
-    file_id: int = Field(gt=0)
-    file_source_id: int = Field(gt=0)
+    collection_slug: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    dataset_slug: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    file_slug: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    version: str = Field(min_length=1, max_length=128)
+    asset_key: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    storage_location_slug: str | None
 
 
 class _EncodedPayload(_TokenModel):
@@ -66,10 +68,12 @@ class QueryTokenCodec:
             "sources": [
                 {
                     "alias": source.alias,
-                    "collection_id": source.collection_id,
-                    "dataset_id": source.dataset_id,
-                    "file_id": source.file_id,
-                    "file_source_id": source.file_source_id,
+                    "collection_slug": source.collection_slug,
+                    "dataset_slug": source.dataset_slug,
+                    "file_slug": source.file_slug,
+                    "version": source.version,
+                    "asset_key": source.asset_key,
+                    "storage_location_slug": source.storage_location_slug,
                 }
                 for source in payload.sources
             ],
@@ -108,10 +112,12 @@ class QueryTokenCodec:
         sources = tuple(
             QuerySourceRef(
                 alias=source.alias,
-                collection_id=source.collection_id,
-                dataset_id=source.dataset_id,
-                file_id=source.file_id,
-                file_source_id=source.file_source_id,
+                collection_slug=source.collection_slug,
+                dataset_slug=source.dataset_slug,
+                file_slug=source.file_slug,
+                version=source.version,
+                asset_key=source.asset_key,
+                storage_location_slug=source.storage_location_slug,
             )
             for source in encoded.sources
         )

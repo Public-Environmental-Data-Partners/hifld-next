@@ -401,18 +401,20 @@ describe("map WebMCP tools", () => {
     await waitFor(() => expect(fake.toolNames()).toContain("add_dataset_layer"));
     await expect(
       fake.execute("add_dataset_layer", {
-        collection_id: 1,
-        dataset_id: 2,
-        file_id: 3,
-        file_source_id: 4,
+        collection_slug: "hifld",
+        dataset_slug: "roads",
+        file_slug: "roads",
+        version: "v1.0.0",
+        asset_key: "pmtiles",
         label: "Roads",
       }),
     ).resolves.toMatchObject({ ok: true });
     expect(resolveCatalogLayer).toHaveBeenCalledWith({
-      collection_id: 1,
-      dataset_id: 2,
-      file_id: 3,
-      file_source_id: 4,
+      collection_slug: "hifld",
+      dataset_slug: "roads",
+      file_slug: "roads",
+      version: "v1.0.0",
+      asset_key: "pmtiles",
       label: "Roads",
     });
     expect(addDatasetLayer).toHaveBeenCalledWith({ layerId: "generated", label: "Roads" });
@@ -444,10 +446,11 @@ describe("map WebMCP tools", () => {
     });
     await expect(
       fake.execute("add_dataset_layer", {
-        collection_id: 1,
-        dataset_id: 2,
-        file_id: 3,
-        file_source_id: 4,
+        collection_slug: "hifld",
+        dataset_slug: "roads",
+        file_slug: "roads",
+        version: "v1.0.0",
+        asset_key: "pmtiles",
         map_layer_id: "generated",
       }),
     ).resolves.toMatchObject({ ok: false, error: { code: "invalid_request" } });

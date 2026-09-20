@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Separator } from "@/components/ui/separator";
 import { getCollectionBySlug, getDatasetBySlug } from "@/lib/api-client";
+import { formatOptionalDate } from "@/lib/date";
 import { buildDatasetJsonLd, datasetKeywords, pageTitle, plainTextForSeo, seoDescription } from "@/lib/seo";
 
 export const Route = createFileRoute("/collections/$collectionSlug/datasets/$datasetSlug/")({
@@ -45,7 +46,7 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
     )}`;
     const metadataUrl = `/api/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
       params.datasetSlug,
-    )}`;
+    )}/metadata`;
     const keywordList = datasetKeywords(dataset?.tags);
     const keywords = keywordList.length > 0 ? keywordList.join(", ") : undefined;
 
@@ -98,6 +99,8 @@ function DatasetDetailPage() {
   const { collectionSlug, datasetSlug } = Route.useParams();
 
   const cleanDescription = plainTextForSeo(dataset.description);
+  const createdAt = formatOptionalDate(dataset.created_at);
+  const updatedAt = formatOptionalDate(dataset.updated_at);
 
   return (
     <div className="p-6 sm:p-10">
@@ -118,17 +121,15 @@ function DatasetDetailPage() {
             <h1 className="text-3xl sm:text-4xl md:text-5xl font-mono font-bold tracking-tight break-words">
               {dataset.name}
             </h1>
-            {dataset.tags && Object.keys(dataset.tags).length > 0 && (
-              <Button variant="outline" size="sm" asChild className="mt-3 font-mono">
-                <a
-                  href={`/api/collections/${collectionSlug}/datasets/${datasetSlug}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  View Metadata
-                </a>
-              </Button>
-            )}
+            <Button variant="outline" size="sm" asChild className="mt-3 font-mono">
+              <a
+                href={`/api/collections/${encodeURIComponent(collectionSlug)}/datasets/${encodeURIComponent(datasetSlug)}/metadata`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                View Metadata
+              </a>
+            </Button>
           </div>
         </div>
 
@@ -185,8 +186,8 @@ function DatasetDetailPage() {
           <Separator />
 
           <div className="text-xs text-muted-foreground space-y-1">
-            <p>Created: {new Date(dataset.created_at).toLocaleString()}</p>
-            <p>Updated: {new Date(dataset.updated_at).toLocaleString()}</p>
+            {createdAt && <p>Created: {createdAt}</p>}
+            {updatedAt && <p>Updated: {updatedAt}</p>}
           </div>
         </div>
       </div>

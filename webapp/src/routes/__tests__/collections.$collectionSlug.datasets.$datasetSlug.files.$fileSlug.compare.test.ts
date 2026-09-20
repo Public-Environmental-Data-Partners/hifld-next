@@ -9,6 +9,7 @@ import {
 function source(id: number, version: string): DatasetSource {
   return {
     id,
+    asset_key: "pmtiles",
     version,
     source_type: "file",
     location: {
@@ -17,6 +18,7 @@ function source(id: number, version: string): DatasetSource {
     },
     storage_location: {
       id: 4,
+      slug: "seaweedfs",
       name: "SeaweedFS",
       backend_type: "s3",
       created_at: "2026-01-01T00:00:00Z",
@@ -93,9 +95,9 @@ describe("file compare route helpers", () => {
       collectionSlug: "hifld",
       datasetSlug: "hospitals-3",
       fileSlug: "hospitals-3",
-      formatType: "pmtiles",
+      assetKey: "pmtiles",
       version: "v1.1.0",
-      sourceId: 19,
+      storageLocationSlug: "seaweedfs",
     });
   });
 

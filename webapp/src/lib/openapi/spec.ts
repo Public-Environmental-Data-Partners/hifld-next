@@ -25,34 +25,60 @@ const FormatType = z
 
 const SourceType = z.enum(["file", "api"]).openapi("SourceType");
 
-const DatasetTags = z.record(z.string(), z.union([z.string(), z.array(z.string())])).openapi("DatasetTags");
-
-const Collection = z
+const STACLink = z
   .object({
-    id: z.number(),
-    slug: z.string(),
-    name: z.string(),
-    description: z.string().optional(),
-    created_at: DateTimeString.optional(),
-    updated_at: DateTimeString.optional(),
+    rel: z.string(),
+    href: z.string(),
+    type: z.string().optional(),
+    title: z.string().optional(),
   })
   .passthrough()
-  .openapi("Collection");
+  .openapi("STACLink");
 
-const Dataset = z
+const STACCatalog = z
   .object({
-    id: z.number(),
-    slug: z.string(),
-    name: z.string(),
-    description: z.string().optional(),
-    collection_id: z.number().optional(),
-    tags: DatasetTags.optional(),
-    created_at: DateTimeString.optional(),
-    updated_at: DateTimeString.optional(),
-    links: LinkMap.optional(),
+    type: z.literal("Catalog"),
+    stac_version: z.string(),
+    id: z.string(),
+    title: z.string().optional(),
+    description: z.string(),
+    links: z.array(STACLink),
   })
   .passthrough()
-  .openapi("Dataset");
+  .openapi("STACCatalog");
+
+const STACAsset = z
+  .object({
+    href: z.string(),
+    title: z.string().optional(),
+    type: z.string().optional(),
+    roles: z.array(z.string()).optional(),
+    "hifld:format_key": z.string().optional(),
+    "hifld:sha256": z.string().optional(),
+    "hifld:storage_location_slug": z.string().optional(),
+  })
+  .passthrough()
+  .openapi("STACAsset");
+
+const STACCollection = z
+  .object({
+    type: z.literal("Collection"),
+    stac_version: z.string(),
+    id: z.string(),
+    title: z.string().optional(),
+    description: z.string(),
+    license: z.string(),
+    extent: z.record(z.string(), z.unknown()),
+    links: z.array(STACLink),
+    assets: z.record(z.string(), STACAsset),
+    "table:columns": z
+      .array(
+        z.object({ name: z.string(), type: z.string(), description: z.string().nullable().optional() }).passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough()
+  .openapi("STACCollection");
 
 const ColumnSchema = z
   .object({
@@ -201,91 +227,6 @@ const DatasetFile = z
   .passthrough()
   .openapi("DatasetFile");
 
-const DatasetDetailResponse = z
-  .object({
-    links: LinkMap,
-    collection: Collection,
-    dataset: Dataset.extend({ files: z.array(DatasetFile).optional() }).passthrough(),
-  })
-  .passthrough()
-  .openapi("DatasetDetailResponse");
-
-const DatasetByIdLinks = z
-  .object({
-    self: z.string(),
-    collection: z.string().optional(),
-  })
-  .openapi("DatasetByIdLinks");
-
-const DatasetByIdResponse = z
-  .object({
-    links: DatasetByIdLinks,
-    dataset: Dataset.extend({ files: z.array(DatasetFile).optional() }).passthrough(),
-  })
-  .passthrough()
-  .openapi("DatasetByIdResponse");
-
-const DatasetFileResponse = z
-  .object({
-    links: LinkMap,
-    collection: Collection,
-    dataset: Dataset,
-    file: DatasetFile,
-  })
-  .passthrough()
-  .openapi("DatasetFileResponse");
-
-const DatasetFileSchemaResponse = z
-  .object({
-    links: LinkMap,
-    collection: Collection,
-    dataset: Dataset,
-    file: z
-      .object({
-        id: z.number(),
-        dataset_id: z.number(),
-        slug: z.string(),
-        name: z.string(),
-        description: z.string().nullable().optional(),
-        layer_name: z.string().nullable().optional(),
-      })
-      .passthrough(),
-    versions: z.array(z.union([z.string(), z.number()])),
-    selected_version: z.union([z.string(), z.number()]).nullable(),
-    total_columns: z.number().int().nonnegative().optional(),
-    column_offset: z.number().int().nonnegative().optional(),
-    column_limit: z.number().int().positive().max(50).optional(),
-    has_more: z.boolean().optional(),
-    schema: z
-      .object({
-        version: z.union([z.string(), z.number()]).nullable(),
-        format_type: FormatType,
-        format_name: z.string(),
-        source_id: z.number(),
-        storage_location: StorageLocation.nullable().optional(),
-        source: DatasetSource,
-        source_metadata: SpatialDatasetFileMetadata.nullable(),
-        summary: z
-          .object({
-            columnCount: z.number(),
-            featureCount: z.number().nullable(),
-            geometryType: z.string().nullable(),
-            invalidGeometryCount: z.number().nullable(),
-            qualityCheckPassed: z.boolean().nullable(),
-            columnsHash: z.string().nullable(),
-          })
-          .passthrough(),
-        columns: z.array(ColumnSchema),
-        total_columns: z.number().int().nonnegative().optional(),
-        column_offset: z.number().int().nonnegative().optional(),
-        column_limit: z.number().int().positive().max(50).optional(),
-        has_more: z.boolean().optional(),
-      })
-      .nullable(),
-  })
-  .passthrough()
-  .openapi("DatasetFileSchemaResponse");
-
 // The runtime result schema recursively models arbitrary JSON cells. Keep the
 // generated OpenAPI contract finite while still describing all response fields.
 const QuerySourceDocumentationSchema = z
@@ -361,11 +302,6 @@ registry.register("ColumnSchema", ColumnSchema);
 registry.register("SpatialDatasetFileMetadata", SpatialDatasetFileMetadata);
 registry.register("DatasetSource", DatasetSource);
 registry.register("DatasetFile", DatasetFile);
-registry.register("DatasetDetailResponse", DatasetDetailResponse);
-registry.register("DatasetByIdLinks", DatasetByIdLinks);
-registry.register("DatasetByIdResponse", DatasetByIdResponse);
-registry.register("DatasetFileResponse", DatasetFileResponse);
-registry.register("DatasetFileSchemaResponse", DatasetFileSchemaResponse);
 const OpenApiQueryRequest = registry.register("QueryRequest", OpenApiQueryRequestSchema);
 const OpenApiQueryPageRequest = registry.register("QueryPageRequest", OpenApiQueryPageRequestSchema);
 const OpenApiQueryResult = registry.register("QueryResult", QueryResultDocumentationSchema);
@@ -429,32 +365,14 @@ registry.registerPath({
 registry.registerPath({
   method: "get",
   path: "/api/collections",
-  summary: "List collections",
-  description:
-    "Catalog entrypoint. Use include=datasets,files for compact collection, dataset, and file/layer discovery without per-dataset follow-up requests.",
-  request: {
-    query: z.object({
-      include: z
-        .enum(["datasets", "datasets,files"])
-        .optional()
-        .describe("Expand compact child resources. Use datasets,files for sitemap or agent catalog discovery."),
-    }),
-  },
+  summary: "Root STAC catalog",
+  description: "Returns the authored root STAC Catalog. Follow child links to collection catalogs on this origin.",
   responses: {
     200: {
       description: "OK",
       content: {
         "application/json": {
-          schema: z.array(
-            z
-              .object({
-                id: z.number(),
-                slug: z.string(),
-                name: z.string(),
-                links: z.object({ self: z.string() }).optional(),
-              })
-              .passthrough(),
-          ),
+          schema: STACCatalog,
         },
       },
     },
@@ -464,17 +382,37 @@ registry.registerPath({
 registry.registerPath({
   method: "get",
   path: "/api/collections/{slug}",
+  summary: "Collection STAC catalog",
+  description:
+    "Returns the authored STAC Catalog for one collection. Use the explicit /datasets child resource to search datasets.",
+  responses: {
+    200: {
+      description: "OK",
+      content: {
+        "application/json": {
+          schema: STACCatalog,
+        },
+      },
+    },
+    400: { description: "Bad request", content: { "application/problem+json": { schema: Problem } } },
+    404: { description: "Not found", content: { "application/problem+json": { schema: Problem } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/collections/{slug}/datasets",
   summary: "List datasets in a collection (paginated)",
   description:
-    "This is the only collection-level list route: text search, tag filters, and pagination apply here (search, query, tag_filters, limit, offset, omit, include_urls, include=files). There is no /api/collections/{slug}/items, no ?q= shortcut on other paths, and no numeric dataset id in this URL—use dataset slug under .../datasets/{datasetSlug} next.",
+    "Search and page datasets in one collection. There is no /api/collections/{slug}/items or ?q= shortcut; use dataset slugs under .../datasets/{datasetSlug} for detail.",
   request: {
     query: z.object({
-      query: z.string().optional().describe("Alias for text filter (same effect as search on this route)"),
-      search: z.string().optional().describe("Filter datasets by text; use this or query, not q= on invented paths"),
+      query: z.string().optional().describe("Alias for the text filter"),
+      search: z.string().optional().describe("Filter datasets by text"),
       limit: z.coerce.number().int().positive().optional().describe("Defaults to 50 when omitted"),
       offset: z.coerce.number().int().nonnegative().optional(),
       include_urls: z.enum(["true", "false"]).optional(),
-      include: z.enum(["files"]).optional().describe("Use include=files to add compact file/layer summaries to items."),
+      include: z.enum(["files"]).optional().describe("Add compact file/layer summaries to items"),
       tag_filters: z.string().optional().describe("Use GET .../datasets/tags to discover allowed values"),
       omit: z.string().optional().describe("Comma-separated; use 'description' to omit long descriptions"),
     }),
@@ -486,8 +424,7 @@ registry.registerPath({
         "application/json": {
           schema: z
             .object({
-              collection: z.object({ id: z.number(), slug: z.string() }).passthrough(),
-              datasets: z.array(z.object({ slug: z.string(), links: LinkMap.optional() }).passthrough()),
+              datasets: z.array(STACCatalog),
               total: z.number(),
               limit: z.number().nullable(),
               offset: z.number(),
@@ -530,23 +467,19 @@ registry.registerPath({
   method: "get",
   path: "/api/collections/{collectionSlug}/datasets/{datasetSlug}",
   summary: "Dataset detail in a collection",
-  description:
-    "Returns one dataset by collection and dataset slug. Use include_urls=true when source URLs are needed on nested file format sources.",
+  description: "Returns the raw dataset STAC Catalog with child links to file catalogs.",
   request: {
     params: z.object({
       collectionSlug: z.string(),
       datasetSlug: z.string(),
     }),
-    query: z.object({
-      include_urls: z.enum(["true", "false"]).optional(),
-    }),
   },
   responses: {
     200: {
-      description: "Dataset detail with file links",
+      description: "Dataset STAC Catalog",
       content: {
         "application/json": {
-          schema: DatasetDetailResponse,
+          schema: STACCatalog,
         },
       },
     },
@@ -557,22 +490,23 @@ registry.registerPath({
 registry.registerPath({
   method: "get",
   path: "/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}",
-  summary: "Dataset file metadata and source URLs",
+  summary: "Selected dataset file version",
   description:
-    "Raw file metadata used by the View metadata action. Includes formats, source versions, storage locations, source lifecycle timestamps, source_metadata.description, source_metadata.size_bytes, and download links.",
+    "Returns the requested version as a raw STAC Collection, defaulting to latest. Assets are keyed by format and content hash; schema columns are in table:columns.",
   request: {
     params: z.object({
       collectionSlug: z.string(),
       datasetSlug: z.string(),
       fileSlug: z.string(),
     }),
+    query: z.object({ version: z.string().optional() }),
   },
   responses: {
     200: {
-      description: "Dataset file metadata",
+      description: "Selected-version STAC Collection",
       content: {
         "application/json": {
-          schema: DatasetFileResponse,
+          schema: STACCollection,
         },
       },
     },
@@ -583,9 +517,9 @@ registry.registerPath({
 registry.registerPath({
   method: "get",
   path: "/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/schema",
-  summary: "Dataset file schema and data dictionary",
+  summary: "Dataset file STAC Collection schema alias",
   description:
-    "Focused schema metadata for a dataset file. Returns the best schema-capable source for the requested version, including data dictionary columns. Omit version to use the latest schema-capable version. Omit both column paging parameters to preserve the legacy full-column response; supplying either enables paging with a default limit of 25 and a maximum limit of 50.",
+    "Exact alias of the selected-version file response. Read schema columns from table:columns; omit version to select latest.",
   request: {
     params: z.object({
       collectionSlug: z.string(),
@@ -594,45 +528,75 @@ registry.registerPath({
     }),
     query: z.object({
       version: z.string().optional(),
-      column_offset: z.coerce
-        .number()
-        .int()
-        .nonnegative()
-        .optional()
-        .describe("Column offset when bounded paging is requested"),
-      column_limit: z.coerce
-        .number()
-        .int()
-        .positive()
-        .max(50)
-        .optional()
-        .describe("Column page size; defaults to 25 when either paging parameter is supplied"),
     }),
   },
   responses: {
     200: {
-      description: "Dataset file schema metadata",
+      description: "Selected-version STAC Collection",
       content: {
         "application/json": {
-          schema: DatasetFileSchemaResponse,
+          schema: STACCollection,
         },
       },
     },
-    400: { description: "Invalid schema column paging", content: { "application/problem+json": { schema: Problem } } },
     404: { description: "Not found", content: { "application/problem+json": { schema: Problem } } },
   },
 });
 
+for (const [path, schema, description] of [
+  [
+    "/api/collections/{collectionSlug}/datasets/{datasetSlug}/metadata",
+    STACCatalog,
+    "Exact alias of the dataset STAC Catalog",
+  ],
+  [
+    "/api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}/metadata",
+    STACCollection,
+    "Exact alias of the selected-version file STAC Collection",
+  ],
+] as const) {
+  registry.registerPath({
+    method: "get",
+    path,
+    summary: description,
+    request: {
+      params: path.includes("fileSlug")
+        ? z.object({ collectionSlug: z.string(), datasetSlug: z.string(), fileSlug: z.string() })
+        : z.object({ collectionSlug: z.string(), datasetSlug: z.string() }),
+      query: path.includes("fileSlug") ? z.object({ version: z.string().optional() }) : undefined,
+    },
+    responses: {
+      200: { description, content: { "application/json": { schema } } },
+      404: { description: "Not found", content: { "application/problem+json": { schema: Problem } } },
+    },
+  });
+}
+
 registry.registerPath({
   method: "get",
   path: "/api/datasets",
-  summary: "List datasets (capped aggregate across collections)",
+  summary: "List dataset STAC catalogs across collections",
+  request: {
+    query: z.object({
+      search: z.string().optional(),
+      query: z.string().optional(),
+      tag_filters: z.string().optional(),
+      limit: z.coerce.number().int().positive().optional(),
+      offset: z.coerce.number().int().nonnegative().optional(),
+    }),
+  },
   responses: {
     200: {
-      description: "JSON array; each row may include links",
+      description: "Paginated custom wrapper of raw dataset STAC Catalogs",
       content: {
         "application/json": {
-          schema: z.array(z.object({ id: z.number(), slug: z.string(), links: LinkMap.optional() }).passthrough()),
+          schema: z.object({
+            datasets: z.array(STACCatalog),
+            total: z.number(),
+            limit: z.number(),
+            offset: z.number(),
+            links: LinkMap.optional(),
+          }),
         },
       },
     },
@@ -642,23 +606,20 @@ registry.registerPath({
 registry.registerPath({
   method: "get",
   path: "/api/datasets/{id}",
-  summary: "Dataset detail by numeric id",
+  summary: "Dataset STAC Catalog by full slug identity",
   description:
-    "Returns one dataset by numeric id using the global dataset lookup route. The live response is { links, dataset }; it is not collection-scoped and does not include a top-level collection object.",
+    "Returns raw dataset STAC for a URL-encoded collection/dataset identity. Numeric legacy IDs are invalid.",
   request: {
     params: z.object({
-      id: z
-        .number()
-        .int()
-        .openapi({ param: { description: "Numeric dataset id" } }),
+      id: z.string().openapi({ param: { description: "URL-encoded collection/dataset identity" } }),
     }),
   },
   responses: {
     200: {
-      description: "Dataset detail with links",
+      description: "Dataset STAC Catalog",
       content: {
         "application/json": {
-          schema: DatasetByIdResponse,
+          schema: STACCatalog,
         },
       },
     },
@@ -788,11 +749,11 @@ export function buildOpenApiDocument() {
       version: "1.0.0",
       description: [
         "TanStack webapp JSON routes that proxy dataset-api. Start with GET /api or GET /llms.txt, then GET /api/openapi for the full contract.",
-        "Not OGC API-Features or STAC: no /items or /features collections; dataset URLs use string slugs (not /datasets/3418).",
-        "Search and pagination: only on GET /api/collections/{slug} using search, query, tag_filters, limit, offset, omit (not ?q= on other paths).",
+        "GET /api/collections and GET /api/collections/{slug} return authored STAC Catalog documents; this is not an OGC API-Features or STAC API /items surface.",
+        "Search and pagination: only on GET /api/collections/{slug}/datasets using search, query, tag_filters, limit, offset, omit (not ?q= on other paths).",
         "Collection dataset listing defaults to limit=50 when omitted (breaking vs older unbounded responses).",
-        "GET /api/datasets returns at most 200 rows aggregated across collections.",
-        "GET /api/datasets/{id} returns one dataset by numeric id as { links, dataset }, not a collection-scoped detail response.",
+        "GET /api/datasets returns a custom paginated wrapper of raw dataset STAC Catalogs; it is not a STAC Item Search FeatureCollection.",
+        "GET /api/datasets/{id} accepts a URL-encoded collection/dataset identity and returns the raw dataset STAC Catalog; numeric legacy IDs are invalid.",
         "Unknown GET paths under /api respond with 404 and application/problem+json including links to /api, /api/openapi, and /llms.txt.",
       ].join(" "),
     },

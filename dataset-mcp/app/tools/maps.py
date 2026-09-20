@@ -29,6 +29,9 @@ type JSONMapping = Mapping[str, JSONValue]
 type SourceLayer = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
 ]
+type CatalogIdentity = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)
+]
 
 _DECIMAL_INTEGER = re.compile(r"^[0-9]+$")
 _OCTAL_INTEGER = re.compile(r"^0[0-7]+$")
@@ -142,10 +145,11 @@ class CatalogMapSourceInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["catalog"] = "catalog"
-    collection_id: int = Field(gt=0)
-    dataset_id: int = Field(gt=0)
-    file_id: int = Field(gt=0)
-    file_source_id: int = Field(gt=0)
+    collection_slug: CatalogIdentity
+    dataset_slug: CatalogIdentity
+    file_slug: CatalogIdentity
+    version: CatalogIdentity
+    asset_key: CatalogIdentity
 
 
 class PmtilesMapSourceInput(BaseModel):
@@ -233,7 +237,7 @@ class MapDefinitionInput(BaseModel):
 
 class CatalogMapResolver(Protocol):
     def resolve_map_source(
-        self, collection_id: int, dataset_id: int, file_id: int, file_source_id: int
+        self, collection: str, dataset: str, file: str, version: str, asset_key: str
     ) -> Awaitable[JSONMapping]: ...
 
 
@@ -331,10 +335,11 @@ async def _map_from_definition(
             continue
         if isinstance(layer.source, CatalogMapSourceInput):
             resolved = await catalog.resolve_map_source(
-                layer.source.collection_id,
-                layer.source.dataset_id,
-                layer.source.file_id,
-                layer.source.file_source_id,
+                layer.source.collection_slug,
+                layer.source.dataset_slug,
+                layer.source.file_slug,
+                layer.source.version,
+                layer.source.asset_key,
             )
             source: JSONMapping = PmtilesMapSourceInput.model_validate(resolved).model_dump(
                 mode="json", exclude_none=True
