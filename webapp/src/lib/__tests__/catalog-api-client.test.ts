@@ -147,7 +147,9 @@ describe("SQLite catalog file adapter", () => {
       tags: { categories: ["Infrastructure"], inventory_name: "stations" },
     });
     expect(result.file).toMatchObject({ name: "Station layer from STAC", description: "Authoritative file description" });
-    expect(result.file.source_dates).toEqual({ issued: "2024-06-25", provenance: { issued: "inventory" } });
+    expect(result.file.source_dates_by_version).toEqual({
+      "v1.0.0": { issued: "2024-06-25", provenance: { issued: "inventory" } },
+    });
     expect(result.file.formats?.[0]?.sources[0]?.source_metadata).toMatchObject({
       version: "v1.0.0",
       description: "Added refreshed station attributes",

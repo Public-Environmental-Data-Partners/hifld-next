@@ -3,6 +3,7 @@ import {
   fileSourceDateEntries,
   Route as FileDetailRoute,
 } from "../collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.index";
+import * as fileDetailModule from "../collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.index";
 
 describe("Dataset file detail source dates", () => {
   it("labels inventory dates as source dates without inventing times or requiring chronological order", () => {
@@ -11,6 +12,29 @@ describe("Dataset file detail source dates", () => {
       { label: "Source modified", value: "2020-10-21" },
     ]);
     expect(fileSourceDateEntries(undefined)).toEqual([]);
+  });
+
+  it("summarizes the earliest issue and latest source activity across versions", () => {
+    expect("fileSourceDateHistoryEntries" in fileDetailModule).toBe(true);
+    if (!("fileSourceDateHistoryEntries" in fileDetailModule)) return;
+
+    expect(
+      fileDetailModule.fileSourceDateHistoryEntries({
+        "v1.0.0": { issued: "2024-07-03", modified: "2025-03-20" },
+        "v1.1.0": { issued: "2026-04-06" },
+      }),
+    ).toEqual([
+      { label: "First issued", value: "2024-07-03" },
+      { label: "Latest source activity", value: "2026-04-06" },
+    ]);
+    expect(
+      fileDetailModule.fileSourceDateHistoryEntries({
+        "v1.0.0": { issued: "2024-06-25", modified: "2020-10-21" },
+      }),
+    ).toEqual([
+      { label: "First issued", value: "2024-06-25" },
+      { label: "Latest source activity", value: "2024-06-25" },
+    ]);
   });
 });
 
