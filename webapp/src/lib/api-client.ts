@@ -259,6 +259,7 @@ export interface DatasetFile {
   file_metadata?: SpatialDatasetFileMetadata | undefined;
   created_at: string;
   updated_at: string;
+  source_dates?: StacVersionCollection["sourceDates"];
   formats?: DatasetFormat[] | undefined;
 }
 
@@ -515,6 +516,7 @@ export function catalogFileResponse(
       source_file_path: undefined,
       created_at: value.created_at ?? "",
       updated_at: value.updated_at ?? "",
+      source_dates: value.latest_version ? versionStac.get(value.latest_version)?.sourceDates : undefined,
       formats: catalogFormats(value, versionStac),
     },
   };
