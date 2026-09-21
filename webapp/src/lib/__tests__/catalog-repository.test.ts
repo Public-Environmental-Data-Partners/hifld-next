@@ -51,12 +51,42 @@ function catalogDatabase(): string {
     INSERT INTO tags VALUES ('hifld/bridges/tag/category', 'hifld/bridges', 'category', 'Transportation');
     INSERT INTO tags VALUES ('hifld/bridges/tag/keyword/1', 'hifld/bridges', 'keyword', 'critical');
     INSERT INTO tags VALUES ('hifld/shelters/tag/category', 'hifld/shelters', 'category', 'Public safety');
+    CREATE VIRTUAL TABLE dataset_fts USING fts5(dataset_path UNINDEXED, title, description, tags, slug, tokenize='unicode61 remove_diacritics 2');
+    INSERT INTO dataset_fts SELECT dataset_path, title, description,
+      COALESCE((SELECT group_concat(tag_value, ' ') FROM tags WHERE entity_path = datasets.dataset_path), ''), dataset_slug FROM datasets;
   `);
   db.close();
   return path;
 }
 
 describe("CatalogRepository", () => {
+  it("ranks title matches above descriptions and preserves filtered search pagination", () => {
+    const path = catalogDatabase();
+    const db = new DatabaseSync(path);
+    db.exec(`
+      INSERT INTO datasets VALUES ('hifld/hospitals', 'hifld', 'hospitals', 'Hospitals', 'Facility locations', 'hospitals/catalog.json', NULL, NULL);
+      INSERT INTO datasets VALUES ('hifld/broadband', 'hifld', 'broadband', 'Broadband', 'Service for hospitals', 'broadband/catalog.json', NULL, NULL);
+      INSERT INTO dataset_fts VALUES ('hifld/hospitals', 'Hospitals', 'Facility locations', 'health', 'hospitals');
+      INSERT INTO dataset_fts VALUES ('hifld/broadband', 'Broadband', 'Service for hospitals', 'communications', 'broadband');
+      INSERT INTO tags VALUES ('hifld/hospitals/category', 'hifld/hospitals', 'category', 'Health');
+    `);
+    db.close();
+    const repository = new CatalogRepository(path);
+    try {
+      const first = repository.listDatasets("hifld", { search: "HOSP", limit: 1, offset: 0 });
+      expect(first.total).toBe(2);
+      expect(first.items.map((item) => item.title)).toEqual(["Hospitals"]);
+      expect(repository.listDatasets("hifld", { search: "hosp", limit: 1, offset: 1 }).items.map((item) => item.title)).toEqual(["Broadband"]);
+      expect(repository.listDatasets("hifld", { search: "hosp", limit: 10, offset: 0, tagFilters: { category: "Health" } }).total).toBe(1);
+      expect(repository.listDatasets("other", { search: "hosp", limit: 10, offset: 0 }).total).toBe(0);
+      expect(repository.listDatasets("hifld", { search: '"hospital"-service', limit: 10, offset: 0 }).items.map((item) => item.title)).toEqual(["Broadband"]);
+      expect(repository.listDatasets("hifld", { search: "health", limit: 10, offset: 0 }).items.map((item) => item.title)).toEqual(["Hospitals"]);
+      expect(repository.listDatasets("hifld", { search: "!!!", limit: 10, offset: 0 }).total).toBe(0);
+      expect(repository.listDatasets("hifld", { limit: 1, offset: 0 }).items[0]?.title).toBe("Bridges");
+    } finally {
+      repository.close();
+    }
+  });
   it("orders versions by latest marker and numeric label without source-derived timestamps", () => {
     const path = catalogDatabase();
     const db = new DatabaseSync(path);

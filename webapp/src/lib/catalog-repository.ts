@@ -355,10 +355,19 @@ export class SQLiteCatalogRepository implements CatalogRepository {
     query: { search?: string; limit: number; offset: number; tagFilters?: CatalogTags },
   ): CatalogPage<CatalogDataset> {
     const search = query.search?.trim();
+    const terms = search?.match(/[\p{L}\p{N}\p{M}]+/gu) ?? [];
+    const ftsQuery = terms.map((term) => `"${term}"*`).join(" AND ");
     const match = search ? `%${search}%` : null;
+    const searchJoin = ftsQuery ? " JOIN dataset_fts ON dataset_fts.dataset_path = d.dataset_path" : "";
+    const order = ftsQuery
+      ? "bm25(dataset_fts, 0.0, 10.0, 1.0, 5.0, 10.0), d.title, d.dataset_path"
+      : "d.title, d.dataset_path";
     const predicates = ["c.collection_slug = ?"];
     const parameters: Array<string> = [collectionSlug];
-    if (match) {
+    if (ftsQuery) {
+      predicates.push("dataset_fts MATCH ?");
+      parameters.push(ftsQuery);
+    } else if (match) {
       predicates.push(
         "(d.dataset_slug LIKE ? OR d.title LIKE ? OR d.description LIKE ? OR EXISTS (SELECT 1 FROM tags search_tags WHERE search_tags.entity_path = d.dataset_path AND search_tags.tag_value LIKE ?))",
       );
@@ -382,13 +391,13 @@ export class SQLiteCatalogRepository implements CatalogRepository {
     const where = predicates.join(" AND ");
     const countRow = this.#db
       .prepare(
-        `SELECT count(*) AS total FROM datasets d JOIN collections c ON c.collection_path = d.collection_path WHERE ${where}`,
+        `SELECT count(*) AS total FROM datasets d JOIN collections c ON c.collection_path = d.collection_path${searchJoin} WHERE ${where}`,
       )
       .get(...parameters);
     const total = pageSchema.parse(countRow).total;
     const items = this.#db
       .prepare(
-        `SELECT d.dataset_path, d.collection_path, d.dataset_slug, d.title, d.description, d.catalog_href, d.created_at, d.updated_at FROM datasets d JOIN collections c ON c.collection_path = d.collection_path WHERE ${where} ORDER BY d.title, d.dataset_path LIMIT ? OFFSET ?`,
+        `SELECT d.dataset_path, d.collection_path, d.dataset_slug, d.title, d.description, d.catalog_href, d.created_at, d.updated_at FROM datasets d JOIN collections c ON c.collection_path = d.collection_path${searchJoin} WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`,
       )
       .all(...parameters, query.limit, query.offset)
       .map((row) => this.datasetWithTags(datasetSchema.parse(row)));

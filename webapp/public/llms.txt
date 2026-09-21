@@ -36,7 +36,7 @@ search and tag filters.
 
 Supported query parameters on these listing routes:
 
-- `search` or `query` - text filter (do not use `q=` on made-up paths like `.../items`)
+- `search` or `query` - relevance-ranked full-text search; all words must match token prefixes, with title/slug and tags weighted above description (do not use `q=` on made-up paths like `.../items`)
 - `tag_filters` - use **[GET /api/collections/{slug}/datasets/tags](/api/collections/hifld/datasets/tags)** to discover values
 - `limit`, `offset` - pagination (`limit` defaults to 50 when omitted)
 - `omit` - e.g. `omit=description` to shrink rows
