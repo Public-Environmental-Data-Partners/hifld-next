@@ -469,10 +469,15 @@ export class SQLiteCatalogRepository implements CatalogRepository {
   listVersions(collectionSlug: string, datasetSlug: string, fileSlug: string): CatalogVersion[] {
     return this.#db
       .prepare(
-        "SELECT v.version_path, v.version_label, v.collection_href, v.spatial_status, v.crs84_bbox_json, v.geometry_type, v.feature_count, v.is_latest FROM versions v JOIN files f ON f.file_path = v.file_path JOIN datasets d ON d.dataset_path = f.dataset_path JOIN collections c ON c.collection_path = d.collection_path WHERE c.collection_slug = ? AND d.dataset_slug = ? AND f.file_slug = ? ORDER BY v.created_at DESC, v.version_label DESC",
+        "SELECT v.version_path, v.version_label, v.collection_href, v.spatial_status, v.crs84_bbox_json, v.geometry_type, v.feature_count, v.is_latest FROM versions v JOIN files f ON f.file_path = v.file_path JOIN datasets d ON d.dataset_path = f.dataset_path JOIN collections c ON c.collection_path = d.collection_path WHERE c.collection_slug = ? AND d.dataset_slug = ? AND f.file_slug = ?",
       )
       .all(collectionSlug, datasetSlug, fileSlug)
-      .map((row) => versionSchema.parse(row));
+      .map((row) => versionSchema.parse(row))
+      .sort(
+        (left, right) =>
+          right.is_latest - left.is_latest ||
+          right.version_label.localeCompare(left.version_label, "en", { numeric: true }),
+      );
   }
 
   getFileVersion(

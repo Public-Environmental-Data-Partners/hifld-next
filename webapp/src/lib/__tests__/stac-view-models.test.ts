@@ -33,6 +33,11 @@ describe("STAC UI view models", () => {
       assets: {},
       "hifld:feature_count": 5,
       "hifld:geometry_type": "Point",
+      "hifld:source_dates": {
+        issued: "2024-06-25",
+        modified: "2020-10-21",
+        provenance: { issued: "inventory", modified: "inventory" },
+      },
       "hifld:quality": {
         passed: false,
         invalid_geometry_count: 2,
@@ -73,5 +78,10 @@ describe("STAC UI view models", () => {
       length: null,
     });
     expect(collection.quality.columns_hash).toBeNull();
+    expect(collection.sourceDates).toEqual({
+      issued: "2024-06-25",
+      modified: "2020-10-21",
+      provenance: { issued: "inventory", modified: "inventory" },
+    });
   });
 });

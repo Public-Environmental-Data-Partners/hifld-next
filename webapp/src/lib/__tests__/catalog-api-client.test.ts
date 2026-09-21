@@ -109,6 +109,7 @@ describe("SQLite catalog file adapter", () => {
       },
       "hifld:feature_count": 3,
       "hifld:geometry_type": "Point",
+      "hifld:source_dates": { issued: "2024-06-25", provenance: { issued: "inventory" } },
       "hifld:source_version_description": "Added refreshed station attributes",
       "hifld:source_version_bounds": [100, 200, 300, 400],
       "hifld:quality": {
@@ -146,6 +147,7 @@ describe("SQLite catalog file adapter", () => {
       tags: { categories: ["Infrastructure"], inventory_name: "stations" },
     });
     expect(result.file).toMatchObject({ name: "Station layer from STAC", description: "Authoritative file description" });
+    expect(result.file.source_dates).toEqual({ issued: "2024-06-25", provenance: { issued: "inventory" } });
     expect(result.file.formats?.[0]?.sources[0]?.source_metadata).toMatchObject({
       version: "v1.0.0",
       description: "Added refreshed station attributes",

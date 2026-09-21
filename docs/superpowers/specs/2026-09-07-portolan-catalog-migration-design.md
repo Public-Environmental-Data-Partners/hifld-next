@@ -358,15 +358,17 @@ The generator promotes current sidecar values as follows:
 | `publisher`, `agency`, `office` | Normalized Collection `providers` |
 | `source_url` | Collection `via` link and source-asset `href` when directly downloadable |
 | Dataset/catalog license file | Collection `license` and explicit `license` link |
-| `date_issued`, `date_modified` | Source link/asset `published`, `updated` timestamps |
+| `date_issued`, `date_modified` | Version Collection `hifld:source_dates.issued` and `.modified`, with `metadata_resolved_from` provenance |
+| Authored `temporal_start`, `temporal_end` | Version Collection `extent.temporal.interval` |
 | Quality `feature_count` | `table:row_count` and SQLite quality summary |
 | Native bounds plus source CRS | Transformed CRS84 Collection `extent.spatial.bbox` |
 | Data-dictionary column name, type, description | `table:columns` |
 | Detailed column statistics and HIFLD quality findings | Metadata assets and SQLite |
 
-Date-only source values are normalized deterministically to RFC 3339 midnight
-UTC for STAC date-time fields while retaining only their original day-level
-precision in generated human-readable documentation. `tags.inventory_name` is
+Date-only source values retain their original day-level precision; they are not
+converted into invented midnight timestamps. Unknown data coverage is
+`[[null, null]]`, and publication rejects a backwards authored coverage
+interval. `tags.inventory_name` is
 not written into STAC when it duplicates the dataset slug; SQLite and the
 compatibility API derive it from that slug so existing responses and filters do
 not change. Other fields with no consumer or interoperable meaning are dropped
@@ -503,12 +505,14 @@ are normalized into provider objects instead of being copied as parallel custom
 fields. Where an organizational subdivision is useful, it is retained in the
 provider name or description.
 
-Legacy `date_issued` and `date_modified` describe the upstream source, not the
-HIFLD catalog publication. When present, `date_issued` becomes the Timestamps
-extension's `published` field and `date_modified` becomes the STAC common
-`updated` field on the `via` link or `source` asset. Portolan's top-level
-`updated` remains the time HIFLD last synchronized the mirror. Legacy
-`metadata_sources`, `metadata_resolved_from`, `manifest_keys`, `manifest_role`,
+Inventory `date_issued` and `date_modified` are reported source metadata, not
+HIFLD catalog lifecycle dates or data temporal coverage. They remain unchanged
+in the version Collection's `hifld:source_dates` object, with their resolved
+provenance. They are not placed on a `via` link or source asset unless separate
+evidence establishes that the date applies to that linked resource. A top-level
+`updated` may be supplied only from an actual HIFLD mirror synchronization
+timestamp, not these inventory fields. Other migration bookkeeping such as
+`metadata_sources`, `manifest_keys`, `manifest_role`,
 `schema_version`, and `inventory_match_type` are migration or pipeline
 bookkeeping and are not published as catalog metadata.
 

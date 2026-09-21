@@ -57,6 +57,26 @@ function catalogDatabase(): string {
 }
 
 describe("CatalogRepository", () => {
+  it("orders versions by latest marker and numeric label without source-derived timestamps", () => {
+    const path = catalogDatabase();
+    const db = new DatabaseSync(path);
+    db.exec(`
+      INSERT INTO versions (version_path, file_path, version_label, collection_href, spatial_status, feature_count, is_latest)
+        VALUES ('hifld/stations/stations/v1.9.0', 'hifld/stations/stations', 'v1.9.0', 'v1.9.0/collection.json', 'spatial', 4, 0);
+      INSERT INTO versions (version_path, file_path, version_label, collection_href, spatial_status, feature_count, is_latest)
+        VALUES ('hifld/stations/stations/v1.10.0', 'hifld/stations/stations', 'v1.10.0', 'v1.10.0/collection.json', 'spatial', 5, 0);
+    `);
+    db.close();
+
+    const repository = new CatalogRepository(path);
+    expect(repository.listVersions("hifld", "stations", "stations").map((version) => version.version_label)).toEqual([
+      "v1.0.0",
+      "v1.10.0",
+      "v1.9.0",
+    ]);
+    repository.close();
+  });
+
   it("pages published STAC version identities in stable path order", () => {
     const path = catalogDatabase();
     const db = new DatabaseSync(path);

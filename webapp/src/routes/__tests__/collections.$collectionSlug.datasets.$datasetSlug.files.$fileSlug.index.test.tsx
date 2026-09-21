@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
-  fileTimestampEntries,
+  fileSourceDateEntries,
   Route as FileDetailRoute,
 } from "../collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.index";
 
-describe("Dataset file detail timestamps", () => {
-  it("omits missing or invalid timestamps", () => {
-    expect(fileTimestampEntries(undefined, "not-a-date")).toEqual([]);
+describe("Dataset file detail source dates", () => {
+  it("labels inventory dates as source dates without inventing times or requiring chronological order", () => {
+    expect(fileSourceDateEntries({ issued: "2024-06-25", modified: "2020-10-21" })).toEqual([
+      { label: "Source issued", value: "2024-06-25" },
+      { label: "Source modified", value: "2020-10-21" },
+    ]);
+    expect(fileSourceDateEntries(undefined)).toEqual([]);
   });
 });
 

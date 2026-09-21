@@ -71,6 +71,12 @@ const assetSchema = z
   })
   .catchall(z.json());
 
+const sourceDatesSchema = z.object({
+  issued: z.string().min(1).optional(),
+  modified: z.string().min(1).optional(),
+  provenance: z.object({ issued: z.string().min(1).optional(), modified: z.string().min(1).optional() }).optional(),
+});
+
 const versionCollectionSchema = z
   .object({
     stac_version: z.string().min(1),
@@ -98,6 +104,7 @@ const versionCollectionSchema = z
     "hifld:native_bbox": z.array(z.number()).nullable().optional(),
     "hifld:source_version_description": z.string().nullable().optional(),
     "hifld:source_version_bounds": boundsSchema.nullable().optional(),
+    "hifld:source_dates": sourceDatesSchema.optional(),
     "hifld:quality": qualitySchema,
   })
   .catchall(z.json());
@@ -137,6 +144,7 @@ export function parseStacVersionCollection(input: z.input<typeof versionCollecti
     bounds: bounds.success ? bounds.data : undefined,
     sourceVersionDescription: value["hifld:source_version_description"],
     sourceVersionBounds: value["hifld:source_version_bounds"],
+    sourceDates: value["hifld:source_dates"],
     quality: value["hifld:quality"],
   };
 }

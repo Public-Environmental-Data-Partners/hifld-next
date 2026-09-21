@@ -22,7 +22,6 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { Separator } from "@/components/ui/separator";
 import type { DatasetFile } from "@/lib/api-client";
 import { getCollectionBySlug, getDatasetBySlug, getDatasetFileBySlug } from "@/lib/api-client";
-import { formatOptionalDate } from "@/lib/date";
 import { buildDatasetJsonLd, datasetKeywords, pageTitle, plainTextForSeo, seoDescription } from "@/lib/seo";
 
 type FileFormat = NonNullable<DatasetFile["formats"]>[number];
@@ -37,13 +36,12 @@ interface SelectedSourcesByFormat {
   [formatType: string]: SelectedSource;
 }
 
-export function fileTimestampEntries(
-  createdAt: string | null | undefined,
-  updatedAt: string | null | undefined,
+export function fileSourceDateEntries(
+  sourceDates: DatasetFile["source_dates"],
 ): Array<{ label: string; value: string }> {
   const entries = [
-    { label: "Created", value: formatOptionalDate(createdAt) },
-    { label: "Updated", value: formatOptionalDate(updatedAt) },
+    { label: "Source issued", value: sourceDates?.issued },
+    { label: "Source modified", value: sourceDates?.modified },
   ];
   return entries.flatMap((entry) => (entry.value ? [{ label: entry.label, value: entry.value }] : []));
 }
@@ -147,7 +145,6 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
       metadataUrl,
       keywords: datasetKeywords(dataset?.tags),
       isPartOf: dataset?.name ? { type: "Dataset", name: dataset.name } : undefined,
-      dateModified: file?.updated_at,
     });
 
     return {
@@ -438,7 +435,7 @@ function FileDetailPage() {
         <Separator />
 
         <div className="text-xs text-muted-foreground space-y-1">
-          {fileTimestampEntries(file.created_at, file.updated_at).map(({ label, value }) => (
+          {fileSourceDateEntries(file.source_dates).map(({ label, value }) => (
             <p key={label}>
               {label}: {value}
             </p>
