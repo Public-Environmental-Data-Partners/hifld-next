@@ -35,6 +35,8 @@ Collections listing. \`/features\` serves OGC data features, not STAC Items.
 
 ## Typical flow
 
+Dataset text search matches all words as token prefixes and ranks results by relevance, weighting title/slug and tags above descriptions. Filtering and pagination apply to the same ranked result set.
+
 1. \`GET /api/collections\` — open the root static STAC Catalog and follow child links.
 2. \`GET /api/collections/{slug}/datasets\` — search datasets in one collection with \`search\` or \`query\`, \`tag_filters\`, \`limit\`, \`offset\`, \`omit\`, and \`include_urls\`. Use \`GET /api/datasets\` for the same paginated shape aggregated across all collections, or \`GET /api/collections/{slug}\` for the collection's raw STAC Catalog.
 3. \`GET /api/collections/{collectionSlug}/datasets/{datasetSlug}\` — open dataset detail by collection and dataset slug.
