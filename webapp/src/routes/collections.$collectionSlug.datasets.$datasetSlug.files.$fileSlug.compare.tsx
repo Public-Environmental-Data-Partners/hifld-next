@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
+  type DatasetFile,
   type DatasetFormat,
   type DatasetSource,
   getCollectionBySlug,
@@ -120,6 +121,17 @@ export function comparisonSourcesForVersions(
 
 function sourceVersionKey(source: DatasetSource): string {
   return String(source.version ?? "1");
+}
+
+export function versionSourceDateEntries(
+  sourceDatesByVersion: DatasetFile["source_dates_by_version"],
+  version: string | number | undefined,
+): Array<{ label: string; value: string }> {
+  const dates = sourceDatesByVersion?.[String(version ?? "1")];
+  return [
+    { label: "Source issued", value: dates?.issued },
+    { label: "Source modified", value: dates?.modified },
+  ].flatMap((entry) => (entry.value ? [{ label: entry.label, value: entry.value }] : []));
 }
 
 const compareFileVersionsInputSchema = z
@@ -317,6 +329,13 @@ function FileComparePage() {
                   ))}
                 </SelectContent>
               </Select>
+              {versionSourceDateEntries(file.source_dates_by_version, selectedSourceA.version).map(
+                ({ label, value }) => (
+                  <div key={label} className="text-xs text-muted-foreground">
+                    {label}: {value}
+                  </div>
+                ),
+              )}
             </div>
 
             <div className="min-w-0 space-y-2">
@@ -333,6 +352,13 @@ function FileComparePage() {
                   ))}
                 </SelectContent>
               </Select>
+              {versionSourceDateEntries(file.source_dates_by_version, selectedSourceB.version).map(
+                ({ label, value }) => (
+                  <div key={label} className="text-xs text-muted-foreground">
+                    {label}: {value}
+                  </div>
+                ),
+              )}
             </div>
           </div>
         </div>

@@ -259,8 +259,14 @@ export interface DatasetFile {
   file_metadata?: SpatialDatasetFileMetadata | undefined;
   created_at: string;
   updated_at: string;
-  source_dates?: StacVersionCollection["sourceDates"];
+  source_dates_by_version?: SourceDatesByVersion | undefined;
   formats?: DatasetFormat[] | undefined;
+}
+
+export type SourceDates = NonNullable<StacVersionCollection["sourceDates"]>;
+
+export interface SourceDatesByVersion {
+  [version: string]: SourceDates | undefined;
 }
 
 export interface DatasetWithUrls extends Dataset {
@@ -493,6 +499,10 @@ export function catalogFileResponse(
   fileStac?: StacCatalog,
   versionStac: ReadonlyMap<string, StacVersionCollection> = new Map(),
 ): DatasetFileResponse {
+  const sourceDatesByVersion: SourceDatesByVersion = {};
+  for (const [version, stac] of versionStac) {
+    if (stac.sourceDates) sourceDatesByVersion[version] = stac.sourceDates;
+  }
   const dataset: Dataset = {
     id: `${value.collection_slug}/${value.dataset_slug}`,
     collection_id: value.collection_slug,
@@ -516,7 +526,7 @@ export function catalogFileResponse(
       source_file_path: undefined,
       created_at: value.created_at ?? "",
       updated_at: value.updated_at ?? "",
-      source_dates: value.latest_version ? versionStac.get(value.latest_version)?.sourceDates : undefined,
+      ...(Object.keys(sourceDatesByVersion).length > 0 ? { source_dates_by_version: sourceDatesByVersion } : {}),
       formats: catalogFormats(value, versionStac),
     },
   };

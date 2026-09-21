@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { PageLoader } from "@/components/ui/page-loader";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Separator } from "@/components/ui/separator";
-import type { DatasetFile } from "@/lib/api-client";
+import type { DatasetFile, SourceDates, SourceDatesByVersion } from "@/lib/api-client";
 import { getCollectionBySlug, getDatasetBySlug, getDatasetFileBySlug } from "@/lib/api-client";
 import { buildDatasetJsonLd, datasetKeywords, pageTitle, plainTextForSeo, seoDescription } from "@/lib/seo";
 
@@ -36,14 +36,40 @@ interface SelectedSourcesByFormat {
   [formatType: string]: SelectedSource;
 }
 
-export function fileSourceDateEntries(
-  sourceDates: DatasetFile["source_dates"],
-): Array<{ label: string; value: string }> {
+export function fileSourceDateEntries(sourceDates: SourceDates | undefined): Array<{ label: string; value: string }> {
   const entries = [
     { label: "Source issued", value: sourceDates?.issued },
     { label: "Source modified", value: sourceDates?.modified },
   ];
   return entries.flatMap((entry) => (entry.value ? [{ label: entry.label, value: entry.value }] : []));
+}
+
+function datedValue(value: string | undefined): { value: string; timestamp: number } | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? null : { value, timestamp };
+}
+
+export function fileSourceDateHistoryEntries(
+  sourceDatesByVersion: SourceDatesByVersion | undefined,
+): Array<{ label: string; value: string }> {
+  const versions = Object.values(sourceDatesByVersion ?? {}).flatMap((dates) => (dates ? [dates] : []));
+  const issued = versions.flatMap((dates) => {
+    const value = datedValue(dates.issued);
+    return value ? [value] : [];
+  });
+  const activity = versions.flatMap((dates) =>
+    [dates.issued, dates.modified].flatMap((candidate) => {
+      const value = datedValue(candidate);
+      return value ? [value] : [];
+    }),
+  );
+  const firstIssued = issued.sort((left, right) => left.timestamp - right.timestamp)[0]?.value;
+  const latestActivity = activity.sort((left, right) => right.timestamp - left.timestamp)[0]?.value;
+  return [
+    { label: "First issued", value: firstIssued },
+    { label: "Latest source activity", value: latestActivity },
+  ].flatMap((entry) => (entry.value ? [{ label: entry.label, value: entry.value }] : []));
 }
 
 function latestSourcesByLocation(sources: FileSource[]): Map<string, { source: FileSource; version: string | number }> {
@@ -435,7 +461,7 @@ function FileDetailPage() {
         <Separator />
 
         <div className="text-xs text-muted-foreground space-y-1">
-          {fileSourceDateEntries(file.source_dates).map(({ label, value }) => (
+          {fileSourceDateHistoryEntries(file.source_dates_by_version).map(({ label, value }) => (
             <p key={label}>
               {label}: {value}
             </p>

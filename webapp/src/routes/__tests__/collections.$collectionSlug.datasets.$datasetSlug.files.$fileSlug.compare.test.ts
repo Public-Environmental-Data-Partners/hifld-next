@@ -5,6 +5,7 @@ import {
   comparisonSourcesForVersions,
   pmtilesDescriptorForVersion,
 } from "../collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.compare";
+import * as compareModule from "../collections.$collectionSlug.datasets.$datasetSlug.files.$fileSlug.compare";
 
 function source(id: number, version: string): DatasetSource {
   return {
@@ -48,6 +49,23 @@ function format(formatType: DatasetFormat["format"]["format_type"], sources: Dat
 }
 
 describe("file compare route helpers", () => {
+  it("returns only the selected version's source dates", () => {
+    expect("versionSourceDateEntries" in compareModule).toBe(true);
+    if (!("versionSourceDateEntries" in compareModule)) return;
+
+    const dates = {
+      "v1.0.0": { issued: "2024-07-03", modified: "2025-03-20" },
+      "v1.1.0": { issued: "2026-04-06" },
+    };
+    expect(compareModule.versionSourceDateEntries(dates, "v1.0.0")).toEqual([
+      { label: "Source issued", value: "2024-07-03" },
+      { label: "Source modified", value: "2025-03-20" },
+    ]);
+    expect(compareModule.versionSourceDateEntries(dates, "v1.1.0")).toEqual([
+      { label: "Source issued", value: "2026-04-06" },
+    ]);
+  });
+
   it("validates requested versions against the route's advertised source options", () => {
     const sources = [source(100, "v1.0.0"), source(101, "v1.1.0")];
 
