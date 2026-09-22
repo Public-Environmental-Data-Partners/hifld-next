@@ -405,7 +405,9 @@ describe("useMapInitialization helpers", () => {
           { fields: { ignored: "String" } },
         ],
       }),
-    ).toEqual([{ id: "test-layer", fields: ["name", "id"], numericFields: [{ name: "id" }] }]);
+    ).toEqual([{ id: "test-layer", fields: ["name", "id"], numericFields: [{ name: "id" }], scalarFields: [
+      { name: "name", type: "string", values: [] }, { name: "id", type: "number", values: [] },
+    ] }]);
   });
 
   it("builds a geographic selection box polygon", () => {

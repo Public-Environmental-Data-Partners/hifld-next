@@ -1,5 +1,6 @@
 import type maplibregl from "maplibre-gl";
 import { useCallback, useMemo, useRef } from "react";
+import { colorMode } from "@/components/viewer/layerColorStyle";
 import type { LayerStyle, LayerStylesById, VectorLayerInfo } from "@/components/viewer/types";
 import { syncBasemapVisibility } from "@/components/viewer/useMapInitialization";
 import { DEFAULT_STYLE } from "@/components/viewer/utils";
@@ -96,6 +97,7 @@ function applyStyleUpdate(style: LayerStyle, update: LayerStyleUpdate): LayerSty
     ...style,
     ...(update.colorProperty === undefined ? {} : { colorProperty: update.colorProperty }),
     ...(update.colorScheme === undefined ? {} : { colorScheme: update.colorScheme }),
+    ...(update.colorMode === undefined ? {} : { colorMode: update.colorMode }),
     ...(update.breaks === undefined ? {} : { breaksText: update.breaks.join(", ") }),
     ...(update.breakMode === undefined ? {} : { breakMode: update.breakMode }),
     ...(update.opacity === undefined ? {} : { opacity: update.opacity }),
@@ -202,6 +204,7 @@ export function useMapWorkspaceCommands({
   loadedLayers,
   setLoadedLayers,
   vectorLayers,
+  layerStyles,
   setLayerStyles,
   selectedFeatures,
   clearSelection,
@@ -212,10 +215,12 @@ export function useMapWorkspaceCommands({
 }: UseMapWorkspaceCommandsOptions): MapWorkspaceCommands {
   const loadedLayersRef = useRef(loadedLayers);
   const vectorLayersRef = useRef(vectorLayers);
+  const layerStylesRef = useRef(layerStyles);
   const selectedFeaturesRef = useRef(selectedFeatures);
   const pendingLayerIdsRef = useRef<Set<string>>(new Set());
   loadedLayersRef.current = loadedLayers;
   vectorLayersRef.current = vectorLayers;
+  layerStylesRef.current = layerStyles;
   selectedFeaturesRef.current = selectedFeatures;
 
   const addDatasetLayer = useCallback(
@@ -274,11 +279,25 @@ export function useMapWorkspaceCommands({
     (styleLayerId: string, update: LayerStyleUpdate): void => {
       const target = vectorLayersRef.current.find((layer) => layer.id === styleLayerId);
       if (!target) throw new Error(`style layer ${styleLayerId} does not exist`);
-      assertValidLayerStyleUpdate(target, update);
-      setLayerStyles((previous) => ({
-        ...previous,
-        [styleLayerId]: applyStyleUpdate(previous[styleLayerId] ?? { ...DEFAULT_STYLE }, update),
-      }));
+      const current = layerStylesRef.current[styleLayerId] ?? DEFAULT_STYLE;
+      const property = update.colorProperty === undefined ? current.colorProperty : update.colorProperty;
+      const mode =
+        update.colorMode ??
+        (update.colorProperty === undefined ? current.colorMode : undefined) ??
+        (target.numericFields.some((field) => field.name === property) ? "numeric" : "categorical");
+      const effective = { ...update, colorProperty: property, colorMode: mode };
+      assertValidLayerStyleUpdate(target, effective);
+      setLayerStyles((previous) => {
+        const style = previous[styleLayerId] ?? DEFAULT_STYLE;
+        const resetBreaks = property !== style.colorProperty || mode !== colorMode(target, style);
+        return {
+          ...previous,
+          [styleLayerId]: applyStyleUpdate(
+            resetBreaks ? { ...style, breaksText: "", breakMode: "auto" } : style,
+            effective,
+          ),
+        };
+      });
     },
     [setLayerStyles],
   );

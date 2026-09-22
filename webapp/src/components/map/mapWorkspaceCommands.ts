@@ -18,7 +18,10 @@ export interface DatasetLayerInput {
 
 export type { LayerStyleUpdate } from "@/components/viewer/types";
 
-export type StyleLayerTarget = Pick<VectorLayerInfo, "id" | "fields" | "numericFields" | "geometryType">;
+export type StyleLayerTarget = Pick<
+  VectorLayerInfo,
+  "id" | "fields" | "numericFields" | "scalarFields" | "geometryType"
+>;
 
 export interface MapCameraTarget {
   bounds?: MapBounds | undefined;
@@ -154,6 +157,7 @@ function validateStyleKeys(update: LayerStyleUpdate): void {
   const knownKeys = new Set([
     "colorProperty",
     "colorScheme",
+    "colorMode",
     "breaks",
     "breakMode",
     "opacity",
@@ -176,7 +180,9 @@ function validateStyleFields(target: StyleLayerTarget, update: LayerStyleUpdate)
   const radiusField = numericField(target, update.radiusProperty);
   const lineWidthField = numericField(target, update.lineWidthProperty);
   if (update.colorProperty !== null && update.colorProperty !== undefined && !colorField) {
-    fail(`field ${update.colorProperty} is not numeric`);
+    if (update.colorMode === "numeric") fail(`field ${update.colorProperty} is not numeric`);
+    if (!target.scalarFields?.some((field) => field.name === update.colorProperty))
+      fail(`field ${update.colorProperty} is not scalar`);
   }
   if (update.radiusProperty !== null && update.radiusProperty !== undefined && !radiusField) {
     fail(`field ${update.radiusProperty} is not numeric`);
@@ -190,13 +196,19 @@ function validateStyleFields(target: StyleLayerTarget, update: LayerStyleUpdate)
 function validateStyleBreaksAndPalette(update: LayerStyleUpdate, colorField: NumericFieldSummary | undefined): void {
   if (
     update.colorScheme !== undefined &&
-    !["blues", "greens", "oranges", "purples", "viridis", "plasma", "rdyblu", "rdyg"].includes(update.colorScheme)
+    !["blues", "greens", "oranges", "purples", "viridis", "plasma", "rdyblu", "rdyg", "tableau10", "set3"].includes(
+      update.colorScheme,
+    )
   ) {
     fail(`palette ${update.colorScheme} is invalid`);
   }
   if (update.breakMode !== undefined && update.breakMode !== "auto" && update.breakMode !== "manual") {
     fail("break mode is invalid");
   }
+  if (update.colorMode !== undefined && update.colorMode !== "numeric" && update.colorMode !== "categorical")
+    fail("color mode is invalid");
+  if (update.colorMode === "categorical" && update.breaks !== undefined)
+    fail("categorical colors do not use numeric breaks");
   if (update.breaks !== undefined) {
     validateBreaks(update.breaks, colorField);
   }

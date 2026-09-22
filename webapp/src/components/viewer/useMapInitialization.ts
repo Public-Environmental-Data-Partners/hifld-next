@@ -12,6 +12,7 @@ import { PMTiles, Protocol } from "pmtiles";
 import { z } from "zod";
 import type { LoadedMapLayer, QueryMvtLayer } from "@/components/map/multiLayerSources";
 import type { ColumnSchema } from "@/lib/api-client";
+import { scalarFieldSummaries } from "./categoricalFields";
 import type { HoverInfo, NumericFieldSummary, VectorLayerInfo } from "./types";
 import { DEFAULT_STYLE } from "./utils";
 
@@ -240,6 +241,7 @@ export function getVectorLayers(metadata: PMTilesMetadata): VectorLayerInfo[] {
         id: layer.id,
         fields: Object.keys(layer.fields ?? {}),
         numericFields: numericFieldSummaries({ fields: layer.fields, metadataColumns: undefined }),
+        scalarFields: scalarFieldSummaries(layer.fields, undefined),
       });
     }
   }
@@ -263,6 +265,10 @@ export function getVectorLayersForSource(metadata: PMTilesMetadata, source: Load
       metadataColumns: source.sourceMetadata?.columns,
     }),
     geometryType: source.sourceMetadata?.geometry_type,
+    scalarFields: scalarFieldSummaries(
+      metadata.vector_layers?.find((entry) => entry.id === layer.sourceLayerId || entry.id === layer.id)?.fields,
+      source.sourceMetadata?.columns,
+    ),
   }));
 }
 
@@ -275,6 +281,10 @@ export function getVectorLayersForQuerySource(source: QueryMvtLayer): VectorLaye
       mapSourceId: source.mapSourceId,
       mapLayerBaseId: `${source.mapSourceId}-${source.sourceLayerId}`,
       fields: source.scalarFields.map((field) => field.name),
+      scalarFields: scalarFieldSummaries(
+        Object.fromEntries(source.scalarFields.map((field) => [field.name, field.logicalType])),
+        undefined,
+      ),
       numericFields: source.scalarFields
         .filter((field) => isNumericFieldType(field.logicalType) || field.min !== undefined || field.max !== undefined)
         .map((field) => ({ name: field.name, min: field.min, max: field.max })),

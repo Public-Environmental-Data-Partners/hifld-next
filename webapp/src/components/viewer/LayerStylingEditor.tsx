@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
+import { colorMode } from "./layerColorStyle";
 import type { LayerStyle, NumericFieldSummary, VectorLayerInfo } from "./types";
 import { automaticBreaksForNumericField, colorSchemes, DEFAULT_BREAK_COUNT } from "./utils";
 
@@ -224,14 +225,27 @@ function ColorOpacitySection({
   onStyleChange,
 }: ColorOpacitySectionProps) {
   const numericFields = activeLayer.numericFields;
+  const mode = colorMode(activeLayer, activeStyle);
+  const fields =
+    activeLayer.scalarFields ?? numericFields.map((field) => ({ ...field, type: "number" as const, values: [] }));
 
   const setColorProperty = (value: string) => {
     if (value === "none") {
       onStyleChange({ ...activeStyle, colorProperty: null, breaksText: "" });
       return;
     }
-    const breaks = automaticBreaksForProperty({ layer: activeLayer, property: value, getSampledBreaks });
-    onStyleChange({ ...activeStyle, colorProperty: value, breaksText: breaks.join(", "), breakMode: "auto" });
+    const nextMode = numericFields.some((field) => field.name === value) ? "numeric" : "categorical";
+    const breaks =
+      nextMode === "numeric"
+        ? automaticBreaksForProperty({ layer: activeLayer, property: value, getSampledBreaks })
+        : [];
+    onStyleChange({
+      ...activeStyle,
+      colorProperty: value,
+      colorMode: nextMode,
+      breaksText: breaks.join(", "),
+      breakMode: "auto",
+    });
   };
 
   return (
@@ -244,18 +258,53 @@ function ColorOpacitySection({
         <div className="space-y-2">
           <div className="text-xs text-muted-foreground">Color by Property</div>
           <Select value={activeStyle.colorProperty || "none"} onValueChange={setColorProperty}>
-            <SelectTrigger>
+            <SelectTrigger aria-label="Color by property">
               <SelectValue placeholder="Select property" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="none">Solid color</SelectItem>
-              <NumericFieldOptions fields={numericFields} />
+              {fields.map((field) => (
+                <SelectItem key={field.name} value={field.name}>
+                  {field.name}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
-          {numericFields.length === 0 && (
-            <div className="text-xs text-muted-foreground">No numeric fields are available for color styling.</div>
+          {fields.length === 0 && (
+            <div className="text-xs text-muted-foreground">No scalar fields are available for color styling.</div>
           )}
         </div>
+
+        {activeStyle.colorProperty && numericFields.some((field) => field.name === activeStyle.colorProperty) && (
+          <fieldset aria-label="Color mode" className="flex gap-2">
+            {(["numeric", "categorical"] as const).map((value) => (
+              <Button
+                key={value}
+                size="sm"
+                variant={mode === value ? "secondary" : "outline"}
+                aria-pressed={mode === value}
+                onClick={() => {
+                  const breaks =
+                    value === "numeric" && activeStyle.colorProperty
+                      ? automaticBreaksForProperty({
+                          layer: activeLayer,
+                          property: activeStyle.colorProperty,
+                          getSampledBreaks,
+                        })
+                      : [];
+                  onStyleChange({ ...activeStyle, colorMode: value, breaksText: breaks.join(", "), breakMode: "auto" });
+                }}
+              >
+                {value === "numeric" ? "Graduated" : "Categorical"}
+              </Button>
+            ))}
+          </fieldset>
+        )}
+        {activeStyle.colorProperty && mode === "categorical" && (
+          <p className="text-xs text-muted-foreground">
+            Categories receive stable colors. The map legend lists discovered values.
+          </p>
+        )}
 
         <div className="space-y-2">
           <div className="text-xs text-muted-foreground">Color Scheme</div>
@@ -263,7 +312,7 @@ function ColorOpacitySection({
             value={activeStyle.colorScheme}
             onValueChange={(value) => onStyleChange({ ...activeStyle, colorScheme: value })}
           >
-            <SelectTrigger>
+            <SelectTrigger aria-label="Color scheme">
               <SelectValue placeholder="Select scheme" />
             </SelectTrigger>
             <SelectContent>
@@ -276,14 +325,16 @@ function ColorOpacitySection({
           </Select>
         </div>
 
-        <BreakpointsEditor
-          activeLayer={activeLayer}
-          activeStyle={activeStyle}
-          activeBreaks={activeBreaks}
-          activeColors={activeColors}
-          getSampledBreaks={getSampledBreaks}
-          onStyleChange={onStyleChange}
-        />
+        {mode === "numeric" && (
+          <BreakpointsEditor
+            activeLayer={activeLayer}
+            activeStyle={activeStyle}
+            activeBreaks={activeBreaks}
+            activeColors={activeColors}
+            getSampledBreaks={getSampledBreaks}
+            onStyleChange={onStyleChange}
+          />
+        )}
 
         <div className="space-y-2">
           <div className="text-xs text-muted-foreground">Opacity</div>

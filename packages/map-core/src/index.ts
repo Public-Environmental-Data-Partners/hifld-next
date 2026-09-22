@@ -32,6 +32,22 @@ export {
   getLegendItems,
   getValueRange,
 } from "./style";
+export {
+  CATEGORY_CAP,
+  categoricalStyle,
+  chooseLayerPalette,
+  extendCategoryRegistry,
+  normalizeCategory,
+  NO_DATA_COLOR,
+  OTHER_VALUES_COLOR,
+  solidPaletteColor,
+} from "./category";
+export type {
+  CategoricalStyle,
+  CategoryFieldType,
+  CategoryRegistry,
+  CategoryValue,
+} from "./category";
 export type {
   ColorScheme,
   ColorSchemeId,

@@ -59,6 +59,14 @@ Exactly 19 contextual tools are available when their route state permits it:
 - Catalog: \`list_collections\`, \`get_collection\`, \`search_datasets\`, \`get_dataset\`, \`get_dataset_file\`, \`get_dataset_file_schema\`.
 - Version comparison: \`compare_file_versions\`.
 - Map workspace: \`get_map_state\`, \`add_dataset_layer\`, \`remove_map_layer\`, \`set_layer_visibility\`, \`set_layer_style\`, \`reorder_map_layers\`, \`set_map_camera\`, \`set_basemap\`, \`get_map_selection\`, \`clear_map_selection\`.
+
+Map styling supports text/boolean categories and numeric codes via \`set_layer_style\`
+with \`color_property\` and \`color_mode: "categorical"\`. Numeric fields default to
+\`"numeric"\` graduated coloring; radius and line-width fields remain numeric-only.
+Palettes include \`tableau10\` and \`set3\` as well as the existing ramps. Category
+colors stay stable while panning; legends combine dictionary values with loaded
+features (not a complete inventory), show at most 32 named values, and flag reused
+colors. New layers choose unused palettes, then least-used; manual choices persist.
 - Bounded query: \`run_dataset_query\`, \`set_result_page\`.
 
 The current standard \`document.modelContext\` surface is preferred. Some

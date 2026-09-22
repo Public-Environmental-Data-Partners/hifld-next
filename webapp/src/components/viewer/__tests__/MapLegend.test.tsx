@@ -3,6 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import { MapLegend } from "../MapLegend";
 
 describe("MapLegend", () => {
+  it("shows category discovery and palette reuse notes", () => {
+    render(<MapLegend visible onToggle={vi.fn()} groups={[{ id: "zones", title: "Zones", items: [], notes: ["Based on loaded features", "Colors are reused"] }]} />);
+    expect(screen.getByText("Based on loaded features")).toBeInTheDocument();
+    expect(screen.getByText("Colors are reused")).toBeInTheDocument();
+  });
   it("uses the styled field as the legend heading", () => {
     render(
       <MapLegend

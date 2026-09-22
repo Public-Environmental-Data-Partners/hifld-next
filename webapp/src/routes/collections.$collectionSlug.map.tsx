@@ -49,6 +49,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FeatureHoverPopup } from "@/components/viewer/FeatureHoverPopup";
 import { LayerStylingEditor } from "@/components/viewer/LayerStylingEditor";
+import { colorMode, resolveLayerColor } from "@/components/viewer/layerColorStyle";
 import { MapControls } from "@/components/viewer/MapControls";
 import { MapLegend } from "@/components/viewer/MapLegend";
 import type {
@@ -64,7 +65,6 @@ import {
   automaticBreaksForNumericField,
   DEFAULT_BREAK_COUNT,
   getColorRamp,
-  getLegendItems,
   getSampledValues,
   parseBreaks,
 } from "@/components/viewer/utils";
@@ -183,6 +183,7 @@ function computeMissingBreakUpdates(
   for (const layer of vectorLayers) {
     const style = layerStyles[layer.id];
     if (!style?.colorProperty || style.breakMode !== "auto" || style.breaksText) continue;
+    if (colorMode(layer, style) === "categorical") continue;
     const numericField = layer.numericFields.find((field) => field.name === style.colorProperty);
     const sampledValues = sampledBreakValues(map, layer, style.colorProperty);
     const breaks = automaticBreaksForNumericField({
@@ -888,7 +889,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     handleMapSourceRecovered,
   );
 
-  useLayerStyling(mapRef, vectorLayers, layerStyles, setLayerStyles);
+  const categoryRegistries = useLayerStyling(mapRef, vectorLayers, layerStyles, setLayerStyles);
 
   const getSampledBreaks = useCallback(
     (layer: VectorLayerInfo, property: string) => sampledBreakValues(mapRef.current, layer, property),
@@ -1048,6 +1049,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
                     style: {
                       color_property: style.colorProperty,
                       color_scheme: style.colorScheme,
+                      color_mode: colorMode(vectorLayer, style),
                       breaks: parseBreaks(style.breaksText),
                       break_mode: style.breakMode,
                       opacity: style.opacity,
@@ -1198,22 +1200,19 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
       vectorLayers.flatMap((layer) => {
         const style = layerStyles[layer.id];
         if (!style) return [];
-        const breaks = parseBreaks(style.breaksText);
-        if (style.colorProperty && breaks.length === 0) {
-          return [];
-        }
-        const colors = getColorRamp(style.colorScheme, breaks.length + 1);
+        const resolved = resolveLayerColor(layer, style, categoryRegistries[layer.id]);
         const loadedLayer = loadedLayers.find((entry) => entry.id === layer.loadedLayerId);
         return [
           {
             id: layer.id,
             title: loadedLayer?.name ?? layer.sourceLayerId ?? layer.id,
             field: style.colorProperty ?? undefined,
-            items: getLegendItems(breaks, colors),
+            items: resolved.items,
+            notes: resolved.notes,
           },
         ];
       }),
-    [layerStyles, loadedLayers, vectorLayers],
+    [layerStyles, loadedLayers, vectorLayers, categoryRegistries],
   );
   const legendTitle = legendGroups.length === 1 ? legendGroups[0]?.field : undefined;
   const headerLayer = loadedLayers.length === 1 && loadedLayers[0]?.kind === "catalog_pmtiles" ? loadedLayers[0] : null;

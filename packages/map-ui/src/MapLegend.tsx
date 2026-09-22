@@ -11,6 +11,7 @@ export interface MapLegendGroup {
   title: string;
   field?: string | null | undefined;
   items: readonly MapLegendItem[];
+  notes?: readonly string[] | undefined;
   layerVisible?: boolean | undefined;
 }
 
@@ -143,6 +144,7 @@ export function MapLegend({
                 </div>
               ))}
             </div>
+            {group.notes?.map(note => <p key={note} className="text-xs text-muted-foreground">{note}</p>)}
             </section>
           ))}
         </div>

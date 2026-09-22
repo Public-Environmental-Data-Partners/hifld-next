@@ -82,7 +82,7 @@ describe("multi-layer map helpers", () => {
         version: "v1.1.0",
         geometry_type: "Point",
         columns: [
-          { name: "name", type: "string", nullable: false },
+          { name: "name", type: "string", nullable: false, possible_values: ["General", "Children"] },
           { name: "beds", type: "float", nullable: false, min: 1, max: 100 },
         ],
       },
@@ -104,6 +104,7 @@ describe("multi-layer map helpers", () => {
         mapLayerBaseId: `${loadedLayer.mapSourceId}-default`,
         fields: ["name", "beds"],
         numericFields: [{ name: "beds", min: 1, max: 100 }],
+        scalarFields: [{ name: "name", type: "string", values: ["General", "Children"] }, { name: "beds", type: "number", values: [] }],
         geometryType: "Point",
       },
     ]);
