@@ -33,7 +33,7 @@ Contract: `CategoryValue = string | number | boolean`; `CategoryFieldType = "str
 ## 4. Verification and handoff
 
 - [x] Run targeted tests, then map-core typecheck/tests and webapp check/typecheck/full tests/build.
-- [ ] Browser-check real categorical data and adding multiple layers using a temporary GCS-backed local process if needed. Stop it afterward without changing SeaweedFS configuration.
+- [ ] Complete categorical-color and multi-layer browser verification; basic GCS map loading and file selection are verified below.
 - [x] Review diff for spec coverage, type safety, bounded discovery and event cleanup; fix concrete findings.
 - [x] Hand off implementation and verification status. Production deployment is not part of this request.
 
@@ -43,3 +43,7 @@ Contract: `CategoryValue = string | number | boolean`; `CategoryFieldType = "str
 - Map-core: typecheck and 22 tests passed, including real MapLibre expression parsing/evaluation. Map-ui: typecheck and 18 tests passed.
 - Independent review identified two issues, both fixed with red/green regression tests: late-discovered categories after many repeated features, and palette-only agent updates resetting implicit-numeric manual breakpoints.
 - Visual verification remains incomplete: the temporary GCS-backed app loaded metadata and the basemap, but PMTiles requests failed in the browser with `Failed to fetch`. Both real GCS PMTiles archives were independently readable through the terminal. No claim of successful visual coloring verification is made. Temporary diagnostic UI changes were reverted and the test server stopped; persistent SeaweedFS configuration and production were not changed.
+
+### Follow-up NFHL fixes
+
+The GCS failure was traced to the viewer rebuilding a catalog asset URL without its bucket name. Catalog assets now retain their already-resolved URL. The long file selector uses a bounded popper layout instead of an expanding item-aligned menu. Regression tests reproduced both issues before fixing them. Browser verification confirmed NFHL West automatically loads and renders, and wheel scrolling reaches and selects Water Lines near the bottom of the NFHL file list. Webapp checks, typecheck, 481 tests, and build passed. Local runtime remains temporarily GCS-backed at the user's request; saved SeaweedFS configuration is unchanged.
