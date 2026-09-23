@@ -6,17 +6,20 @@ export type ColorSchemeId =
   | "viridis"
   | "plasma"
   | "rdyblu"
-  | "rdyg";
+  | "rdyg"
+  | "tableau10"
+  | "set3";
 
 export type NumericScale = "linear" | "sqrt" | "log";
 
-export type StyleExpression = readonly (string | number | boolean | StyleExpression)[];
+export type StyleExpression = readonly (string | number | boolean | null | StyleExpression)[];
 export type PaintValue = string | number | StyleExpression;
 
 export interface ColorScheme {
   id: ColorSchemeId;
   label: string;
   interpolator: (t: number) => string;
+  categoricalSwatches?: readonly string[];
 }
 
 export interface LegendItem {
@@ -58,6 +61,66 @@ export const colorSchemes: ColorScheme[] = [
   { id: "plasma", label: "Plasma", interpolator: ramp(["#0d0887", "#cc4778", "#f0f921"]) },
   { id: "rdyblu", label: "RdYlBu", interpolator: ramp(["#a50026", "#ffffbf", "#313695"]) },
   { id: "rdyg", label: "RdYlGn", interpolator: ramp(["#a50026", "#ffffbf", "#006837"]) },
+  {
+    id: "tableau10",
+    label: "Tableau 10",
+    interpolator: ramp([
+      "#4e79a7",
+      "#f28e2b",
+      "#e15759",
+      "#76b7b2",
+      "#59a14f",
+      "#edc949",
+      "#af7aa1",
+      "#ff9da7",
+      "#9c755f",
+      "#bab0ab",
+    ]),
+    categoricalSwatches: [
+      "#4e79a7",
+      "#f28e2b",
+      "#e15759",
+      "#76b7b2",
+      "#59a14f",
+      "#edc949",
+      "#af7aa1",
+      "#ff9da7",
+      "#9c755f",
+      "#bab0ab",
+    ],
+  },
+  {
+    id: "set3",
+    label: "Set 3",
+    interpolator: ramp([
+      "#8dd3c7",
+      "#ffffb3",
+      "#bebada",
+      "#fb8072",
+      "#80b1d3",
+      "#fdb462",
+      "#b3de69",
+      "#fccde5",
+      "#d9d9d9",
+      "#bc80bd",
+      "#ccebc5",
+      "#ffed6f",
+    ]),
+    categoricalSwatches: [
+      "#8dd3c7",
+      "#ffffb3",
+      "#bebada",
+      "#fb8072",
+      "#80b1d3",
+      "#fdb462",
+      "#b3de69",
+      "#fccde5",
+      "#d9d9d9",
+      "#bc80bd",
+      "#ccebc5",
+      "#ffed6f",
+    ],
+  },
 ];
 
 export function computeQuantileBreaks(values: number[], count: number): number[] {

@@ -93,6 +93,15 @@ these 19 tools; schemas remain in the browser tool registry, not this index.
 - Map workspace: `get_map_state`, `add_dataset_layer`, `remove_map_layer`,
   `set_layer_visibility`, `set_layer_style`, `reorder_map_layers`,
   `set_map_camera`, `set_basemap`, `get_map_selection`, `clear_map_selection`.
+
+Map styles accept `color_property` and `color_mode` (`numeric` or `categorical`).
+Text/boolean fields default to categories; numeric fields default to graduated
+colors but can be treated as category codes. Size fields remain numeric-only.
+`tableau10` and `set3` provide qualitative palettes alongside the existing ramps.
+Category legends use dictionary and loaded-feature values, not a complete data
+inventory; at most 32 values receive named entries, with Other values and No data
+fallbacks. Colors stay stable while panning. Added layers choose an unused palette
+or the least-used palette after exhaustion; existing manual styles are preserved.
 - Bounded queries: `run_dataset_query`, `set_result_page`.
 
 The current standard `document.modelContext` surface is preferred. Native

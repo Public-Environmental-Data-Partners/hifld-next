@@ -1,4 +1,7 @@
+import type { CategoryFieldType, CategoryValue } from "@hifld/map-core";
 import type maplibregl from "maplibre-gl";
+
+export type ScalarFieldSummary = { name: string; type: CategoryFieldType; values: CategoryValue[] };
 
 export type LayerStylesById = {
   [layerId: string]: LayerStyle | undefined;
@@ -14,6 +17,7 @@ export type VectorLayerInfo = {
   mapLayerBaseId?: string | undefined;
   fields: string[];
   numericFields: NumericFieldSummary[];
+  scalarFields?: ScalarFieldSummary[] | undefined;
   geometryType?: string | undefined;
 };
 
@@ -24,6 +28,7 @@ export type NumericFieldSummary = {
 };
 
 export type LayerStyle = {
+  colorMode?: "numeric" | "categorical" | undefined;
   colorProperty: string | null;
   colorScheme: string;
   breaksText: string;
@@ -39,6 +44,7 @@ export type LayerStyle = {
 
 /** The agent-facing style vocabulary; arbitrary MapLibre expressions are not part of it. */
 export type LayerStyleUpdate = {
+  colorMode?: LayerStyle["colorMode"];
   colorProperty?: string | null | undefined;
   colorScheme?: string | undefined;
   breaks?: readonly number[] | undefined;

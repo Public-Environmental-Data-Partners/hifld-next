@@ -1,10 +1,11 @@
 import type maplibregl from "maplibre-gl";
 import { useEffect } from "react";
+import { colorMode, type FieldRegistries, initializeLayerStyles, resolveLayerColor } from "./layerColorStyle";
 import type { LayerStyle, LayerStylesById, VectorLayerInfo } from "./types";
+import { useCategoryRegistries } from "./useCategoryRegistries";
 import {
   applyScale,
   buildColorExpression,
-  DEFAULT_STYLE,
   getColorRamp,
   getSampledValues,
   getValueRange,
@@ -53,12 +54,19 @@ function buildScaledExpression(
   ];
 }
 
-function applyLayerStyle(map: maplibregl.Map, layer: VectorLayerInfo, style: LayerStyle) {
+function applyLayerStyle(map: maplibregl.Map, layer: VectorLayerInfo, style: LayerStyle, registries?: FieldRegistries) {
+  const colorExpression = resolveLayerColor(layer, style, registries).color;
   const breaks = parseBreaks(style.breaksText);
-  const colors = getColorRamp(style.colorScheme, breaks.length + 1);
-  const outlineColors = colors.map(invertHexColor);
-  const colorExpression = buildColorExpression(style.colorProperty, breaks, colors);
-  const outlineExpression = buildColorExpression(style.colorProperty, breaks, outlineColors);
+  const outlineExpression =
+    typeof colorExpression === "string"
+      ? invertHexColor(colorExpression)
+      : colorMode(layer, style) === "categorical"
+        ? "#374151"
+        : buildColorExpression(
+            style.colorProperty,
+            breaks,
+            getColorRamp(style.colorScheme, breaks.length + 1).map(invertHexColor),
+          );
   const hoverOpacity = Math.max(0.05, style.opacity * 0.35);
   const opacityExpression: StyleExpression = [
     "case",
@@ -118,19 +126,11 @@ export function useLayerStyling(
   layerStyles: LayerStylesById,
   setLayerStyles: React.Dispatch<React.SetStateAction<LayerStylesById>>,
 ) {
+  const registries = useCategoryRegistries(mapRef, vectorLayers, layerStyles);
   // Initialize default styles for new layers
   useEffect(() => {
-    if (!mapRef.current || vectorLayers.length === 0) return;
-    setLayerStyles((prev) => {
-      const next = { ...prev };
-      for (const layer of vectorLayers) {
-        if (!next[layer.id]) {
-          next[layer.id] = { ...DEFAULT_STYLE };
-        }
-      }
-      return next;
-    });
-  }, [vectorLayers, mapRef, setLayerStyles]);
+    setLayerStyles((prev) => initializeLayerStyles(vectorLayers, prev));
+  }, [vectorLayers, setLayerStyles]);
 
   // Apply styles to map layers
   useEffect(() => {
@@ -140,8 +140,9 @@ export function useLayerStyling(
     for (const layer of vectorLayers) {
       const style = layerStyles[layer.id];
       if (style) {
-        applyLayerStyle(map, layer, style);
+        applyLayerStyle(map, layer, style, registries[layer.id]);
       }
     }
-  }, [layerStyles, vectorLayers, mapRef]);
+  }, [layerStyles, vectorLayers, mapRef, registries]);
+  return registries;
 }

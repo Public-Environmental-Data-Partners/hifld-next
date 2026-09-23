@@ -14,13 +14,25 @@ import { useWebMcpTool } from "./useWebMcpTool";
 const mapLayerIdSchema = z.string().min(1).max(200);
 const styleLayerIdSchema = z.string().min(1).max(200);
 const emptyInputSchema = z.object({}).strict();
-const palette = ["blues", "greens", "oranges", "purples", "viridis", "plasma", "rdyblu", "rdyg"] as const;
+const palette = [
+  "blues",
+  "greens",
+  "oranges",
+  "purples",
+  "viridis",
+  "plasma",
+  "rdyblu",
+  "rdyg",
+  "tableau10",
+  "set3",
+] as const;
 const scale = ["linear", "sqrt", "log"] as const;
 
 const styleFieldsSchema = z
   .object({
     color_property: z.string().trim().min(1).max(200).nullable().optional(),
     color_scheme: z.enum(palette).optional(),
+    color_mode: z.enum(["numeric", "categorical"]).optional(),
     breaks: z.array(z.number().finite()).max(12).optional(),
     break_mode: z.enum(["auto", "manual"]).optional(),
     opacity: z.number().finite().min(0).max(1).optional(),
@@ -94,6 +106,7 @@ export interface MapToolStyleSummary {
     | {
         color_property?: string | null | undefined;
         color_scheme?: string | undefined;
+        color_mode?: "numeric" | "categorical" | undefined;
         breaks?: readonly number[] | undefined;
         break_mode?: "auto" | "manual" | undefined;
         opacity?: number | undefined;
@@ -161,6 +174,7 @@ function styleData(style: MapToolStyleSummary["style"]): WebMcpJsonObject | unde
   return {
     ...(style.color_property === undefined ? {} : { color_property: style.color_property }),
     ...(style.color_scheme === undefined ? {} : { color_scheme: style.color_scheme }),
+    ...(style.color_mode === undefined ? {} : { color_mode: style.color_mode }),
     ...(style.breaks === undefined ? {} : { breaks: [...style.breaks] }),
     ...(style.break_mode === undefined ? {} : { break_mode: style.break_mode }),
     ...(style.opacity === undefined ? {} : { opacity: style.opacity }),
@@ -252,6 +266,7 @@ function styleUpdate(input: z.infer<typeof styleSchema> | z.infer<typeof styleFi
   return {
     ...(input.color_property === undefined ? {} : { colorProperty: input.color_property }),
     ...(input.color_scheme === undefined ? {} : { colorScheme: input.color_scheme }),
+    ...(input.color_mode === undefined ? {} : { colorMode: input.color_mode }),
     ...(input.breaks === undefined ? {} : { breaks: input.breaks }),
     ...(input.break_mode === undefined ? {} : { breakMode: input.break_mode }),
     ...(input.opacity === undefined ? {} : { opacity: input.opacity }),

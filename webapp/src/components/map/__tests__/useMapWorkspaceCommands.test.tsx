@@ -2,6 +2,8 @@ import { act, renderHook } from "@testing-library/react";
 import type maplibregl from "maplibre-gl";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import type { LayerStylesById } from "../../viewer/types";
+import { DEFAULT_STYLE } from "../../viewer/utils";
 import { buildQueryMvtLayer } from "../multiLayerSources";
 import { resolveCameraLayerBounds, useMapWorkspaceCommands, waitForMapMovement } from "../useMapWorkspaceCommands";
 
@@ -13,6 +15,24 @@ vi.mock("maplibre-gl", () => ({
 }));
 
 describe("useMapWorkspaceCommands", () => {
+  it("preserves manual breaks on a palette-only update to an implicit numeric style", () => {
+    const { result } = renderHook(() => {
+      const [styles, setStyles] = useState<LayerStylesById>({
+        stations: { ...DEFAULT_STYLE, colorProperty: "count", breaksText: "10, 20", breakMode: "manual" },
+      });
+      const commands = useMapWorkspaceCommands({
+        mapRef: { current: null }, loadedLayers: [], setLoadedLayers: vi.fn(),
+        vectorLayers: [{ id: "stations", fields: ["count"], numericFields: [{ name: "count", type: "Number" }] }],
+        layerStyles: styles, setLayerStyles: setStyles,
+        selectedFeatures: [], clearSelection: vi.fn(), basemapMode: "street", setBasemapMode: vi.fn(),
+        resolveDatasetLayer: async () => null,
+      });
+      return { styles, commands };
+    });
+    act(() => result.current.commands.setLayerStyle("stations", { colorScheme: "plasma" }));
+    expect(result.current.styles.stations?.breaksText).toBe("10, 20");
+    expect(result.current.styles.stations?.breakMode).toBe("manual");
+  });
   it.each([false, true])("preserves the camera with preloaded layers: %s", async (preloaded) => {
     const layer = buildQueryMvtLayer({
       queryId: "query_12345678901234567890",

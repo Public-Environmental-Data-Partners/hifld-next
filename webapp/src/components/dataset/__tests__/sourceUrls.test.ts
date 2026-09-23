@@ -32,6 +32,12 @@ function makeFileSource(baseUrl: string, path: string, fallbackUrl?: string): Da
 }
 
 describe("source URL helpers", () => {
+  it("uses the resolved catalog asset URL without dropping the GCS bucket or re-encoding the path", () => {
+    const url = "https://storage.googleapis.com/hifld-next-portolan-published/hifld/nfhl/west%20area.pmtiles";
+    const source = makeFileSource("https://storage.googleapis.com", "hifld/nfhl/west area.pmtiles", url);
+    source.asset_key = "pmtiles-west";
+    expect(buildSourceFileUrl(source)).toBe(url);
+  });
   it("builds file URLs from storage location base URL and file path", () => {
     expect(
       buildSourceFileUrl(

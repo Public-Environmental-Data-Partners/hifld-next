@@ -15,6 +15,16 @@ const layers: MapLayerSummary[] = [
 ];
 
 describe("map workspace command contracts", () => {
+  it("allows categorical colors but keeps sizes numeric-only", () => {
+    const target = { id: "zones", fields: ["zone", "code"], numericFields: [{ name: "code" }], scalarFields: [
+      { name: "zone", type: "string" as const, values: [] },
+      { name: "code", type: "number" as const, values: [] },
+    ] };
+    expect(() => assertValidLayerStyleUpdate(target, { colorProperty: "zone", colorMode: "categorical", colorScheme: "tableau10" })).not.toThrow();
+    expect(() => assertValidLayerStyleUpdate(target, { colorProperty: "zone" })).not.toThrow();
+    expect(() => assertValidLayerStyleUpdate(target, { colorProperty: "zone", colorMode: "numeric" })).toThrow(/numeric/);
+    expect(() => assertValidLayerStyleUpdate(target, { radiusProperty: "zone" })).toThrow(/numeric/);
+  });
   it("validates layer mutations atomically", () => {
     expect(() => assertValidAddDatasetLayer({ layerId: "query:q-2", label: "Second query" }, layers)).not.toThrow();
     expect(() => assertValidAddDatasetLayer({ layerId: "catalog:one", label: "Duplicate" }, layers)).toThrow(

@@ -50,6 +50,9 @@ function replaceStorageUriPath(storageUri: string, path: string): string {
 }
 
 export function buildSourceFileUrl(source: DatasetSource): string | null {
+  // Catalog URLs already resolve the storage bucket and encode the object path.
+  if (source.asset_key && source.url) return source.url;
+
   if (source.source_type === "api" && "url" in source.location) {
     return source.location.url;
   }
