@@ -1,3 +1,4 @@
+import { PEDP_DONATE_URL } from "@/lib/pedp";
 import { SURVEY_URL } from "./SurveyButton";
 
 export default function Footer() {
@@ -30,7 +31,7 @@ export default function Footer() {
               |
             </span>
             <a
-              href="https://donorbox.org/open-environmental-data-project-donations-2?default_interval=o"
+              href={PEDP_DONATE_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-foreground transition-colors"
