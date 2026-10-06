@@ -3,6 +3,7 @@ import { Database, FileText, Home, Info, Menu, Users } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { PEDP_DONATE_URL } from "@/lib/pedp";
 
 const PEDP_LOGO =
   "https://images.squarespace-cdn.com/content/v1/6793060d1570ff20aceb1125/807a2f81-c6a3-4a9b-adbc-86a84a81fa7e/pedp_mark_pad.png?format=1500w";
@@ -85,9 +86,16 @@ export default function Header() {
           </Link>
         </div>
 
-        <nav className="hidden md:flex items-center gap-1" aria-label="Main">
-          {navLinks}
-        </nav>
+        <div className="flex shrink-0 items-center gap-3">
+          <nav className="hidden md:flex items-center gap-1" aria-label="Main">
+            {navLinks}
+          </nav>
+          <Button asChild size="sm">
+            <a href={PEDP_DONATE_URL} target="_blank" rel="noopener noreferrer">
+              Donate
+            </a>
+          </Button>
+        </div>
       </div>
     </header>
   );
