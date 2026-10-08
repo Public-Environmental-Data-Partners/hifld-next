@@ -46,11 +46,16 @@ class SourceResolver:
             object_key = _trusted_object_key(asset.href, config)
             if object_key is not None:
                 matches.append((slug, config, object_key))
-        if len(matches) != 1:
+        # Registry aliases (e.g. historical and current slugs for one bucket) may all
+        # match the same object; only distinct physical targets are ambiguous.
+        targets = {
+            (config.type, config.bucket, config.endpoint_url, key) for _, config, key in matches
+        }
+        if len(targets) != 1:
             raise CatalogClientError(
                 "source_location_invalid", "catalog asset href is outside trusted storage"
             )
-        storage_slug, storage_config, object_key = matches[0]
+        storage_slug, storage_config, object_key = min(matches, key=lambda match: match[0])
         scheme = "gs" if storage_config.type == "gcs" else "s3"
         bbox = _bbox(response)
         return ResolvedSource(

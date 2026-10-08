@@ -51,6 +51,8 @@ _CATALOG_ERROR_CODES: dict[str, ErrorCode] = {
     "catalog_unavailable": ErrorCode.CATALOG_UNAVAILABLE,
     "catalog_contract_invalid": ErrorCode.CATALOG_CONTRACT_INVALID,
     "schema_version_not_found": ErrorCode.SCHEMA_VERSION_NOT_FOUND,
+    "source_location_invalid": ErrorCode.STORAGE_UNAVAILABLE,
+    "source_storage_unknown": ErrorCode.STORAGE_UNAVAILABLE,
 }
 
 
@@ -150,6 +152,8 @@ class QueryApplicationService:
                         if code is ErrorCode.CATALOG_UNAVAILABLE
                         else "The catalog response did not match its contract"
                         if code is ErrorCode.CATALOG_CONTRACT_INVALID
+                        else "The source storage location could not be resolved"
+                        if code is ErrorCode.STORAGE_UNAVAILABLE
                         else "The catalog request failed unexpectedly"
                         if code is ErrorCode.INTERNAL_ERROR
                         else "The selected catalog source was not found"

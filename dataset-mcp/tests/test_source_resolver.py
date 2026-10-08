@@ -22,8 +22,8 @@ class FakeCatalog:
         return self.response
 
 
-def ref(**updates: str) -> QuerySourceRef:
-    values = {
+def ref(**updates: str | None) -> QuerySourceRef:
+    values: dict[str, str | None] = {
         "alias": "roads",
         "collection_slug": "hifld",
         "dataset_slug": "roads",
@@ -133,3 +133,45 @@ async def test_resolver_rejects_unknown_explicit_storage() -> None:
 async def test_resolver_rejects_untrusted_or_traversing_asset_href(href: str) -> None:
     with pytest.raises(CatalogClientError, match="source_location_invalid"):
         await SourceResolver(FakeCatalog(response(href=href)), locations()).resolve(ref())
+
+
+def aliased_gcs_locations() -> dict[str, BucketStorageConfig]:
+    config = BucketStorageConfig(
+        type="gcs",
+        base_url="https://storage.googleapis.com",
+        bucket="hifld-next-portolan-published",
+    )
+    return {"gcs-portolan-published": config, "gcp-portolan-published": config}
+
+
+GCS_HREF = (
+    "https://storage.googleapis.com/hifld-next-portolan-published/"
+    "hifld/roads/roads/v1.0.0/geoparquet/roads.parquet"
+)
+
+
+@pytest.mark.asyncio
+async def test_resolver_accepts_aliases_for_the_same_object_without_explicit_storage() -> None:
+    resolved = await SourceResolver(
+        FakeCatalog(response(href=GCS_HREF)), aliased_gcs_locations()
+    ).resolve(ref(storage_location_slug=None))
+
+    assert resolved.storage_location_slug == "gcp-portolan-published"
+    assert resolved.object_uris == (
+        "gs://hifld-next-portolan-published/hifld/roads/roads/v1.0.0/geoparquet/roads.parquet",
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolver_rejects_distinct_backends_matching_without_explicit_storage() -> None:
+    locations = aliased_gcs_locations()
+    locations["other-endpoint"] = BucketStorageConfig(
+        type="gcs",
+        base_url="https://storage.googleapis.com",
+        bucket="hifld-next-portolan-published",
+        endpoint_url="https://mirror.example.test",
+    )
+    with pytest.raises(CatalogClientError, match="source_location_invalid"):
+        await SourceResolver(FakeCatalog(response(href=GCS_HREF)), locations).resolve(
+            ref(storage_location_slug=None)
+        )
