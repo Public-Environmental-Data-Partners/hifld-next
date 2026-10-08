@@ -151,15 +151,12 @@ GCS_HREF = (
 
 
 @pytest.mark.asyncio
-async def test_resolver_accepts_aliases_for_the_same_object_without_explicit_storage() -> None:
-    resolved = await SourceResolver(
-        FakeCatalog(response(href=GCS_HREF)), aliased_gcs_locations()
-    ).resolve(ref(storage_location_slug=None))
-
-    assert resolved.storage_location_slug == "gcp-portolan-published"
-    assert resolved.object_uris == (
-        "gs://hifld-next-portolan-published/hifld/roads/roads/v1.0.0/geoparquet/roads.parquet",
-    )
+async def test_resolver_rejects_duplicate_registry_entries_for_one_bucket() -> None:
+    # Two slugs for one bucket is a registry error; it must fail loudly, not pick one.
+    with pytest.raises(CatalogClientError, match="source_location_invalid"):
+        await SourceResolver(FakeCatalog(response(href=GCS_HREF)), aliased_gcs_locations()).resolve(
+            ref(storage_location_slug=None)
+        )
 
 
 @pytest.mark.asyncio
