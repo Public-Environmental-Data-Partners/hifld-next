@@ -9,7 +9,7 @@ export const Route = createFileRoute("/stac/")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const lifecycle = await activeCatalogLifecycle();
+        const lifecycle = await activeCatalogLifecycle().catch(() => null);
         if (!lifecycle) return jsonProblem(503, "Catalog metadata is unavailable");
         return (
           (await lifecycle.withSnapshot(async ({ catalogUrl, generation }) => {

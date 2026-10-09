@@ -159,4 +159,4 @@ For statewide filters or heavy analytics, **download GeoParquet (or other format
 
 ## Upstream
 
-- Catalog metadata routes read the published Portolan STAC catalog; download-zip and legacy compatibility paths may use **dataset-api** (`DATASET_API_URL` at deploy time). This file describes routes on **this** origin only.
+- Catalog metadata routes read the published Portolan STAC catalog with its SQLite index. ZIP downloads redirect to published object-storage assets. This file describes routes on **this** origin only.

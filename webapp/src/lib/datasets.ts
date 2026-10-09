@@ -1,6 +1,5 @@
 /**
- * Dataset functions - now using dataset-api (Python FastAPI service)
- * All backend logic has been moved to dataset-api
+ * Dataset functions backed by the published SQLite and STAC catalog
  */
 
 import {

@@ -24,7 +24,7 @@ def development_settings(
     runtime_root = runtime_directory or Path(tempfile.gettempdir()) / "dataset-mcp"
     values: dict[str, str] = {
         "catalog_base_url": environment.get(
-            "DATASET_MCP_CATALOG_BASE_URL", "http://127.0.0.1:8000"
+            "DATASET_MCP_CATALOG_BASE_URL", "http://127.0.0.1:3000"
         ),
         "query_token_secret": environment.get(
             "DATASET_MCP_QUERY_TOKEN_SECRET", _LOCAL_QUERY_TOKEN_SECRET

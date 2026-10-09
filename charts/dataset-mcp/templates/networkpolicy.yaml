@@ -26,7 +26,7 @@ spec:
           podSelector:
             matchLabels:
               {{- toYaml .Values.networkPolicy.catalogSelector | nindent 14 }}
-      ports: [{protocol: TCP, port: 8000}]
+      ports: [{protocol: TCP, port: {{ .Values.networkPolicy.catalogPort }}}]
     - to:
         - namespaceSelector:
             matchLabels:

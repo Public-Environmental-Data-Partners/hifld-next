@@ -9,8 +9,8 @@ export const Route = createFileRoute("/api/datasets")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const catalog = await sqliteCatalogApi();
-        const catalogUrl = await activeCatalogStacUrl();
+        const catalog = await sqliteCatalogApi().catch(() => null);
+        const catalogUrl = catalog ? await activeCatalogStacUrl().catch(() => null) : null;
         if (!catalog || !catalogUrl) return jsonProblem(503, "Catalog metadata is unavailable");
         const query = parseCollectionApiQuery(new URL(request.url).searchParams);
         if (query instanceof Response) return query;

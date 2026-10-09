@@ -1,41 +1,51 @@
-# HIFLD Next Architecture
+# HIFLD Next architecture
 
-```mermaid
-flowchart LR
-  user["Browser / API client"] --> alb["External HTTPS Application Load Balancer"]
-  alb --> webapp["webapp Deployment on GKE"]
-  alb -- "/storage/*" --> gcs["GCS published artifacts"]
-  webapp --> api["dataset-api ClusterIP Service"]
-  api --> db["Neon Postgres"]
-  api --> gcs
-  configsync["config-sync CronJob on GKE"] --> api
-  discovery["dataset-discovery CronJob on GKE"] --> api
-  discovery --> gcs
-  dagster["Dagster on GKE"] --> staging["GCS staging bucket"]
-  dagster --> metadata["quality_manifest.json / data_dictionary.json"]
-  metadata --> gcs
-  dagster --> gcs
-  local["Local development"] --> seaweed["SeaweedFS filer + S3 API"]
-  local --> api
-```
+## Catalog publication
 
-## Current Shape
+Dagster in the publisher repository ingests original datasets, converts supported
+formats, computes quality/schema metadata, and promotes immutable version assets.
+It renders Portolan STAC documents and a derived SQLite catalog, then atomically
+selects the complete catalog generation with `_catalog/current.json`.
 
-- The webapp is the public TanStack Start application and same-origin JSON API facade.
-- The external Application Load Balancer sends web traffic to the GKE `webapp` Service via standalone NEGs.
-- Public `/storage/*` URLs are served directly from the GCS backend bucket.
-- The dataset API is internal-only in the cluster at `http://dataset-api.hifld-next.svc.cluster.local`.
-- The dataset API serves catalog reads and intentionally initializes database schema on startup.
-- GCS stores production dataset artifacts and catalog configuration inputs.
-- SeaweedFS is the supported local object-storage backend.
-- Dagster/GKE own ingestion, geospatial processing, quality computation, and promotion into published artifacts.
-- Dataset quality and schema views use stored version metadata from `quality_manifest.json` and `data_dictionary.json`; the dataset API does not compute quality on request.
-- GKE CronJobs own catalog config reconciliation and dataset discovery.
-- Terraform in `../hifld-next-iac` manages GKE, the load balancer, buckets, IAM, secrets, Neon, and GitHub Actions identity.
-- GitHub Actions in this repo builds and publishes GHCR images for `dataset-api` and `webapp`.
-- GitHub Actions in `../hifld-next-iac` deploys selected GHCR image tags with Helm for `dataset-api`, `webapp`, and `dataset-discovery`.
-- Runtime client settings such as PostHog are supplied by the deployer through environment variables and served by `/runtime-config.js`; they are not baked into public GHCR images.
+Production published storage is `hifld-next-datasets-prod`; staging is
+`hifld-next-staging-prod`. The canonical published storage slug is
+`gcs-hifld-next-datasets-prod`. Source formats and quality/schema/provenance
+metadata remain available; retiring the old discovery service does not remove
+the manifests used by the publisher.
 
-## Removed Legacy
+## Serving
 
-GeoServer is no longer part of the active runtime, local compose stack, or production Terraform path.
+- The TanStack Start webapp reads the selected SQLite catalog and STAC documents
+  for browsing, search, schemas, version comparison, downloads and STAC APIs.
+- Dataset MCP calls the webapp's slug-based catalog API. ClickHouse executes
+  supported spatial queries; the MCP service serves authenticated query tiles
+  and its map application.
+- The feature server reads the same release pointer independently. Its pygeoapi
+  resources use a custom DuckDB provider over the catalog's approved GeoParquet
+  assets.
+- Webapp and feature server initialize their catalog snapshot on startup and
+  refresh in-process. A complete new catalog becomes visible without restarting;
+  refresh failures retain the last usable snapshot.
+- The public HTTPS load balancer routes browser/API, MCP, feature-server and
+  published-storage requests. Storage registries constrain trusted locations.
+
+## Local and operational boundaries
+
+SeaweedFS remains the local object-storage backend. ClickHouse and the optional
+feature-server Compose profile use local storage; the host webapp/MCP can use
+the same published catalog.
+
+Terraform and Helm in the infrastructure repository manage GKE, load-balancer
+routing, storage and identities. Dagster retains its own durable run/partition
+state and PostgreSQL database. The former catalog database and credentials are
+preserved pending a separately approved data-retention decision; they are not
+serving dependencies of this architecture.
+
+The application repository publishes webapp, MCP, ClickHouse and feature-server
+images. Runtime browser configuration is served dynamically; catalog URLs,
+storage policy and credentials remain server-only.
+
+The retired API/discovery runtime, GeoServer schemas and one-off migration
+writers are absent from active application code. Historical specs and cutover
+reports remain an audit trail, not current deployment instructions. See
+[the retirement guide](legacy-retirement.md) for rollout order and verification.

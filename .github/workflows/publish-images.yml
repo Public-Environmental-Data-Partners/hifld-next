@@ -8,12 +8,10 @@ on:
       - ".dockerignore"
       - "package.json"
       - "package-lock.json"
-      - "dataset-api/**"
       - "dataset-mcp/**"
       - "ops/clickhouse/**"
       - "feature-server/**"
-      - "charts/dataset-api/**"
-      - "charts/dataset-discovery/**"
+      - "charts/feature-server/**"
       - "charts/dataset-mcp/**"
       - "charts/webapp/**"
       - "packages/map-core/**"
@@ -27,12 +25,10 @@ on:
       - ".dockerignore"
       - "package.json"
       - "package-lock.json"
-      - "dataset-api/**"
       - "dataset-mcp/**"
       - "ops/clickhouse/**"
       - "feature-server/**"
-      - "charts/dataset-api/**"
-      - "charts/dataset-discovery/**"
+      - "charts/feature-server/**"
       - "charts/dataset-mcp/**"
       - "charts/webapp/**"
       - "packages/map-core/**"
@@ -44,7 +40,6 @@ permissions:
   packages: write
 
 env:
-  DATASET_API_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/dataset-api
   WEBAPP_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/webapp
   DATASET_MCP_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/dataset-mcp
   CLICKHOUSE_IMAGE: ghcr.io/public-environmental-data-partners/hifld-next/clickhouse
@@ -60,10 +55,6 @@ jobs:
           - name: clickhouse
             context: ops/clickhouse
             file: ops/clickhouse/Dockerfile
-            build_args: ""
-          - name: dataset-api
-            context: dataset-api
-            file: dataset-api/Dockerfile
             build_args: ""
           - name: webapp
             context: .
@@ -109,15 +100,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push dataset-api
-        uses: docker/build-push-action@v6
-        with:
-          context: dataset-api
-          file: dataset-api/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ env.DATASET_API_IMAGE }}:${{ github.sha }}
-
       - name: Build and push webapp
         uses: docker/build-push-action@v6
         with:
@@ -159,7 +141,6 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
-          docker buildx imagetools create --tag "${DATASET_API_IMAGE}:latest" "${DATASET_API_IMAGE}:${GITHUB_SHA}"
           docker buildx imagetools create --tag "${WEBAPP_IMAGE}:latest" "${WEBAPP_IMAGE}:${GITHUB_SHA}"
           docker buildx imagetools create --tag "${DATASET_MCP_IMAGE}:latest" "${DATASET_MCP_IMAGE}:${GITHUB_SHA}"
           docker buildx imagetools create --tag "${CLICKHOUSE_IMAGE}:latest" "${CLICKHOUSE_IMAGE}:${GITHUB_SHA}"

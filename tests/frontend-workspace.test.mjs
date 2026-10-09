@@ -68,9 +68,8 @@ test("image publishing runs for deployable chart changes", async () => {
   const workflow = await readProjectFile(".github/workflows/publish-images.yml");
 
   for (const path of [
-    "charts/dataset-api/**",
-    "charts/dataset-discovery/**",
     "charts/dataset-mcp/**",
+    "charts/feature-server/**",
     "charts/webapp/**",
   ]) {
     assert.ok(workflow.includes(`- "${path}"`));
@@ -81,6 +80,28 @@ test("image publishing runs for deployable chart changes", async () => {
   assert.match(workflow, /docker buildx imagetools create/);
 });
 
+test("retired catalog services and migration writers cannot be started or published", async () => {
+  for (const path of [
+    "dataset-api",
+    "charts/dataset-api",
+    "charts/dataset-discovery",
+    "scripts/setup-geoserver.sh",
+    "scripts/portolan_gcp_copy.py",
+    "scripts/portolan_gcp_spike.py",
+    "scripts/portolan_gcp_upload_catalog.py",
+    "scripts/portolan_prod_baseline.py",
+    "scripts/portolan_catalog_parity.py",
+  ]) {
+    assert.equal(await pathExists(path), false, `${path} is retired`);
+  }
+  for (const path of [".github/workflows/publish-images.yml", "docker-compose.yaml", ".env.example"]) {
+    const source = await readProjectFile(path);
+    assert.doesNotMatch(source, /dataset-api|dataset_api|dataset-discovery|discover-job|geoserver/i);
+  }
+  assert.ok(await pathExists("scripts/portolan_acceptance.py"));
+  assert.match(await readProjectFile("docker-compose.yaml"), /seaweedfs-filer:/);
+});
+
 test("MCP asset copying resolves MapLibre from the workspace dependency graph", async () => {
   const script = await readProjectFile(
     "dataset-mcp/ui/scripts/copy-maplibre-assets.mjs",
@@ -89,6 +110,13 @@ test("MCP asset copying resolves MapLibre from the workspace dependency graph", 
   assert.match(script, /createRequire/);
   assert.match(script, /resolve\("maplibre-gl\/package\.json"\)/);
   assert.doesNotMatch(script, /node_modules\/maplibre-gl\/dist/);
+});
+
+test("MCP catalog egress uses the webapp pod port, not the retired API port", async () => {
+  const policy = await readProjectFile("charts/dataset-mcp/templates/networkpolicy.yaml");
+  const values = await readProjectFile("charts/dataset-mcp/values.yaml");
+  assert.match(policy, /port: \{\{ \.Values\.networkPolicy\.catalogPort \}\}/);
+  assert.match(values, /catalogPort: 8080/);
 });
 
 test("the dataset MCP Python gate builds UI assets from the repository root", async () => {

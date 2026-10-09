@@ -11,8 +11,8 @@ export const Route = createFileRoute("/api/datasets/$id")({
         const [collectionSlug, datasetSlug, extra] = params.id.split("/");
         if (!collectionSlug || !datasetSlug || extra !== undefined)
           return jsonProblem(400, "Dataset identity must be collection/dataset");
-        const catalog = await sqliteCatalogApi();
-        const catalogUrl = await activeCatalogStacUrl();
+        const catalog = await sqliteCatalogApi().catch(() => null);
+        const catalogUrl = catalog ? await activeCatalogStacUrl().catch(() => null) : null;
         if (!catalog || !catalogUrl) return jsonProblem(503, "Catalog metadata is unavailable");
         const dataset = await catalog.dataset(collectionSlug, datasetSlug);
         if (!dataset) return jsonProblem(404, "Dataset not found");

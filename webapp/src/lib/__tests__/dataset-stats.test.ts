@@ -7,7 +7,7 @@ vi.mock("@/lib/catalog-api", () => ({
 }));
 
 vi.mock("@/env/server", () => ({
-  env: { DATASET_API_URL: "http://dataset-api.invalid" },
+  env: {},
 }));
 
 import { loadDatasetStats } from "@/lib/api-client";

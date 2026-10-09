@@ -10,7 +10,7 @@ import { runtimeClientConfigDevPlugin } from "./plugins/runtime-client-config-de
 
 const config = defineConfig(({ mode }) => ({
   // Keep local development reachable through the same IPv4 URL used by the
-  // dataset API, browser tooling, and generated links. Vite's localhost
+  // browser tooling and generated links. Vite's localhost
   // default can otherwise bind only to ::1 on macOS.
   server: {
     host: "127.0.0.1",

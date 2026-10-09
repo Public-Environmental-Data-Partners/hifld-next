@@ -1,11 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   buildCatalogSitemapEntries,
   buildCatalogSitemapPaths,
   buildSitemapXmlFromEntries,
   buildSitemapXmlFromPaths,
-  fetchSitemapDatasetGroups,
-  type SitemapFetchClient,
   toLastmod,
 } from "../sitemap";
 
@@ -73,50 +71,4 @@ describe("sitemap helpers", () => {
     expect(xml).toContain("<loc>https://example.org/collections/hifld?query=power&amp;offset=100</loc>");
   });
 
-  it("fetches multiple paginated dataset pages", async () => {
-    const client: SitemapFetchClient = {
-      fetchCatalogGroups: vi.fn().mockResolvedValue([]),
-      fetchCollections: vi.fn().mockResolvedValue([{ id: 1, slug: "hifld", name: "HIFLD" }]),
-      fetchDatasetFiles: vi.fn().mockResolvedValue([]),
-      fetchDatasetPage: vi
-        .fn()
-        .mockResolvedValueOnce({
-          items: [{ id: 1, slug: "first", name: "First" }],
-          total: 2,
-          limit: 500,
-          offset: 0,
-        })
-        .mockResolvedValueOnce({
-          items: [{ id: 2, slug: "second", name: "Second" }],
-          total: 2,
-          limit: 500,
-          offset: 1,
-        }),
-    };
-
-    const groups = await fetchSitemapDatasetGroups(client);
-
-    expect(groups[0]?.datasets.map((dataset) => dataset.slug)).toEqual(["first", "second"]);
-    expect(client.fetchDatasetPage).toHaveBeenNthCalledWith(1, 1, 500, 0);
-    expect(client.fetchDatasetPage).toHaveBeenNthCalledWith(2, 1, 500, 1);
-  });
-
-  it("fetches dataset files when collection dataset pages do not include file summaries", async () => {
-    const client: SitemapFetchClient = {
-      fetchCatalogGroups: vi.fn().mockResolvedValue([]),
-      fetchCollections: vi.fn().mockResolvedValue([{ id: 1, slug: "hifld", name: "HIFLD" }]),
-      fetchDatasetPage: vi.fn().mockResolvedValue({
-        items: [{ id: 1, slug: "hospitals-3", name: "Hospitals" }],
-        total: 1,
-        limit: 500,
-        offset: 0,
-      }),
-      fetchDatasetFiles: vi.fn().mockResolvedValue([{ id: 20, slug: "hospitals-3", name: "hospitals-3" }]),
-    };
-
-    const groups = await fetchSitemapDatasetGroups(client);
-
-    expect(groups[0]?.datasets[0]?.files?.map((file) => file.slug)).toEqual(["hospitals-3"]);
-    expect(client.fetchDatasetFiles).toHaveBeenCalledWith(1, "hospitals-3");
-  });
 });

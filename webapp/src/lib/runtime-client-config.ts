@@ -1,5 +1,4 @@
 export interface RuntimeClientConfig {
-  publicDatasetApiUrl?: string;
   posthogKey?: string;
   posthogHost: string;
   webMcpEnabled: boolean;
@@ -25,7 +24,6 @@ export function runtimeClientConfigFromWindow(): RuntimeClientConfig {
   }
 
   const config = window.__HIFLD_CLIENT_CONFIG__;
-  const publicDatasetApiUrl = nonEmpty(config?.publicDatasetApiUrl);
   const posthogKey = nonEmpty(config?.posthogKey);
   const posthogHost = nonEmpty(config?.posthogHost) ?? DEFAULT_POSTHOG_HOST;
   const webMcpEnabled = config?.webMcpEnabled === true;
@@ -34,9 +32,6 @@ export function runtimeClientConfigFromWindow(): RuntimeClientConfig {
     webMcpEnabled,
     queryToolsEnabled: webMcpEnabled && config?.queryToolsEnabled === true,
   };
-  if (publicDatasetApiUrl) {
-    runtimeConfig.publicDatasetApiUrl = publicDatasetApiUrl;
-  }
   if (posthogKey) {
     runtimeConfig.posthogKey = posthogKey;
   }

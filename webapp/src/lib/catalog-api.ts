@@ -204,11 +204,11 @@ export async function sqliteCatalogApi(): Promise<{
     fileSlug: string,
     version?: string,
   ) => Promise<CatalogFileResponse | null>;
-} | null> {
+}> {
   const lifecycle = await activeCatalogLifecycle();
-  if (!lifecycle?.repository()) return null;
+  if (!lifecycle.repository()) throw new Error("Published catalog is unavailable");
   const generation = lifecycle.status().generation;
-  if (!generation) return null;
+  if (!generation) throw new Error("Published catalog is unavailable");
   return {
     generation,
     collections: async () =>

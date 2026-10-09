@@ -16,9 +16,8 @@ export const Route = createFileRoute("/api/datasets/stats")({
             links: { self: globalDatasetStatsSelf(origin) },
             ...stats,
           });
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          return jsonProblem(502, "Failed to load dataset statistics", msg);
+        } catch {
+          return jsonProblem(503, "Catalog statistics are unavailable");
         }
       },
     },

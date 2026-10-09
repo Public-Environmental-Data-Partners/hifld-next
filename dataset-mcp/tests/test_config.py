@@ -5,9 +5,9 @@ from app.config import Settings
 
 
 def test_settings_require_catalog_and_token_secret() -> None:
-    settings = Settings(catalog_base_url="http://dataset-api:8000", query_token_secret="x" * 32)
+    settings = Settings(catalog_base_url="http://webapp:3000", query_token_secret="x" * 32)
 
-    assert str(settings.catalog_base_url) == "http://dataset-api:8000/"
+    assert str(settings.catalog_base_url) == "http://webapp:3000/"
     assert settings.query_default_limit == 100
     assert settings.query_max_limit == 1_000
     assert settings.tile_timeout_seconds == 60
@@ -40,13 +40,13 @@ def test_settings_parse_catalog_storage_registry_from_json() -> None:
 
 def test_settings_reject_short_token_secret() -> None:
     with pytest.raises(ValidationError):
-        Settings(catalog_base_url="http://dataset-api:8000", query_token_secret="short")
+        Settings(catalog_base_url="http://webapp:3000", query_token_secret="short")
 
 
 def test_settings_reject_token_ttl_longer_than_codec_contract() -> None:
     with pytest.raises(ValidationError):
         Settings(
-            catalog_base_url="http://dataset-api:8000",
+            catalog_base_url="http://webapp:3000",
             query_token_secret="x" * 32,
             query_token_ttl_seconds=7_201,
         )
@@ -54,7 +54,7 @@ def test_settings_reject_token_ttl_longer_than_codec_contract() -> None:
 
 def test_settings_normalize_http_allowed_hosts() -> None:
     settings = Settings(
-        catalog_base_url="http://dataset-api:8000",
+        catalog_base_url="http://webapp:3000",
         query_token_secret="x" * 32,
         http_allowed_hosts="Dataset-MCP, mcp.example.test:443",
     )
@@ -75,7 +75,7 @@ def test_settings_normalize_http_allowed_hosts() -> None:
 def test_settings_reject_unsafe_http_allowed_hosts(host: str) -> None:
     with pytest.raises(ValidationError):
         Settings(
-            catalog_base_url="http://dataset-api:8000",
+            catalog_base_url="http://webapp:3000",
             query_token_secret="x" * 32,
             http_allowed_hosts=host,
         )
