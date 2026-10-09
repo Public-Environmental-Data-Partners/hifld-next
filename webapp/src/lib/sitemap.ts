@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { env } from "@/env/server";
+import type { CatalogRepository } from "@/lib/catalog-repository";
+import { activeCatalogLifecycle } from "@/lib/catalog-runtime";
+import { legacyDatasetApiUrl } from "@/lib/legacy-dataset-api";
 
 const SITEMAP_DATASET_PAGE_SIZE = 500;
 
@@ -232,8 +234,49 @@ export async function fetchSitemapDatasetGroups(client: SitemapFetchClient): Pro
   return groups;
 }
 
+async function collectionSitemapEntries(
+  repository: CatalogRepository,
+  collectionSlug: string,
+): Promise<SitemapEntry[]> {
+  const result: SitemapEntry[] = [];
+  const collectionPath = `/collections/${encodeURIComponent(collectionSlug)}`;
+  let offset = 0;
+  while (true) {
+    const page = await repository.listDatasets(collectionSlug, { limit: SITEMAP_DATASET_PAGE_SIZE, offset });
+    for (const dataset of page.items) {
+      const datasetPath = `${collectionPath}/datasets/${encodeURIComponent(dataset.dataset_slug)}`;
+      result.push(makeEntry(datasetPath, dataset.updated_at));
+      for (const file of await repository.listFiles(collectionSlug, dataset.dataset_slug)) {
+        result.push(
+          makeEntry(
+            `${datasetPath}/files/${encodeURIComponent(file.file_slug)}`,
+            file.updated_at ?? dataset.updated_at,
+          ),
+        );
+      }
+    }
+    offset += page.items.length;
+    if (!page.items.length || offset >= page.total) break;
+  }
+  return result;
+}
+
 export async function buildCatalogSitemapXml(origin: string): Promise<string> {
-  const client = createDatasetApiSitemapClient(env.DATASET_API_URL);
+  const lifecycle = await activeCatalogLifecycle();
+  if (lifecycle) {
+    const entries = await lifecycle.withRepository(async (repository) => {
+      const result: SitemapEntry[] = STATIC_SITEMAP_PATHS.map((path) => ({ path }));
+      for (const collection of await repository.listCollections()) {
+        const collectionPath = `/collections/${encodeURIComponent(collection.collection_slug)}`;
+        result.push(makeEntry(collectionPath, collection.updated_at));
+        result.push(...(await collectionSitemapEntries(repository, collection.collection_slug)));
+      }
+      return result;
+    });
+    if (!entries) throw new Error("Published catalog is unavailable for sitemap generation");
+    return buildSitemapXmlFromEntries(origin, entries);
+  }
+  const client = createDatasetApiSitemapClient(legacyDatasetApiUrl());
   try {
     const groups = await client.fetchCatalogGroups();
     return buildSitemapXmlFromEntries(origin, buildCatalogSitemapEntries(groups));

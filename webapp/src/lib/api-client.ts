@@ -6,9 +6,11 @@
  */
 
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { env } from "../env/server";
+import { env } from "@/env/server";
 import { type CatalogAsset, type CatalogFileResponse, sqliteCatalogApi } from "./catalog-api";
+import { datasetIdentity, fileIdentity } from "./catalog-identity";
 import { activeCatalogStacUrl } from "./catalog-runtime";
+import { legacyDatasetApiUrl } from "./legacy-dataset-api";
 import {
   fetchStacCatalog,
   fetchStacVersionCollection,
@@ -19,6 +21,10 @@ import {
 } from "./stac-view-models";
 
 export type { CatalogAsset } from "./catalog-api";
+
+function usesLegacyRowId(id: string): boolean {
+  return Boolean(env.DATASET_API_URL) && /^\d+$/.test(id);
+}
 
 export interface CatalogFormatSource {
   asset_key: string;
@@ -52,7 +58,7 @@ function encodeObjectPath(value: string): string {
     .join("/");
 }
 
-function catalogAssetUrl(asset: CatalogAsset): string | undefined {
+export function catalogAssetUrl(asset: CatalogAsset): string | undefined {
   const object = asset.objects.length === 1 ? asset.objects[0] : undefined;
   if (!object) return undefined;
   const baseUrl = asset.storage_config.base_url.replace(/\/+$/, "");
@@ -580,10 +586,33 @@ function hasMoreDatasetPages(page: PaginatedResponse<DatasetWithUrls>, offset: n
  * List datasets across all collections by paging each collection's API.
  * Does not call a global /api/datasets on dataset-api (not exposed there).
  */
+async function listPublishedDatasets(data: {
+  search?: string | undefined;
+  includeUrls?: boolean | undefined;
+}): Promise<DatasetWithUrls[]> {
+  const catalog = await sqliteCatalogApi();
+  if (!catalog) throw new Error("Published catalog is unavailable");
+  const out: DatasetWithUrls[] = [];
+  for (const collection of await catalog.collections()) {
+    let offset = 0;
+    while (out.length < GLOBAL_DATASET_LIST_CAP) {
+      const page = await getCollectionDatasetsBySlug({
+        data: { collectionSlug: collection.collection_slug, ...data, limit: GLOBAL_DATASET_PAGE_SIZE, offset },
+      });
+      out.push(...page.items.slice(0, GLOBAL_DATASET_LIST_CAP - out.length));
+      offset += page.items.length;
+      if (!page.items.length || offset >= page.total) break;
+    }
+  }
+  return out;
+}
+
 export const getDatasets = createServerFn({ method: "GET" })
   .inputValidator((data: { search?: string | undefined; includeUrls?: boolean | undefined }) => data)
   .handler(async ({ data }) => {
-    const base = env.DATASET_API_URL;
+    const catalog = await sqliteCatalogApi();
+    if (catalog) return listPublishedDatasets(data);
+    const base = legacyDatasetApiUrl();
     const collections = await fetchCollections(base);
     const out: DatasetWithUrls[] = [];
 
@@ -610,7 +639,13 @@ export const getDatasets = createServerFn({ method: "GET" })
 export const getDatasetById = createServerFn({ method: "GET" })
   .inputValidator((data: { id: string; includeUrls?: boolean | undefined }) => data)
   .handler(async ({ data }) => {
-    const base = env.DATASET_API_URL;
+    if (await sqliteCatalogApi()) {
+      const collectionId = data.id.split("/")[0] ?? "";
+      const identity = datasetIdentity(collectionId, data.id);
+      if (identity) return getDatasetBySlug({ data: { ...identity, includeUrls: data.includeUrls ?? false } });
+      if (!usesLegacyRowId(data.id)) return null;
+    }
+    const base = legacyDatasetApiUrl();
     const collections = await fetchCollections(base);
     const suffix = data.includeUrls ? "/urls" : "/files";
 
@@ -670,7 +705,7 @@ export const getDatasetBySlug = createServerFn({ method: "GET" })
       endpoint += "/files"; // Default to files endpoint for file tree
     }
 
-    const url = `${env.DATASET_API_URL}${endpoint}`;
+    const url = `${legacyDatasetApiUrl()}${endpoint}`;
     const response = await fetch(url);
 
     if (!response.ok) {
@@ -690,7 +725,12 @@ export const getDatasetBySlug = createServerFn({ method: "GET" })
 export const getDatasetFileById = createServerFn({ method: "GET" })
   .inputValidator((data: { collectionId: string; datasetId: string; fileId: string }) => data)
   .handler(async ({ data }) => {
-    const url = `${env.DATASET_API_URL}/api/collections/${data.collectionId}/datasets/${data.datasetId}/files/${data.fileId}`;
+    if (await sqliteCatalogApi()) {
+      const identity = fileIdentity(data.collectionId, data.datasetId, data.fileId);
+      if (identity) return getDatasetFileBySlug({ data: identity });
+      if (![data.collectionId, data.datasetId, data.fileId].every(usesLegacyRowId)) return null;
+    }
+    const url = `${legacyDatasetApiUrl()}/api/collections/${data.collectionId}/datasets/${data.datasetId}/files/${data.fileId}`;
     const response = await fetch(url);
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
@@ -702,7 +742,16 @@ export const getDatasetFileById = createServerFn({ method: "GET" })
 export const getFileVersions = createServerFn({ method: "GET" })
   .inputValidator((data: { collectionId: string; datasetId: string; fileId: string }) => data)
   .handler(async ({ data }) => {
-    const url = `${env.DATASET_API_URL}/api/collections/${data.collectionId}/datasets/${data.datasetId}/files/${data.fileId}/versions`;
+    if (await sqliteCatalogApi()) {
+      if (fileIdentity(data.collectionId, data.datasetId, data.fileId)) {
+        const response = await getDatasetFileById({ data });
+        return response
+          ? { dataset_id: response.dataset.id, file_id: response.file.id, formats: response.file.formats ?? [] }
+          : null;
+      }
+      if (![data.collectionId, data.datasetId, data.fileId].every(usesLegacyRowId)) return null;
+    }
+    const url = `${legacyDatasetApiUrl()}/api/collections/${data.collectionId}/datasets/${data.datasetId}/files/${data.fileId}/versions`;
     const response = await fetch(url);
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
@@ -727,7 +776,7 @@ export const getDatasetFileBySlug = createServerFn({ method: "GET" })
       console.error("[getDatasetFileBySlug] Collection not found:", data.collectionSlug);
       return null;
     }
-    const url = `${env.DATASET_API_URL}/api/collections/${collection.id}/datasets/by-slug/${data.datasetSlug}/files/${data.fileSlug}`;
+    const url = `${legacyDatasetApiUrl()}/api/collections/${collection.id}/datasets/by-slug/${data.datasetSlug}/files/${data.fileSlug}`;
     const response = await fetch(url);
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
@@ -744,7 +793,7 @@ export const loadDatasetStats = createServerOnlyFn(async (): Promise<DatasetStat
   const catalog = await sqliteCatalogApi();
   if (catalog) return catalog.stats();
 
-  const base = env.DATASET_API_URL;
+  const base = legacyDatasetApiUrl();
   const collections = await fetchCollections(base);
   let total = 0;
   for (const c of collections) {
@@ -774,7 +823,7 @@ export const getCollections = createServerFn({ method: "GET" }).handler(async ()
       ),
     );
   }
-  const response = await fetch(`${env.DATASET_API_URL}/api/collections`);
+  const response = await fetch(`${legacyDatasetApiUrl()}/api/collections`);
   if (!response.ok) {
     const errorText = await response.text().catch(() => response.statusText);
     throw new Error(`Failed to fetch collections: ${response.status} ${errorText}`);
@@ -789,10 +838,12 @@ export const getCollections = createServerFn({ method: "GET" }).handler(async ()
 export const getCollectionById = createServerFn({ method: "GET" })
   .inputValidator((data: { id: string }) => data)
   .handler(async ({ data }) => {
+    if ((await sqliteCatalogApi()) && !usesLegacyRowId(data.id))
+      return getCollectionBySlug({ data: { slug: data.id } });
     if (!data.id) {
       return null;
     }
-    const response = await fetch(`${env.DATASET_API_URL}/api/collections/${data.id}`);
+    const response = await fetch(`${legacyDatasetApiUrl()}/api/collections/${data.id}`);
     if (!response.ok) {
       if (response.status === 404) {
         return null;
@@ -835,17 +886,18 @@ export const getCollectionBySlug = createServerFn({ method: "GET" })
  */
 export const getCollectionDatasets = createServerFn({ method: "GET" })
   .inputValidator((data: CollectionDatasetQuery) => data)
-  .handler(async ({ data }) => {
+  .handler(async ({ data }): Promise<PaginatedResponse<DatasetWithUrls>> => {
+    if ((await sqliteCatalogApi()) && !usesLegacyRowId(data.collectionId))
+      return getCollectionDatasetsBySlug({ data: { ...data, collectionSlug: data.collectionId } });
     const params = new URLSearchParams();
-    if (data.search) params.set("search", data.search);
-    if (data.includeUrls) params.set("include_urls", "true");
+    appendDatasetListParams(params, data);
     if (data.limit !== undefined) params.set("limit", data.limit.toString());
     if (data.offset !== undefined) params.set("offset", data.offset.toString());
     if (data.tagFilters && Object.keys(data.tagFilters).length > 0) {
       params.set("tag_filters", JSON.stringify(data.tagFilters));
     }
 
-    const url = `${env.DATASET_API_URL}/api/collections/${data.collectionId}/datasets${params.toString() ? `?${params}` : ""}`;
+    const url = `${legacyDatasetApiUrl()}/api/collections/${data.collectionId}/datasets${params.toString() ? `?${params}` : ""}`;
 
     try {
       // Add a timeout to prevent hanging requests
@@ -940,7 +992,7 @@ export const getCollectionTagValues = createServerFn({ method: "GET" })
     const params = new URLSearchParams();
     if (data.tagKey) params.set("tag_key", data.tagKey);
 
-    const url = `${env.DATASET_API_URL}/api/collections/${data.collectionId}/datasets/tags${params.toString() ? `?${params}` : ""}`;
+    const url = `${legacyDatasetApiUrl()}/api/collections/${data.collectionId}/datasets/tags${params.toString() ? `?${params}` : ""}`;
 
     try {
       const response = await fetch(url);

@@ -1,15 +1,35 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { z } from "zod";
 import { env } from "@/env/server";
-import { getCollectionBySlug } from "@/lib/api-client";
+import { catalogAssetUrl, getCollectionBySlug } from "@/lib/api-client";
 import { jsonProblem } from "@/lib/api-problem";
+import { type CatalogAsset, sqliteCatalogApi } from "@/lib/catalog-api";
 
 const DOWNLOAD_TIMEOUT_MS = 300000;
+const legacyCollectionsSchema = z.array(z.object({ id: z.union([z.string(), z.number()]), slug: z.string() }));
+
+export async function legacyZipCollectionId(baseUrl: string, collectionSlug: string): Promise<string | null> {
+  const response = await fetch(`${baseUrl}/api/collections`, { signal: AbortSignal.timeout(30000) });
+  if (!response.ok) throw new Error(`Legacy collection lookup failed: ${response.status}`);
+  const collection = legacyCollectionsSchema.parse(await response.json()).find((item) => item.slug === collectionSlug);
+  return collection ? String(collection.id) : null;
+}
 
 interface DownloadZipParams {
   collectionSlug: string;
   datasetSlug: string;
   fileSlug: string;
   sourceId: string;
+}
+
+export function catalogZipRedirect(assets: CatalogAsset[], sourceId: string): Response {
+  const asset = assets.find((candidate) => `${candidate.version}/${candidate.asset_key}` === sourceId);
+  if (asset?.media_type !== "application/zip") return jsonProblem(404, "ZIP source not found");
+  const location = catalogAssetUrl(asset);
+  if (!location) return jsonProblem(404, "ZIP source not found");
+  const url = new URL(location);
+  if (url.protocol !== "https:" && url.protocol !== "http:") return jsonProblem(502, "Invalid storage URL");
+  return new Response(null, { status: 302, headers: { Location: location } });
 }
 
 function datasetApiUnavailableDetail(): string {
@@ -100,18 +120,23 @@ export const Route = createFileRoute(
     handlers: {
       GET: async ({ params, request }) => {
         try {
+          const catalog = await sqliteCatalogApi();
+          if (catalog && !(env.DATASET_API_URL && /^\d+$/.test(params.sourceId))) {
+            const file = await catalog.file(params.collectionSlug, params.datasetSlug, params.fileSlug);
+            return file ? catalogZipRedirect(file.assets, params.sourceId) : jsonProblem(404, "File not found");
+          }
           if (!env.DATASET_API_URL) {
             return jsonProblem(500, "Server configuration error", "DATASET_API_URL is not configured");
           }
 
-          const collection = await getCollectionBySlug({
-            data: { slug: params.collectionSlug },
-          });
-          if (!collection) {
+          const collectionId = catalog
+            ? await legacyZipCollectionId(env.DATASET_API_URL, params.collectionSlug)
+            : (await getCollectionBySlug({ data: { slug: params.collectionSlug } }))?.id;
+          if (!collectionId) {
             return jsonProblem(404, "Collection not found");
           }
 
-          const fastApiUrl = `${env.DATASET_API_URL}/api/collections/${collection.id}/datasets/by-slug/${params.datasetSlug}/files/${params.fileSlug}/sources/${params.sourceId}/download-zip`;
+          const fastApiUrl = `${env.DATASET_API_URL}/api/collections/${collectionId}/datasets/by-slug/${params.datasetSlug}/files/${params.fileSlug}/sources/${params.sourceId}/download-zip`;
 
           let response: Response;
           try {

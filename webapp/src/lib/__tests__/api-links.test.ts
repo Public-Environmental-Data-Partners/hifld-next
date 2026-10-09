@@ -29,6 +29,12 @@ describe("requestOrigin", () => {
 describe("path URLs", () => {
   const o = "https://h.example";
 
+  it("encodes qualified catalog source IDs as one route parameter", () => {
+    expect(sourceDownloadZip(o, "hifld", "my-ds", "f1", "v1.0.0/file_geodatabase")).toBe(
+      "https://h.example/api/collections/hifld/datasets/my-ds/files/f1/sources/v1.0.0%2Ffile_geodatabase/download-zip",
+    );
+  });
+
   it("encodes collection slug", () => {
     expect(collectionSelf(o, "hifld")).toBe("https://h.example/api/collections/hifld");
     expect(collectionSelf(o, "a b")).toBe("https://h.example/api/collections/a%20b");
