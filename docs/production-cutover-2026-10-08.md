@@ -153,10 +153,17 @@ MCP independently counted 8,340 v1.1.0 features and served a nonempty authentica
 map tile (HTTP 200).
 
 The rollback restores previous map/Shapefile field names, not the older
-GeoPackage/GeoParquet schema. A publisher repair is being designed to preserve
-source `ID` alongside a separate internal `fid` and reject newly converted
-publications missing catalog-described fields. It has not yet been implemented
-or deployed. Corrected historical data needs a separately reviewed new version,
+GeoPackage/GeoParquet schema. The repair in [publisher PR 12](https://github.com/fulton-ring/hifld-next-datasets/pull/12)
+preserves source `ID` alongside a separate internal `fid` and rejects newly
+converted publications missing catalog-described fields. It is implemented and
+locally verified, but not deployed. The full publisher suite ran 451 tests with
+zero failures/errors and one skipped. A local-only corrected Hospitals preview
+preserved all 8,340 IDs, including leading zeros, through GeoPackage, GeoParquet,
+Shapefile ZIP and decoded PMTiles. The archived input hash stayed unchanged;
+there were no production uploads or pointer changes during this preview.
+The workflow files pass Ruff; optional full-file lint on conversion/tests still
+reports 57 pre-existing findings (baseline 58). No new ignores were introduced.
+Corrected historical data needs a separately reviewed new version,
 not an overwrite or a blind global `source_ID` rename.
 
 ## Caveats and follow-up
