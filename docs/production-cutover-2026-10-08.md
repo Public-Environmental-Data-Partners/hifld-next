@@ -155,8 +155,10 @@ map tile (HTTP 200).
 The rollback restores previous map/Shapefile field names, not the older
 GeoPackage/GeoParquet schema. The repair in [publisher PR 12](https://github.com/fulton-ring/hifld-next-datasets/pull/12)
 preserves source `ID` alongside a separate internal `fid` and rejects newly
-converted publications missing catalog-described fields. It is implemented and
-locally verified, but not deployed. The full publisher suite ran 451 tests with
+converted publications missing catalog-described fields. PR 12 was squash-merged
+as `5395d597f4d48293e0f71bbc5270145921f877d9`; its main-branch image publication
+succeeded. The repair is locally verified but not deployed, and no corrected
+dataset release has been published. The full publisher suite ran 451 tests with
 zero failures/errors and one skipped. A local-only corrected Hospitals preview
 preserved all 8,340 IDs, including leading zeros, through GeoPackage, GeoParquet,
 Shapefile ZIP and decoded PMTiles. The archived input hash stayed unchanged;
