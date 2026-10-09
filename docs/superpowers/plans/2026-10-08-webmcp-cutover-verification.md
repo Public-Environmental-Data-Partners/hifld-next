@@ -13,29 +13,33 @@ only scalar statistic parsing and deduplicate validated logical file summaries.
 
 Files: `webapp/src/lib/webmcp/__tests__/catalogTools.test.tsx`.
 
-- [ ] Add a file/schema regression using a column with `min: "0", max: "8340"`;
+- [x] Add a file/schema regression using a column with `min: "0", max: "8340"`;
   both tools must return `ok: true` and schema must preserve these strings.
-- [ ] Add a dataset regression with a file Catalog child link repeated for two
+- [x] Add a dataset regression with a file Catalog child link repeated for two
   versions, as in production; expect exactly one logical file summary.
-- [ ] Run `npm test -- src/lib/webmcp/__tests__/catalogTools.test.tsx` from
+- [x] Run `npm test -- src/lib/webmcp/__tests__/catalogTools.test.tsx` from
   `webapp/` and confirm both new regressions fail for the observed reasons.
 
 ## Task 2: Minimal adapter repair
 
 File: `webapp/src/lib/webmcp/catalogTools.ts`.
 
-- [ ] Change both scalar extrema definitions to
+- [x] Change both scalar extrema definitions to
   `z.union([z.number(), z.string()]).nullable().optional()`.
-- [ ] Filter file summaries by first occurrence of their validated `slug`, using
+- [x] Filter file summaries by first occurrence of their validated `slug`, using
   an invocation-local `Set<string>`; do not change navigation or fetch behavior.
-- [ ] Run the targeted command again; require all tests pass.
+- [x] Run the targeted command again; require all tests pass.
 
 ## Task 3: Full verification and deployment
 
-- [ ] From `webapp/`, run `npm run check`, `npm run typecheck`, `npm test`, and
+- [x] From `webapp/`, run `npm run check`, `npm run typecheck`, `npm test`, and
   `npm run build`; commit the focused adapter, tests, and these documents.
-- [ ] Push and merge through the application PR workflow; require CI and pinned
+- [x] Push and merge through the application PR workflow; require CI and pinned
   image build success before deployment.
-- [ ] Verify browser catalog, schema, query, and map tools against the candidate
+- [x] Verify browser catalog, schema, query, and map tools against the candidate
   and production. Report the non-native browser test boundary explicitly.
-- [ ] Resume the existing approved cutover plan only after these checks pass.
+- [x] Resume the existing approved cutover plan only after these checks pass.
+
+Completed through PRs 64 and 65 and production browser acceptance. See
+`docs/production-cutover-2026-10-08.md` for the non-native API-boundary test
+limitation and deployed spatial-query verification.
