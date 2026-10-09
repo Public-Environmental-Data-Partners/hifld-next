@@ -814,6 +814,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     (features: maplibregl.MapGeoJSONFeature[], mode: FeatureSelectionMode) => {
       const incoming = normalizeSelectedFeatures({ features, loadedLayers });
       if (incoming.length > 0) {
+        if (isMobileMapLayout) setLegendVisible(false);
         dispatchDataPanel({ type: "features_selected" });
       } else if (mode === "replace") {
         dispatchDataPanel({ type: "features_cleared", hasQueryResults: queryResult !== null });
@@ -824,7 +825,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
         return update.rows;
       });
     },
-    [loadedLayers, queryResult],
+    [isMobileMapLayout, loadedLayers, queryResult],
   );
 
   const handleMapSourceError = useCallback(

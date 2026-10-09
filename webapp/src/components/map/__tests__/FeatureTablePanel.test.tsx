@@ -155,11 +155,14 @@ describe("FeatureTablePanel", () => {
     expect(screen.getByRole("combobox", { name: "Version" })).toHaveClass("h-11", "sm:h-8", "w-full");
     const searchInput = screen.getByPlaceholderText("Search selected features...");
     expect(searchInput).toHaveClass("h-11", "sm:h-8");
-    expect(searchInput.parentElement).toHaveClass("w-full", "sm:w-80", "sm:flex-none");
+    expect(searchInput.parentElement).toHaveClass("col-span-2", "w-full", "sm:w-80", "sm:flex-none");
+    expect(searchInput.closest('[data-slot="selected-features-toolbar"]')).toHaveClass(
+      "grid", "grid-cols-[minmax(0,1fr)_7rem]", "sm:flex",
+    );
     expect(screen.getByTestId("selected-features-scroll")).toHaveClass(
       "overflow-x-auto",
-      "sm:overflow-auto",
-      "sm:overscroll-contain",
+      "md:overflow-auto",
+      "md:overscroll-contain",
     );
   });
 
