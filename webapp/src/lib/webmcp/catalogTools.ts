@@ -84,8 +84,8 @@ const columnSchema = z
     num_null_values: z.number().nullable().optional(),
     num_unique_values: z.number().nullable().optional(),
     example_values: z.array(z.string()).nullable().optional(),
-    min: z.number().nullable().optional(),
-    max: z.number().nullable().optional(),
+    min: z.union([z.number(), z.string()]).nullable().optional(),
+    max: z.union([z.number(), z.string()]).nullable().optional(),
     length: z.number().nullable().optional(),
     possible_values: z.array(z.string()).nullable().optional(),
   })
@@ -199,6 +199,7 @@ async function listChildren(root: z.infer<typeof catalogSchema>, signal: AbortSi
 }
 function fileChildren(item: z.infer<typeof catalogSchema>, collection: string, dataset: string) {
   if (item.id !== `${collection}/${dataset}`) throw new CatalogRequestError("upstream_unavailable");
+  const seen = new Set<string>();
   return item.links
     .filter((x) => x.rel === "child")
     .map((x) => {
@@ -210,6 +211,11 @@ function fileChildren(item: z.infer<typeof catalogSchema>, collection: string, d
         name: x.title ?? file,
         link: `/api/collections/${enc(collection)}/datasets/${enc(dataset)}/files/${enc(file)}`,
       };
+    })
+    .filter((file) => {
+      if (seen.has(file.slug)) return false;
+      seen.add(file.slug);
+      return true;
     });
 }
 function selectedVersion(item: z.infer<typeof collectionSchema>, collection: string, dataset: string, file: string) {

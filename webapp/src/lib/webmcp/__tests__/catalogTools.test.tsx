@@ -83,6 +83,57 @@ const collectionCatalog = {
 };
 
 describe("global catalog WebMCP tools", () => {
+  it("deduplicates logical file links repeated for multiple catalog versions", async () => {
+    const fake = createModelContextFake();
+    installModelContextFake(fake);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      ...datasetCatalog,
+      links: [
+        { rel: "child", href: "roads/catalog.json", title: "Roads layer" },
+        { rel: "child", href: "roads/catalog.json", title: "Roads layer" },
+      ],
+    })));
+    render(<CatalogTools applySearch={vi.fn(async () => undefined)} enabled />);
+    await waitFor(() => expect(fake.toolNames()).toHaveLength(6));
+
+    await expect(fake.execute("get_dataset", { collection: "hifld", dataset: "roads" })).resolves.toMatchObject({
+      ok: true,
+      data: { files: [{ id: "hifld/roads/roads", slug: "roads", name: "Roads layer", link: "/api/collections/hifld/datasets/roads/files/roads" }] },
+    });
+  });
+
+  it("preserves string statistics in real catalog columns for file and schema tools", async () => {
+    const fake = createModelContextFake();
+    installModelContextFake(fake);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      ...fileCollection,
+      "table:columns": [{ name: "OBJECTID", type: "string", min: "0000000004", max: "0000083400" }],
+    })));
+    render(<CatalogTools applySearch={vi.fn(async () => undefined)} enabled />);
+    await waitFor(() => expect(fake.toolNames()).toHaveLength(6));
+
+    const input = { collection: "hifld", dataset: "roads", file: "roads" };
+    await expect(fake.execute("get_dataset_file", input)).resolves.toMatchObject({ ok: true });
+    await expect(fake.execute("get_dataset_file_schema", input)).resolves.toMatchObject({
+      ok: true,
+      data: { schema: { columns: [{ name: "OBJECTID", type: "string", min: "0000000004", max: "0000083400" }] } },
+    });
+  });
+
+  it("rejects structured extrema rather than weakening catalog column validation", async () => {
+    const fake = createModelContextFake();
+    installModelContextFake(fake);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      ...fileCollection,
+      "table:columns": [{ name: "OBJECTID", type: "string", min: { value: "4" } }],
+    })));
+    render(<CatalogTools applySearch={vi.fn(async () => undefined)} enabled />);
+    await waitFor(() => expect(fake.toolNames()).toHaveLength(6));
+    await expect(fake.execute("get_dataset_file_schema", { collection: "hifld", dataset: "roads", file: "roads" })).resolves.toMatchObject({
+      ok: false, error: { code: "upstream_unavailable" },
+    });
+  });
+
   it("registers exactly six catalog tools", async () => {
     const fake = createModelContextFake();
     installModelContextFake(fake);
