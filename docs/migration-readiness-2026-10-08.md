@@ -1,5 +1,10 @@
 # Portolan migration readiness — 2026-10-08
 
+> Historical pre-cutover review. Production was subsequently switched; see
+> [the production cutover report](production-cutover-2026-10-08.md) for deployment,
+> live acceptance, rollback, and retained-storage status. Statements below about
+> unmerged changes and empty permanent prefixes describe the earlier snapshot.
+
 ## Decision
 
 Proceed with a **verified copy-and-switch after merging/building/deploying the

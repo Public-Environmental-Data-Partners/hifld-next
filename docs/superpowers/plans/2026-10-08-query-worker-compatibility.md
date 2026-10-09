@@ -15,3 +15,10 @@ No server, storage, worker implementation, or query behavior changes.
 Browser verification uses a probe at the unavailable native WebMCP registration
 boundary; application tools, HTTP requests, query execution, and rendering remain
 real. Report this limitation explicitly.
+
+Completed: regression failed before the fix; all 18 targeted and 497 full tests,
+lint, typecheck, build and CI passed. PR 65 merged as `a990aa6`; pinned container
+rollout `37869924121` succeeded. Production spatial WebMCP returned five rows,
+added a ready query layer and fetched a vector tile with HTTP 200. Published
+PMTiles fetched byte ranges with HTTP 206; comparison and catalog tools passed,
+with no browser page errors.
