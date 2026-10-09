@@ -74,12 +74,12 @@ describe("query-api", () => {
     expect(result.rows[0]?.id).toBe(1);
   });
 
-  it("parses a successful spatial result without exposing resolved source paths", () => {
+  it.each(["mjs", "cjs"])("parses a spatial result with the %s worker without exposing resolved source paths", (extension) => {
     const result = QueryResultSchema.parse({
       ...page,
       map_configuration: {
         tile_url: "https://mcp.example.test/api/queries/query_12345678901234567890/tiles/{z}/{x}/{y}.mvt",
-        worker_url: "https://mcp.example.test/assets/maplibre-gl-worker.mjs",
+        worker_url: `https://mcp.example.test/assets/maplibre-gl-worker.${extension}`,
         source_layer: "hifld",
         geometry_column: "geometry",
         result_crs: "EPSG:4326",
@@ -89,6 +89,26 @@ describe("query-api", () => {
 
     expect(result.map_configuration?.source_layer).toBe("hifld");
     expect(QueryResultSchema.safeParse({ ...page, resolved_sources: [] }).success).toBe(false);
+  });
+
+  it.each([
+    "https://user:password@mcp.example.test/assets/maplibre-gl-worker.cjs",
+    "https://mcp.example.test/assets/maplibre-gl-worker.cjs?token=secret",
+    "https://mcp.example.test/assets/maplibre-gl-worker.cjs#fragment",
+    "file:///assets/maplibre-gl-worker.cjs",
+    "https://mcp.example.test/assets/maplibre-gl-worker.cjs/extra",
+    "https://mcp.example.test/assets/maplibre-gl-worker.cjs.evil",
+  ])("rejects unsafe or lookalike worker URL %s", (workerUrl) => {
+    expect(QueryResultSchema.safeParse({
+      ...page,
+      map_configuration: {
+        tile_url: "https://mcp.example.test/api/queries/query_12345678901234567890/tiles/{z}/{x}/{y}.mvt",
+        worker_url: workerUrl,
+        source_layer: "hifld",
+        geometry_column: "geometry",
+        result_crs: "EPSG:4326",
+      },
+    }).success).toBe(false);
   });
 
   it("sends the private token only as a page request header", async () => {
