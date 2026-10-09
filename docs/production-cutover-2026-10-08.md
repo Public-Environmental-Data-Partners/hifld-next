@@ -3,7 +3,10 @@
 ## Status
 
 The permanent-bucket switch is deployed and live publication, browser, object
-audit and rollback/restore acceptance passed. Discovery was restored to its prior
+audit and rollback/restore serving checks passed. A subsequent field-level audit
+found an existing Hospitals schema mismatch, propagated into the processing-only
+v1.1.1 release. That release has been rolled back: the active generation is now
+`cf809c93-c5c0-4ec3-968a-d3ecb8ec6696`, with Hospitals v1.1.0 latest. Discovery remains in its prior
 `RUNNING` status; both legacy cronjobs remain suspended with no active jobs.
 This report supersedes the earlier readiness review's pre-deployment status.
 
@@ -114,6 +117,47 @@ the actual process continued and the final recorded status was `SUCCESS`.
 The audit trail contains both the monitor's `PIPELINE_FAILURE` event and the
 actual final `PIPELINE_SUCCESS`. This invocation caveat is not evidence that the
 normal Kubernetes run-launcher/scheduler path was tested by this manual check.
+
+## Hospitals field audit and final rollback
+
+The processing-only release was not a fix to source data. A field-level audit
+after acceptance found that the archived v1.1.0 GeoPackage and GeoParquet already
+contained `source_ID`, while its PMTiles and Shapefile contained `ID`. The old
+GeoPackage conversion sanitizer treated `id` as reserved and renamed it.
+Reprocessing the archived GeoPackage propagated `source_ID` to the v1.1.1 PMTiles
+and Shapefile. The pinned authored dictionary still described `ID`, and the
+publisher had no check against actual converted field names.
+
+All 8,340 actual `source_ID` values were compared across both GeoPackages and
+GeoParquets and match, including leading zeros. The GeoParquet files are
+byte-identical, SHA-256
+`1340e20f1921deb0c636901f74bd5faa6a1a2da872e22b4a74bf555286dc07e1`.
+This audit compared the existing `source_ID` field explicitly, not an absent
+`ID` field. Existing schema metadata does not accurately describe that field in
+either version's GeoPackage/GeoParquet; prior schema acceptance checked successful
+serving and preservation, not full physical field equivalence.
+
+With operator approval, the verified/CAS rollback selected
+`cf809c93-c5c0-4ec3-968a-d3ecb8ec6696` at `2026-10-09T02:05:47Z`. Catalog SHA-256:
+`2c98fb6dcd1e22aec6bf922634fd02002fe823e0e36e6e294814661ddf25d578`.
+Both readers adopted it with their existing pod UIDs and zero restarts. Hospitals
+v1.1.0 is latest; v1.0.0 and v1.1.0 each serve 8,340 features, and v1.1.1 is no
+longer advertised. No historical files or buckets were overwritten or deleted.
+The active index again has 526 versions, 515 spatial versions and 2,734 assets.
+
+Fresh deployed-browser acceptance passed after this rollback: WebMCP discovery,
+schema/search, PMTiles HTTP 206, count/spatial queries, a rendered query tile with
+HTTP 200, and v1.0.0/v1.1.0 comparison. No page errors were observed. The same
+experimental browser registration-boundary limitation described above applies.
+MCP independently counted 8,340 v1.1.0 features and served a nonempty authenticated
+map tile (HTTP 200).
+
+The rollback restores previous map/Shapefile field names, not the older
+GeoPackage/GeoParquet schema. A publisher repair is being designed to preserve
+source `ID` alongside a separate internal `fid` and reject newly converted
+publications missing catalog-described fields. It has not yet been implemented
+or deployed. Corrected historical data needs a separately reviewed new version,
+not an overwrite or a blind global `source_ID` rename.
 
 ## Caveats and follow-up
 
