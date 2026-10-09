@@ -583,6 +583,8 @@ async def test_initial_catalog_outage_is_not_reported_as_not_found() -> None:
     [
         ("source_not_found", ErrorCode.CATALOG_NOT_FOUND),
         ("source_not_queryable", ErrorCode.SOURCE_NOT_GEOPARQUET),
+        ("source_location_invalid", ErrorCode.STORAGE_UNAVAILABLE),
+        ("source_storage_unknown", ErrorCode.STORAGE_UNAVAILABLE),
         ("future_catalog_code", ErrorCode.INTERNAL_ERROR),
     ],
 )
@@ -597,6 +599,8 @@ async def test_initial_source_resolution_preserves_failure_category(
         await service.query((_source(),), "SELECT id FROM roads", 1, None, None)
 
     assert caught.value.code is expected_code
+    if expected_code is ErrorCode.STORAGE_UNAVAILABLE:
+        assert "catalog" not in caught.value.message
 
 
 @pytest.mark.asyncio

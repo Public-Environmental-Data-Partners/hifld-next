@@ -10,6 +10,7 @@ function configuredSource(): CatalogSource | null {
   if (env.CATALOG_SQLITE_PATH) return { kind: "file", path: env.CATALOG_SQLITE_PATH };
   if (env.CATALOG_RELEASE_POINTER_URL) return { kind: "pointer", url: env.CATALOG_RELEASE_POINTER_URL };
   if (env.CATALOG_SQLITE_URL) return { kind: "url", url: env.CATALOG_SQLITE_URL };
+  if (!env.DATASET_API_URL) throw new Error("Configure a catalog source or DATASET_API_URL");
   return null;
 }
 

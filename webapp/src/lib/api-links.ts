@@ -137,7 +137,7 @@ export function sourceDownloadZip(
   fileSlug: string,
   sourceId: string,
 ): string {
-  return `${origin}/api/collections/${enc(collectionSlug)}/datasets/${enc(datasetSlug)}/files/${enc(fileSlug)}/sources/${sourceId}/download-zip`;
+  return `${origin}/api/collections/${enc(collectionSlug)}/datasets/${enc(datasetSlug)}/files/${enc(fileSlug)}/sources/${enc(sourceId)}/download-zip`;
 }
 
 export function globalDatasetsListSelf(origin: string, opts?: { search?: string }): string {

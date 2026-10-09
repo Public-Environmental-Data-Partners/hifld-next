@@ -4,7 +4,7 @@ import { z } from "zod";
 export const env = createEnv({
   server: {
     // Dataset API URL for server-side routes (loader functions)
-    DATASET_API_URL: z.string().url(),
+    DATASET_API_URL: z.string().url().optional(),
     // During cutover one of these catalog sources enables SQLite-backed reads.
     // DATASET_API_URL remains the explicit rollback/dual-read source.
     CATALOG_SQLITE_PATH: z.string().min(1).optional(),
