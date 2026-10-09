@@ -161,7 +161,7 @@ export const QueryMapConfigurationSchema = z
         parsed.password === "" &&
         parsed.search === "" &&
         parsed.hash === "" &&
-        parsed.pathname === "/assets/maplibre-gl-worker.mjs"
+        (parsed.pathname === "/assets/maplibre-gl-worker.mjs" || parsed.pathname === "/assets/maplibre-gl-worker.cjs")
       );
     }, "worker_url must point to the MapLibre worker"),
     source_layer: z.string().min(1),
