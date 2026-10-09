@@ -9,7 +9,7 @@ const { activeCatalogStacUrl } = vi.hoisted(() => ({
 vi.mock("@/lib/catalog-runtime", () => ({ activeCatalogStacUrl }));
 
 vi.mock("@/env/server", () => ({
-  env: { DATASET_API_URL: "https://dataset-api.example" },
+  env: {},
 }));
 
 import { publishedCatalogUrl } from "@/lib/api-client";

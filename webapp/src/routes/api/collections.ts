@@ -8,8 +8,8 @@ export const Route = createFileRoute("/api/collections")({
   server: {
     handlers: {
       GET: async () => {
-        const catalog = await sqliteCatalogApi();
-        const catalogUrl = await activeCatalogStacUrl();
+        const catalog = await sqliteCatalogApi().catch(() => null);
+        const catalogUrl = catalog ? await activeCatalogStacUrl().catch(() => null) : null;
         if (!catalog || !catalogUrl) return jsonProblem(503, "Catalog metadata is unavailable");
         const response = await fetchCatalogStac(catalogUrl, "catalog.json");
         response.headers.set("X-Catalog-Generation", catalog.generation);

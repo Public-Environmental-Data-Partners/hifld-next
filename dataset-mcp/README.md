@@ -1,10 +1,9 @@
 # dataset-mcp
 
 Stateless FastMCP Apps service for catalog discovery and bounded server-side
-DuckDB queries. The production image builds the nested React app, installs
-DuckDB `httpfs` and `spatial` extensions at image-build time, and runs as a
-non-root user with a read-only root filesystem. Runtime scratch space is the
-dedicated 4 GiB spill volume configured by the Helm chart.
+ClickHouse queries. The production image builds the nested React app and runs
+as a non-root user with a read-only root filesystem. Query execution uses the
+separate ClickHouse service; no DuckDB extensions are installed in production.
 
 ## Local development
 
@@ -15,9 +14,9 @@ cd dataset-mcp
 uv run fastapi dev
 ```
 
-Local development defaults the catalog URL to `http://127.0.0.1:8000` and uses
+Local development defaults the catalog URL to `http://127.0.0.1:3000` and uses
 the fixed `access` / `secret` credentials from the repository's local SeaweedFS
-setup. For the unified catalog, point `DATASET_MCP_CATALOG_BASE_URL` at the
+setup. Point `DATASET_MCP_CATALOG_BASE_URL` at the
 webapp that serves the public STAC routes (normally `http://127.0.0.1:3000`).
 The public STAC documents contain canonical asset hrefs, but they do not grant
 access to arbitrary object stores. Configure the matching server-controlled
@@ -43,9 +42,8 @@ prefix and is exposed on port 8000. Required settings are:
 - `DATASET_MCP_QUERY_TOKEN_SECRET`: at least 32 bytes, used to sign stateless
   query and tile tokens.
 
-`DATASET_MCP_PUBLIC_ORIGIN` is optional. DuckDB's `httpfs` and `spatial`
-extensions are installed into `/opt/duckdb/extensions` while the image is
-built; the container never downloads extensions at startup. `/healthz` is the
+`DATASET_MCP_PUBLIC_ORIGIN` is optional. DuckDB workers are retained only for
+local regression/reference tests, not as a serving fallback. `/healthz` is the
 Kubernetes and container health endpoint; MCP traffic is served at `/mcp`.
 
 The first-party webapp keeps the MCP transport same-origin by default. Its

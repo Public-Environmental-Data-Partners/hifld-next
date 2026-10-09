@@ -6,7 +6,7 @@ import { activeCatalogLifecycle } from "@/lib/catalog-runtime";
 import { buildStacCollection, loadStacDocument } from "@/lib/stac-api";
 
 export async function serveStacCollection(request: Request, id: string): Promise<Response> {
-  const lifecycle = await activeCatalogLifecycle();
+  const lifecycle = await activeCatalogLifecycle().catch(() => null);
   if (!lifecycle) return jsonProblem(503, "Catalog metadata is unavailable");
   return (
     (await lifecycle.withSnapshot(async ({ repository, catalogUrl, generation }) => {

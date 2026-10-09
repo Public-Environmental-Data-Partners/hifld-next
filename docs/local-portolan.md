@@ -7,9 +7,8 @@ catalog. `hifld-local-published` contains the promoted originals, generated
 GeoParquet/PMTiles, STAC metadata and the final catalog database. The original
 acceptance bucket and production bucket are not modified by this workflow.
 
-The publisher implementation is currently in the linked datasets-repository
-worktree `.worktrees/portolan-publisher`. Its changes must be integrated separately
-from the `hifld-next` repository; the original sibling checkout is untouched.
+The publisher implementation lives in the sibling `../hifld-next-datasets`
+repository. Use its reviewed current revision, not a historical migration worktree.
 
 ## Published metadata refreshes
 
@@ -17,14 +16,9 @@ The publisher writes absolute STAC navigation and asset URLs when a public root
 is configured, for either GCS or SeaweedFS. Offline rendering can retain relative
 links. Webapp metadata endpoints continue to return the authored documents verbatim.
 
-For production-inventory builds, pass `--production-datasets` alongside
-`--production-collections` to preserve catalog timestamps from the production
-exports. Missing source dates remain absent; catalog build time is not a source date.
-
-`scripts/portolan_gcp_upload_catalog.py --replace-existing` refreshes generated
-catalog documents in the dedicated migration buckets using generation-conditional
-writes, skips unchanged content, and uploads SQLite last. Keep the prior local
-build for comparison. This command does not refresh or transform dataset assets.
+Use the recorded publisher promotion job with `--catalog-only` for metadata-only
+refreshes. Missing source dates remain absent; catalog build time is not a source
+date. The initial migration copy/uploader scripts have been retired.
 
 ## Bootstrap and run Dagster
 
@@ -32,7 +26,7 @@ Start SeaweedFS with the root Compose project, then run from the repository root
 
 ```bash
 source ops/local-portolan.env.example
-cd .worktrees/portolan-publisher
+cd ../hifld-next-datasets
 uv run python -m ops.acceptance.bootstrap
 uv run python -m dagster_hifld.portolan.cli promote \
   --manifest ops/acceptance/manifest.json \
@@ -112,8 +106,7 @@ Alternatively, from a fresh shell (without the host-specific environment), use
 features on port 8002. Compose uses the internal Docker S3 hostname, while the
 host example uses localhost. Do not mix those two endpoint configurations.
 
-The host example deliberately points `DATASET_API_URL` at an unavailable port so
-catalog smoke checks cannot silently fall back to the old service.
+Consumers require a published catalog; there is no old-service fallback.
 
 ## Metadata
 
@@ -156,7 +149,10 @@ Example UI: [Agricultural Minerals schema](http://localhost:3000/collections/hif
 Its metadata link returns the exact published STAC Collection bytes. File metadata
 supports `?version=v1.0.0`; without it, the selected latest version is returned.
 
-## Verification recorded for this local setup
+## Historical verification recorded for the initial local setup
+
+These counts and run IDs record the original migration exercise, not current
+test results or deployment status. Re-run acceptance against the selected revisions.
 
 - Crawled both STAC trees and resolved all 14 staging / 22 published asset URLs.
 - Checked source archive contents and pinned checksums.
@@ -195,6 +191,5 @@ PMTiles rendering, and table queries returning rows 1–5 then 6–10. The captu
 production collection response and all 19 source metadata documents match their
 recorded checksums.
 
-The broader migration still has outstanding production-hardening and conformance
-work described in the implementation checkpoint. This local fixture workflow is
-not permission to retire dataset-api or deploy the feature service publicly.
+This local fixture workflow is not authorization for production writes or
+teardown. Follow [the coordinated retirement gates](legacy-retirement.md).

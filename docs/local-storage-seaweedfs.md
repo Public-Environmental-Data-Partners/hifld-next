@@ -16,8 +16,14 @@ Endpoints:
 ## Verify
 
 ```bash
-cd dataset-api
-HIFLD_RUN_SEAWEEDFS_INTEGRATION=1 uv run pytest tests/test_storage_client.py -v
+cd dataset-mcp
+HIFLD_TEST_SEAWEED_ENDPOINT=http://localhost:8333 \
+HIFLD_TEST_SEAWEED_BUCKET=hifld-local-published \
+HIFLD_TEST_SEAWEED_OBJECT=path/to/an/existing.parquet \
+uv run pytest tests/integration/test_seaweedfs.py -v
 ```
 
-The integration test uploads a JSON file, verifies listing/glob expansion, downloads it, checks the storage URI, and deletes the object.
+Replace the object key with an existing published GeoParquet fixture. The test
+reads two rows using request-scoped S3 credentials; it does not modify objects.
+For conversion, promotion, catalog refresh, webapp and feature-server acceptance,
+follow [the local Portolan workflow](local-portolan.md).

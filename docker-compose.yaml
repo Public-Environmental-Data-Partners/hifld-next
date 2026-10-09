@@ -24,47 +24,6 @@ services:
     networks:
       - hifld-network
 
-  # PostgreSQL database for dataset-api metadata
-  # Stores collections, datasets, formats, and sources metadata
-  dataset-api-postgres:
-    image: postgres:17-alpine
-    container_name: hifld-dataset-api-postgres
-    environment:
-      POSTGRES_DB: ${DATASET_API_POSTGRES_DB:-hifld_datasets}
-      POSTGRES_USER: ${DATASET_API_POSTGRES_USER:-hifld}
-      POSTGRES_PASSWORD: ${DATASET_API_POSTGRES_PASSWORD:-hifld_dev}
-    volumes:
-      - dataset_api_postgres_data:/var/lib/postgresql/data
-    ports:
-      - "${DATASET_API_POSTGRES_PORT:-5433}:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DATASET_API_POSTGRES_USER:-hifld}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - hifld-network
-
-  discover-job:
-    build:
-      context: ./dataset-api
-    command: uv run python -m jobs.discover
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://hifld:hifld_dev@dataset-api-postgres:5432/hifld_datasets}
-      DISCOVER_STORAGE_LOCATION_SLUG: ${DISCOVER_STORAGE_LOCATION_SLUG:-seaweedfs-drp-hifld-copy-formatted}
-      DISCOVER_COLLECTION_SLUG: ${DISCOVER_COLLECTION_SLUG:-hifld}
-      DISCOVER_PREFIX: ${DISCOVER_PREFIX:-}
-      DISCOVER_DRY_RUN: ${DISCOVER_DRY_RUN:-false}
-      DISCOVER_PRUNE_STALE: ${DISCOVER_PRUNE_STALE:-false}
-      DISCOVER_LIMIT: ${DISCOVER_LIMIT:-}
-    depends_on:
-      dataset-api-postgres:
-        condition: service_healthy
-    profiles:
-      - tools
-    networks:
-      - hifld-network
-
   # OGC API - Features adapter over the shared Portolan SQLite catalog.
   # Opt in with: docker compose --profile feature-server up -d feature-server
   feature-server:
@@ -158,8 +117,6 @@ services:
 
 volumes:
   clickhouse_cache:
-    driver: local
-  dataset_api_postgres_data:
     driver: local
   seaweedfs_master_data:
     driver: local

@@ -8,8 +8,8 @@ export const Route = createFileRoute("/api/collections/$collectionSlug/datasets/
   server: {
     handlers: {
       GET: async ({ params }) => {
-        const catalog = await sqliteCatalogApi();
-        const catalogUrl = await activeCatalogStacUrl();
+        const catalog = await sqliteCatalogApi().catch(() => null);
+        const catalogUrl = catalog ? await activeCatalogStacUrl().catch(() => null) : null;
         if (!catalog || !catalogUrl) return jsonProblem(503, "Catalog metadata is unavailable");
         const dataset = await catalog.dataset(params.collectionSlug, params.datasetSlug);
         if (!dataset) return jsonProblem(404, "Dataset not found");

@@ -6,23 +6,24 @@ Public TanStack Start application and public JSON API facade for HIFLD Next.
 
 ```bash
 npm install
-DATASET_API_URL=http://127.0.0.1:8000 npm run dev
+CATALOG_SQLITE_URL=http://127.0.0.1:8333/published/_catalog/catalog.sqlite npm run dev
 ```
 
-The webapp proxies the FastAPI dataset service through same-origin `/api/*` routes.
+The webapp reads a published SQLite catalog and serves its STAC metadata through same-origin `/api/*` routes. ZIP downloads redirect directly to published storage assets.
 
 ## Production Configuration
 
-Production runs on GKE behind the external Application Load Balancer. The server runtime should use the internal dataset API service:
+Production runs on GKE behind the external Application Load Balancer. Configure a published catalog release pointer:
 
 ```bash
-DATASET_API_URL=http://dataset-api.hifld-next.svc.cluster.local
+CATALOG_RELEASE_POINTER_URL=https://storage.googleapis.com/your-bucket/releases/current.json
 ```
+
+`CATALOG_SQLITE_URL` also supports a direct published index URL. `CATALOG_SQLITE_PATH` supports an existing local SQLite file; set a published URL alongside it when serving STAC documents. The in-process catalog starts on first use and refreshes on a timer, retaining the last valid generation on refresh failures. Readiness and catalog routes fail closed when no valid catalog can be opened. Configure `CATALOG_STORAGE_LOCATIONS_JSON` to resolve published asset storage locations (including SeaweedFS for local storage). Numeric database row IDs are retired; use collection slugs and published dataset/file paths.
 
 Runtime browser settings are supplied by the running webapp server and served from `/runtime-config.js`:
 
 ```bash
-PUBLIC_DATASET_API_URL=https://your-public-webapp-origin.example
 PUBLIC_POSTHOG_KEY=your-posthog-key
 PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
 ```
@@ -65,8 +66,9 @@ result persistence, cursor registry, or saved query history.
 
 - `GET /api` returns bootstrap links for OpenAPI, collections, `llms.txt`, and agent discovery.
 - `GET /api/openapi` returns the public machine-readable API contract.
-- `GET /api/collections` lists collections.
-- `GET /api/collections/{slug}` lists datasets for a collection.
+- `GET /api/collections` returns the root STAC catalog.
+- `GET /api/collections/{slug}` returns a collection STAC catalog.
+- `GET /api/collections/{slug}/datasets` lists datasets for a collection.
 - `GET /api/collections/{collectionSlug}/datasets/{datasetSlug}` returns dataset detail.
 - `GET /api/collections/{collectionSlug}/datasets/{datasetSlug}/files/{fileSlug}` returns file/source detail.
 - `GET /api/datasets` provides a capped global list. Prefer collection-scoped endpoints for complete catalog traversal.

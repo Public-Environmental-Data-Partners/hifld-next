@@ -1,11 +1,11 @@
 import { expect, it, vi } from "vitest";
 
-vi.mock("@/env/server", () => ({ env: {} }));
+vi.mock("@/env/server", () => ({ env: { DATASET_API_URL: "https://retired.example" } }));
 import { catalogRuntimeHealth } from "@/lib/catalog-runtime";
 
-it("does not report ready when neither a published catalog nor the legacy API is configured", async () => {
+it("requires a published catalog even when the retired API URL is configured", async () => {
   expect(await catalogRuntimeHealth()).toMatchObject({
     ready: false,
-    last_error: "Configure a catalog source or DATASET_API_URL",
+    last_error: "Configure CATALOG_SQLITE_PATH, CATALOG_SQLITE_URL, or CATALOG_RELEASE_POINTER_URL",
   });
 });

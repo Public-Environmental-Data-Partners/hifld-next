@@ -6,18 +6,15 @@ let starting: Promise<void> | null = null;
 let started = false;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
-function configuredSource(): CatalogSource | null {
+function configuredSource(): CatalogSource {
   if (env.CATALOG_SQLITE_PATH) return { kind: "file", path: env.CATALOG_SQLITE_PATH };
   if (env.CATALOG_RELEASE_POINTER_URL) return { kind: "pointer", url: env.CATALOG_RELEASE_POINTER_URL };
   if (env.CATALOG_SQLITE_URL) return { kind: "url", url: env.CATALOG_SQLITE_URL };
-  if (!env.DATASET_API_URL) throw new Error("Configure a catalog source or DATASET_API_URL");
-  return null;
+  throw new Error("Configure CATALOG_SQLITE_PATH, CATALOG_SQLITE_URL, or CATALOG_RELEASE_POINTER_URL");
 }
 
-/** Returns null only in explicitly configured legacy/dual-read mode. */
-export async function activeCatalogLifecycle(): Promise<CatalogLifecycle | null> {
+export async function activeCatalogLifecycle(): Promise<CatalogLifecycle> {
   const source = configuredSource();
-  if (!source) return null;
   if (!lifecycle) lifecycle = new CatalogLifecycle(source);
   if (!started) {
     if (!starting) {
@@ -44,7 +41,7 @@ export async function activeCatalogLifecycle(): Promise<CatalogLifecycle | null>
 export async function activeCatalogStacUrl(): Promise<string | null> {
   if (!env.CATALOG_RELEASE_POINTER_URL) return env.CATALOG_SQLITE_URL ?? null;
   const active = await activeCatalogLifecycle();
-  return active?.activeUrl() ?? null;
+  return active.activeUrl();
 }
 
 export async function catalogRuntimeHealth(): Promise<{
@@ -55,7 +52,6 @@ export async function catalogRuntimeHealth(): Promise<{
 }> {
   try {
     const active = await activeCatalogLifecycle();
-    if (!active) return { ready: true, generation: null, last_successful_refresh: null, last_error: null };
     const status = active.status();
     return {
       ready: status.generation !== null,

@@ -6,7 +6,6 @@ export const Route = createFileRoute("/runtime-config.js")({
     handlers: {
       GET: () => {
         const script = runtimeClientConfigScriptFromEnv({
-          PUBLIC_DATASET_API_URL: process.env["PUBLIC_DATASET_API_URL"],
           PUBLIC_POSTHOG_KEY: process.env["PUBLIC_POSTHOG_KEY"],
           PUBLIC_POSTHOG_HOST: process.env["PUBLIC_POSTHOG_HOST"],
           WEBMCP_ENABLED: process.env["WEBMCP_ENABLED"],

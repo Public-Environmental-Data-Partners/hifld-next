@@ -3,12 +3,6 @@
 .env.local
 .env.*.local
 
-# Docker volumes data (optional - you may want to keep these)
-# Uncomment if you don't want to track volume data
-# postgres_data/
-# geoserver_data/
-# seaweedfs_*_data/
-
 # IDE
 .vscode/
 .idea/
@@ -20,7 +14,7 @@
 .DS_Store
 Thumbs.db
 
-# Large GeoServer binaries (downloaded during Docker build)
+# Protect historical local downloads; GeoServer is not a supported runtime.
 geoserver/binaries/
 
 # Node dependencies

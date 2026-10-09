@@ -20,7 +20,8 @@ export default defineConfig({
     timeout: 120_000,
     reuseExistingServer: !process.env["CI"],
     env: {
-      DATASET_API_URL: "http://127.0.0.1:8000",
+      CATALOG_SQLITE_URL:
+        process.env["CATALOG_SQLITE_URL"] ?? "http://127.0.0.1:8333/published/_catalog/catalog.sqlite",
       NITRO_HOST: host,
       NITRO_PORT: String(port),
       WEBMCP_ENABLED: "true",

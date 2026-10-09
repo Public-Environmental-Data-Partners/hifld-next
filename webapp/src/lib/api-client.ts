@@ -1,16 +1,14 @@
 /**
- * API client for dataset-api (Python FastAPI service)
+ * Published SQLite and STAC catalog client
  *
  * All API functions are server functions that can be called from both
  * server (loaders) and client (components) via RPC.
  */
 
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
-import { env } from "@/env/server";
 import { type CatalogAsset, type CatalogFileResponse, sqliteCatalogApi } from "./catalog-api";
 import { datasetIdentity, fileIdentity } from "./catalog-identity";
 import { activeCatalogStacUrl } from "./catalog-runtime";
-import { legacyDatasetApiUrl } from "./legacy-dataset-api";
 import {
   fetchStacCatalog,
   fetchStacVersionCollection,
@@ -21,10 +19,6 @@ import {
 } from "./stac-view-models";
 
 export type { CatalogAsset } from "./catalog-api";
-
-function usesLegacyRowId(id: string): boolean {
-  return Boolean(env.DATASET_API_URL) && /^\d+$/.test(id);
-}
 
 export interface CatalogFormatSource {
   asset_key: string;
@@ -73,7 +67,6 @@ export const getCatalogDatasetFileBySlug = createServerFn({ method: "GET" })
   .inputValidator((data: { collectionSlug: string; datasetSlug: string; fileSlug: string; version?: string }) => data)
   .handler(async ({ data }): Promise<CatalogDatasetFileAdapter | null> => {
     const catalog = await sqliteCatalogApi();
-    if (!catalog) return null;
     const file = await catalog.file(data.collectionSlug, data.datasetSlug, data.fileSlug, data.version);
     if (!file) return null;
     const formats = new Map<string, CatalogFormatAdapter>();
@@ -103,7 +96,7 @@ export const getCatalogDatasetFileBySlug = createServerFn({ method: "GET" })
     return { ...file, formats: [...formats.values()], assets: file.assets };
   });
 
-// Type definitions matching Python Pydantic models
+// Published catalog presentation types
 
 export type FormatType = "geoparquet" | "pmtiles" | "geopackage" | "shapefile" | "geojson" | "file_geodatabase";
 
@@ -542,56 +535,12 @@ export function catalogFileResponse(
 const GLOBAL_DATASET_LIST_CAP = 200;
 const GLOBAL_DATASET_PAGE_SIZE = 50;
 
-async function fetchCollections(base: string): Promise<Collection[]> {
-  const response = await fetch(`${base}/api/collections`);
-  if (!response.ok) {
-    const text = await response.text().catch(() => response.statusText);
-    throw new Error(`Failed to fetch collections: ${response.status} ${text}`);
-  }
-  return (await response.json()) as Collection[];
-}
-
-function appendDatasetListParams(
-  params: URLSearchParams,
-  data: { search?: string | undefined; includeUrls?: boolean | undefined },
-) {
-  if (data.search) params.set("search", data.search);
-  if (data.includeUrls) params.set("include_urls", "true");
-}
-
-async function fetchDatasetPage(
-  base: string,
-  collectionId: string,
-  data: { search?: string | undefined; includeUrls?: boolean | undefined },
-  offset: number,
-): Promise<PaginatedResponse<DatasetWithUrls>> {
-  const params = new URLSearchParams();
-  appendDatasetListParams(params, data);
-  params.set("limit", String(GLOBAL_DATASET_PAGE_SIZE));
-  params.set("offset", String(offset));
-
-  const response = await fetch(`${base}/api/collections/${collectionId}/datasets?${params}`);
-  if (!response.ok) {
-    const text = await response.text().catch(() => response.statusText);
-    throw new Error(`Failed to fetch datasets for collection ${collectionId}: ${response.status} ${text}`);
-  }
-  return (await response.json()) as PaginatedResponse<DatasetWithUrls>;
-}
-
-function hasMoreDatasetPages(page: PaginatedResponse<DatasetWithUrls>, offset: number): boolean {
-  return page.items.length >= GLOBAL_DATASET_PAGE_SIZE && offset + page.items.length < page.total;
-}
-
-/**
- * List datasets across all collections by paging each collection's API.
- * Does not call a global /api/datasets on dataset-api (not exposed there).
- */
+/** List datasets across published collections with bounded pagination. */
 async function listPublishedDatasets(data: {
   search?: string | undefined;
   includeUrls?: boolean | undefined;
 }): Promise<DatasetWithUrls[]> {
   const catalog = await sqliteCatalogApi();
-  if (!catalog) throw new Error("Published catalog is unavailable");
   const out: DatasetWithUrls[] = [];
   for (const collection of await catalog.collections()) {
     let offset = 0;
@@ -609,57 +558,17 @@ async function listPublishedDatasets(data: {
 
 export const getDatasets = createServerFn({ method: "GET" })
   .inputValidator((data: { search?: string | undefined; includeUrls?: boolean | undefined }) => data)
-  .handler(async ({ data }) => {
-    const catalog = await sqliteCatalogApi();
-    if (catalog) return listPublishedDatasets(data);
-    const base = legacyDatasetApiUrl();
-    const collections = await fetchCollections(base);
-    const out: DatasetWithUrls[] = [];
-
-    for (const c of collections) {
-      let offset = 0;
-      while (out.length < GLOBAL_DATASET_LIST_CAP) {
-        const page = await fetchDatasetPage(base, c.id, data, offset);
-        for (const item of page.items) {
-          out.push(item);
-          if (out.length >= GLOBAL_DATASET_LIST_CAP) {
-            return out;
-          }
-        }
-        if (!hasMoreDatasetPages(page, offset)) break;
-        offset += GLOBAL_DATASET_PAGE_SIZE;
-      }
-    }
-    return out;
-  });
+  .handler(async ({ data }) => listPublishedDatasets(data));
 
 /**
- * Get a single dataset by ID by probing collection-scoped dataset-api routes.
+ * Get a single dataset by its published slug path.
  */
 export const getDatasetById = createServerFn({ method: "GET" })
   .inputValidator((data: { id: string; includeUrls?: boolean | undefined }) => data)
   .handler(async ({ data }) => {
-    if (await sqliteCatalogApi()) {
-      const collectionId = data.id.split("/")[0] ?? "";
-      const identity = datasetIdentity(collectionId, data.id);
-      if (identity) return getDatasetBySlug({ data: { ...identity, includeUrls: data.includeUrls ?? false } });
-      if (!usesLegacyRowId(data.id)) return null;
-    }
-    const base = legacyDatasetApiUrl();
-    const collections = await fetchCollections(base);
-    const suffix = data.includeUrls ? "/urls" : "/files";
-
-    for (const c of collections) {
-      const url = `${base}/api/collections/${c.id}/datasets/${data.id}${suffix}`;
-      const response = await fetch(url);
-      if (response.status === 404) continue;
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => response.statusText);
-        throw new Error(`Failed to fetch dataset: ${response.status} ${errorText}`);
-      }
-      return (await response.json()) as DatasetWithUrls;
-    }
-    return null;
+    await sqliteCatalogApi();
+    const identity = datasetIdentity(data.id.split("/")[0] ?? "", data.id);
+    return identity ? getDatasetBySlug({ data: { ...identity, includeUrls: data.includeUrls ?? false } }) : null;
   });
 
 /**
@@ -670,53 +579,24 @@ export const getDatasetBySlug = createServerFn({ method: "GET" })
   .inputValidator((data: { collectionSlug: string; datasetSlug: string; includeUrls?: boolean }) => data)
   .handler(async ({ data }) => {
     const catalog = await sqliteCatalogApi();
-    if (catalog) {
-      const dataset = await catalog.dataset(data.collectionSlug, data.datasetSlug);
-      if (!dataset) return null;
-      const datasetStac = await fetchStacCatalog(await publishedCatalogUrl(), dataset.stac_href);
-      const result = catalogDataset(dataset, datasetStac);
-      const files = await catalog.files(data.collectionSlug, data.datasetSlug);
-      const responses = await Promise.all(
-        files.map((file) => catalog.file(data.collectionSlug, data.datasetSlug, file.file_slug)),
-      );
-      return {
-        ...result,
-        files: (
-          await Promise.all(
-            responses.flatMap((file) =>
-              file ? [publishedFileResponse(data.collectionSlug, data.datasetSlug, file)] : [],
-            ),
-          )
-        ).map((response) => response.file),
-      };
-    }
-    // Get the collection first
-    const collection = await getCollectionBySlug({ data: { slug: data.collectionSlug } });
-    if (!collection) {
-      return null;
-    }
-
-    // Use the appropriate endpoint based on includeUrls
-    const includeUrls = data.includeUrls ?? false;
-    let endpoint = `/api/collections/${collection.id}/datasets/by-slug/${data.datasetSlug}`;
-    if (includeUrls) {
-      endpoint += "/urls";
-    } else {
-      endpoint += "/files"; // Default to files endpoint for file tree
-    }
-
-    const url = `${legacyDatasetApiUrl()}${endpoint}`;
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      if (response.status === 404) {
-        return null;
-      }
-      const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(`Failed to fetch dataset: ${response.status} ${errorText}`);
-    }
-
-    return (await response.json()) as DatasetWithUrls;
+    const dataset = await catalog.dataset(data.collectionSlug, data.datasetSlug);
+    if (!dataset) return null;
+    const datasetStac = await fetchStacCatalog(await publishedCatalogUrl(), dataset.stac_href);
+    const result = catalogDataset(dataset, datasetStac);
+    const files = await catalog.files(data.collectionSlug, data.datasetSlug);
+    const responses = await Promise.all(
+      files.map((file) => catalog.file(data.collectionSlug, data.datasetSlug, file.file_slug)),
+    );
+    return {
+      ...result,
+      files: (
+        await Promise.all(
+          responses.flatMap((file) =>
+            file ? [publishedFileResponse(data.collectionSlug, data.datasetSlug, file)] : [],
+          ),
+        )
+      ).map((response) => response.file),
+    };
   });
 
 /**
@@ -725,39 +605,18 @@ export const getDatasetBySlug = createServerFn({ method: "GET" })
 export const getDatasetFileById = createServerFn({ method: "GET" })
   .inputValidator((data: { collectionId: string; datasetId: string; fileId: string }) => data)
   .handler(async ({ data }) => {
-    if (await sqliteCatalogApi()) {
-      const identity = fileIdentity(data.collectionId, data.datasetId, data.fileId);
-      if (identity) return getDatasetFileBySlug({ data: identity });
-      if (![data.collectionId, data.datasetId, data.fileId].every(usesLegacyRowId)) return null;
-    }
-    const url = `${legacyDatasetApiUrl()}/api/collections/${data.collectionId}/datasets/${data.datasetId}/files/${data.fileId}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(`Failed to fetch dataset file: ${response.status} ${errorText}`);
-    }
-    return (await response.json()) as DatasetFileResponse;
+    await sqliteCatalogApi();
+    const identity = fileIdentity(data.collectionId, data.datasetId, data.fileId);
+    return identity ? getDatasetFileBySlug({ data: identity }) : null;
   });
 
 export const getFileVersions = createServerFn({ method: "GET" })
   .inputValidator((data: { collectionId: string; datasetId: string; fileId: string }) => data)
-  .handler(async ({ data }) => {
-    if (await sqliteCatalogApi()) {
-      if (fileIdentity(data.collectionId, data.datasetId, data.fileId)) {
-        const response = await getDatasetFileById({ data });
-        return response
-          ? { dataset_id: response.dataset.id, file_id: response.file.id, formats: response.file.formats ?? [] }
-          : null;
-      }
-      if (![data.collectionId, data.datasetId, data.fileId].every(usesLegacyRowId)) return null;
-    }
-    const url = `${legacyDatasetApiUrl()}/api/collections/${data.collectionId}/datasets/${data.datasetId}/files/${data.fileId}/versions`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(`Failed to fetch file versions: ${response.status} ${errorText}`);
-    }
-    return (await response.json()) as DatasetFileVersionsResponse;
+  .handler(async ({ data }): Promise<DatasetFileVersionsResponse | null> => {
+    const response = await getDatasetFileById({ data });
+    return response
+      ? { dataset_id: response.dataset.id, file_id: response.file.id, formats: response.file.formats ?? [] }
+      : null;
   });
 
 /**
@@ -767,22 +626,8 @@ export const getDatasetFileBySlug = createServerFn({ method: "GET" })
   .inputValidator((data: { collectionSlug: string; datasetSlug: string; fileSlug: string }) => data)
   .handler(async ({ data }) => {
     const catalog = await sqliteCatalogApi();
-    if (catalog) {
-      const file = await catalog.file(data.collectionSlug, data.datasetSlug, data.fileSlug);
-      return file ? publishedFileResponse(data.collectionSlug, data.datasetSlug, file) : null;
-    }
-    const collection = await getCollectionBySlug({ data: { slug: data.collectionSlug } });
-    if (!collection) {
-      console.error("[getDatasetFileBySlug] Collection not found:", data.collectionSlug);
-      return null;
-    }
-    const url = `${legacyDatasetApiUrl()}/api/collections/${collection.id}/datasets/by-slug/${data.datasetSlug}/files/${data.fileSlug}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(`Failed to fetch dataset file: ${response.status} ${errorText}`);
-    }
-    return (await response.json()) as DatasetFileResponse;
+    const file = await catalog.file(data.collectionSlug, data.datasetSlug, data.fileSlug);
+    return file ? publishedFileResponse(data.collectionSlug, data.datasetSlug, file) : null;
   });
 
 /**
@@ -791,18 +636,7 @@ export const getDatasetFileBySlug = createServerFn({ method: "GET" })
  */
 export const loadDatasetStats = createServerOnlyFn(async (): Promise<DatasetStats> => {
   const catalog = await sqliteCatalogApi();
-  if (catalog) return catalog.stats();
-
-  const base = legacyDatasetApiUrl();
-  const collections = await fetchCollections(base);
-  let total = 0;
-  for (const c of collections) {
-    const r = await fetch(`${base}/api/collections/${c.id}/datasets/stats`);
-    if (!r.ok) continue;
-    const j = (await r.json()) as { total?: number };
-    total += typeof j.total === "number" ? j.total : 0;
-  }
-  return { total } satisfies DatasetStats;
+  return catalog.stats();
 });
 
 export const getDatasetStats = createServerFn({ method: "GET" }).handler(async () => loadDatasetStats());
@@ -813,22 +647,14 @@ export const getDatasetStats = createServerFn({ method: "GET" }).handler(async (
  */
 export const getCollections = createServerFn({ method: "GET" }).handler(async () => {
   const catalog = await sqliteCatalogApi();
-  if (catalog) {
-    return Promise.all(
-      (await catalog.collections()).map(async (collection) =>
-        catalogCollection(
-          collection,
-          await fetchStacCatalog(await publishedCatalogUrl(), `${collection.collection_path}/catalog.json`),
-        ),
+  return Promise.all(
+    (await catalog.collections()).map(async (collection) =>
+      catalogCollection(
+        collection,
+        await fetchStacCatalog(await publishedCatalogUrl(), `${collection.collection_path}/catalog.json`),
       ),
-    );
-  }
-  const response = await fetch(`${legacyDatasetApiUrl()}/api/collections`);
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => response.statusText);
-    throw new Error(`Failed to fetch collections: ${response.status} ${errorText}`);
-  }
-  return (await response.json()) as Collection[];
+    ),
+  );
 });
 
 /**
@@ -837,22 +663,7 @@ export const getCollections = createServerFn({ method: "GET" }).handler(async ()
  */
 export const getCollectionById = createServerFn({ method: "GET" })
   .inputValidator((data: { id: string }) => data)
-  .handler(async ({ data }) => {
-    if ((await sqliteCatalogApi()) && !usesLegacyRowId(data.id))
-      return getCollectionBySlug({ data: { slug: data.id } });
-    if (!data.id) {
-      return null;
-    }
-    const response = await fetch(`${legacyDatasetApiUrl()}/api/collections/${data.id}`);
-    if (!response.ok) {
-      if (response.status === 404) {
-        return null;
-      }
-      const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(`Failed to fetch collection: ${response.status} ${errorText}`);
-    }
-    return (await response.json()) as Collection;
-  });
+  .handler(async ({ data }) => getCollectionBySlug({ data: { slug: data.id } }));
 
 /**
  * Get a collection by slug
@@ -862,22 +673,13 @@ export const getCollectionBySlug = createServerFn({ method: "GET" })
   .inputValidator((data: { slug: string }) => data)
   .handler(async ({ data }) => {
     const catalog = await sqliteCatalogApi();
-    if (catalog) {
-      const collection = await catalog.collection(data.slug);
-      return collection
-        ? catalogCollection(
-            collection,
-            await fetchStacCatalog(await publishedCatalogUrl(), `${collection.collection_path}/catalog.json`),
-          )
-        : null;
-    }
-    if (!data.slug) {
-      return null;
-    }
-    // Fetch all collections and find by slug
-    const collections = await getCollections();
-    const collection = collections.find((c: Collection) => c.slug === data.slug);
-    return collection || null;
+    const collection = await catalog.collection(data.slug);
+    return collection
+      ? catalogCollection(
+          collection,
+          await fetchStacCatalog(await publishedCatalogUrl(), `${collection.collection_path}/catalog.json`),
+        )
+      : null;
   });
 
 /**
@@ -886,50 +688,10 @@ export const getCollectionBySlug = createServerFn({ method: "GET" })
  */
 export const getCollectionDatasets = createServerFn({ method: "GET" })
   .inputValidator((data: CollectionDatasetQuery) => data)
-  .handler(async ({ data }): Promise<PaginatedResponse<DatasetWithUrls>> => {
-    if ((await sqliteCatalogApi()) && !usesLegacyRowId(data.collectionId))
-      return getCollectionDatasetsBySlug({ data: { ...data, collectionSlug: data.collectionId } });
-    const params = new URLSearchParams();
-    appendDatasetListParams(params, data);
-    if (data.limit !== undefined) params.set("limit", data.limit.toString());
-    if (data.offset !== undefined) params.set("offset", data.offset.toString());
-    if (data.tagFilters && Object.keys(data.tagFilters).length > 0) {
-      params.set("tag_filters", JSON.stringify(data.tagFilters));
-    }
-
-    const url = `${legacyDatasetApiUrl()}/api/collections/${data.collectionId}/datasets${params.toString() ? `?${params}` : ""}`;
-
-    try {
-      // Add a timeout to prevent hanging requests
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 second timeout
-
-      const response = await fetch(url, {
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => response.statusText);
-        throw new Error(`Failed to fetch collection datasets: ${response.status} ${errorText}`);
-      }
-      const result = await response.json();
-      return result as PaginatedResponse<DatasetWithUrls>;
-    } catch (error) {
-      // Log the error for debugging
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new Error(
-          "Request timeout: The server took too long to respond. This may be due to slow URL computation. Please try again or contact support.",
-        );
-      }
-      console.error(`Error fetching collection datasets:`, {
-        url,
-        collectionId: data.collectionId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
-  });
+  .handler(
+    async ({ data }): Promise<PaginatedResponse<DatasetWithUrls>> =>
+      getCollectionDatasetsBySlug({ data: { ...data, collectionSlug: data.collectionId } }),
+  );
 
 /**
  * Get datasets in a specific collection by collection slug
@@ -948,36 +710,18 @@ export const getCollectionDatasetsBySlug = createServerFn({ method: "GET" })
   )
   .handler(async ({ data }) => {
     const catalog = await sqliteCatalogApi();
-    if (catalog) {
-      const page = await catalog.datasets(data.collectionSlug, {
-        ...(data.search ? { search: data.search } : {}),
-        ...(data.tagFilters ? { tagFilters: data.tagFilters } : {}),
-        limit: data.limit ?? 50,
-        offset: data.offset ?? 0,
-      });
-      const items = await Promise.all(
-        page.items.map(async (dataset) =>
-          catalogDataset(dataset, await fetchStacCatalog(await publishedCatalogUrl(), dataset.stac_href)),
-        ),
-      );
-      return { items, total: page.total, limit: page.limit, offset: page.offset };
-    }
-    // First get the collection by slug to get its ID
-    const collection = await getCollectionBySlug({ data: { slug: data.collectionSlug } });
-    if (!collection) {
-      throw new Error(`Collection not found: ${data.collectionSlug}`);
-    }
-    // Then use the existing function with the collection ID
-    return getCollectionDatasets({
-      data: {
-        collectionId: collection.id,
-        ...(data.search !== undefined ? { search: data.search } : {}),
-        ...(data.includeUrls !== undefined ? { includeUrls: data.includeUrls } : {}),
-        ...(data.limit !== undefined ? { limit: data.limit } : {}),
-        ...(data.offset !== undefined ? { offset: data.offset } : {}),
-        ...(data.tagFilters !== undefined ? { tagFilters: data.tagFilters } : {}),
-      },
+    const page = await catalog.datasets(data.collectionSlug, {
+      ...(data.search ? { search: data.search } : {}),
+      ...(data.tagFilters ? { tagFilters: data.tagFilters } : {}),
+      limit: data.limit ?? 50,
+      offset: data.offset ?? 0,
     });
+    const items = await Promise.all(
+      page.items.map(async (dataset) =>
+        catalogDataset(dataset, await fetchStacCatalog(await publishedCatalogUrl(), dataset.stac_href)),
+      ),
+    );
+    return { items, total: page.total, limit: page.limit, offset: page.offset };
   });
 
 /**
@@ -988,27 +732,7 @@ export const getCollectionTagValues = createServerFn({ method: "GET" })
   .inputValidator((data: { collectionId: string; tagKey?: string | undefined }) => data)
   .handler(async ({ data }) => {
     const catalog = await sqliteCatalogApi();
-    if (catalog) return catalog.tags(data.collectionId, data.tagKey);
-    const params = new URLSearchParams();
-    if (data.tagKey) params.set("tag_key", data.tagKey);
-
-    const url = `${legacyDatasetApiUrl()}/api/collections/${data.collectionId}/datasets/tags${params.toString() ? `?${params}` : ""}`;
-
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => response.statusText);
-        throw new Error(`Failed to fetch collection tag values: ${response.status} ${errorText}`);
-      }
-      return response.json();
-    } catch (error) {
-      console.error(`Error fetching collection tag values:`, {
-        url,
-        collectionId: data.collectionId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
+    return catalog.tags(data.collectionId, data.tagKey);
   });
 
 /**

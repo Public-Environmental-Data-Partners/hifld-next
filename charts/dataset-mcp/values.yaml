@@ -10,8 +10,7 @@ service: {type: ClusterIP, port: 80, targetPort: 8000}
 containerPort: 8000
 env: []
 secretEnv: []
-# The catalog client now targets the webapp's slug-based API. Keep baseUrl as a
-# rollback alias while the legacy dataset-api deployment remains available.
+# The catalog client targets the webapp's slug-based API.
 catalog:
   baseUrl: ""
   # Same trusted slug/backend/bucket mapping as the webapp catalog configuration.
@@ -53,7 +52,7 @@ ingress:
   className: nginx
   host: ""
   annotations: {nginx.ingress.kubernetes.io/limit-rps: "10", nginx.ingress.kubernetes.io/limit-connections: "20", nginx.ingress.kubernetes.io/proxy-body-size: 1m, nginx.ingress.kubernetes.io/proxy-read-timeout: "120", nginx.ingress.kubernetes.io/proxy-buffer-size: 16k, nginx.ingress.kubernetes.io/proxy-buffers-number: "4"}
-networkPolicy: {enabled: true, dnsCidrs: [169.254.20.10/32], catalogNamespace: "", catalogSelector: {app.kubernetes.io/name: dataset-api}, webappNamespace: "", webappSelector: {app.kubernetes.io/name: webapp}, extraEgress: []}
+networkPolicy: {enabled: true, dnsCidrs: [169.254.20.10/32], catalogNamespace: "", catalogSelector: {app.kubernetes.io/name: webapp}, catalogPort: 8080, webappNamespace: "", webappSelector: {app.kubernetes.io/name: webapp}, extraEgress: []}
 nodeSelector: {}
 tolerations: []
 affinity: {}

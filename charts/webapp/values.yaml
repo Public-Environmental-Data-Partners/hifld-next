@@ -5,8 +5,7 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
-# Server-only Portolan catalog settings. DATASET_API_URL remains available
-# during the bounded dual-read/rollback window.
+# Server-only Portolan catalog settings. A configured catalog source is required.
 catalog:
   sqliteUrl: ""
   pointerUrl: ""

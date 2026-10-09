@@ -31,7 +31,6 @@ expect.extend(matchers)
 
 beforeEach(() => {
   window.__HIFLD_CLIENT_CONFIG__ = {
-    publicDatasetApiUrl: "https://api.test",
     posthogKey: "ph_test",
     posthogHost: "https://posthog.test",
   }

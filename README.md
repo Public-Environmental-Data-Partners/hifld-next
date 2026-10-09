@@ -1,108 +1,82 @@
 # HIFLD Next
 
-HIFLD Next is a catalog and delivery app for public geospatial datasets.
+HIFLD Next publishes and serves versioned geospatial datasets using a Portolan
+STAC catalog and its derived SQLite index.
 
-## Architecture
+## Services
 
-- `webapp/` is the public TanStack Start application and public JSON API.
-- `dataset-api/` is the FastAPI catalog service for collections, datasets, files, formats, and source URLs.
-- Google Cloud Storage is the production artifact store for GeoParquet, PMTiles, GeoJSON, shapefile ZIPs, file geodatabases, and metadata manifests.
-- SeaweedFS is the supported local object-storage backend for testing storage discovery and URL generation.
-- Dagster/GKE own ingestion and data operations.
-- Dataset quality, schema, feature counts, file sizes, and related comparison data come from Dagster-published `quality_manifest.json` and `data_dictionary.json` files ingested by discovery.
-- The dataset API intentionally runs Alembic migrations and SQLModel table initialization on startup.
+- `webapp/`: TanStack Start frontend, catalog/search/schema API, STAC endpoints,
+  downloads, and same-origin MCP/query proxy.
+- `dataset-mcp/`: dataset discovery and query tools, MCP map application, and
+  ClickHouse-backed spatial queries.
+- `feature-server/`: pygeoapi OGC API - Features backed by DuckDB and published
+  GeoParquet.
+- `../hifld-next-datasets`: Dagster ingestion, conversions, quality checks,
+  immutable promotion, STAC rendering, and SQLite publication.
+- `../hifld-next-iac`: production infrastructure and deployment workflows.
 
-GeoServer has been removed from the active architecture.
+The catalog is stored with the data, not in a separate catalog database service.
+Production readers resolve
+`https://storage.googleapis.com/hifld-next-datasets-prod/_catalog/current.json`
+and refresh in-process. The pointer selects a complete STAC/SQLite generation;
+canonical dataset assets are shared between catalog generations.
 
-## Local Services
+## Local development
 
-Start local Postgres and SeaweedFS:
-
-```bash
-docker compose up -d dataset-api-postgres seaweedfs-master seaweedfs-volume seaweedfs-filer
-```
-
-The Portolan OGC API - Features service is opt-in and reads the shared catalog
-without replacing the dataset API:
-
-```bash
-docker compose --profile feature-server up -d feature-server
-```
-
-It is available at `http://localhost:8002`; `/healthz` is liveness and
-`/readyz` becomes ready after a valid catalog snapshot is loaded. The profile
-uses disposable cache/tmp volumes and does not install DuckDB extensions at
-runtime. Keep the dataset-api/Postgres services running during the migration
-observation window so rollback remains possible.
-
-Useful local endpoints:
-
-- SeaweedFS filer UI/API: `http://localhost:8888`
-- SeaweedFS S3 API: `http://localhost:8333`
-- Dataset API Postgres: `localhost:5433`
-
-### Local Portolan catalog
-
-The isolated Portolan workflow uses `hifld-local-staging` for original source
-assets and `hifld-local-published` for promoted originals, GeoParquet, PMTiles,
-STAC metadata and `_catalog/catalog.sqlite`. Existing buckets are not cleared.
-STAC JSON is the metadata authority; the database is its query projection.
-
-Host-based consumer configuration is in
-[`ops/local-portolan.env.example`](ops/local-portolan.env.example). Source it
-before starting the webapp or feature server. The feature-server Compose profile
-defaults to the published bucket using the internal SeaweedFS S3 endpoint.
-See [the local workflow instructions](docs/local-portolan.md) for fixture setup,
-Dagster execution and verification.
-
-## Development
-
-Run the dataset API:
+SeaweedFS is the supported local storage backend:
 
 ```bash
-cd dataset-api
-uv sync
-DATABASE_URL=postgresql://hifld:hifld_dev@localhost:5433/hifld_datasets uv run uvicorn main:app --reload --port 8000
-```
-
-Run the webapp:
-
-```bash
+cp .env.example .env
+docker compose up -d seaweedfs-master seaweedfs-volume seaweedfs-filer clickhouse
+npm ci
+source ops/local-portolan.env.example
 cd webapp
-npm install
-DATASET_API_URL=http://127.0.0.1:8000 npm run dev
+npm run dev
 ```
 
-Run tests:
+Bootstrap and promote the pinned source fixtures with the publisher repository
+before starting catalog consumers. Follow [the local Portolan workflow](docs/local-portolan.md)
+for Dagster, the feature server, MCP, and hot-refresh acceptance checks.
+Configure `CATALOG_RELEASE_POINTER_URL`, `CATALOG_SQLITE_URL`, or
+`CATALOG_SQLITE_PATH`; the webapp fails closed when no catalog is available.
+
+## Verification
 
 ```bash
-cd dataset-api && uv run pytest
-cd webapp && npm test
+npm run test:frontend-workspace
+npm run --workspace webapp check
+npm run --workspace webapp typecheck
+npm run --workspace webapp test
+npm run --workspace webapp build
 ```
 
-Run the local SeaweedFS integration test:
+For each Python service, run from its directory:
 
 ```bash
-cd dataset-api
-HIFLD_RUN_SEAWEEDFS_INTEGRATION=1 uv run pytest tests/test_storage_client.py -v
+uv sync --frozen
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run basedpyright
+uv run pytest
 ```
 
-## Deployment
+The dataset MCP tests need its built UI assets; run
+`npm run --workspace @hifld/dataset-mcp-ui build` first. Optional cloud/SeaweedFS
+integration tests require their documented local fixtures and configuration.
 
-Production infrastructure lives in `../hifld-next-iac`. The webapp, dataset API, discovery, and config reconciliation run on GKE with Helm-managed releases. The public webapp is served through the external Application Load Balancer; the dataset API is internal-only at `http://dataset-api.hifld-next.svc.cluster.local`.
+## Production
 
-This repo publishes application images to GHCR:
+Application images are published for webapp, dataset-mcp, ClickHouse, and
+feature-server. Infrastructure workflows deploy pinned revisions. The public
+load balancer routes the webapp, MCP and feature server; published storage assets
+are served directly from GCS.
 
-- `ghcr.io/public-environmental-data-partners/hifld-next/dataset-api`
-- `ghcr.io/public-environmental-data-partners/hifld-next/webapp`
-- `ghcr.io/public-environmental-data-partners/hifld-next/feature-server`
+Runtime browser settings such as PostHog are served by `/runtime-config.js`, not
+baked into images. Catalog/storage configuration and query secrets remain
+server-side.
 
-The `Publish app images` workflow tags both images with the full commit SHA and also publishes `latest` from `main`. Images are portable and do not bake deployment-specific runtime configuration.
-
-The production deployment path is the `Deploy containers` GitHub Actions workflow in the IaC repo. It fetches GKE credentials and deploys a selected GHCR image tag with Helm upgrades for:
-
-- `dataset-api`
-- `dataset-discovery`
-- `webapp`
-
-The webapp receives runtime configuration from the deployer. `DATASET_API_URL` points the server at the internal dataset API, while browser-visible settings such as `PUBLIC_DATASET_API_URL` and optional analytics values are served from `/runtime-config.js`. Public GHCR images do not contain deployment-specific origins or PostHog keys. Use explicit SHA image tags for production rollouts and rollbacks; `latest` is only a convenience default.
+See [architecture](docs/architecture.md), [cutover evidence](docs/production-cutover-2026-10-08.md),
+and [legacy retirement](docs/legacy-retirement.md). Removing service code does not
+uninstall an existing deployment or delete its database, storage, or local
+volumes. Retirement requires the coordinated rollout described in that guide.

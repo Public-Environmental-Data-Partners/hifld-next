@@ -67,22 +67,12 @@ class BucketStorageConfig(CatalogModel):
     endpoint_url: str | None = None
 
 
-class GeoServerStorageConfig(CatalogModel):
-    type: Literal["geoserver"] = "geoserver"
-    version: str = "v1"
-    base_url: str
-    workspace: str
-
-
-StorageConfig = BucketStorageConfig | GeoServerStorageConfig
-
-
 class StorageLocation(CatalogModel):
     slug: str | None = None
     name: str
     backend_type: str
     description: str | None = None
-    config: StorageConfig | None = None
+    config: BucketStorageConfig | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -100,19 +90,11 @@ class ApiLocation(CatalogModel):
     method: str | None = None
 
 
-class GeoServerLocation(CatalogModel):
-    type: Literal["geoserver"] = "geoserver"
-    version: str = "v1"
-    workspace: str
-    store_name: str
-    layer_name: str
-
-
-SourceLocation = FileLocation | ApiLocation | GeoServerLocation
+SourceLocation = FileLocation | ApiLocation
 FormatType = Literal[
-    "geoparquet", "pmtiles", "geopackage", "shapefile", "geojson", "file_geodatabase", "geoserver"
+    "geoparquet", "pmtiles", "geopackage", "shapefile", "geojson", "file_geodatabase"
 ]
-SourceType = Literal["file", "api", "geoserver"]
+SourceType = Literal["file", "api"]
 
 
 class FileSource(CatalogModel):
@@ -227,7 +209,7 @@ class DatasetFileSummary(CatalogModel):
 
 
 class DatasetWithFiles(CatalogModel):
-    """Dataset metadata with the compact file summaries returned by dataset-api."""
+    """Dataset metadata with compact file summaries from the catalog facade."""
 
     slug: str
     name: str
@@ -271,13 +253,6 @@ class CollectionDatasetsResponse(CatalogModel):
 
 class DatasetFileResponse(CatalogModel):
     collection: Collection
-    dataset: Dataset
-    file: DatasetFile
-
-
-class DatasetFilePayload(CatalogModel):
-    """Internal dataset-api file response before collection context is restored."""
-
     dataset: Dataset
     file: DatasetFile
 
