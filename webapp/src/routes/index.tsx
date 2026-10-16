@@ -67,9 +67,9 @@ function HomePage() {
             <a href="/commons" className="font-medium text-foreground underline underline-offset-2 hover:no-underline">
               HIFLD Next Commons
             </a>
-            —a coalition of mission-driven organizations committed to stewarding and expanding the catalog. Stewards:
+            —a coalition of mission-driven organizations committed to stewarding and expanding the catalog.
           </p>
-          <div className="mt-10 mx-auto grid w-fit grid-cols-2 gap-x-12 gap-y-6">
+          <div className="mt-10">
             <CommonsMemberBanner />
           </div>
         </div>

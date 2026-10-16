@@ -29,10 +29,7 @@ function CommonsPage() {
       </div>
 
       <section className="mt-32 border-t border-border pt-16">
-        <h2 className="text-center text-lg font-semibold tracking-tight text-foreground">Stewards</h2>
-        <div className="mt-6 mx-auto grid w-fit grid-cols-2 gap-x-16 gap-y-10">
-          <CommonsMemberBanner size="page" />
-        </div>
+        <CommonsMemberBanner size="page" />
       </section>
 
       <section className="mt-32 border-t border-border pt-16">
