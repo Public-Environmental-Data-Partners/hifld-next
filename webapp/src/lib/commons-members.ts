@@ -1,7 +1,11 @@
-/**
- * HIFLD Next Commons founding members / stewards.
- * PEDP uses Squarespace logo; others use Google favicon so all four display reliably.
- */
+/** HIFLD Next Commons stewards, partners, and funders. */
+export interface CommonsMember {
+  name: string;
+  url: string;
+  logo: string;
+  logoSize: "default" | "lg";
+}
+
 function favicon(domain: string, size = 64) {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=${size}`;
 }
@@ -30,5 +34,29 @@ export const COMMONS_MEMBERS = [
     url: "https://niyamit.com/",
     logo: favicon("niyamit.com"),
     logoSize: "default",
+  },
+] as const;
+
+export const COMMONS_PARTNERS = [
+  {
+    name: "Digital Public Goods Network",
+    url: "https://dpgn.org/",
+    logo: "/commons/dpgn-logo.png",
+    logoSize: "lg",
+  },
+] as const;
+
+export const COMMONS_FUNDERS = [
+  {
+    name: "MacArthur Foundation",
+    url: "https://www.macfound.org/",
+    logo: "/commons/macarthur-foundation-logo.png",
+    logoSize: "lg",
+  },
+  {
+    name: "Open Environmental Data Project",
+    url: "https://www.openenvironmentaldata.org/",
+    logo: "/commons/oedp-logo.webp",
+    logoSize: "lg",
   },
 ] as const;
