@@ -6,10 +6,6 @@ export interface CommonsMember {
   logoSize: "default" | "lg";
 }
 
-function favicon(domain: string, size = 64) {
-  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=${size}`;
-}
-
 export const COMMONS_MEMBERS = [
   {
     name: "Fulton Ring",
@@ -26,14 +22,14 @@ export const COMMONS_MEMBERS = [
   {
     name: "Data Rescue Project",
     url: "https://www.datarescueproject.org/",
-    logo: favicon("datarescueproject.org"),
-    logoSize: "default",
+    logo: "/commons/data-rescue-project-logo.png",
+    logoSize: "lg",
   },
   {
     name: "Niyam IT",
     url: "https://niyamit.com/",
-    logo: favicon("niyamit.com"),
-    logoSize: "default",
+    logo: "/commons/niyam-it-logo.svg",
+    logoSize: "lg",
   },
 ] as const;
 
