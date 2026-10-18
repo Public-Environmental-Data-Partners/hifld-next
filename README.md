@@ -1,5 +1,7 @@
 # HIFLD Next
 
+Engineering contributions by [Fulton Ring](https://fultonring.com). Read the [project case study](https://fultonring.com/work/hifld-next/).
+
 HIFLD Next publishes and serves versioned geospatial datasets using a Portolan
 STAC catalog and its derived SQLite index.
 
