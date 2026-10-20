@@ -219,7 +219,16 @@ def test_query_parquet_and_tile_url_are_callable_without_opening_ui() -> None:
     async def check() -> None:
         mcp = create_mcp_server(_dependencies(), ui_html="<html/>")
         async with Client(mcp) as client:
-            sources = [{"alias": "roads"}]
+            sources = [
+                {
+                    "alias": "roads",
+                    "collection_slug": "hifld",
+                    "dataset_slug": "roads",
+                    "file_slug": "roads",
+                    "version": "v1",
+                    "asset_key": "geoparquet",
+                }
+            ]
             query_result = await client.call_tool(
                 "query_parquet",
                 {
@@ -228,6 +237,10 @@ def test_query_parquet_and_tile_url_are_callable_without_opening_ui() -> None:
                 },
             )
             assert not query_result.is_error
+            rows_result = await client.call_tool(
+                "read_geoparquet_rows", {"source": sources[0], "limit": 1}
+            )
+            assert not rows_result.is_error
             tile_result = await client.call_tool(
                 "generate_mvt_tile_url",
                 {
@@ -238,6 +251,33 @@ def test_query_parquet_and_tile_url_are_callable_without_opening_ui() -> None:
             assert not tile_result.is_error
             assert "tile_url" in tile_result.structured_content
             tools = {tool.name: tool for tool in await client.list_tools()}
+            required = {
+                "alias",
+                "collection_slug",
+                "dataset_slug",
+                "file_slug",
+                "version",
+                "asset_key",
+            }
+            for name, field in (
+                ("read_geoparquet_rows", "source"),
+                ("query_parquet", "sources"),
+                ("generate_mvt_tile_url", "sources"),
+            ):
+                schema = tools[name].inputSchema
+                source = schema["properties"][field]
+                if field == "sources":
+                    source = source["items"]
+                if "$ref" in source:
+                    source = schema["$defs"][source["$ref"].split("/")[-1]]
+                assert set(source["required"]) == required
+                assert required <= source["properties"].keys()
+                assert source["additionalProperties"] is False
+                arguments = {field: {} if field == "source" else [{}]}
+                if field == "sources":
+                    arguments["sql"] = "SELECT * FROM roads"
+                invalid = await client.call_tool(name, arguments, raise_on_error=False)
+                assert invalid.is_error
             assert tools["view_query_map"].inputSchema["properties"]["layers"]["type"] == "array"
             assert "ui" not in (tools["generate_mvt_tile_url"].meta or {})
 

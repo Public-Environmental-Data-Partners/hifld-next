@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDataCatalogJsonLd,
   buildDatasetJsonLd,
+  datasetAttribution,
   datasetKeywords,
   pageTitle,
   plainTextForSeo,
@@ -43,7 +44,7 @@ describe("seo helpers", () => {
       url: "/collections/hifld/datasets/hospitals",
       metadataUrl: "/api/collections/hifld/datasets/hospitals",
       keywords: ["Public Health"],
-      isPartOf: { type: "Collection", name: "HIFLD" },
+      isPartOf: "/collections/hifld/datasets/parent",
       dateModified: "2026-05-19",
     });
 
@@ -51,10 +52,9 @@ describe("seo helpers", () => {
       "@context": "https://schema.org",
       "@type": "Dataset",
       name: "Hospitals",
-      description: "Hospitals & clinics",
       url: "/collections/hifld/datasets/hospitals",
       keywords: ["Public Health"],
-      isPartOf: { "@type": "Collection", name: "HIFLD" },
+      isPartOf: "/collections/hifld/datasets/parent",
       dateModified: "2026-05-19",
       includedInDataCatalog: { "@type": "DataCatalog", name: "HIFLD Next" },
       distribution: [
@@ -69,6 +69,17 @@ describe("seo helpers", () => {
     expect(jsonLd).not.toHaveProperty("isPartOf");
     expect(jsonLd).not.toHaveProperty("distribution");
     expect(jsonLd).not.toHaveProperty("dateModified");
+    expect(jsonLd.description?.length).toBeGreaterThanOrEqual(50);
+  });
+
+  it("preserves verified attribution while never assigning a partial license to a whole dataset", () => {
+    const attribution = { creators: [{ name: "Niyam IT" }], licenses: ["https://example.org/LICENSE.md"] };
+    expect(datasetAttribution([{ attribution }, { attribution }])).toEqual(attribution);
+    expect(datasetAttribution([{ attribution }, {}]).licenses).toEqual([]);
+    const jsonLd = buildDatasetJsonLd({ name: "Hospitals", url: "/x", attribution });
+    expect(jsonLd.creator).toEqual([{ "@type": "Organization", name: "Niyam IT" }]);
+    expect(jsonLd.license).toEqual(attribution.licenses);
+    expect(buildDatasetJsonLd({ name: "Unknown", url: "/x" })).not.toHaveProperty("license");
   });
 
   it("builds DataCatalog JSON-LD nested under the HIFLD Next catalog", () => {

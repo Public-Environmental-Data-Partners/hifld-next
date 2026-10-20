@@ -78,7 +78,7 @@ describe("Dataset detail route head", () => {
       "@type": "Dataset",
       name: "Hospitals",
       url: "/collections/hifld/datasets/hospitals-3",
-      isPartOf: { "@type": "Collection", name: "HIFLD" },
+      includedInDataCatalog: { "@type": "DataCatalog", name: "HIFLD Next" },
     });
   });
 });

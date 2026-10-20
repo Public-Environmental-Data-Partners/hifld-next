@@ -7,7 +7,14 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { Separator } from "@/components/ui/separator";
 import { getCollectionBySlug, getDatasetBySlug } from "@/lib/api-client";
 import { formatOptionalDate } from "@/lib/date";
-import { buildDatasetJsonLd, datasetKeywords, pageTitle, plainTextForSeo, seoDescription } from "@/lib/seo";
+import {
+  buildDatasetJsonLd,
+  datasetAttribution,
+  datasetKeywords,
+  pageTitle,
+  plainTextForSeo,
+  seoDescription,
+} from "@/lib/seo";
 
 export const Route = createFileRoute("/collections/$collectionSlug/datasets/$datasetSlug/")({
   loader: async ({ params }) => {
@@ -38,7 +45,6 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
   },
   head: ({ loaderData, params }) => {
     const dataset = loaderData?.dataset;
-    const collection = loaderData?.collection;
     const title = pageTitle(dataset?.name ?? params.datasetSlug);
     const description = seoDescription(dataset?.description);
     const canonical = `/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
@@ -56,7 +62,7 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
       url: canonical,
       metadataUrl,
       keywords: keywordList,
-      isPartOf: collection?.name ? { type: "Collection", name: collection.name } : undefined,
+      attribution: datasetAttribution(dataset?.files),
       dateModified: dataset?.updated_at,
     });
 

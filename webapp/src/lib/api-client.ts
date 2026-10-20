@@ -10,6 +10,7 @@ import { type CatalogAsset, type CatalogFileResponse, sqliteCatalogApi } from ".
 import { datasetIdentity, fileIdentity } from "./catalog-identity";
 import { activeCatalogStacUrl } from "./catalog-runtime";
 import {
+  type DatasetAttribution,
   fetchStacCatalog,
   fetchStacVersionCollection,
   type StacAsset,
@@ -247,6 +248,7 @@ export interface DatasetFormat {
 }
 
 export interface DatasetFile {
+  attribution?: DatasetAttribution | undefined;
   id: string;
   file_slug?: string | undefined;
   dataset_id: string;
@@ -521,6 +523,7 @@ export function catalogFileResponse(
       file_slug: value.file_slug,
       name: fileStac?.title ?? value.name,
       description: fileStac?.description ?? value.description,
+      attribution: value.latest_version ? versionStac.get(value.latest_version)?.attribution : undefined,
       layer_name: undefined,
       source_file_path: undefined,
       created_at: value.created_at ?? "",

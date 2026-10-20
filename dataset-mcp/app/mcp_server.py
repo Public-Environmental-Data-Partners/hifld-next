@@ -27,6 +27,18 @@ OPENFREEMAP_ORIGIN = "https://tiles.openfreemap.org"
 ESRI_IMAGERY_ORIGIN = "https://services.arcgisonline.com"
 
 
+def _query_source_payload(source: QuerySourceRef) -> dict[str, JSONValue]:
+    return {
+        "alias": source.alias,
+        "collection_slug": source.collection_slug,
+        "dataset_slug": source.dataset_slug,
+        "file_slug": source.file_slug,
+        "version": source.version,
+        "asset_key": source.asset_key,
+        "storage_location_slug": source.storage_location_slug,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class AppDependencies:
     catalog: discovery.CatalogClient
@@ -252,7 +264,7 @@ def create_mcp_server(
     mcp.tool()(get_dataset_file_schema)
 
     async def read_geoparquet_rows(
-        source: dict[str, JSONValue],
+        source: QuerySourceRef,
         columns: list[str] | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -267,7 +279,11 @@ def create_mcp_server(
         try:
             return _result(
                 await query.read_geoparquet_rows(
-                    dependencies.query, source, columns=columns or (), limit=limit, offset=offset
+                    dependencies.query,
+                    _query_source_payload(source),
+                    columns=columns or (),
+                    limit=limit,
+                    offset=offset,
                 )
             )
         except Exception as error:
@@ -276,7 +292,7 @@ def create_mcp_server(
     mcp.tool()(read_geoparquet_rows)
 
     async def query_parquet(
-        sources: list[dict[str, JSONValue]],
+        sources: list[QuerySourceRef],
         sql: str,
         limit: int = 100,
         geometry_column: str | None = None,
@@ -300,7 +316,7 @@ def create_mcp_server(
             return _result(
                 await query.query_geoparquet(
                     dependencies.query,
-                    sources,
+                    [_query_source_payload(source) for source in sources],
                     sql,
                     limit=limit,
                     geometry_column=geometry_column,
@@ -331,7 +347,7 @@ def create_mcp_server(
     mcp.tool()(inspect_query_source)
 
     async def generate_mvt_tile_url(
-        sources: list[dict[str, JSONValue]],
+        sources: list[QuerySourceRef],
         sql: str,
         geometry_column: str | None = None,
         result_crs: str | None = None,
@@ -359,7 +375,7 @@ def create_mcp_server(
             return _result(
                 await query.generate_mvt_tile_url(
                     dependencies.query,
-                    sources,
+                    [_query_source_payload(source) for source in sources],
                     sql,
                     geometry_column=geometry_column,
                     result_crs=result_crs,
