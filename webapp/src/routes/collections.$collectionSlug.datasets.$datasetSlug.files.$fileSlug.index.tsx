@@ -156,7 +156,8 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
     const title = pageTitle(dataset?.name ? `${fileName} | ${dataset.name}` : fileName);
     // Fall back to the parent dataset description so the JSON-LD/meta are not empty
     // when a file carries no description of its own.
-    const description = seoDescription(file?.description ?? dataset?.description);
+    const sourceDescription = plainTextForSeo(file?.description) || dataset?.description;
+    const description = seoDescription(sourceDescription);
     const canonical = `/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(
       params.datasetSlug,
     )}/files/${encodeURIComponent(params.fileSlug)}`;
@@ -166,11 +167,12 @@ export const Route = createFileRoute("/collections/$collectionSlug/datasets/$dat
 
     const jsonLd = buildDatasetJsonLd({
       name: fileName,
-      description: file?.description ?? dataset?.description,
+      description: sourceDescription,
       url: canonical,
       metadataUrl,
       keywords: datasetKeywords(dataset?.tags),
-      isPartOf: dataset?.name ? { type: "Dataset", name: dataset.name } : undefined,
+      isPartOf: `/collections/${encodeURIComponent(params.collectionSlug)}/datasets/${encodeURIComponent(params.datasetSlug)}`,
+      attribution: file?.attribution,
     });
 
     return {

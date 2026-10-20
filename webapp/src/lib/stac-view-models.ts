@@ -5,6 +5,17 @@ const tagValueSchema = z.union([z.string(), z.array(z.string())]);
 const jsonScalarSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 const boundsSchema = z.tuple([z.number(), z.number(), z.number(), z.number()]);
 
+const providerSchema = z.object({
+  name: z.string().min(1),
+  roles: z.array(z.string()).optional(),
+  url: z.url().optional(),
+});
+
+export interface DatasetAttribution {
+  creators: Array<{ name: string; url?: string | undefined }>;
+  licenses: string[];
+}
+
 const linkSchema = z
   .object({
     rel: z.string().min(1),
@@ -82,6 +93,8 @@ const versionCollectionSchema = z
     stac_version: z.string().min(1),
     stac_extensions: z.array(z.string()).optional(),
     type: z.literal("Collection"),
+    license: z.string().optional(),
+    providers: z.array(providerSchema).optional(),
     id: z.string().min(1),
     title: z.string().optional(),
     description: z.string(),
@@ -134,6 +147,14 @@ export function parseStacVersionCollection(input: z.input<typeof versionCollecti
     id: value.id,
     title: value.title ?? value.id.split("/").at(-2) ?? value.id,
     description: value.description,
+    attribution: {
+      creators: (value.providers ?? [])
+        .filter((provider) => provider.roles?.includes("producer"))
+        .map((provider) => ({ name: provider.name, ...(provider.url ? { url: provider.url } : {}) })),
+      licenses: value.links
+        .filter((link) => link.rel === "license" && /^https?:\/\//.test(link.href))
+        .map((link) => link.href),
+    } satisfies DatasetAttribution,
     keywords: value.keywords ?? [],
     links: value.links,
     assets: value.assets,

@@ -95,5 +95,8 @@ describe("Dataset file detail route head", () => {
       href: "/api/collections/hifld/datasets/hospitals-3/files/hospitals-3/metadata",
       title: "File metadata JSON",
     });
+    const jsonLd = JSON.parse(result.scripts?.find((script) => script.type === "application/ld+json")?.children ?? "{}");
+    expect(jsonLd.isPartOf).toBe("/collections/hifld/datasets/hospitals-3");
+    expect(jsonLd.description.length).toBeGreaterThanOrEqual(50);
   });
 });

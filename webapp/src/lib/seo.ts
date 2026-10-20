@@ -1,4 +1,5 @@
 import type { DatasetTags } from "@/lib/api-client";
+import type { DatasetAttribution } from "@/lib/stac-view-models";
 
 const DEFAULT_DESCRIPTION_LIMIT = 155;
 
@@ -83,9 +84,19 @@ const DATASET_JSONLD_DESCRIPTION_LIMIT = 5000;
 
 const CATALOG_NAME = "HIFLD Next";
 
-export interface JsonLdParent {
-  type: "Collection" | "Dataset";
-  name: string;
+export function datasetAttribution(
+  files: Array<{ attribution?: DatasetAttribution | undefined }> = [],
+): DatasetAttribution {
+  const creators = new Map<string, DatasetAttribution["creators"][number]>();
+  for (const file of files) {
+    for (const creator of file.attribution?.creators ?? []) creators.set(creator.name, creator);
+  }
+  // A dataset-wide license must cover every file, not just the files with metadata.
+  const licenses =
+    files.length > 0 && files.every((file) => file.attribution?.licenses.length)
+      ? [...new Set(files.flatMap((file) => file.attribution?.licenses ?? []))]
+      : [];
+  return { creators: [...creators.values()], licenses };
 }
 
 export interface DatasetJsonLdInput {
@@ -97,7 +108,8 @@ export interface DatasetJsonLdInput {
   metadataUrl?: string | undefined;
   keywords?: string[] | undefined;
   /** Parent entity this dataset/file belongs to (a Collection or a Dataset). */
-  isPartOf?: JsonLdParent | undefined;
+  isPartOf?: string | undefined;
+  attribution?: DatasetAttribution | undefined;
   dateModified?: string | undefined;
 }
 
@@ -107,9 +119,11 @@ export interface DatasetJsonLd {
   name: string;
   url: string;
   includedInDataCatalog: { "@type": "DataCatalog"; name: string };
-  description?: string;
+  description: string;
   keywords?: string[];
-  isPartOf?: { "@type": "Collection" | "Dataset"; name: string };
+  isPartOf?: string;
+  creator?: Array<{ "@type": "Organization"; name: string; url?: string | undefined }>;
+  license?: string[];
   dateModified?: string;
   distribution?: Array<{ "@type": "DataDownload"; encodingFormat: string; contentUrl: string }>;
 }
@@ -120,9 +134,12 @@ export interface DatasetJsonLd {
  * rich results, which is a primary discovery channel for a data catalog.
  */
 export function buildDatasetJsonLd(input: DatasetJsonLdInput): DatasetJsonLd {
-  const description = truncateSeoDescription(plainTextForSeo(input.description), DATASET_JSONLD_DESCRIPTION_LIMIT);
+  const summary = plainTextForSeo(input.description) || `Explore ${plainTextForSeo(input.name)}.`;
+  const description = truncateSeoDescription(
+    summary.length < 50 ? `${summary} This dataset is available through the HIFLD Next public data catalog.` : summary,
+    DATASET_JSONLD_DESCRIPTION_LIMIT,
+  );
   const keywords = (input.keywords ?? []).map((keyword) => plainTextForSeo(keyword)).filter(Boolean);
-  const parentName = input.isPartOf ? plainTextForSeo(input.isPartOf.name) : undefined;
 
   return {
     "@context": "https://schema.org",
@@ -133,9 +150,19 @@ export function buildDatasetJsonLd(input: DatasetJsonLdInput): DatasetJsonLd {
       "@type": "DataCatalog",
       name: CATALOG_NAME,
     },
-    ...(description ? { description } : {}),
+    description,
     ...(keywords.length > 0 ? { keywords } : {}),
-    ...(input.isPartOf && parentName ? { isPartOf: { "@type": input.isPartOf.type, name: parentName } } : {}),
+    ...(input.isPartOf ? { isPartOf: input.isPartOf } : {}),
+    ...(input.attribution?.creators.length
+      ? {
+          creator: input.attribution.creators.map((creator) => ({
+            "@type": "Organization" as const,
+            name: creator.name,
+            ...(creator.url ? { url: creator.url } : {}),
+          })),
+        }
+      : {}),
+    ...(input.attribution?.licenses.length ? { license: input.attribution.licenses } : {}),
     ...(input.dateModified ? { dateModified: input.dateModified } : {}),
     ...(input.metadataUrl
       ? {

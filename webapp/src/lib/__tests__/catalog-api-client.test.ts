@@ -95,8 +95,12 @@ describe("SQLite catalog file adapter", () => {
       title: "Station layer from STAC",
       description: "Version description",
       license: "other",
+      providers: [
+        { name: "Source agency", roles: ["producer"], url: "https://agency.example/" },
+        { name: "HIFLD Next", roles: ["host"], url: "https://hifld.publicenvirodata.org" },
+      ],
       extent: { spatial: { bbox: [[1, 2, 3, 4]] }, temporal: { interval: [[null, null]] } },
-      links: [],
+      links: [{ rel: "license", href: "https://agency.example/license" }],
       assets: {
         geoparquet: {
           href: "https://published.example/stations.parquet",
@@ -147,6 +151,10 @@ describe("SQLite catalog file adapter", () => {
       tags: { categories: ["Infrastructure"], inventory_name: "stations" },
     });
     expect(result.file).toMatchObject({ name: "Station layer from STAC", description: "Authoritative file description" });
+    expect(result.file.attribution).toEqual({
+      creators: [{ name: "Source agency", url: "https://agency.example/" }],
+      licenses: ["https://agency.example/license"],
+    });
     expect(result.file.source_dates_by_version).toEqual({
       "v1.0.0": { issued: "2024-06-25", provenance: { issued: "inventory" } },
     });
