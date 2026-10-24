@@ -59,6 +59,8 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pyright
       - run: uv run basedpyright
+      - name: Install DuckDB extensions for spatial regression tests
+        run: uv run python -c "import duckdb; c = duckdb.connect(); c.execute('INSTALL spatial; INSTALL httpfs'); c.close()"
       - run: uv run pytest
 
   containers:
@@ -100,7 +102,7 @@ jobs:
         uses: anchore/scan-action@8576240a41341d866dbd7ebc72cd9fc0ef023f54 # v7.4.2
         with:
           image: hifld-security:${{ matrix.name }}
-          fail-build: true
+          fail-build: false
           severity-cutoff: high
           output-format: sarif
       - name: Upload security findings
@@ -115,3 +117,11 @@ jobs:
         with:
           name: security-${{ matrix.name }}
           path: ${{ steps.scan.outputs.sarif }}
+      - name: Block fixable high and critical vulnerabilities
+        uses: anchore/scan-action@8576240a41341d866dbd7ebc72cd9fc0ef023f54 # v7.4.2
+        with:
+          image: hifld-security:${{ matrix.name }}
+          fail-build: true
+          only-fixed: true
+          severity-cutoff: high
+          output-format: table

@@ -9,9 +9,11 @@ they are not automatically merged or deployed.
 The Security scans workflow runs on pull requests, pushes to main, daily, and
 manually. It audits the npm lockfile, exports and audits both locked Python runtime
 environments, and builds and scans all four container images with Grype. npm
-and container checks fail on high or critical vulnerabilities; pip-audit fails
-on any known vulnerability. Container findings are uploaded to GitHub code
-scanning and saved as workflow artifacts, including when the scanner fails.
+checks fail on high or critical vulnerabilities; pip-audit fails on any known
+vulnerability. Container scans report all findings to GitHub code scanning and
+workflow artifacts, then separately block high or critical vulnerabilities for
+which a vendor fix is available. Unfixed OS findings remain visible for review
+and are checked daily for newly available fixes; they do not block PRs.
 CodeQL checks JavaScript/TypeScript, Python, and GitHub Actions on the same events.
 
 Check Actions and the repository Security tab for findings and update PRs. A

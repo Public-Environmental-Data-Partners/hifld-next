@@ -30,6 +30,12 @@ RUN npm run --workspace webapp build
 # Production stage
 FROM node:22.23.4-slim
 
+RUN apt-get update \
+    && apt-get upgrade --no-install-recommends -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /usr/local/lib/node_modules/npm /opt/yarn-* \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
 # Set working directory
 WORKDIR /app
 

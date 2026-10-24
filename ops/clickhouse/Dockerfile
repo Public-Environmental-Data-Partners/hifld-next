@@ -3,12 +3,14 @@ FROM clickhouse/clickhouse-server:26.8.3.105
 USER root
 
 RUN apt-get update \
+    && apt-get install --only-upgrade --no-install-recommends -y openssl libssl3 \
     && apt-get install --no-install-recommends -y python3 python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /tmp/hifld-udf-requirements.txt
 RUN python3 -m venv /opt/hifld-udf \
     && /opt/hifld-udf/bin/pip install --no-cache-dir -r /tmp/hifld-udf-requirements.txt \
+    && /opt/hifld-udf/bin/pip uninstall --yes pip setuptools \
     && rm /tmp/hifld-udf-requirements.txt
 
 COPY --chmod=0555 hifld_reproject_wkb.py /opt/hifld-user-scripts/hifld_reproject_wkb.py

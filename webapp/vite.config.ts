@@ -31,6 +31,19 @@ const config = defineConfig(({ mode }) => ({
     noExternal: ["@asteasolutions/zod-to-openapi", "react-resizable-panels"],
   },
   plugins: [
+    {
+      name: "node-sqlite-test-external",
+      enforce: "post",
+      configEnvironment: {
+        order: "post",
+        handler() {
+          // Run after Vitest's override: Node 22 omits sqlite from builtinModules.
+          if (mode === "test") {
+            return { resolve: { external: ["node:sqlite"] } };
+          }
+        },
+      },
+    },
     runtimeClientConfigDevPlugin(),
     ...(mode === "test" ? [] : [devtools(), nitro()]),
     // this is the plugin that enables path aliases
