@@ -1,4 +1,4 @@
-FROM clickhouse/clickhouse-server:26.8.3.105
+FROM clickhouse/clickhouse-server:26.9.23.15
 
 USER root
 
