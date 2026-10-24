@@ -6,7 +6,7 @@ import {
   QUERY_MVT_FEATURE_KEY_PROPERTY,
 } from "@hifld/map-core";
 import type { Geometry, Position } from "geojson";
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 import type { LoadedMapLayer } from "./multiLayerSources";
 
 export const MAX_SELECTED_FEATURES = mapCoreMaxSelectedFeatures;

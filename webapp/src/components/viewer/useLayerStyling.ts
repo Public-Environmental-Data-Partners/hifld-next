@@ -1,4 +1,4 @@
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 import { useEffect } from "react";
 import { colorMode, type FieldRegistries, initializeLayerStyles, resolveLayerColor } from "./layerColorStyle";
 import type { LayerStyle, LayerStylesById, VectorLayerInfo } from "./types";
@@ -10,9 +10,7 @@ import {
   getSampledValues,
   getValueRange,
   invertHexColor,
-  type PaintValue,
   parseBreaks,
-  type StyleExpression,
 } from "./utils";
 
 function buildScaledExpression(
@@ -23,7 +21,7 @@ function buildScaledExpression(
   baseValue: number,
   minimumValue: number,
   sourceId: string,
-): PaintValue {
+): number | maplibregl.ExpressionSpecification {
   if (!property) {
     return baseValue;
   }
@@ -36,7 +34,7 @@ function buildScaledExpression(
     return baseValue;
   }
 
-  const inputExpression: StyleExpression =
+  const inputExpression: maplibregl.ExpressionSpecification =
     scale === "sqrt"
       ? ["sqrt", ["max", ["to-number", ["get", property]], 0]]
       : scale === "log"
@@ -55,20 +53,23 @@ function buildScaledExpression(
 }
 
 function applyLayerStyle(map: maplibregl.Map, layer: VectorLayerInfo, style: LayerStyle, registries?: FieldRegistries) {
-  const colorExpression = resolveLayerColor(layer, style, registries).color;
+  // Core expressions are immutable; MapLibre 6 expects mutable style-spec tuples.
+  const colorExpression = resolveLayerColor(layer, style, registries).color as
+    | string
+    | maplibregl.ExpressionSpecification;
   const breaks = parseBreaks(style.breaksText);
   const outlineExpression =
     typeof colorExpression === "string"
       ? invertHexColor(colorExpression)
       : colorMode(layer, style) === "categorical"
         ? "#374151"
-        : buildColorExpression(
+        : (buildColorExpression(
             style.colorProperty,
             breaks,
             getColorRamp(style.colorScheme, breaks.length + 1).map(invertHexColor),
-          );
+          ) as string | maplibregl.ExpressionSpecification);
   const hoverOpacity = Math.max(0.05, style.opacity * 0.35);
-  const opacityExpression: StyleExpression = [
+  const opacityExpression: maplibregl.ExpressionSpecification = [
     "case",
     ["boolean", ["feature-state", "hover"], false],
     hoverOpacity,

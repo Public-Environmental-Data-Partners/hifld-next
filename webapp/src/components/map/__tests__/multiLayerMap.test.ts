@@ -6,10 +6,8 @@ import { buildLoadedMapLayer, buildQueryMvtLayer } from "../multiLayerSources";
 import type { SourceDescriptor } from "../sourceDescriptors";
 
 vi.mock("maplibre-gl", () => ({
-  default: {
-    Map: vi.fn(),
-    addProtocol: vi.fn(),
-  },
+  Map: vi.fn(),
+  addProtocol: vi.fn(),
 }));
 
 const descriptor: SourceDescriptor = {

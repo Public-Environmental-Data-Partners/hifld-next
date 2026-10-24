@@ -1,7 +1,7 @@
 import { isQueryMvtReservedProperty } from "@hifld/map-core";
 import { createFileRoute, Link, notFound, useSearch } from "@tanstack/react-router";
 import { ArrowLeft, Check, ChevronDown, ChevronsUpDown, Layers, PanelLeft, Plus } from "lucide-react";
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 import { useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { z } from "zod";

@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import { act, renderHook } from "@testing-library/react";
 import { PMTiles } from "pmtiles";
 import { describe, expect, it, vi } from "vitest";
@@ -25,10 +25,8 @@ import type { CatalogPmtilesLayer, QueryMvtLayer } from "@/components/map/multiL
 import { buildLoadedMapLayer, buildQueryMvtLayer } from "@/components/map/multiLayerSources";
 
 vi.mock("maplibre-gl", () => ({
-  default: {
-    Map: vi.fn(),
-    addProtocol: vi.fn(),
-  },
+  Map: vi.fn(),
+  addProtocol: vi.fn(),
 }));
 
 function mockMapWithFeatures(features: unknown[]) {

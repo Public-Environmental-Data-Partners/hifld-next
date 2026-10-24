@@ -10,7 +10,7 @@ import {
 
 export type { PaintValue, StyleExpression } from "@hifld/map-core";
 
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 import type { ColorScheme, LayerStyle, NumericFieldSummary } from "./types";
 
 export const colorSchemes: ColorScheme[] = mapCoreColorSchemes;

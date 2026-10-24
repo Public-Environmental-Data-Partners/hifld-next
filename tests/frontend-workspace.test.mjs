@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -51,17 +52,11 @@ test("consumer images install from the root workspace lockfile", async () => {
   }
 });
 
-test("frontend test tooling stays compatible with webapp's Vite 7 build", async () => {
-  const mcpUi = JSON.parse(await readProjectFile("dataset-mcp/ui/package.json"));
-  const mapCore = JSON.parse(await readProjectFile("packages/map-core/package.json"));
-  const mapUi = JSON.parse(await readProjectFile("packages/map-ui/package.json"));
-
-  assert.equal(mcpUi.devDependencies.vite, "^7.1.7");
-  assert.equal(mcpUi.devDependencies.vitest, "^3.0.5");
-  assert.equal(mapCore.devDependencies.vitest, "^3.0.5");
-  assert.equal(mapUi.devDependencies.vitest, "^3.0.5");
-  assert.equal(mapCore.devDependencies["@types/node"], "^22.19.3");
-  assert.equal(mapUi.devDependencies["@types/node"], "^22.19.3");
+test("frontend build and test tooling resolves without incompatible peer dependencies", () => {
+  execFileSync("npm", ["ls", "vite", "vitest", "--all"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+  });
 });
 
 test("image publishing runs for deployable chart changes", async () => {

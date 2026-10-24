@@ -13,6 +13,6 @@
     "@maplibre/maplibre-gl-style-spec": "^19.3.3",
     "@types/node": "^22.19.3",
     "typescript": "^5.7.2",
-    "vitest": "^3.0.5"
+    "vitest": "^4.1.12"
   }
 }
