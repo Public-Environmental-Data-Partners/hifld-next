@@ -31,7 +31,7 @@
     "@testing-library/user-event": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "@vitejs/plugin-react": "^5.0.4",
+    "@vitejs/plugin-react": "^6.1.2",
     "jsdom": "^27.0.0",
     "pbf": "5.1.2",
     "typescript": "^5.7.2",
