@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { LayerStylesById } from "../../viewer/types";
@@ -8,10 +8,8 @@ import { buildQueryMvtLayer } from "../multiLayerSources";
 import { resolveCameraLayerBounds, useMapWorkspaceCommands, waitForMapMovement } from "../useMapWorkspaceCommands";
 
 vi.mock("maplibre-gl", () => ({
-  default: {
-    Map: vi.fn(),
-    addProtocol: vi.fn(),
-  },
+  Map: vi.fn(),
+  addProtocol: vi.fn(),
 }));
 
 describe("useMapWorkspaceCommands", () => {

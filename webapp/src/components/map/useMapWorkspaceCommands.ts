@@ -1,4 +1,4 @@
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 import { useCallback, useMemo, useRef } from "react";
 import { colorMode } from "@/components/viewer/layerColorStyle";
 import type { LayerStyle, LayerStylesById, VectorLayerInfo } from "@/components/viewer/types";

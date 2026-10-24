@@ -1,5 +1,5 @@
 import { type MapControl, MapControls as SharedMapControls } from "@hifld/map-ui";
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { BasemapMode } from "./useMapInitialization";

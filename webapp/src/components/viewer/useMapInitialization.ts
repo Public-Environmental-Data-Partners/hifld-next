@@ -5,7 +5,7 @@ import {
   selectionBoxFeature as mapCoreSelectionBoxFeature,
   OPENFREEMAP_BRIGHT_STYLE_URL,
 } from "@hifld/map-core";
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import { type RefObject, useCallback, useEffect, useRef } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { PMTiles, Protocol } from "pmtiles";
@@ -1204,7 +1204,7 @@ export function useMultiLayerMapInitialization(
       onFeatureSelectionRef.current?.(selectedFeatures, "replace");
     });
 
-    map.on("mouseleave", () => {
+    map.on("mouseout", () => {
       clearHoverFeature();
       onHoverRef.current(null);
     });

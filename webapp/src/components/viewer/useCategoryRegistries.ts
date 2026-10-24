@@ -1,5 +1,5 @@
 import { CATEGORY_CAP, type CategoryFieldType, type CategoryValue, normalizeCategory } from "@hifld/map-core";
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 import { type RefObject, useEffect, useState } from "react";
 import { type LayerRegistries, updateCategoryRegistries } from "./layerColorStyle";
 import type { LayerStylesById, VectorLayerInfo } from "./types";
