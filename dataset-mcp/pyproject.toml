@@ -30,7 +30,7 @@ include = ["app*", "query_worker*", "query_engine*"]
 [dependency-groups]
 dev = [
     "duckdb",
-    "shapely==2.1.2",
+    "shapely==2.2.0",
     "pytest",
     "pytest-asyncio",
     "respx",
