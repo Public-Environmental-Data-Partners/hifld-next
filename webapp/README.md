@@ -50,7 +50,9 @@ webapp behavior without an error or polyfill.
   same-origin `/mcp` proxy. The proxy still uses the internal
   `DATASET_MCP_QUERY_API_URL`; internal service origins never leak.
 - `WEBAPP_PUBLIC_ORIGIN` is the canonical public webapp origin used to validate
-  the `Origin` header on browser MCP requests. Set it explicitly in production;
+  the `Origin` header on browser MCP requests and to build absolute links in
+  API, STAC, `/robots.txt`, and `/sitemap.xml` responses, so crawlers see the
+  public HTTPS origin behind the load balancer. Set it explicitly in production;
   it defaults to `http://localhost:3000` for local development.
 - `DATASET_MCP_WEBAPP_ORIGINS` belongs on dataset-mcp. It is the comma-separated
   allowlist of deployed webapp origins allowed to load public query MVT with
