@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
@@ -91,9 +91,7 @@ class ApiLocation(CatalogModel):
 
 
 SourceLocation = FileLocation | ApiLocation
-FormatType = Literal[
-    "geoparquet", "pmtiles", "geopackage", "shapefile", "geojson", "file_geodatabase"
-]
+FormatType = Annotated[str, Field(min_length=1)]
 SourceType = Literal["file", "api"]
 
 
