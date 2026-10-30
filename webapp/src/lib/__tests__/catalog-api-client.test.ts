@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { catalogFileResponse } from "@/lib/api-client";
+import { catalogAssetUrl, catalogFileResponse } from "@/lib/api-client";
 import type { CatalogFileResponse } from "@/lib/catalog-api";
 import { parseStacCatalog, parseStacVersionCollection } from "@/lib/stac-view-models";
 
@@ -51,6 +51,7 @@ describe("SQLite catalog file adapter", () => {
           asset_key: "geoparquet",
           format_key: "geoparquet",
           title: "GeoParquet",
+          href: "https://cdn.example.test/storage/data%20file.parquet?download=1",
           media_type: "application/vnd.apache.parquet",
           size_bytes: 12,
           sha256: null,
@@ -192,7 +193,15 @@ describe("SQLite catalog file adapter", () => {
       checksum_multihash: "d50110000102030405060708090a0b0c0d0e0f",
     });
     expect(result.file.formats?.[0]?.sources[0]?.url).toBe(
-      "http://localhost:8333/published/hifld/stations/data%20file.parquet",
+      "https://published.example/stations.parquet",
+    );
+    const asset = value.assets[0];
+    if (!asset) throw new Error("Expected a published asset fixture");
+    expect(catalogAssetUrl(asset)).toBe(
+      "https://cdn.example.test/storage/data%20file.parquet?download=1",
+    );
+    expect(catalogFileResponse(value).file.formats?.[0]?.sources[0]?.url).toBe(
+      "https://cdn.example.test/storage/data%20file.parquet?download=1",
     );
   });
 });

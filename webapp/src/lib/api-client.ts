@@ -42,22 +42,8 @@ export interface CatalogDatasetFileAdapter extends Omit<CatalogFileResponse, "as
   assets: CatalogAsset[];
 }
 
-function encodeObjectPath(value: string): string {
-  return value
-    .split("/")
-    .map((segment) => {
-      if (segment === ".") return "%2E";
-      if (segment === "..") return "%2E%2E";
-      return encodeURIComponent(segment);
-    })
-    .join("/");
-}
-
 export function catalogAssetUrl(asset: CatalogAsset): string | undefined {
-  const object = asset.objects.length === 1 ? asset.objects[0] : undefined;
-  if (!object) return undefined;
-  const baseUrl = asset.storage_config.base_url.replace(/\/+$/, "");
-  return `${baseUrl}/${encodeURIComponent(asset.storage_config.bucket)}/${encodeObjectPath(object.object_key)}`;
+  return asset.objects.length === 1 ? asset.href : undefined;
 }
 
 /**
@@ -471,7 +457,7 @@ function catalogDatasetSource(
     asset_key: asset.asset_key,
     version: asset.version,
     source_type: "file",
-    url: catalogAssetUrl(asset),
+    url: asset.objects.length === 1 ? (stacAsset?.href ?? catalogAssetUrl(asset)) : undefined,
     sha256: asset.sha256,
     checksum_multihash: asset.checksum_multihash,
     location: { version: asset.version, path: asset.objects.map((object) => object.object_key).join(",") },
