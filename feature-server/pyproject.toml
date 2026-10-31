@@ -7,17 +7,17 @@ dependencies = [
     "duckdb==1.5.5",
     "httpx==0.28.1",
     "pygeoapi==0.24.0",
-    "pydantic-settings==2.16.1",
+    "pydantic-settings==2.16.2",
     "starlette==1.10.0",
-    "uvicorn[standard]==0.41.0",
+    "uvicorn[standard]==0.54.0",
 ]
 
 [dependency-groups]
 dev = [
-    "basedpyright==1.38.2",
-    "pyright==1.1.407",
-    "pytest==9.1.1",
-    "ruff==0.16.5",
+    "basedpyright==1.40.2",
+    "pyright==1.1.414",
+    "pytest==9.2.0",
+    "ruff==0.17.3",
 ]
 
 [build-system]
