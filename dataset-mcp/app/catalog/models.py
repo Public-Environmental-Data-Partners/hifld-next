@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 class CatalogModel(BaseModel):
@@ -91,7 +91,15 @@ class ApiLocation(CatalogModel):
 
 
 SourceLocation = FileLocation | ApiLocation
-FormatType = Annotated[str, Field(min_length=1)]
+
+
+def _validate_format_type(value: str) -> str:
+    if value.casefold() == "geoserver":
+        raise ValueError("GeoServer formats are retired")
+    return value
+
+
+FormatType = Annotated[str, Field(min_length=1), AfterValidator(_validate_format_type)]
 SourceType = Literal["file", "api"]
 
 

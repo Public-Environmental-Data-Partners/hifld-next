@@ -22,7 +22,7 @@ describe("catalog physical objects", () => {
     const fetch = vi.spyOn(globalThis, "fetch");
     const source = catalogFileResponse(file).file.formats?.[0]?.sources[0];
     expect(source?.objects).toEqual(asset.objects.map((object) => ({ ...object,
-      url: `https://storage.example/data/${object.object_key.replace(' #', '%20%23')}`,
+      url: `https://storage.example/data/${object.object_key.replaceAll(' #', '%20%23')}`,
     })));
     expect(source?.location).toEqual({ version: "v1", path: "" });
     expect(fetch).not.toHaveBeenCalled();
