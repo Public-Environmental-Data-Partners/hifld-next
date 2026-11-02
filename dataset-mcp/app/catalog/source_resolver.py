@@ -94,11 +94,20 @@ def _trusted_object_key(href: str, config: BucketStorageConfig) -> str | None:
         if parsed.scheme != expected_scheme or parsed.netloc != config.bucket:
             return None
         return decoded_path.lstrip("/") or None
+    if (
+        config.type == "gcs"
+        and parsed.scheme == "https"
+        and parsed.netloc == "storage.googleapis.com"
+    ):
+        bucket, separator, key = decoded_path.lstrip("/").partition("/")
+        return key if bucket == config.bucket and separator and key else None
     base = urlsplit(config.base_url)
     if parsed.scheme != base.scheme or parsed.netloc != base.netloc:
         return None
     base_parts = [part for part in unquote(base.path).split("/") if part]
-    if not base_parts or base_parts[-1] != config.bucket:
+    # A custom GCS base_url is the complete public bucket root; its URL path
+    # need not contain the physical bucket name. SeaweedFS retains path-style S3.
+    if config.type != "gcs" and (not base_parts or base_parts[-1] != config.bucket):
         base_parts.append(config.bucket)
     path_parts = [part for part in decoded_path.split("/") if part]
     if path_parts[: len(base_parts)] != base_parts or len(path_parts) <= len(base_parts):

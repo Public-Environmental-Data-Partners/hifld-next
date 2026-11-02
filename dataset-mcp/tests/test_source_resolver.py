@@ -172,3 +172,31 @@ async def test_resolver_rejects_distinct_backends_matching_without_explicit_stor
         await SourceResolver(FakeCatalog(response(href=GCS_HREF)), locations).resolve(
             ref(storage_location_slug=None)
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "public_root",
+    ["https://hifld.publicenvirodata.org/storage", "https://cdn.example.test"],
+)
+async def test_gcs_custom_public_root_resolves_same_physical_bucket(public_root: str) -> None:
+    key = "hifld/roads/roads/v1.0.0/geoparquet/roads.parquet"
+    config = BucketStorageConfig(
+        type="gcs", base_url=public_root, bucket="hifld-next-datasets-prod"
+    )
+    for href in (
+        f"{public_root}/{key}",
+        f"https://storage.googleapis.com/{config.bucket}/{key}",
+    ):
+        resolved = await SourceResolver(
+            FakeCatalog(response(href=href)), {"local": config}
+        ).resolve(ref())
+        assert resolved.object_uris == (f"gs://{config.bucket}/{key}",)
+    for href in (
+        "https://untrusted.example.test/storage/roads.parquet",
+        f"{public_root}-other/roads.parquet",
+        "https://storage.googleapis.com/other-bucket/roads.parquet",
+        f"{public_root}/%2e%2e/roads.parquet",
+    ):
+        with pytest.raises(CatalogClientError, match="source_location_invalid"):
+            await SourceResolver(FakeCatalog(response(href=href)), {"local": config}).resolve(ref())
