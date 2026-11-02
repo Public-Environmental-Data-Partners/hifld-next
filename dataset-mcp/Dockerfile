@@ -22,6 +22,9 @@ RUN uv sync --frozen --no-dev
 FROM python:3.12-slim AS runtime
 ENV PATH="/app/.venv/bin:${PATH}" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PORT=8000
 WORKDIR /app
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=python-deps /app/.venv /app/.venv
 COPY dataset-mcp/ .
 COPY --from=ui-build /workspace/dataset-mcp/ui/dist ./ui/dist

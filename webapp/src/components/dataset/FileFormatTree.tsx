@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type { DownloadAnalyticsContext } from "@/lib/analytics";
 import type { DatasetFile, DatasetFormat, DatasetSource, FileLocation } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { CatalogObjectTree } from "./CatalogObjectTree";
 import { CopyButton } from "./CopyButton";
 import { getLocationOptions, getVersionSourcesForLocation } from "./compareSources";
 import { DownloadButton } from "./DownloadButton";
@@ -562,6 +563,8 @@ export function FileFormatTree({
           fileSlug={fileSlug}
         />
       )}
+
+      <CatalogObjectTree formats={file.formats ?? []} />
 
       {(!file.formats || file.formats.length === 0) && (
         <p className="text-sm text-muted-foreground">No formats available for this file.</p>

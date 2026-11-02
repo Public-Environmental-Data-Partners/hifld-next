@@ -53,9 +53,15 @@ function encodeObjectPath(value: string): string {
     .join("/");
 }
 
-export function catalogAssetUrl(asset: CatalogAsset): string | undefined {
-  const object = asset.objects.length === 1 ? asset.objects[0] : undefined;
+export function catalogAssetUrl(
+  asset: CatalogAsset,
+  object = asset.objects.length === 1 ? asset.objects[0] : undefined,
+): string | undefined {
   if (!object) return undefined;
+  return catalogObjectUrl(asset, object);
+}
+
+function catalogObjectUrl(asset: CatalogAsset, object: CatalogAsset["objects"][number]): string {
   const baseUrl = asset.storage_config.base_url.replace(/\/+$/, "");
   return `${baseUrl}/${encodeURIComponent(asset.storage_config.bucket)}/${encodeObjectPath(object.object_key)}`;
 }
@@ -99,7 +105,10 @@ export const getCatalogDatasetFileBySlug = createServerFn({ method: "GET" })
 
 // Published catalog presentation types
 
-export type FormatType = "geoparquet" | "pmtiles" | "geopackage" | "shapefile" | "geojson" | "file_geodatabase";
+// Catalog formats are extensible; preview and query capabilities use explicit format checks.
+export type FormatType = string;
+
+export type CatalogObject = CatalogAsset["objects"][number] & { url: string };
 
 export type BackendType = "s3";
 
@@ -178,6 +187,7 @@ export interface Dataset {
 export interface DatasetSource {
   id: string;
   asset_key?: string | undefined;
+  objects?: CatalogObject[] | undefined;
   version?: string | number | undefined;
   url?: string | undefined;
   storage_uri?: string | undefined; // Storage URI (gs:// or s3://) for file sources
@@ -445,7 +455,7 @@ function catalogFormats(
     const existing = formats.get(asset.format_key) ?? {
       format: {
         id: asset.format_key,
-        format_type: asset.format_key as FormatType,
+        format_type: asset.format_key,
         name: stacAsset?.title ?? asset.title,
         mime_type: stacAsset?.type ?? asset.media_type,
         created_at: value.created_at ?? "",
@@ -474,7 +484,8 @@ function catalogDatasetSource(
     url: catalogAssetUrl(asset),
     sha256: asset.sha256,
     checksum_multihash: asset.checksum_multihash,
-    location: { version: asset.version, path: asset.objects.map((object) => object.object_key).join(",") },
+    objects: asset.objects.map((object) => ({ ...object, url: catalogObjectUrl(asset, object) })),
+    location: { version: asset.version, path: asset.objects.length === 1 ? (asset.objects[0]?.object_key ?? "") : "" },
     ...(sourceMetadata ? { source_metadata: sourceMetadata } : {}),
     storage_location: {
       id: asset.storage_location_slug,

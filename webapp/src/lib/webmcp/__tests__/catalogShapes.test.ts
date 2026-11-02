@@ -149,3 +149,13 @@ describe("catalog shaping", () => {
     })).toThrow();
   });
 });
+
+it("includes arbitrary catalog formats without making them query sources", () => {
+  const response = makeResponse();
+  const entry = response.file.formats?.[0];
+  if (!entry) throw new Error("Missing test format");
+  entry.format.format_type = "json";
+  const shaped = shapeDatasetFileResponse(response, "https://catalog.example");
+  expect(shaped.formats[0]?.format_type).toBe("json");
+  expect(shaped.query_sources).toEqual([]);
+});
