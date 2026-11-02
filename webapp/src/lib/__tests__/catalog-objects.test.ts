@@ -4,6 +4,7 @@ import type { CatalogAsset, CatalogFileResponse } from "@/lib/catalog-api";
 
 const asset: CatalogAsset = {
   version: "v1", asset_key: "raw-json", format_key: "json", title: "Raw JSON",
+  href: "https://published.example/collection/dataset/file/v1/raw/",
   media_type: "application/json", size_bytes: 24, sha256: null, checksum_multihash: null,
   storage_location_slug: "published", storage_config: { type: "gcs", base_url: "https://storage.example", bucket: "data" },
   objects: ["raw/a/data #1.json", "raw/b/data #1.json"].map((path) => ({
@@ -38,6 +39,8 @@ describe("catalog physical objects", () => {
   it("creates encoded URLs for each indexed object while preserving single-object compatibility", () => {
     expect(catalogAssetUrl(asset)).toBeUndefined();
     expect(catalogAssetUrl(asset, asset.objects[1])).toBe("https://storage.example/data/collection/dataset/file/v1/raw/b/data%20%231.json");
-    expect(catalogAssetUrl({ ...asset, objects: asset.objects.slice(0, 1) })).toBe("https://storage.example/data/collection/dataset/file/v1/raw/a/data%20%231.json");
+    const single = { ...asset, href: "https://cdn.example/storage/data%20%231.json?download=1", objects: asset.objects.slice(0, 1) };
+    expect(catalogAssetUrl(single)).toBe(single.href);
+    expect(catalogFileResponse({ ...file, assets: [single] }).file.formats?.[0]?.sources[0]?.objects?.[0]?.url).toBe(single.href);
   });
 });

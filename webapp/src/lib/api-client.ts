@@ -62,6 +62,8 @@ export function catalogAssetUrl(
 }
 
 function catalogObjectUrl(asset: CatalogAsset, object: CatalogAsset["objects"][number]): string {
+  if (asset.objects.length === 1) return asset.href;
+  // Multi-object assets have no published per-object href; retain their indexed storage resolver.
   const baseUrl = asset.storage_config.base_url.replace(/\/+$/, "");
   return `${baseUrl}/${encodeURIComponent(asset.storage_config.bucket)}/${encodeObjectPath(object.object_key)}`;
 }
@@ -476,15 +478,16 @@ function catalogDatasetSource(
   stacAsset: StacAsset | undefined,
 ): DatasetSource {
   const sourceMetadata = catalogSourceMetadata(asset.version, stacVersion, stacAsset);
+  const url = asset.objects.length === 1 ? (stacAsset?.href ?? asset.href) : undefined;
   return {
     id: `${asset.version}/${asset.asset_key}`,
     asset_key: asset.asset_key,
     version: asset.version,
     source_type: "file",
-    url: catalogAssetUrl(asset),
+    url,
     sha256: asset.sha256,
     checksum_multihash: asset.checksum_multihash,
-    objects: asset.objects.map((object) => ({ ...object, url: catalogObjectUrl(asset, object) })),
+    objects: asset.objects.map((object) => ({ ...object, url: url ?? catalogObjectUrl(asset, object) })),
     location: { version: asset.version, path: asset.objects.length === 1 ? (asset.objects[0]?.object_key ?? "") : "" },
     ...(sourceMetadata ? { source_metadata: sourceMetadata } : {}),
     storage_location: {

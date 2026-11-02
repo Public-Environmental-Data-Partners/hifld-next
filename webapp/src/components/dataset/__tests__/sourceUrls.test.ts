@@ -50,6 +50,12 @@ describe("source URL helpers", () => {
     ).toBe("https://hifld.publicenvirodata.org/storage/nfhl/water-lines.pmtiles");
   });
 
+  it("does not invent a single-file URL for a catalog asset without one", () => {
+    const source = makeFileSource("https://storage.googleapis.com", "part-a.parquet,part-b.parquet");
+    source.asset_key = "geoparquet";
+    expect(buildSourceFileUrl(source)).toBeNull();
+  });
+
   it("builds SeaweedFS S3 URLs with the bucket as the first path segment", () => {
     const source = makeFileSource(
       "http://localhost:8888",

@@ -27,6 +27,7 @@ export interface CatalogAsset {
   asset_key: string;
   format_key: string;
   title: string;
+  href: string;
   media_type: string;
   size_bytes: number;
   sha256: string | null;
@@ -51,6 +52,7 @@ function assetResponse(version: string, value: CatalogResolvedAsset): CatalogAss
     asset_key: value.asset_key,
     format_key: value.format_key,
     title: value.title,
+    href: value.href,
     media_type: value.media_type,
     size_bytes: value.size_bytes,
     sha256: value.sha256,
