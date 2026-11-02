@@ -47,7 +47,7 @@ it("combines same-format assets from the selected version and location", () => {
   const format: DatasetFormat = {
     format: { id: "json", format_type: "json", name: "JSON", created_at: "", updated_at: "" },
     sources: ["a", "b"].map((folder) => ({
-      id: `v1/hash-${folder}`, asset_key: `hash-${folder}`, version: "v1", source_type: "file",
+      sha256: `source-${folder}`, id: `v1/hash-${folder}`, asset_key: `hash-${folder}`, version: "v1", source_type: "file",
       location: { version: "v1", path: "" },
       storage_location: { id: "published", name: "Published", backend_type: "s3", created_at: "", updated_at: "" },
       objects: [{ object_key: `data/raw/${folder}/same.json`, relative_path: `raw/${folder}/same.json`,
@@ -57,6 +57,8 @@ it("combines same-format assets from the selected version and location", () => {
   };
   const { container } = render(<FileFormatTree file={file([format])} selectedSources={{}} onSourceChange={vi.fn()} pmtilesUrl={null} />);
   fireEvent.click(screen.getByRole("button", { name: /json/i }));
+  expect(within(container).queryByText("source-a")).not.toBeInTheDocument();
+  expect(within(container).queryByText("source-b")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /^raw/ }));
   fireEvent.click(screen.getByRole("button", { name: /^a/ }));
   fireEvent.click(screen.getByRole("button", { name: /^b/ }));
@@ -119,4 +121,24 @@ it("uses the version shown first by the selector when no version was selected", 
   expect(within(container).getByRole("combobox").textContent).toContain("v2.0");
   expect(within(container).queryByText("v1.0")).not.toBeInTheDocument();
   expect(within(container).getByRole("button", { name: /^v2\.0/ })).toBeInTheDocument();
+});
+
+it("shows file checksums on physical Parquet entries, not on the glob", () => {
+  const format: DatasetFormat = {
+    format: { id: "geoparquet", format_type: "geoparquet", name: "GeoParquet", created_at: "", updated_at: "" },
+    sources: ["a", "b"].map((name) => ({
+      id: name, version: "v1", source_type: "file" as const,
+      location: { version: "v1", path: `data/geoparquet/${name}.parquet` },
+      url: `https://objects.example/${name}.parquet`, sha256: `checksum-${name}`,
+      glob_pattern: "gs://bucket/data/geoparquet/*.parquet",
+      storage_location: { id: "published", name: "Published", backend_type: "s3" as const, created_at: "", updated_at: "" },
+    })),
+  };
+  render(<FileFormatTree file={file([format])} selectedSources={{}} onSourceChange={vi.fn()} pmtilesUrl={null} />);
+  fireEvent.click(screen.getByRole("button", { name: /^geoparquet/ }));
+  fireEvent.click(screen.getByRole("button", { name: /glob/ }));
+  expect(screen.queryByText("checksum-a")).not.toBeInTheDocument();
+  expect(screen.queryByText("checksum-b")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /^a\.parquet/ }));
+  expect(screen.getByText("checksum-a")).toBeInTheDocument();
 });

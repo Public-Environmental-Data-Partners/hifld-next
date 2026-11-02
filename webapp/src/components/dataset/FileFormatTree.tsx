@@ -509,7 +509,6 @@ export function FileFormatTree({
                                 </div>
                               </>
                             )}
-                            <SourceLifecycleMetadata source={sourceWithGlob ?? allSources[0]} />
                           </>
                         );
                       })()}
@@ -1331,7 +1330,6 @@ function SourceSelector({ formatType, formatEntry, selectedSources, onSourceChan
           <MarkdownDescription markdown={versionDescription} className="mt-1" />
         </div>
       ) : null}
-      <SourceLifecycleMetadata source={currentSource} />
     </div>
   );
 }
