@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM python:3.12-slim AS dependencies
+FROM python:3.15-slim AS dependencies
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
 WORKDIR /app
 RUN pip install --no-cache-dir uv
@@ -8,7 +8,7 @@ RUN uv sync --frozen --no-dev \
  && mkdir -p "$DUCKDB_EXTENSION_DIRECTORY" \
  && .venv/bin/python -c "import duckdb; c=duckdb.connect(); c.execute(\"SET extension_directory='$DUCKDB_EXTENSION_DIRECTORY'\"); c.execute('INSTALL httpfs'); c.execute('INSTALL spatial'); c.close()"
 
-FROM python:3.12-slim
+FROM python:3.15-slim
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions FEATURE_SERVER_TEMP_DIRECTORY=/var/lib/feature-server/spill
 WORKDIR /app
 COPY --from=dependencies /app/.venv /app/.venv
