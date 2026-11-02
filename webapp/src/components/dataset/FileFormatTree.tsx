@@ -754,31 +754,28 @@ export function FileFormatTree({
               format.format.format_type,
             ),
         )
-        .map((format) => (
-          <FormatFolderNode
-            key={format.format.format_type}
-            icon={<FileJson className="h-4 w-4 text-muted-foreground" />}
-            name={formatName(format)}
-            formatType={format.format.format_type}
-            formatEntry={format}
-            selectedSources={selectedSources}
-            onSourceChange={onSourceChange}
-            isExpanded={expandedFormats.has(`format-${format.format.format_type}`)}
-            onToggle={() => toggleFormat(`format-${format.format.format_type}`)}
-            badgeLabel={`${
-              new Set(
-                selectedFormatSources(format, selectedSources, format.format.format_type).flatMap(
-                  (source) => source.objects?.map((object) => object.object_key) ?? [],
-                ),
-              ).size
-            } files`}
-          >
-            <CatalogObjects
+        .map((format) => {
+          const sources = selectedFormatSources(format, selectedSources, format.format.format_type);
+          const objectCount = new Set(
+            sources.flatMap((source) => source.objects?.map((object) => object.object_key) ?? []),
+          ).size;
+          return (
+            <FormatFolderNode
+              key={format.format.format_type}
+              icon={<FileJson className="h-4 w-4 text-muted-foreground" />}
+              name={formatName(format)}
+              formatType={format.format.format_type}
               formatEntry={format}
-              sources={selectedFormatSources(format, selectedSources, format.format.format_type)}
-            />
-          </FormatFolderNode>
-        ))}
+              selectedSources={selectedSources}
+              onSourceChange={onSourceChange}
+              isExpanded={expandedFormats.has(`format-${format.format.format_type}`)}
+              onToggle={() => toggleFormat(`format-${format.format.format_type}`)}
+              badgeLabel={`${objectCount} file${objectCount === 1 ? "" : "s"}`}
+            >
+              <CatalogObjects formatEntry={format} sources={sources} />
+            </FormatFolderNode>
+          );
+        })}
 
       {(!file.formats || file.formats.length === 0) && (
         <p className="text-sm text-muted-foreground">No formats available for this file.</p>
@@ -1109,6 +1106,7 @@ function FormatFileNode({
     <div>
       <button
         type="button"
+        aria-expanded={hasChildren ? isExpanded : undefined}
         className={cn(
           "select-none flex w-full items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors text-left",
           isExpanded && hasChildren && "bg-muted/30",
@@ -1192,6 +1190,7 @@ function FormatFolderNode({
     <div>
       <button
         type="button"
+        aria-expanded={isExpanded}
         className={cn(
           "select-none flex w-full items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors text-left",
           isExpanded && "bg-muted/30",

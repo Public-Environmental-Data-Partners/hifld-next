@@ -78,7 +78,7 @@ it("renders unknown formats as peers in the format tree", () => {
     }],
   };
   render(<FileFormatTree file={file([format])} selectedSources={{}} onSourceChange={vi.fn()} pmtilesUrl={null} />);
-  expect(screen.getByRole("button", { name: /yaml config/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /yaml config\s*1 file$/i })).toBeInTheDocument();
   expect(screen.queryByText("All files")).not.toBeInTheDocument();
 });
 
