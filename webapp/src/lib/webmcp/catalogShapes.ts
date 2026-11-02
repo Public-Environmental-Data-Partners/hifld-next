@@ -66,7 +66,7 @@ const CatalogSourceSchema = z
 
 const CatalogFormatSchema = z
   .object({
-    format_type: z.enum(["geoparquet", "pmtiles", "geopackage", "shapefile", "geojson", "file_geodatabase"]),
+    format_type: z.string().min(1),
     name: z.string(),
     sources: z.array(CatalogSourceSchema),
   })
@@ -258,7 +258,7 @@ export type CatalogSchemaResponseInput = {
 const CatalogSchemaDetailsSchema = z
   .object({
     version: z.union([z.string(), z.number()]).nullable(),
-    format_type: z.enum(["geoparquet", "pmtiles", "geopackage", "shapefile", "geojson", "file_geodatabase"]),
+    format_type: z.string().min(1),
     format_name: z.string(),
     source_id: z.string().min(1),
     summary: SpatialSummarySchema.nullable(),

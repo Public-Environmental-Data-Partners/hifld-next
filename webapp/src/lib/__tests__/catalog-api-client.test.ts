@@ -195,6 +195,9 @@ describe("SQLite catalog file adapter", () => {
     expect(result.file.formats?.[0]?.sources[0]?.url).toBe(
       "https://published.example/stations.parquet",
     );
+    expect(result.file.formats?.[0]?.sources[0]?.objects?.[0]?.url).toBe(
+      "https://published.example/stations.parquet",
+    );
     const asset = value.assets[0];
     if (!asset) throw new Error("Expected a published asset fixture");
     expect(catalogAssetUrl(asset)).toBe(

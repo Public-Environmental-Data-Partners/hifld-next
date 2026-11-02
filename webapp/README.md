@@ -21,12 +21,16 @@ CATALOG_RELEASE_POINTER_URL=https://storage.googleapis.com/your-bucket/_catalog/
 
 `CATALOG_SQLITE_URL` also supports a direct published index URL. `CATALOG_SQLITE_PATH` supports an existing local SQLite file; set a published URL alongside it when serving STAC documents. The in-process catalog starts on first use and refreshes on a timer, retaining the last valid generation on refresh failures. Readiness and catalog routes fail closed when no valid catalog can be opened. Configure `CATALOG_STORAGE_LOCATIONS_JSON` to resolve published asset storage locations (including SeaweedFS for local storage). Numeric database row IDs are retired; use collection slugs and published dataset/file paths.
 
-Public file links use the published STAC asset `href`, or its indexed catalog
-`href` for SQLite-only reads. Downloads and ZIP redirects do not
+Single-object file links use the published STAC asset `href`, or its indexed
+catalog `href` for SQLite-only reads. These links and ZIP redirects do not
 reconstruct URLs from the storage registry's `base_url` and `bucket`. The registry
 still supplies backend identity and storage configuration; it does not override
 the publisher's public URL. Multi-object assets are not offered as single-file
 downloads.
+
+The All files browser uses that same published URL for single-object assets.
+For multi-object assets it retains indexed backend resolution for each physical
+file, because the STAC asset does not supply individual object URLs.
 
 The publisher sets public URLs with `HIFLD_PORTOLAN_PUBLIC_ROOT`. Changing that
 setting requires a new catalog publication. If switching the catalog itself to
