@@ -4,9 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { DownloadAnalyticsContext } from "@/lib/analytics";
-import type { DatasetFile, DatasetFormat, DatasetSource, FileLocation } from "@/lib/api-client";
+import type { CatalogObject, DatasetFile, DatasetFormat, DatasetSource, FileLocation } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
-import { CatalogObjectTree } from "./CatalogObjectTree";
 import { CopyButton } from "./CopyButton";
 import { getLocationOptions, getVersionSourcesForLocation } from "./compareSources";
 import { DownloadButton } from "./DownloadButton";
@@ -55,6 +54,8 @@ export function sourceLifecycleDetails(source: DatasetSource | undefined): Sourc
   if (typeof sizeBytes === "number" && sizeBytes > 0) {
     details.push({ label: "Size", value: formatFileSize(sizeBytes) });
   }
+  if (source.sha256) details.push({ label: "SHA-256", value: source.sha256 });
+  if (source.checksum_multihash) details.push({ label: "Multihash", value: source.checksum_multihash });
 
   return details;
 }
@@ -66,7 +67,7 @@ function SourceLifecycleMetadata({ source }: { source: DatasetSource | undefined
   return (
     <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-3">
       {details.map((detail) => (
-        <p key={detail.label}>
+        <p key={detail.label} className="min-w-0 break-all">
           <span className="font-medium text-foreground">{detail.label}:</span> {detail.value}
         </p>
       ))}
@@ -96,13 +97,7 @@ function selectedFormatSource(
   selectedSources: SelectedFormatSources,
   formatType: string,
 ): DatasetSource | undefined {
-  const selectedLocationId = selectedSources[formatType]?.storageLocationId;
-  const selectedVersion = selectedSources[formatType]?.version;
-  return formatEntry.sources?.find(
-    (source) =>
-      source.storage_location?.id === selectedLocationId &&
-      String(source.version || "1") === String(selectedVersion || "1"),
-  );
+  return selectedFormatSources(formatEntry, selectedSources, formatType)[0];
 }
 
 function selectedFormatSources(
@@ -110,8 +105,16 @@ function selectedFormatSources(
   selectedSources: SelectedFormatSources,
   formatType: string,
 ): DatasetSource[] {
-  const selectedLocationId = selectedSources[formatType]?.storageLocationId;
-  const selectedVersion = selectedSources[formatType]?.version;
+  const firstSource = formatEntry.sources?.[0];
+  const selectedLocationId =
+    selectedSources[formatType]?.storageLocationId ??
+    getLocationOptions(formatEntry)[0]?.id ??
+    firstSource?.storage_location?.id;
+  const selectedVersion =
+    selectedSources[formatType]?.version ??
+    getVersionSourcesForLocation(formatEntry, selectedLocationId)[0]?.version ??
+    firstSource?.version ??
+    firstSource?.location.version;
   return (
     formatEntry.sources?.filter(
       (source) =>
@@ -213,6 +216,143 @@ interface FileFormatTreeProps {
   collectionSlug?: string;
   datasetSlug?: string;
   fileSlug?: string;
+}
+
+interface CatalogTreeNode {
+  name: string;
+  path: string;
+  folders: Map<string, CatalogTreeNode>;
+  objects: CatalogObject[];
+}
+
+function catalogTree(objects: CatalogObject[]): CatalogTreeNode {
+  const root: CatalogTreeNode = { name: "", path: "", folders: new Map(), objects: [] };
+  for (const object of objects) {
+    const parts = object.relative_path.split("/").filter(Boolean);
+    let node = root;
+    for (const part of parts) {
+      const path = node.path ? `${node.path}/${part}` : part;
+      let child = node.folders.get(part);
+      if (!child) {
+        child = { name: part, path, folders: new Map(), objects: [] };
+        node.folders.set(part, child);
+      }
+      node = child;
+    }
+    node.objects.push(object);
+  }
+  return root;
+}
+
+const formatNames = new Map([
+  ["json", "JSON"],
+  ["xml", "XML"],
+  ["csv", "CSV"],
+  ["metadata", "Metadata"],
+  ["styles", "Styles"],
+  ["thumbnail", "Thumbnail"],
+  ["pdf", "PDF"],
+  ["geoparquet", "GeoParquet"],
+  ["pmtiles", "PMTiles"],
+  ["geopackage", "GeoPackage"],
+  ["shapefile", "Shapefile"],
+  ["geojson", "GeoJSON"],
+  ["file_geodatabase", "File geodatabase"],
+]);
+
+function formatName(formatEntry: DatasetFormat): string {
+  const label = formatEntry.format.format_type
+    .split(/[_-]/)
+    .map((part) => (part === "yaml" ? "YAML" : `${part.charAt(0).toUpperCase()}${part.slice(1)}`))
+    .join(" ");
+  return formatNames.get(formatEntry.format.format_type) ?? label;
+}
+
+function CatalogObjectNodes({ node, formatEntry }: { node: CatalogTreeNode; formatEntry: DatasetFormat }) {
+  return [...node.folders.values()]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((child) => {
+      return <CatalogObjectBranch key={child.path} node={child} formatEntry={formatEntry} />;
+    });
+}
+
+function CatalogObjectBranch({ node, formatEntry }: { node: CatalogTreeNode; formatEntry: DatasetFormat }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const isFile = node.folders.size === 0 && node.objects.length > 0;
+  const size = node.objects.reduce((total, object) => total + object.size_bytes, 0);
+  return (
+    <FormatFileNode
+      icon={
+        isFile ? <File className="h-4 w-4 text-muted-foreground" /> : <Folder className="h-4 w-4 text-yellow-600" />
+      }
+      name={node.name}
+      badge={
+        isFile
+          ? formatFileSize(size)
+          : `${node.folders.size + node.objects.length} item${node.folders.size + node.objects.length === 1 ? "" : "s"}`
+      }
+      formatType={formatEntry.format.format_type}
+      formatEntry={formatEntry}
+      selectedSources={{}}
+      onSourceChange={() => undefined}
+      isExpanded={isExpanded}
+      onToggle={() => setIsExpanded((value) => !value)}
+      showSourceSelector={false}
+      showCatalogObjects={false}
+    >
+      <div className="space-y-1">
+        <CatalogObjectNodes node={node} formatEntry={formatEntry} />
+        {node.objects.map((object) => (
+          <div key={object.object_key} className="space-y-2 py-2 pl-4 text-xs">
+            {object.sha256 && (
+              <p className="break-all">
+                SHA-256: <code>{object.sha256}</code>
+              </p>
+            )}
+            {object.checksum_multihash && (
+              <p className="break-all">
+                Multihash: <code>{object.checksum_multihash}</code>
+              </p>
+            )}
+            <p className="break-all text-muted-foreground">{object.url}</p>
+            <div className="flex gap-2">
+              <CopyButton value={object.url} label="Copy URL" />
+              <DownloadButton url={object.url} label="Download" sizeBytes={object.size_bytes} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </FormatFileNode>
+  );
+}
+
+function CatalogObjects({
+  formatEntry,
+  sources,
+  representedUrls,
+}: {
+  formatEntry: DatasetFormat;
+  sources: DatasetSource[];
+  representedUrls?: Set<string> | undefined;
+}) {
+  const uniqueObjects = new Map<string, CatalogObject>();
+  for (const source of sources) {
+    for (const object of source.objects ?? []) {
+      if (!representedUrls?.has(object.url)) {
+        const prefix = `${formatEntry.format.format_type.toLowerCase()}/`;
+        const relativePath = object.relative_path.toLowerCase().startsWith(prefix)
+          ? object.relative_path.slice(prefix.length)
+          : object.relative_path;
+        uniqueObjects.set(object.object_key, { ...object, relative_path: relativePath });
+      }
+    }
+  }
+  if (uniqueObjects.size === 0) return null;
+  return (
+    <div className="space-y-1">
+      <CatalogObjectNodes node={catalogTree([...uniqueObjects.values()])} formatEntry={formatEntry} />
+    </div>
+  );
 }
 
 interface GeoparquetTreeNodesProps {
@@ -396,6 +536,22 @@ export function FileFormatTree({
                   />
                 );
               })()}
+              {(() => {
+                const allSources = selectedFormatSources(geoparquetFormat, selectedSources, "geoparquet");
+                const representedUrls = new Set(
+                  allSources
+                    .filter((source) => !sourcePath(source).includes("*"))
+                    .map(buildSourceFileUrl)
+                    .filter((url): url is string => url !== null),
+                );
+                return (
+                  <CatalogObjects
+                    formatEntry={geoparquetFormat}
+                    sources={allSources}
+                    representedUrls={representedUrls}
+                  />
+                );
+              })()}
             </div>
           </FormatFolderNode>
         </div>
@@ -418,7 +574,10 @@ export function FileFormatTree({
               onSourceChange={onSourceChange}
               isExpanded={expandedFormats.has("pmtiles")}
               onToggle={() => toggleFormat("pmtiles")}
+              showCatalogObjects
+              representedUrls={pmtilesUrl ? new Set([pmtilesUrl]) : undefined}
             >
+              <SourceLifecycleMetadata source={selectedPmtilesSource} />
               {pmtilesUrl && (
                 <div className="space-y-2">
                   <p className="text-xs text-muted-foreground break-all">{pmtilesUrl}</p>
@@ -461,7 +620,10 @@ export function FileFormatTree({
               onSourceChange={onSourceChange}
               isExpanded={expandedFormats.has("geopackage")}
               onToggle={() => toggleFormat("geopackage")}
+              showCatalogObjects
+              representedUrls={geopackageUrl ? new Set([geopackageUrl]) : undefined}
             >
+              <SourceLifecycleMetadata source={selectedGeopackageSource} />
               {geopackageUrl && (
                 <div className="space-y-2">
                   <p className="text-xs text-muted-foreground break-all">{geopackageUrl}</p>
@@ -498,6 +660,15 @@ export function FileFormatTree({
           onSourceChange={onSourceChange}
           isExpanded={expandedFormats.has("shapefile")}
           onToggle={() => toggleFormat("shapefile")}
+          showCatalogObjects
+          representedUrls={
+            new Set(
+              selectedFormatSources(shapefileFormat, selectedSources, "shapefile")
+                .filter((source) => sourcePath(source).toLowerCase().endsWith(".zip"))
+                .map(buildSourceFileUrl)
+                .filter((url): url is string => url !== null),
+            )
+          }
           collectionSlug={collectionSlug}
           datasetSlug={datasetSlug}
           fileSlug={fileSlug}
@@ -522,7 +693,10 @@ export function FileFormatTree({
               onSourceChange={onSourceChange}
               isExpanded={expandedFormats.has("geojson")}
               onToggle={() => toggleFormat("geojson")}
+              showCatalogObjects
+              representedUrls={geojsonUrl ? new Set([geojsonUrl]) : undefined}
             >
+              <SourceLifecycleMetadata source={selectedGeojsonSource} />
               {geojsonUrl && (
                 <div className="space-y-2">
                   <p className="text-xs text-muted-foreground break-all">{geojsonUrl}</p>
@@ -558,13 +732,53 @@ export function FileFormatTree({
           onSourceChange={onSourceChange}
           isExpanded={expandedFormats.has("file_geodatabase")}
           onToggle={() => toggleFormat("file_geodatabase")}
+          showCatalogObjects
+          representedUrls={
+            new Set(
+              selectedFormatSources(fileGeodatabaseFormat, selectedSources, "file_geodatabase")
+                .filter((source) => sourcePath(source).toLowerCase().endsWith(".zip"))
+                .map(buildSourceFileUrl)
+                .filter((url): url is string => url !== null),
+            )
+          }
           collectionSlug={collectionSlug}
           datasetSlug={datasetSlug}
           fileSlug={fileSlug}
         />
       )}
 
-      <CatalogObjectTree formats={file.formats ?? []} />
+      {(file.formats ?? [])
+        .filter(
+          (format) =>
+            !["geoparquet", "pmtiles", "geopackage", "shapefile", "geojson", "file_geodatabase"].includes(
+              format.format.format_type,
+            ),
+        )
+        .map((format) => (
+          <FormatFolderNode
+            key={format.format.format_type}
+            icon={<FileJson className="h-4 w-4 text-muted-foreground" />}
+            name={formatName(format)}
+            formatType={format.format.format_type}
+            formatEntry={format}
+            selectedSources={selectedSources}
+            onSourceChange={onSourceChange}
+            isExpanded={expandedFormats.has(`format-${format.format.format_type}`)}
+            onToggle={() => toggleFormat(`format-${format.format.format_type}`)}
+            badgeLabel={`${
+              new Set(
+                selectedFormatSources(format, selectedSources, format.format.format_type).flatMap(
+                  (source) => source.objects?.map((object) => object.object_key) ?? [],
+                ),
+              ).size
+            } files`}
+          >
+            <CatalogObjects
+              formatEntry={format}
+              sources={selectedFormatSources(format, selectedSources, format.format.format_type)}
+            />
+          </FormatFolderNode>
+        ))}
 
       {(!file.formats || file.formats.length === 0) && (
         <p className="text-sm text-muted-foreground">No formats available for this file.</p>
@@ -787,6 +1001,8 @@ export function ArchiveFormatNode({
   collectionSlug,
   datasetSlug,
   fileSlug,
+  showCatalogObjects,
+  representedUrls,
 }: {
   formatEntry: DatasetFormat;
   formatType: "shapefile" | "file_geodatabase";
@@ -799,6 +1015,8 @@ export function ArchiveFormatNode({
   collectionSlug?: string | undefined;
   datasetSlug?: string | undefined;
   fileSlug?: string | undefined;
+  showCatalogObjects?: boolean | undefined;
+  representedUrls?: Set<string> | undefined;
 }) {
   const source = archiveDownloadSource(selectedFormatSources(formatEntry, selectedSources, formatType));
   const sizeBytes = source?.source_metadata?.size_bytes;
@@ -816,9 +1034,12 @@ export function ArchiveFormatNode({
       onSourceChange={onSourceChange}
       isExpanded={isExpanded}
       onToggle={onToggle}
+      showCatalogObjects={showCatalogObjects}
+      representedUrls={representedUrls}
     >
       {downloadUrl && source && (
         <div className="space-y-2">
+          <SourceLifecycleMetadata source={source} />
           {sizeBytes != null && (
             <p className="text-xs text-muted-foreground">Compressed size: {formatFileSize(sizeBytes)}</p>
           )}
@@ -857,6 +1078,8 @@ interface FormatFileNodeProps {
   onToggle: () => void;
   children?: React.ReactNode;
   showSourceSelector?: boolean; // Whether to show location/version selector
+  showCatalogObjects?: boolean | undefined;
+  representedUrls?: Set<string> | undefined;
 }
 
 function FormatFileNode({
@@ -871,8 +1094,15 @@ function FormatFileNode({
   onToggle,
   children,
   showSourceSelector = true,
+  showCatalogObjects = false,
+  representedUrls,
 }: FormatFileNodeProps) {
-  const hasChildren = !!children;
+  const hasCatalogObjects =
+    showCatalogObjects &&
+    selectedFormatSources(formatEntry, selectedSources, formatType).some((source) =>
+      source.objects?.some((object) => !representedUrls?.has(object.url)),
+    );
+  const hasChildren = !!children || hasCatalogObjects;
   const sources = formatEntry.sources || [];
 
   return (
@@ -917,6 +1147,13 @@ function FormatFileNode({
             </div>
           )}
           {children}
+          {showCatalogObjects && (
+            <CatalogObjects
+              formatEntry={formatEntry}
+              sources={selectedFormatSources(formatEntry, selectedSources, formatType)}
+              representedUrls={representedUrls}
+            />
+          )}
         </div>
       )}
     </div>
@@ -933,6 +1170,7 @@ interface FormatFolderNodeProps {
   isExpanded: boolean;
   onToggle: () => void;
   children?: React.ReactNode;
+  badgeLabel?: string | undefined;
 }
 
 function FormatFolderNode({
@@ -945,6 +1183,7 @@ function FormatFolderNode({
   isExpanded,
   onToggle,
   children,
+  badgeLabel,
 }: FormatFolderNodeProps) {
   const sources = formatEntry.sources || [];
   const sourceCount = countDisplaySources(formatType, sources);
@@ -966,10 +1205,16 @@ function FormatFolderNode({
         )}
         {icon}
         <span className="flex-1 min-w-0 text-sm font-mono font-medium truncate">{name}</span>
-        {sourceCount > 0 && (
+        {badgeLabel ? (
           <Badge variant="secondary" className="text-[10px] h-4 px-1">
-            {sourceCount} source{sourceCount !== 1 ? "s" : ""}
+            {badgeLabel}
           </Badge>
+        ) : (
+          sourceCount > 0 && (
+            <Badge variant="secondary" className="text-[10px] h-4 px-1">
+              {sourceCount} source{sourceCount !== 1 ? "s" : ""}
+            </Badge>
+          )
         )}
       </button>
 
