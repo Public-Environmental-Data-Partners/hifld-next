@@ -12,14 +12,14 @@ COPY packages/map-ui ./packages/map-ui
 COPY dataset-mcp/ui ./dataset-mcp/ui
 RUN npm run --workspace @hifld/dataset-mcp-ui build
 
-FROM python:3.12-slim AS python-deps
+FROM python:3.15-slim AS python-deps
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 WORKDIR /app
 RUN pip install --no-cache-dir uv
 COPY dataset-mcp/pyproject.toml dataset-mcp/uv.lock ./
 RUN uv sync --frozen --no-dev
 
-FROM python:3.12-slim AS runtime
+FROM python:3.15-slim AS runtime
 ENV PATH="/app/.venv/bin:${PATH}" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PORT=8000
 WORKDIR /app
 RUN apt-get update \
