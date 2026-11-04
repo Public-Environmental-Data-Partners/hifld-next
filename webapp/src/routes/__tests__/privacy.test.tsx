@@ -26,3 +26,11 @@ it("does not override browser privacy signals", () => {
   render(<Privacy />);
   expect(screen.getByRole("button", {name:"Analytics disabled by browser"})).toBeDisabled();
 });
+
+it("uses the central PEDP policy while keeping analytics preferences local", () => {
+  render(<Privacy />);
+  expect(screen.getByRole("link", {name:"PEDP Privacy Policy"})).toHaveAttribute("href", "https://www.publicenvirodata.org/privacy-policy");
+  expect(screen.getByRole("button", {name:"Turn off analytics"})).toBeInTheDocument();
+  expect(screen.queryByText(/rotating salt/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/PostHog/)).not.toBeInTheDocument();
+});

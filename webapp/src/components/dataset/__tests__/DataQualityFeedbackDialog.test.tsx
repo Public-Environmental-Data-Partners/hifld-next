@@ -36,12 +36,14 @@ describe("DataQualityFeedbackDialog", () => {
     await user.type(screen.getByLabelText("Email"), "analyst@example.com");
     await user.type(screen.getByLabelText("Comment"), "This layer is missing a facility.");
     expect(screen.getByRole("button", { name: "Submit feedback" })).toBeDisabled();
+    expect(screen.queryByText(/in PostHog/)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", {name:"Privacy Policy"})).toHaveAttribute("href", "https://www.publicenvirodata.org/privacy-policy");
     await user.click(screen.getByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: "Submit feedback" }));
 
     expect(submitDatasetQualityFeedback).toHaveBeenCalledWith({
       consent: true,
-      consent_version: "2026-11-03",
+      consent_version: "2026-11-04",
       reporter_email: "analyst@example.com",
       comment: "This layer is missing a facility.",
       collection_slug: "hifld",

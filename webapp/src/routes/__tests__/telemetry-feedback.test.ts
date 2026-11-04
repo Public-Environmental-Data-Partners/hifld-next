@@ -5,7 +5,7 @@ import { feedbackHandler } from "../api/feedback";
 function request(path: string, body: Record<string, string | boolean | Record<string, string | number>>, origin = "https://data.test") {
  return new Request(`https://data.test/api/${path}`, {method:"POST",headers:{"Content-Type":"application/json",Origin:origin},body:JSON.stringify(body)});
 }
-const feedback = {reporter_email:"analyst@example.com",comment:"Missing facility",collection_slug:"hifld",dataset_slug:"hospitals",file_slug:"hospitals",consent:true,consent_version:"2026-11-03"};
+const feedback = {reporter_email:"analyst@example.com",comment:"Missing facility",collection_slug:"hifld",dataset_slug:"hospitals",file_slug:"hospitals",consent:true,consent_version:"2026-11-04"};
 beforeEach(() => {captureServerEvent.mockClear();});
 describe("consented feedback", () => {
  it("rejects missing consent and cross-origin submissions", async () => {

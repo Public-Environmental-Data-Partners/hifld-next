@@ -175,8 +175,8 @@ export class DataQualityFeedbackDialog extends React.Component<
                 aria-describedby="feedback-privacy"
               />
               <label htmlFor="feedback-consent">
-                I consent to PEDP storing my email, feedback, and dataset context in PostHog to investigate and respond
-                to this report.
+                I consent to PEDP storing my email, feedback, and dataset context to investigate and respond to this
+                report.
               </label>
             </div>
             <p id="feedback-privacy" className="text-xs text-muted-foreground">
@@ -184,8 +184,7 @@ export class DataQualityFeedbackDialog extends React.Component<
               <a className="underline" href={PEDP_PRIVACY_URL} target="_blank" rel="noopener noreferrer">
                 Privacy Policy
               </a>
-              . Reports are kept for no longer than two years. Request deletion at hello@publicenvirodata.org. Feature
-              geometry is excluded. This consent applies only to your report.
+              . This consent applies only to your report.
             </p>
             {this.state.error && (
               <p role="alert" className="text-sm text-destructive">

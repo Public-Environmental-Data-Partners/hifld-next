@@ -1,5 +1,5 @@
 export const PEDP_PRIVACY_URL = "https://www.publicenvirodata.org/privacy-policy";
-export const FEEDBACK_CONSENT_VERSION = "2026-11-03";
+export const FEEDBACK_CONSENT_VERSION = "2026-11-04";
 
 /** This preference cookie is only written after an explicit choice, never as an identifier. */
 export function analyticsDisabled(headers?: Headers): boolean {

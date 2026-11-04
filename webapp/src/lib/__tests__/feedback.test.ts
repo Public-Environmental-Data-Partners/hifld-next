@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { submitDatasetQualityFeedback } from "../feedback";
 import { captureServerEvent } from "../server-analytics";
-const input = {reporter_email:"analyst@example.com",comment:"Missing facility",collection_slug:"hifld",dataset_slug:"hospitals",file_slug:"hospitals",consent:true,consent_version:"2026-11-03"} as const;
+const input = {reporter_email:"analyst@example.com",comment:"Missing facility",collection_slug:"hifld",dataset_slug:"hospitals",file_slug:"hospitals",consent:true,consent_version:"2026-11-04"} as const;
 afterEach(() => {vi.unstubAllGlobals(); vi.unstubAllEnvs(); document.cookie="hifld_analytics=; Max-Age=0; Path=/";});
 it("delivers consented feedback while analytics are disabled, without browser cookies or referrers", async () => {
  document.cookie="hifld_analytics=off; Path=/";
