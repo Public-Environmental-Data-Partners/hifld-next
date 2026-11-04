@@ -11,6 +11,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { trackSearchQuery, trackTagFilter } from "@/lib/analytics";
 import type { DatasetTags, DatasetWithUrls } from "@/lib/api-client";
 import { getCollectionBySlug, getCollectionDatasetsBySlug, getCollectionTagValues } from "@/lib/api-client";
+import { trackUiFailure } from "@/lib/interaction-analytics";
 import { buildDataCatalogJsonLd, pageTitle, seoDescription } from "@/lib/seo";
 
 const SEARCH_DEBOUNCE_MS = 500;
@@ -250,6 +251,7 @@ async function runFilteredDatasetRequest({
     return response;
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
+    if (!fetchArgs.signal.aborted && err.name !== "AbortError") trackUiFailure("search", "request");
     handleFilteredDatasetError(err, fetchArgs.signal, tagFilters, setFilteredDatasets, setFilteredTotal);
     return null;
   } finally {
@@ -660,11 +662,19 @@ function CollectionDetailPage() {
           <Input
             type="search"
             placeholder="Search datasets..."
+            aria-describedby="dataset-search-privacy"
             value={searchQuery}
             onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-10 w-full min-w-0"
           />
         </div>
+
+        <p id="dataset-search-privacy" className="text-xs text-muted-foreground">
+          Search terms help us identify datasets to add. Please leave out personal or confidential information.{" "}
+          <Link to="/privacy" className="underline">
+            Privacy &amp; analytics
+          </Link>
+        </p>
 
         {/* Tag Filters */}
         {tagsLoading ? (

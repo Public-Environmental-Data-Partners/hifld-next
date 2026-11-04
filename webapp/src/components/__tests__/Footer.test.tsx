@@ -17,3 +17,9 @@ describe("Footer", () => {
     expect(linkList).toHaveClass("flex-col", "items-start", "sm:flex-row", "sm:items-center");
   });
 });
+
+it("links to privacy settings without an analytics button in the footer", () => {
+  render(<Footer />);
+  expect(screen.getByRole("link", {name:"Privacy", exact:true})).toHaveAttribute("href", "/privacy");
+  expect(screen.queryByRole("button", {name:/analytics/i})).not.toBeInTheDocument();
+});

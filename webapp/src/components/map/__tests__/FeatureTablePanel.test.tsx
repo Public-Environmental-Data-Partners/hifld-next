@@ -4,6 +4,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { FeatureTablePanel, formatDiffCellDisplay } from "../FeatureTablePanel";
 import type { SelectedFeatureProperties, SelectedMapFeature } from "../featureSelection";
 
+const trackDataTable = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/analytics", () => ({trackDataTable}));
+
 const originalResizeObserver = globalThis.ResizeObserver;
 const originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
 
@@ -623,4 +626,14 @@ describe("FeatureTablePanel", () => {
     expect(rows[0]).toHaveTextContent("AL");
     expect(rows[1]).toHaveTextContent("WY");
   });
+});
+
+it("counts each catalog table once per panel without feature contents", () => {
+  trackDataTable.mockClear();
+  const props = {wasSelectionCapped: false, s2Level: 16, onS2LevelChange: () => {}, onClear: () => {}};
+  const feature = selectedFeature("v1.0.0", {NAME: "private"});
+  const {rerender} = render(<FeatureTablePanel {...props} features={[feature, feature]} />);
+  expect(trackDataTable).toHaveBeenCalledExactlyOnceWith("selected_features", {collectionSlug: "hifld", datasetSlug: "hospitals-3", fileSlug: "hospitals-3"});
+  rerender(<FeatureTablePanel {...props} features={[feature, selectedFeature("v1.1.0", {NAME: "private"})]} />);
+  expect(trackDataTable).toHaveBeenCalledTimes(1);
 });

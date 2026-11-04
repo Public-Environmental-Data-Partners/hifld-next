@@ -1,6 +1,6 @@
 import type { RefObject } from "react";
 import * as maplibregl from "maplibre-gl";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { PMTiles } from "pmtiles";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -35,6 +35,9 @@ function mockMapWithFeatures(features: unknown[]) {
     queryRenderedFeatures: vi.fn(() => features),
   };
 }
+
+const trackUiFailure = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/interaction-analytics", () => ({trackUiFailure}));
 
 interface MockMap {
   addLayer: ReturnType<typeof vi.fn>;
@@ -102,6 +105,7 @@ describe("useMapInitialization helpers", () => {
       buildQueryMvtLayer({ queryId: "q-123", label: "Hospitals", sourceAliases: ["h"], geometryColumn: "geometry", tileTemplate: "https://query.test/tiles/{z}/{x}/{y}.mvt" }),
       buildLoadedMapLayer({ descriptor: { collectionSlug: "c", datasetSlug: "d", fileSlug: "f", formatType: "pmtiles", storageLocationId: 1, version: "v1", sourceId: 2 }, name: "Flood", pmtilesUrl: "https://tiles.test/flood.pmtiles" }),
     ];
+    trackUiFailure.mockClear();
     const onError = vi.fn();
     const container = { current: document.createElement("div") };
     const { unmount } = renderHook(() => useMultiLayerMapInitialization(
@@ -114,6 +118,8 @@ describe("useMapInitialization helpers", () => {
       act(() => fail({ sourceId: source.mapSourceId, error: new Error("Tile download failed") }));
       expect(onError).toHaveBeenCalledWith(expect.objectContaining({ sourceId: source.id, message: "Tile download failed" }));
     }
+    expect(trackUiFailure).toHaveBeenCalledWith("map", "load", expect.objectContaining({dataset_slug: "d", file_slug: "f"}));
+    expect(JSON.stringify(trackUiFailure.mock.calls)).not.toContain("Tile download failed");
     unmount();
   });
 
@@ -163,6 +169,24 @@ describe("useMapInitialization helpers", () => {
     act(() => sourceData({ sourceId: source.mapSourceId, isSourceLoaded: true, tile: { state: "loaded", tileID: { key: "tile-a" } } }));
 
     expect(onRecovered).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("identifies the dataset when a catalog source fails to initialize", async () => {
+    vi.spyOn(PMTiles.prototype, "getMetadata").mockRejectedValue(new Error("PMTiles metadata unavailable at secret-path"));
+    const map = createMockMap();
+    map.isStyleLoaded.mockReturnValue(true);
+    vi.mocked(maplibregl.Map).mockImplementation(function () { return map as maplibregl.Map; });
+    const source = buildLoadedMapLayer({ descriptor: { collectionSlug: "hifld", datasetSlug: "amtrak-stations", fileSlug: "stations", formatType: "pmtiles", storageLocationId: 2, version: "v1", sourceId: 8 }, name: "Amtrak", pmtilesUrl: "https://tiles.test/amtrak.pmtiles" });
+    trackUiFailure.mockClear();
+    const onError = vi.fn();
+    const container = { current: document.createElement("div") };
+    const { unmount } = renderHook(() => useMultiLayerMapInitialization(
+      container, [source], vi.fn(), vi.fn(), undefined, undefined, false, "street", undefined, undefined, new Map(), onError,
+    ));
+    await waitFor(() => expect(onError).toHaveBeenCalledWith(expect.objectContaining({ sourceId: source.id })));
+    expect(trackUiFailure).toHaveBeenCalledWith("map", "load", { collection_slug: "hifld", dataset_slug: "amtrak-stations", file_slug: "stations" });
+    expect(JSON.stringify(trackUiFailure.mock.calls)).not.toMatch(/secret-path|tiles\.test|source-|:8/);
     unmount();
   });
 

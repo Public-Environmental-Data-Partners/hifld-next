@@ -11,7 +11,9 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { PMTiles, Protocol } from "pmtiles";
 import { z } from "zod";
 import type { LoadedMapLayer, QueryMvtLayer } from "@/components/map/multiLayerSources";
+import type { PageViewProperties } from "@/lib/analytics";
 import type { ColumnSchema } from "@/lib/api-client";
+import { trackUiFailure } from "@/lib/interaction-analytics";
 import { scalarFieldSummaries } from "./categoricalFields";
 import type { HoverInfo, NumericFieldSummary, VectorLayerInfo } from "./types";
 import { DEFAULT_STYLE } from "./utils";
@@ -35,6 +37,16 @@ const RuntimeSourceDataEventSchema = z.object({
   tile: RuntimeTileSchema.extend({ state: z.literal("loaded") }).optional(),
 });
 
+function sourceFailureContext(source: LoadedMapLayer): PageViewProperties {
+  return source.kind === "catalog_pmtiles"
+    ? {
+        collection_slug: source.descriptor.collectionSlug,
+        dataset_slug: source.descriptor.datasetSlug,
+        file_slug: source.descriptor.fileSlug,
+      }
+    : {};
+}
+
 function reportRuntimeSourceError(
   event: maplibregl.ErrorEvent,
   sources: readonly LoadedMapLayer[],
@@ -45,6 +57,7 @@ function reportRuntimeSourceError(
   const source = sources.find((candidate) => candidate.mapSourceId === parsed.data.sourceId);
   if (!source) return false;
   if (parsed.data.error.name === "AbortError") return true;
+  trackUiFailure("map", "load", sourceFailureContext(source));
   report?.({
     sourceId: source.id,
     ...(source.kind === "query_mvt" ? { queryId: source.queryId } : {}),
@@ -93,6 +106,7 @@ class MapSourceSyncError extends Error {
   constructor(
     readonly sourceId: string,
     readonly queryId: string | undefined,
+    readonly failureContext: PageViewProperties,
     message: string,
   ) {
     super(message);
@@ -803,6 +817,7 @@ async function loadMapSourceForSync(
     throw new MapSourceSyncError(
       source.id,
       source.kind === "query_mvt" ? source.queryId : undefined,
+      sourceFailureContext(source),
       error instanceof Error ? error.message : "Query map layer could not be loaded.",
     );
   }
@@ -866,6 +881,9 @@ function reportSourceSyncError(
     | ((error: { sourceId: string; queryId?: string | undefined; message: string }) => void)
     | undefined,
 ): void {
+  if (error.name !== "AbortError") {
+    trackUiFailure("map", "load", error instanceof MapSourceSyncError ? error.failureContext : {});
+  }
   const message = error.message || "Query map layer could not be loaded.";
   if (error instanceof MapSourceSyncError) {
     onSourceLayerError?.({
@@ -1037,29 +1055,36 @@ export function useMultiLayerMapInitialization(
     protocolRef.current = new Protocol();
     maplibregl.addProtocol("pmtiles", protocolRef.current.tile);
 
-    const map = new maplibregl.Map({
-      container: mapContainerRef.current,
-      style: OPENFREEMAP_BRIGHT_STYLE_URL,
-      center: [-98.5795, 39.8283],
-      zoom: 4,
-      transformRequest: (url) => {
-        const transformed = transformQueryTileRequest(url, queryTokensRef.current);
-        if (!transformed) {
-          return undefined;
-        }
-        if ("blocked" in transformed) {
-          onSourceLayerErrorRef.current?.({
-            sourceId: `query:${transformed.queryId}`,
-            queryId: transformed.queryId,
-            message: "Query map layer is unavailable.",
-          });
-          return { url: "data:," };
-        }
-        return transformed;
-      },
-    });
+    let map: maplibregl.Map;
+    try {
+      map = new maplibregl.Map({
+        container: mapContainerRef.current,
+        style: OPENFREEMAP_BRIGHT_STYLE_URL,
+        center: [-98.5795, 39.8283],
+        zoom: 4,
+        transformRequest: (url) => {
+          const transformed = transformQueryTileRequest(url, queryTokensRef.current);
+          if (!transformed) {
+            return undefined;
+          }
+          if ("blocked" in transformed) {
+            onSourceLayerErrorRef.current?.({
+              sourceId: `query:${transformed.queryId}`,
+              queryId: transformed.queryId,
+              message: "Query map layer is unavailable.",
+            });
+            return { url: "data:," };
+          }
+          return transformed;
+        },
+      });
+    } catch (error) {
+      trackUiFailure("map", "render");
+      throw error;
+    }
 
     mapRef.current = map;
+    map.on("webglcontextlost", () => trackUiFailure("map", "webgl_context_lost"));
     let hasSyncedBasemapAfterStyleLoad = false;
     let hasAppliedFallbackBasemapStyle = false;
     const syncBasemapAfterStyleLoad = () => {
@@ -1091,6 +1116,7 @@ export function useMultiLayerMapInitialization(
       if (hasSyncedBasemapAfterStyleLoad || hasAppliedFallbackBasemapStyle) {
         return;
       }
+      trackUiFailure("map", "basemap");
       hasAppliedFallbackBasemapStyle = true;
       map.setStyle(fallbackBasemapStyle(currentBasemapModeRef.current));
       map.once("style.load", syncBasemapAfterStyleLoad);

@@ -32,7 +32,7 @@ describe("buildDiscoveryRouteCapture", () => {
       event: "api_route_requested",
       properties: {
         $process_person_profile: false,
-        request_url: url,
+        request_url: url.split("?")[0],
         route_family: routeFamily,
         method: "GET",
         status: 201,
@@ -41,7 +41,7 @@ describe("buildDiscoveryRouteCapture", () => {
     });
   });
 
-  it("retains the complete request URL without capturing unrelated headers", () => {
+  it("strips query strings from the request URL without capturing unrelated headers", () => {
     const requestUrl = "https://data.example.test/api/collections/hifld?search=hospitals&limit=25";
     const request = new Request(requestUrl, {
       headers: {
@@ -54,7 +54,8 @@ describe("buildDiscoveryRouteCapture", () => {
     const capture = buildDiscoveryRouteCapture(request, 200);
     const serialized = JSON.stringify(capture);
 
-    expect(capture?.properties.request_url).toBe(requestUrl);
+    expect(capture?.properties.request_url).toBe("https://data.example.test/api/collections/hifld");
+    expect(serialized).not.toContain("search=");
     expect(serialized).not.toContain("Mozilla/5.0");
     expect(serialized).not.toContain("203.0.113.10");
     expect(serialized).not.toContain("session=secret");
@@ -79,10 +80,27 @@ describe("buildDiscoveryRouteCapture", () => {
   });
 
   it.each([
+    "https://data.example.test/api/feedback",
     "https://data.example.test/collections/hifld",
     "https://data.example.test/.well-known/agent-skills/index.json",
     "https://data.example.test/apiary",
   ])("excludes %s", (url) => {
     expect(buildDiscoveryRouteCapture(new Request(url), 200)).toBeNull();
   });
+});
+
+it.each([
+  ["GPTBot/1.0", "OpenAI", "GPTBot", "crawler"],
+  ["ChatGPT-User/1.0", "OpenAI", "ChatGPT-User", "assistant"],
+  ["OAI-SearchBot/1.0", "OpenAI", "OAI-SearchBot", "search"],
+  ["ClaudeBot/1.0", "Anthropic", "ClaudeBot", "crawler"],
+  ["Claude-User/1.0", "Anthropic", "Claude-User", "assistant"],
+  ["PerplexityBot/1.0", "Perplexity", "PerplexityBot", "search"],
+])("labels %s without retaining the raw user agent", (ua, provider, client, purpose) => {
+  const capture = buildDiscoveryRouteCapture(new Request("https://data.test/api", {headers: {"user-agent": ua}}), 200);
+  expect(capture?.properties).toMatchObject({client_category: "known_agent", agent_provider: provider, agent_client: client, agent_purpose: purpose, agent_attribution: "self_declared"});
+  expect(JSON.stringify(capture)).not.toContain(ua);
+});
+it.each([{"DNT": "1"}, {"Sec-GPC": "1"}, {"cookie": "hifld_analytics=off"}])("honors privacy preferences", (headers) => {
+  expect(buildDiscoveryRouteCapture(new Request("https://data.test/api", {headers}), 200)).toBeNull();
 });

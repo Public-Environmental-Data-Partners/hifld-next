@@ -6,6 +6,9 @@ import { asyncBufferFrom, parquetDataFrame } from "hyperparam";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
+import { trackDataTable } from "@/lib/analytics";
+import { currentDatasetContext, trackUiFailure } from "@/lib/interaction-analytics";
+
 interface ParquetViewerPanelProps {
   url: string;
   fileName: string;
@@ -68,6 +71,12 @@ export function ParquetViewerPanel({ url, fileName, onClose }: ParquetViewerPane
 
   useEffect(() => {
     let isActive = true;
+    const context = currentDatasetContext();
+    trackDataTable("parquet_preview", {
+      collectionSlug: context.collection_slug,
+      datasetSlug: context.dataset_slug,
+      fileSlug: context.file_slug,
+    });
     setIsLoading(true);
     setError(null);
     setDataFrame(null);
@@ -81,6 +90,7 @@ export function ParquetViewerPanel({ url, fileName, onClose }: ParquetViewerPane
       })
       .catch((err) => {
         if (!isActive) return;
+        trackUiFailure("table", "load");
         setError(err instanceof Error ? err.message : "Failed to load parquet file.");
       })
       .finally(() => {
@@ -126,6 +136,7 @@ export function ParquetViewerPanel({ url, fileName, onClose }: ParquetViewerPane
             data={dataFrame}
             className="h-full hightable"
             onError={(err) => {
+              trackUiFailure("table", "render");
               setError(renderTableErrorMessage(err instanceof Error ? err : null));
             }}
           />

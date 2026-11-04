@@ -1,8 +1,10 @@
 import { SelectedFeaturesTable, type SelectedFeatureTableRow } from "@hifld/map-ui";
 import { ChevronDown } from "lucide-react";
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { trackDataTable } from "@/lib/analytics";
+import { currentDatasetContext } from "@/lib/interaction-analytics";
 import type { QueryCell } from "@/lib/query-api";
 import { MapDataTableColumnHeader } from "./MapDataTableColumnHeader";
 import type { QueryResultState } from "./queryResults";
@@ -23,6 +25,9 @@ export function QueryResultPanel({
   onCollapse,
 }: QueryResultPanelProps) {
   const { page } = result;
+  useEffect(() => {
+    trackDataTable("query_results", { collectionSlug: currentDatasetContext().collection_slug });
+  }, []);
   const rows = useMemo<SelectedFeatureTableRow[]>(
     () =>
       page.rows.map((row, index) => ({

@@ -69,7 +69,7 @@ import {
   parseBreaks,
 } from "@/components/viewer/utils";
 import { WebMcpRuntimeConfigContext } from "@/components/WebMcpProvider";
-import { type DatasetMapImportInput, trackDatasetImportedIntoMap } from "@/lib/analytics";
+import { type DatasetMapImportInput, trackDatasetImportedIntoMap, trackMapViewer } from "@/lib/analytics";
 import type {
   Collection,
   Dataset,
@@ -85,6 +85,7 @@ import {
   getDatasetBySlug,
   getDatasetFileBySlug,
 } from "@/lib/api-client";
+import { trackUiFailure } from "@/lib/interaction-analytics";
 import { createQuery, getQueryBounds, getQueryPage, QueryApiError, type QueryRequest } from "@/lib/query-api";
 import { type MapCatalogLayerInput, useMapWebMcpTools } from "@/lib/webmcp/mapTools";
 import { type PublicToolQueryPage, type QueryMapPresentation, useQueryWebMcpTools } from "@/lib/webmcp/queryTools";
@@ -508,7 +509,7 @@ function uniqueSourceVersions(sources: DatasetSource[]): string[] {
 
 function sourceLabel(source: DatasetSource): string {
   const locationLabel = source.storage_location?.name ?? `Location ${source.storage_location?.id ?? source.id}`;
-  return `${locationLabel} · source ${source.id}`;
+  return `${locationLabel}, source ${source.id}`;
 }
 
 interface DatasetSearchComboboxProps {
@@ -516,7 +517,7 @@ interface DatasetSearchComboboxProps {
   query: string;
   selectedDataset: DatasetWithUrls | null;
   isLoading: boolean;
-  error: string | null;
+  error: boolean;
   currentDescriptors: SourceDescriptor[];
   collectionSlug: string;
   onQueryChange: (query: string) => void;
@@ -707,7 +708,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const [searchDraft, setSearchDraft] = useState("");
   const [datasetResults, setDatasetResults] = useState<DatasetWithUrls[]>([]);
   const [isDatasetSearchLoading, setIsDatasetSearchLoading] = useState(false);
-  const [datasetSearchError, setDatasetSearchError] = useState<string | null>(null);
+  const [datasetSearchError, setDatasetSearchError] = useState(false);
   const [selectedDataset, setSelectedDataset] = useState<DatasetWithUrls | null>(null);
   const [isResolvingSelectedDataset, setIsResolvingSelectedDataset] = useState(false);
   const [selectedFileSlug, setSelectedFileSlug] = useState<string | undefined>(undefined);
@@ -755,6 +756,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     for (const event of events) {
       trackedSourceDescriptorIdsRef.current.add(event.sourceDescriptorId);
       trackDatasetImportedIntoMap(event.properties);
+      trackMapViewer(event.properties.dataset_slug, event.properties.file_slug, event.properties.collection_slug);
     }
   }, [loadedLayers]);
 
@@ -766,7 +768,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     searchRequestIdRef.current = requestId;
     searchTimeoutRef.current = setTimeout(() => {
       setIsDatasetSearchLoading(true);
-      setDatasetSearchError(null);
+      setDatasetSearchError(false);
       void searchDatasetsForMapImport({
         collectionSlug: collection.slug,
         query: searchDraft,
@@ -775,10 +777,11 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
           if (searchRequestIdRef.current !== requestId) return;
           setDatasetResults(response.items);
         })
-        .catch((error: Error) => {
+        .catch(() => {
           if (searchRequestIdRef.current !== requestId) return;
           setDatasetResults([]);
-          setDatasetSearchError(error.message);
+          trackUiFailure("search", "request");
+          setDatasetSearchError(true);
         })
         .finally(() => {
           if (searchRequestIdRef.current !== requestId) return;

@@ -9,11 +9,12 @@ import { useLayerStyling } from "@/components/viewer/useLayerStyling";
 import { DEFAULT_STYLE } from "@/components/viewer/utils";
 import type { Collection, Dataset, DatasetFile, DatasetSource } from "@/lib/api-client";
 
-const { getCollectionDatasetsBySlug, getDatasetBySlug, getDatasetFileBySlug, trackDatasetImportedIntoMap } = vi.hoisted(() => ({
+const { getCollectionDatasetsBySlug, getDatasetBySlug, getDatasetFileBySlug, trackDatasetImportedIntoMap, trackMapViewer } = vi.hoisted(() => ({
   getCollectionDatasetsBySlug: vi.fn(),
   getDatasetBySlug: vi.fn(),
   getDatasetFileBySlug: vi.fn(),
   trackDatasetImportedIntoMap: vi.fn(),
+  trackMapViewer: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -26,6 +27,8 @@ vi.mock("@tanstack/react-router", () => ({
 
 vi.mock("@/lib/analytics", () => ({
   trackDatasetImportedIntoMap,
+  trackMapViewer,
+  trackDataTable: vi.fn(),
 }));
 
 vi.mock("@/lib/api-client", () => ({
@@ -148,6 +151,7 @@ describe("MapWorkspace map-import analytics", () => {
     getDatasetBySlug.mockResolvedValue({ ...dataset, files: [file] });
     getDatasetFileBySlug.mockResolvedValue({ dataset, file });
     trackDatasetImportedIntoMap.mockClear();
+    trackMapViewer.mockClear();
     getCollectionDatasetsBySlug.mockResolvedValue({
       items: [{ ...dataset, files: [file] }], total: 1, limit: 12, offset: 0,
     });
@@ -262,6 +266,8 @@ describe("MapWorkspace map-import analytics", () => {
         loaded_layer_count: 2,
       });
     });
+    expect(trackMapViewer).toHaveBeenCalledTimes(2);
+    expect(trackMapViewer).toHaveBeenCalledWith("hospitals", "hospitals", "hifld");
     expect(trackDatasetImportedIntoMap).toHaveBeenCalledTimes(2);
 
     rerender(<MapWorkspace collection={collection} initialLayers={[initialLayer]} initialLayerKey="sources" />);
@@ -301,6 +307,8 @@ describe("MapWorkspace map-import analytics", () => {
         loaded_layer_count: 1,
       });
     });
+    expect(trackMapViewer).toHaveBeenCalledTimes(2);
+    expect(trackMapViewer).toHaveBeenCalledWith("hospitals", "hospitals", "hifld");
     expect(trackDatasetImportedIntoMap).toHaveBeenCalledTimes(2);
 
     rerender(<MapWorkspace collection={collection} initialLayers={[initialLayer]} initialLayerKey="sources" />);

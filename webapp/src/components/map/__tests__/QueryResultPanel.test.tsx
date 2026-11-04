@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import { QueryResultPanel } from "../QueryResultPanel";
 import type { QueryResultState } from "../queryResults";
 
+const trackDataTable = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/analytics", () => ({ trackDataTable }));
+
 const result: QueryResultState = {
   page: {
     query_id: "query_result_identifier_1234",
@@ -101,4 +104,12 @@ describe("QueryResultPanel", () => {
     await user.click(screen.getByRole("button", { name: "Collapse data table" }));
     expect(onCollapse).toHaveBeenCalledOnce();
   });
+});
+
+it("counts query result tables by kind and collection without SQL, query IDs or rows", () => {
+  window.history.replaceState({}, "", "/collections/hifld/map");
+  trackDataTable.mockClear();
+  render(<QueryResultPanel result={result} />);
+  expect(trackDataTable).toHaveBeenCalledExactlyOnceWith("query_results", { collectionSlug: "hifld" });
+  expect(JSON.stringify(trackDataTable.mock.calls)).not.toMatch(/query_result_identifier|Beta|stations/);
 });

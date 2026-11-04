@@ -26,7 +26,7 @@ export function PMTilesFormat({ formatEntry, pmtilesUrl, selectedSource, onSourc
         <p className="text-xs text-muted-foreground break-all">{pmtilesUrl}</p>
       </div>
       <div className="flex shrink-0 gap-1">
-        <CopyButton value={pmtilesUrl} label="URL" />
+        <CopyButton value={pmtilesUrl} label="URL" analytics={{ urlType: "download_url", format: "pmtiles" }} />
         <DownloadButton
           url={pmtilesUrl}
           label="PMTiles"

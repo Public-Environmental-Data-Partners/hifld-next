@@ -11,6 +11,16 @@ CATALOG_SQLITE_URL=http://127.0.0.1:8333/published/_catalog/catalog.sqlite npm r
 
 The webapp reads a published SQLite catalog and serves its STAC metadata through same-origin `/api/*` routes. ZIP downloads redirect directly to published storage assets.
 
+For a local preview of the published catalog, set both of these values (for example in a local, ignored `.env.local`):
+
+```dotenv
+CATALOG_RELEASE_POINTER_URL=https://hifld.publicenvirodata.org/storage/_catalog/current.json
+CATALOG_STORAGE_LOCATIONS_JSON={"gcs-hifld-next-datasets-prod":{"type":"gcs","base_url":"https://storage.googleapis.com","bucket":"hifld-next-datasets-prod"}}
+```
+
+The pointer must use the same public origin as the STAC metadata links. The storage registry must match the catalog’s storage slugs; leaving it out hides file sources even when catalog health is ready. For a built preview, run `node --env-file=.env.local .output/server/index.mjs`; set `NITRO_HOST=127.0.0.1`, `NITRO_PORT=3099`, `WEBAPP_PUBLIC_ORIGIN=http://127.0.0.1:3099`, and an empty `PUBLIC_POSTHOG_KEY` in that file to use the local preview without production analytics.
+
+
 ## Production Configuration
 
 Production runs on GKE behind the external Application Load Balancer. Configure a published catalog release pointer:
@@ -125,3 +135,32 @@ supports cross-origin JSON discovery with CORS; MCP calls remain same-origin.
 npm test
 npm run build
 ```
+
+
+### Privacy and analytics
+
+HIFLD Next follows the existing [PEDP Privacy Policy](https://www.publicenvirodata.org/privacy-policy) (last updated March 17, 2025) and does not edit it. `/privacy` links to that policy for PEDP commitments and contact information, gives a brief HIFLD-specific disclosure of analytics, search terms, failure categories and consented feedback, and holds the analytics preferences. The search notice and feedback consent link to `/privacy`. The feedback consent notice version is `2026-11-04`.
+
+Browser analytics use `cookieless_mode: "always"`, memory-only persistence and no person profiles. Replay, heatmaps, automatic clicks and unsolicited performance/error capture are disabled. Visitor estimates, device/referral summaries, explicit usage events, and the download lifecycle remain available. Dataset search terms are retained to identify unmet dataset demand, including zero-result searches. Terms are normalized for case/spacing and omitted when over 200 characters or matching obvious email, URL, phone, precise-coordinate or common street-address patterns. This is best-effort filtering, not anonymization: names and unusual formats may pass and legitimate queries may be omitted. Omitted text is marked by `query_suppressed: true`; result counts remain available. Query text is only allowed on `dataset_search`, not copied into other events or URLs. URL queries/fragments are removed. DNT, GPC and the privacy-page opt-out are honored. The only new preference cookie is `hifld_analytics=off`, written on an explicit opt-out, with a one-year lifetime.
+
+Cookieless visitor IDs are derived by PostHog from the request IP, user agent, host and calendar day. They are estimates: monthly counts are not comparable to persistent-ID monthly visitors. Do not sum daily uniques and describe them as unique people across a month. Stateless cookieless ingestion must be enabled in **Project settings → Web analytics** before deploying the SDK change, or events are discarded. This project was configured on 2026-11-03 with `cookieless_server_hash_mode: 1`, IP anonymization enabled, and replay/heatmaps disabled. Retain these settings after future project changes.
+
+`api_route_requested` keeps one shared anonymous identity. It records sanitized request URLs and optional self-declared agent provider/client/purpose labels, not raw user agents or client IPs. It cannot measure distinct agents. Client categories and provider labels are heuristics, not verified identities.
+
+Feedback is independent of analytics. `/api/feedback` accepts bounded same-origin JSON, validates affirmative consent and notice version, and stamps consent time on the server. It sends a report with a new random ID and no browsing identity, IP, or geometry to PostHog. The form only closes after an ingestion acknowledgement; failures preserve the report for retry. The existing `PUBLIC_POSTHOG_KEY` and `PUBLIC_POSTHOG_HOST` configure delivery, and missing configuration yields a visible delivery error. Browser tracking opt-outs do not block deliberately submitted feedback.
+
+Interaction and failure reporting: map imports emit `map_viewer_opened` (an attempt to view, not proof of a successful render). Parquet previews, selected-feature tables and query-result panels emit `data_table_opened` with `table_kind` (`parquet_preview`, `selected_features` or `query_results`) and known catalog context, never SQL, query IDs or rows. Successful clipboard writes emit `url_copied` with the type and available catalog context, never copied URLs/configuration. A map import can also emit `dataset_imported_into_map`; these are different measures, not additive open counts.
+
+`ui_operation_failed` covers handled map/tile/basemap/WebGL, table metadata/render, search, query, clipboard and feedback delivery failures, router-caught errors, browser runtime errors and unhandled rejections. Its explicit payload allows only feature/failure categories, page kind, public catalog context and a valid HTTP status where available. No raw exceptions, messages/stacks, SQL, tokens, request bodies or feature contents. Intentional request aborts are excluded. Identical failures are deduplicated and distinct reports capped at 20 per pathname visit; use them to identify affected views, not total failing tiles or exact failure rates. Telemetry respects all existing analytics privacy controls. Generic runtime categories identify where to investigate, but require reproduction or internal server logs to diagnose the underlying exception. Browser blocking, offline operation and failures before the app initializes can prevent delivery. No production dashboard/alert configuration is installed by this code change.
+
+The shared router error and not-found pages show human-readable recovery actions and stable `page_unavailable` / `page_not_found` categories without displaying exception properties. A Start serialization adapter also replaces exception messages with a generic error before hydration or server-function transport, so hiding the visible message does not leave the original in the HTML script. Existing API JSON error contracts and HTTP status handling remain in place.
+
+Download reporting distinguishes `dataset_download_clicked`, `dataset_download_handed_off`, `dataset_download_succeeded`, and `dataset_download_failed`. Sum `received_bytes` for measured transfers; `expected_size_bytes` on a handoff is only planned volume. Native links, external clients, map tiles, and interrupted downloads prevent a complete bandwidth total; use storage/CDN access metrics for authoritative bytes served. Existing download reports and visitor insights should mark the cookieless deployment date as a measurement change.
+
+Operational requirements under [PEDP’s policy](https://www.publicenvirodata.org/privacy-policy):
+
+- Retention follows PEDP’s two-year policy. Verified: a live PostHog audit found the earliest event on 2026-02-16 and no events older than two years. Not verified: an account setting that enforces deletion at two years. Operators must configure or confirm that setting and apply the same limit to exports, backups and retained infrastructure logs; this application cannot enforce it.
+- Restrict access to feedback and analytics, and verify the PostHog processor agreement and hosting arrangement with the responsible PEDP organization.
+- Handle deletion/withdrawal requests through `hello@publicenvirodata.org`; locate feedback by `reporter_email`, remove matching events and any exports, and document completion. Do not rely on person-profile deletion, since these reports have no person profile.
+- Review the `/privacy` notice and the no-popup configuration against applicable privacy law before deployment. Cookieless is a technical mode, not an automatic legal exemption.
+- These changes do not remove historical cookies from prior releases or erase historical PostHog events. Historical data and retention require a separately scoped review.

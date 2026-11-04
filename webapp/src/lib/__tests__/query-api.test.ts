@@ -11,6 +11,9 @@ import {
   getQueryPage,
 } from "@/lib/query-api";
 
+const trackUiFailure = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/interaction-analytics", () => ({trackUiFailure}));
+
 const source = {
   alias: "roads",
   collection_slug: "hifld",
@@ -255,4 +258,20 @@ describe("query-api", () => {
       QueryApiError,
     );
   });
+});
+
+it("reports query HTTP failures without query tokens, SQL or error text", async () => {
+  trackUiFailure.mockClear();
+  await expect(getQueryPage(page.query_id, {offset: 0, page_size: 10}, {
+    queryToken: "private-token", fetcher: async () => Response.json({code: "unavailable", message: "private SQL"}, {status: 503}),
+  })).rejects.toBeInstanceOf(QueryApiError);
+  expect(trackUiFailure).toHaveBeenCalledWith("query", "request", {}, 503);
+  expect(JSON.stringify(trackUiFailure.mock.calls)).not.toMatch(/private|token|SQL/);
+});
+it("does not report aborted query requests", async () => {
+  trackUiFailure.mockClear();
+  await expect(getQueryPage(page.query_id, {offset: 0, page_size: 10}, {
+    queryToken: "private-token", fetcher: async () => {throw new DOMException("Canceled", "AbortError");},
+  })).rejects.toHaveProperty("name", "AbortError");
+  expect(trackUiFailure).not.toHaveBeenCalled();
 });

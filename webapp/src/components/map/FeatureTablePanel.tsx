@@ -19,6 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { trackDataTable } from "@/lib/analytics";
 import { googleMapsSearchUrl } from "@/lib/externalMaps";
 import { cn } from "@/lib/utils";
 import {
@@ -1035,11 +1036,29 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
     sort: undefined,
   };
 
+  private trackedTableScopes = new Set<string>();
+
+  private trackVisibleTables() {
+    for (const feature of this.props.features) {
+      if (!isCatalogSelectedMapFeature(feature)) continue;
+      const key = JSON.stringify([feature.collectionSlug, feature.datasetSlug, feature.fileSlug]);
+      if (this.trackedTableScopes.has(key)) continue;
+      this.trackedTableScopes.add(key);
+      trackDataTable("selected_features", {
+        collectionSlug: feature.collectionSlug,
+        datasetSlug: feature.datasetSlug,
+        fileSlug: feature.fileSlug,
+      });
+    }
+  }
+
   override componentDidMount() {
     this.syncSelectionScope();
+    this.trackVisibleTables();
   }
 
   override componentDidUpdate(prevProps: FeatureTablePanelProps, prevState: FeatureTablePanelState) {
+    if (prevProps.features !== this.props.features) this.trackVisibleTables();
     if (prevProps.features !== this.props.features || prevState.selectedLayerKey !== this.state.selectedLayerKey) {
       this.syncSelectionScope();
     }

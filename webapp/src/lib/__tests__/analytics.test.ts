@@ -32,6 +32,12 @@ describe("analytics", () => {
       "ph_runtime",
       expect.objectContaining({
         api_host: "https://posthog-runtime.test",
+        cookieless_mode: "always",
+        persistence: "memory",
+        person_profiles: "never",
+        disable_session_recording: true,
+        autocapture: false,
+        enable_heatmaps: false,
       }),
     );
     expect(capture).toHaveBeenCalledWith("$pageview", expect.objectContaining({ path: "/collections" }));
@@ -44,6 +50,7 @@ describe("analytics", () => {
 
     expect(capture).toHaveBeenCalledWith("dataset_search", {
       query: "hospital",
+      query_suppressed: false,
       query_length: 8,
       collection_slug: "hifld",
       result_count: 0,
@@ -63,7 +70,6 @@ describe("analytics", () => {
       filter_values: ["Point"],
       result_count: 0,
       is_zero_result: true,
-      search_query: "hospital",
     });
   });
 
@@ -216,60 +222,6 @@ describe("analytics", () => {
     expect(capture.mock.calls[0]?.[1]).not.toHaveProperty("map_viewport");
   });
 
-  it("tracks dataset quality feedback with feature JSON and no geometry", async () => {
-    const { trackDatasetQualityFeedbackSubmitted } = await import("../analytics");
-
-    trackDatasetQualityFeedbackSubmitted({
-      reporter_email: "analyst@example.com",
-      comment: "The address looks wrong.",
-      collection_slug: "hifld",
-      dataset_slug: "hospitals-3",
-      file_slug: "hospitals-3",
-      version: "v1.1.0",
-      source_id: 17,
-      feature: {
-        id: "feature-1",
-        loadedLayerId: "layer-1",
-        layerName: "Hospitals",
-        collectionSlug: "hifld",
-        datasetSlug: "hospitals-3",
-        fileSlug: "hospitals-3",
-        version: "v1.1.0",
-        sourceId: 17,
-        sourceLayerId: "hospitals",
-        featureId: "123",
-        centroid: { lng: -77.0365, lat: 38.8977 },
-        properties: { NAME: "General Hospital" },
-        geometry: { type: "Point", coordinates: [-77.0365, 38.8977] },
-      },
-    });
-
-    expect(capture).toHaveBeenCalledWith("dataset_quality_feedback_submitted", {
-      reporter_email: "analyst@example.com",
-      comment: "The address looks wrong.",
-      collection_slug: "hifld",
-      dataset_slug: "hospitals-3",
-      file_slug: "hospitals-3",
-      version: "v1.1.0",
-      source_id: 17,
-      current_url: "http://localhost:3000/",
-      feature_json: JSON.stringify({
-        id: "feature-1",
-        loadedLayerId: "layer-1",
-        layerName: "Hospitals",
-        collectionSlug: "hifld",
-        datasetSlug: "hospitals-3",
-        fileSlug: "hospitals-3",
-        version: "v1.1.0",
-        sourceId: 17,
-        sourceLayerId: "hospitals",
-        featureId: "123",
-        centroid: { lng: -77.0365, lat: 38.8977 },
-        properties: { NAME: "General Hospital" },
-      }),
-    });
-  });
-
   it("tracks WebMCP lifecycle events with bounded properties only", async () => {
     const {
       trackWebMcpToolStarted,
@@ -332,4 +284,32 @@ describe("analytics", () => {
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain("SQL secret token stack");
     consoleError.mockRestore();
   });
+});
+
+it("strips URL queries at the final SDK boundary and honors GPC", async () => {
+ const {trackPageView} = await import("../analytics");
+ trackPageView("/collections?email=private#secret");
+ expect(capture).toHaveBeenCalledWith("$pageview",expect.objectContaining({path:"/collections"}));
+ const beforeSend = init.mock.calls.at(-1)?.[1].before_send;
+ const event = {event:"$pageview", $set_once:{$initial_current_url:"https://data.test/?secret=1"}, properties:{$current_url:"https://data.test/?token=secret",$referrer:"https://search.test/?q=private",$set:{email:"private@example.com"}}};
+ expect(beforeSend?.(event)).toMatchObject({properties:{$current_url:"https://data.test/",$referrer:"https://search.test/"}});
+ expect(beforeSend?.(event)?.properties).not.toHaveProperty("$set");
+ expect(beforeSend?.(event)).not.toHaveProperty("$set_once");
+ Object.defineProperty(navigator,"globalPrivacyControl",{configurable:true,value:true});
+ expect(beforeSend?.(event)).toBeNull();
+ Reflect.deleteProperty(navigator,"globalPrivacyControl");
+});
+
+it("keeps novel zero-result terms and filters sensitive text at the SDK boundary", async () => {
+  const {trackSearchQuery} = await import("../analytics");
+  capture.mockClear();
+  trackSearchQuery("tribal broadband availability", "hifld", 0);
+  expect(capture).toHaveBeenCalledWith("dataset_search",expect.objectContaining({query:"tribal broadband availability",is_zero_result:true,query_suppressed:false}));
+  trackSearchQuery("analyst@example.com", "hifld", 0);
+  expect(capture.mock.calls.at(-1)?.[1]).not.toHaveProperty("query");
+  expect(capture.mock.calls.at(-1)?.[1]).toMatchObject({result_count:0,query_suppressed:true});
+  const beforeSend = init.mock.calls.at(-1)?.[1].before_send;
+  expect(beforeSend?.({event:"dataset_search",properties:{query:"Substations",search_query:"private"}}).properties).toEqual({query:"substations"});
+  expect(beforeSend?.({event:"dataset_search",properties:{query:"analyst@example.com"}}).properties).not.toHaveProperty("query");
+  expect(beforeSend?.({event:"$pageview",properties:{query:"substations"}}).properties).not.toHaveProperty("query");
 });

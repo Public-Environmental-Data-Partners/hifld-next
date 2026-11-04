@@ -2,6 +2,18 @@
 
 These instructions apply to the whole repository. Follow them before making changes and before handing work back.
 
+## Interface Copy And Design
+
+- Keep interface copy brief and useful. Do not add redundant product labels, decorative eyebrow text, or filler when the heading or navigation already provides context.
+- Do not use middle dots (`·`) or bullets (`•`) as inline delimiters. Use the existing layout and design patterns to separate information.
+- When a new visual pattern is necessary, update the shared design system rather than adding one-off decorative elements or labels.
+
+## Local Development Services
+
+- Use the project's documented development commands (such as `npm run dev` or the documented Docker Compose services) to run services locally. Do not substitute ad hoc preview/build processes unless explicitly asked.
+- Check which services and ports are already running before starting anything. Reuse the existing development process and its live reload when possible.
+- Stop stale or superseded processes belonging to this project before restarting a service. Keep one active process per service and do not leave orphaned processes behind. Do not stop unrelated projects.
+
 ## Quality Gates
 
 For any change touching `dataset-api`, run these from `dataset-api/` before claiming the work is complete:

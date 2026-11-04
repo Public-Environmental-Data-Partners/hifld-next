@@ -18,7 +18,10 @@ export default function Footer() {
             </a>{" "}
             website
           </p>
-          <div className="flex flex-col items-start gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:gap-4">
+          <div className="flex flex-col items-start gap-2 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+            <a href="/privacy" className="hover:text-foreground transition-colors">
+              Privacy
+            </a>
             <a
               href={SURVEY_URL}
               target="_blank"
