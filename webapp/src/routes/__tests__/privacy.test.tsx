@@ -38,7 +38,7 @@ it("links PEDP commitments and discloses what HIFLD Next collects", () => {
     expect.stringMatching(/^Dataset search terms.*filtering is imperfect/),
     expect.stringMatching(/^Failure categories.*without error messages/),
     "No session replay, automatic click capture or visitor profiles.",
-    expect.stringMatching(/^Feedback only when you check the consent box.*stored separately from analytics/),
+    expect.stringMatching(/^Feedback only when you check the consent box.*stored in PostHog without a link to your browsing activity/),
   ]);
   expect(screen.getByRole("button", {name:"Turn off analytics"})).toBeInTheDocument();
 });

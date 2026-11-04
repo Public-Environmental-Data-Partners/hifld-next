@@ -45,8 +45,8 @@ export function Privacy() {
         <li>Failure categories with the page type and public dataset involved, without error messages or contents.</li>
         <li>No session replay, automatic click capture or visitor profiles.</li>
         <li>
-          Feedback only when you check the consent box. Your email, comment and dataset context are stored separately
-          from analytics.
+          Feedback only when you check the consent box. Your email, comment and dataset context are stored in PostHog
+          without a link to your browsing activity.
         </li>
       </ul>
       <h2 className="text-xl font-semibold">Analytics preferences</h2>
