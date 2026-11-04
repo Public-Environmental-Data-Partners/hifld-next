@@ -509,7 +509,7 @@ function uniqueSourceVersions(sources: DatasetSource[]): string[] {
 
 function sourceLabel(source: DatasetSource): string {
   const locationLabel = source.storage_location?.name ?? `Location ${source.storage_location?.id ?? source.id}`;
-  return `${locationLabel} · source ${source.id}`;
+  return `${locationLabel}, source ${source.id}`;
 }
 
 interface DatasetSearchComboboxProps {

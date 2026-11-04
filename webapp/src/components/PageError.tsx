@@ -9,7 +9,6 @@ function ErrorContent({ notFound = false, retry }: { notFound?: boolean; retry?:
       data-error-code={code}
       className="mx-auto w-full max-w-3xl px-6 py-16 sm:py-24"
     >
-      <p className="mb-4 text-sm font-medium text-muted-foreground">HIFLD Next · Dataset catalog</p>
       <h1 id="page-error-title" className="text-3xl font-semibold tracking-tight sm:text-4xl">
         {notFound ? "We could not find this page" : "This page could not load"}
       </h1>
