@@ -37,7 +37,7 @@ describe("DataQualityFeedbackDialog", () => {
     await user.type(screen.getByLabelText("Comment"), "This layer is missing a facility.");
     expect(screen.getByRole("button", { name: "Submit feedback" })).toBeDisabled();
     expect(screen.queryByText(/in PostHog/)).not.toBeInTheDocument();
-    expect(screen.getByRole("link", {name:"Privacy Policy"})).toHaveAttribute("href", "https://www.publicenvirodata.org/privacy-policy");
+    expect(screen.getByRole("link", {name:"privacy notice"})).toHaveAttribute("href", "/privacy");
     await user.click(screen.getByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: "Submit feedback" }));
 

@@ -14,7 +14,7 @@ import {
 import type { DatasetQualityFeedbackFeature } from "@/lib/analytics";
 import { submitDatasetQualityFeedback } from "@/lib/feedback";
 import { trackUiFailure } from "@/lib/interaction-analytics";
-import { FEEDBACK_CONSENT_VERSION, PEDP_PRIVACY_URL } from "@/lib/privacy";
+import { FEEDBACK_CONSENT_VERSION } from "@/lib/privacy";
 
 export interface DataQualityFeedbackContext {
   collectionSlug: string;
@@ -183,8 +183,8 @@ export class DataQualityFeedbackDialog extends React.Component<
             </div>
             <p id="feedback-privacy" className="text-xs text-muted-foreground">
               See the{" "}
-              <a className="underline" href={PEDP_PRIVACY_URL} target="_blank" rel="noopener noreferrer">
-                Privacy Policy
+              <a className="underline" href="/privacy" target="_blank" rel="noopener noreferrer">
+                privacy notice
               </a>
               . This consent applies only to your report.
             </p>

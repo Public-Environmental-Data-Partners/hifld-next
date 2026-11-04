@@ -26,12 +26,29 @@ export function Privacy() {
     <article className="mx-auto w-full max-w-3xl space-y-6 px-6 py-12 text-base leading-relaxed">
       <h1 className="text-3xl font-semibold">Privacy &amp; analytics</h1>
       <p>
-        HIFLD Next is a Public Environmental Data Partners service. Read the{" "}
+        HIFLD Next is a Public Environmental Data Partners service. See the{" "}
         <a className="underline" href={PEDP_PRIVACY_URL}>
           PEDP Privacy Policy
         </a>{" "}
-        for details about data collection, analytics providers, search terms, feedback, retention, and your rights.
+        for PEDP&apos;s privacy commitments and contact information.
       </p>
+      <h2 className="text-xl font-semibold">What HIFLD Next collects</h2>
+      <ul className="list-disc space-y-2 pl-6">
+        <li>
+          Cookieless usage analytics through PostHog: page views, visitor estimates, map and table opens, copies, and
+          downloads with their dataset, file and format.
+        </li>
+        <li>
+          Dataset search terms, including searches with no results, to find datasets to add. Emails, URLs, phone
+          numbers, coordinates and street addresses are filtered out where detected, but filtering is imperfect.
+        </li>
+        <li>Failure categories with the page type and public dataset involved, without error messages or contents.</li>
+        <li>No session replay, automatic click capture or visitor profiles.</li>
+        <li>
+          Feedback only when you check the consent box. Your email, comment and dataset context are stored separately
+          from analytics.
+        </li>
+      </ul>
       <h2 className="text-xl font-semibold">Analytics preferences</h2>
       <p>
         Optional analytics help us understand how HIFLD Next is used and which datasets to add. You can turn them off

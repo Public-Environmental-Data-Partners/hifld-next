@@ -139,7 +139,7 @@ npm run build
 
 ### Privacy and analytics
 
-Deployment dependency: publish and verify the [central PEDP policy update](../docs/privacy/pedp-central-policy-update.md) before deploying this branch. The detailed provider, search, feedback and retention disclosures belong in that policy; HIFLD retains short collection notices and `/privacy` preferences. The feedback consent notice version is `2026-11-04`. PR #105 stays in draft until the central publication is confirmed.
+HIFLD Next follows the existing [PEDP Privacy Policy](https://www.publicenvirodata.org/privacy-policy) (last updated March 17, 2025) and does not edit it. `/privacy` links to that policy for PEDP commitments and contact information, gives a brief HIFLD-specific disclosure of analytics, search terms, failure categories and consented feedback, and holds the analytics preferences. The search notice and feedback consent link to `/privacy`. The feedback consent notice version is `2026-11-04`.
 
 Browser analytics use `cookieless_mode: "always"`, memory-only persistence and no person profiles. Replay, heatmaps, automatic clicks and unsolicited performance/error capture are disabled. Visitor estimates, device/referral summaries, explicit usage events, and the download lifecycle remain available. Dataset search terms are retained to identify unmet dataset demand, including zero-result searches. Terms are normalized for case/spacing and omitted when over 200 characters or matching obvious email, URL, phone, precise-coordinate or common street-address patterns. This is best-effort filtering, not anonymization: names and unusual formats may pass and legitimate queries may be omitted. Omitted text is marked by `query_suppressed: true`; result counts remain available. Query text is only allowed on `dataset_search`, not copied into other events or URLs. URL queries/fragments are removed. DNT, GPC and the privacy-page opt-out are honored. The only new preference cookie is `hifld_analytics=off`, written on an explicit opt-out, with a one-year lifetime.
 
@@ -159,7 +159,7 @@ Download reporting distinguishes `dataset_download_clicked`, `dataset_download_h
 
 Operational requirements under [PEDP’s policy](https://www.publicenvirodata.org/privacy-policy):
 
-- Confirm event retention is at most two years in the PostHog account; replay’s 30-day retention is a separate setting. Include exports, backups and retained infrastructure logs in the inventory. This application cannot enforce the account retention contract.
+- Retention follows PEDP’s two-year policy. Verified: a live PostHog audit found the earliest event on 2026-02-16 and no events older than two years. Not verified: an account setting that enforces deletion at two years. Operators must configure or confirm that setting and apply the same limit to exports, backups and retained infrastructure logs; this application cannot enforce it.
 - Restrict access to feedback and analytics, and verify the PostHog processor agreement and hosting arrangement with the responsible PEDP organization.
 - Handle deletion/withdrawal requests through `hello@publicenvirodata.org`; locate feedback by `reporter_email`, remove matching events and any exports, and document completion. Do not rely on person-profile deletion, since these reports have no person profile.
 - Review the `/privacy` notice and the no-popup configuration against applicable privacy law before deployment. Cookieless is a technical mode, not an automatic legal exemption.

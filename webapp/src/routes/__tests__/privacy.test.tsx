@@ -27,10 +27,18 @@ it("does not override browser privacy signals", () => {
   expect(screen.getByRole("button", {name:"Analytics disabled by browser"})).toBeDisabled();
 });
 
-it("uses the central PEDP policy while keeping analytics preferences local", () => {
+it("links PEDP commitments and discloses what HIFLD Next collects", () => {
   render(<Privacy />);
   expect(screen.getByRole("link", {name:"PEDP Privacy Policy"})).toHaveAttribute("href", "https://www.publicenvirodata.org/privacy-policy");
+  expect(screen.getByText(/privacy commitments and contact information/)).toBeInTheDocument();
+  expect(screen.queryByText(/details about data collection, analytics providers/)).not.toBeInTheDocument();
+  const items = screen.getAllByRole("listitem").map((item) => item.textContent ?? "");
+  expect(items).toEqual([
+    expect.stringMatching(/^Cookieless usage analytics through PostHog.*downloads/),
+    expect.stringMatching(/^Dataset search terms.*filtering is imperfect/),
+    expect.stringMatching(/^Failure categories.*without error messages/),
+    "No session replay, automatic click capture or visitor profiles.",
+    expect.stringMatching(/^Feedback only when you check the consent box.*stored separately from analytics/),
+  ]);
   expect(screen.getByRole("button", {name:"Turn off analytics"})).toBeInTheDocument();
-  expect(screen.queryByText(/rotating salt/)).not.toBeInTheDocument();
-  expect(screen.queryByText(/PostHog/)).not.toBeInTheDocument();
 });
