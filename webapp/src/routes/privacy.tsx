@@ -20,9 +20,17 @@ function Privacy() {
       <h2 className="text-xl font-semibold">Understanding use without tracking you across visits</h2>
       <p>
         We use PostHog to estimate visitors and understand which datasets and features are useful. Analytics include
-        page visits, approximate location, device and browser type, referring sites, searches counted without search
-        text, map actions, and download activity. We remove query strings and fragments from URLs sent in analytics. We
-        do not record session replays, form contents, or automatic clicks.
+        page visits, approximate location, device and browser type, referring sites, dataset search terms and result
+        counts, map actions, and download activity. We remove query strings and fragments from URLs sent in analytics.
+        We do not record session replays, automatic form captures, or automatic clicks.
+      </p>
+      <p>
+        We record dataset search terms, including searches with no results, to identify datasets we should add. Terms
+        are normalized for case and spacing and limited to 200 characters. We omit text matching common email, URL,
+        phone number, precise coordinate, or street-address patterns. This filtering is imperfect: personal names and
+        other sensitive information may still pass, and legitimate queries may be omitted. Please do not enter personal
+        or confidential information in dataset searches. Searches still work when their text is omitted from analytics,
+        and their result counts are still recorded.
       </p>
       <p>
         PostHog runs in cookieless mode: it does not store analytics cookies or identifiers in local or session storage.

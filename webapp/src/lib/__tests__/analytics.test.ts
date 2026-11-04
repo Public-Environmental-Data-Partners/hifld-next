@@ -49,6 +49,8 @@ describe("analytics", () => {
     trackSearchQuery("hospital", "hifld", 0);
 
     expect(capture).toHaveBeenCalledWith("dataset_search", {
+      query: "hospital",
+      query_suppressed: false,
       query_length: 8,
       collection_slug: "hifld",
       result_count: 0,
@@ -296,4 +298,18 @@ it("strips URL queries at the final SDK boundary and honors GPC", async () => {
  Object.defineProperty(navigator,"globalPrivacyControl",{configurable:true,value:true});
  expect(beforeSend?.(event)).toBeNull();
  Reflect.deleteProperty(navigator,"globalPrivacyControl");
+});
+
+it("keeps novel zero-result terms and filters sensitive text at the SDK boundary", async () => {
+  const {trackSearchQuery} = await import("../analytics");
+  capture.mockClear();
+  trackSearchQuery("tribal broadband availability", "hifld", 0);
+  expect(capture).toHaveBeenCalledWith("dataset_search",expect.objectContaining({query:"tribal broadband availability",is_zero_result:true,query_suppressed:false}));
+  trackSearchQuery("analyst@example.com", "hifld", 0);
+  expect(capture.mock.calls.at(-1)?.[1]).not.toHaveProperty("query");
+  expect(capture.mock.calls.at(-1)?.[1]).toMatchObject({result_count:0,query_suppressed:true});
+  const beforeSend = init.mock.calls.at(-1)?.[1].before_send;
+  expect(beforeSend?.({event:"dataset_search",properties:{query:"Substations",search_query:"private"}}).properties).toEqual({query:"substations"});
+  expect(beforeSend?.({event:"dataset_search",properties:{query:"analyst@example.com"}}).properties).not.toHaveProperty("query");
+  expect(beforeSend?.({event:"$pageview",properties:{query:"substations"}}).properties).not.toHaveProperty("query");
 });

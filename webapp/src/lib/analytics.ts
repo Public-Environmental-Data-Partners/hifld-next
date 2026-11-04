@@ -5,6 +5,7 @@
 import posthog from "posthog-js";
 import { analyticsDisabled, withoutUrlQuery } from "./privacy";
 import { runtimeClientConfigFromWindow } from "./runtime-client-config";
+import { searchQueryForAnalytics } from "./search-analytics";
 import type { WebMcpErrorCode } from "./webmcp/result";
 
 // Initialize PostHog on the client side
@@ -264,7 +265,12 @@ export function initPostHog() {
         }
         delete properties["$set"];
         delete properties["$set_once"];
-        delete properties["query"];
+        const query =
+          event.event === "dataset_search" && typeof properties["query"] === "string"
+            ? searchQueryForAnalytics(properties["query"])
+            : undefined;
+        if (query !== undefined) properties["query"] = query;
+        else delete properties["query"];
         delete properties["search_query"];
         const filtered = { ...event, properties };
         delete filtered.$set;
@@ -325,9 +331,12 @@ export function trackSearchQuery(
 
   const trimmedQuery = query.trim();
   if (!trimmedQuery) return; // Don't track empty queries
+  const analyticsQuery = searchQueryForAnalytics(trimmedQuery);
 
   try {
     posthog.capture("dataset_search", {
+      ...(analyticsQuery !== undefined ? { query: analyticsQuery } : {}),
+      query_suppressed: analyticsQuery === undefined,
       query_length: properties?.queryLength ?? trimmedQuery.length,
       collection_slug: collectionSlug,
       result_count: resultCount,
