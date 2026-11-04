@@ -45,7 +45,7 @@ describe("registerDiscoveryAnalytics", () => {
         event: "api_route_requested",
         properties: {
           $process_person_profile: false,
-          request_url: "https://data.example.test/api/collections/hifld?search=hospitals",
+          request_url: "https://data.example.test/api/collections/hifld",
           route_family: "api_resource",
           method: "GET",
           status: 404,

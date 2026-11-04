@@ -15,6 +15,7 @@ import { Route as CollectionsRouteImport } from './routes/collections'
 import { Route as CommonsRouteImport } from './routes/commons'
 import { Route as MapRouteImport } from './routes/map'
 import { Route as McpRouteImport } from './routes/mcp'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
 import { Route as RuntimeConfigDotjsRouteImport } from './routes/runtime-config[.]js'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
@@ -25,6 +26,7 @@ import { Route as ApiIndexRouteImport } from './routes/api/index'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as ApiCollectionsRouteImport } from './routes/api/collections'
 import { Route as ApiDatasetsRouteImport } from './routes/api/datasets'
+import { Route as ApiFeedbackRouteImport } from './routes/api/feedback'
 import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ApiOpenapiRouteImport } from './routes/api/openapi'
 import { Route as ApiQueriesRouteImport } from './routes/api/queries'
@@ -91,6 +93,11 @@ const McpRoute = McpRouteImport.update({
   path: '/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
   id: '/robots.txt',
   path: '/robots.txt',
@@ -141,6 +148,11 @@ const ApiCollectionsRoute = ApiCollectionsRouteImport.update({
 const ApiDatasetsRoute = ApiDatasetsRouteImport.update({
   id: '/api/datasets',
   path: '/api/datasets',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiFeedbackRoute = ApiFeedbackRouteImport.update({
+  id: '/api/feedback',
+  path: '/api/feedback',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiHealthRoute = ApiHealthRouteImport.update({
@@ -374,6 +386,7 @@ export interface FileRoutesByFullPath {
   '/commons': typeof CommonsRouteWithChildren
   '/map': typeof MapRoute
   '/mcp': typeof McpRoute
+  '/privacy': typeof PrivacyRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/runtime-config.js': typeof RuntimeConfigDotjsRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
@@ -382,6 +395,7 @@ export interface FileRoutesByFullPath {
   '/api/$': typeof ApiSplatRoute
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
+  '/api/feedback': typeof ApiFeedbackRoute
   '/api/health': typeof ApiHealthRoute
   '/api/openapi': typeof ApiOpenapiRoute
   '/api/queries': typeof ApiQueriesRouteWithChildren
@@ -424,6 +438,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/map': typeof MapRoute
   '/mcp': typeof McpRoute
+  '/privacy': typeof PrivacyRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/runtime-config.js': typeof RuntimeConfigDotjsRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
@@ -432,6 +447,7 @@ export interface FileRoutesByTo {
   '/api/$': typeof ApiSplatRoute
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
+  '/api/feedback': typeof ApiFeedbackRoute
   '/api/health': typeof ApiHealthRoute
   '/api/openapi': typeof ApiOpenapiRoute
   '/api/queries': typeof ApiQueriesRouteWithChildren
@@ -476,6 +492,7 @@ export interface FileRoutesById {
   '/commons': typeof CommonsRouteWithChildren
   '/map': typeof MapRoute
   '/mcp': typeof McpRoute
+  '/privacy': typeof PrivacyRoute
   '/robots.txt': typeof RobotsDottxtRoute
   '/runtime-config.js': typeof RuntimeConfigDotjsRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
@@ -484,6 +501,7 @@ export interface FileRoutesById {
   '/api/$': typeof ApiSplatRoute
   '/api/collections': typeof ApiCollectionsRouteWithChildren
   '/api/datasets': typeof ApiDatasetsRouteWithChildren
+  '/api/feedback': typeof ApiFeedbackRoute
   '/api/health': typeof ApiHealthRoute
   '/api/openapi': typeof ApiOpenapiRoute
   '/api/queries': typeof ApiQueriesRouteWithChildren
@@ -531,6 +549,7 @@ export interface FileRouteTypes {
     | '/commons'
     | '/map'
     | '/mcp'
+    | '/privacy'
     | '/robots.txt'
     | '/runtime-config.js'
     | '/sitemap.xml'
@@ -539,6 +558,7 @@ export interface FileRouteTypes {
     | '/api/$'
     | '/api/collections'
     | '/api/datasets'
+    | '/api/feedback'
     | '/api/health'
     | '/api/openapi'
     | '/api/queries'
@@ -581,6 +601,7 @@ export interface FileRouteTypes {
     | '/'
     | '/map'
     | '/mcp'
+    | '/privacy'
     | '/robots.txt'
     | '/runtime-config.js'
     | '/sitemap.xml'
@@ -589,6 +610,7 @@ export interface FileRouteTypes {
     | '/api/$'
     | '/api/collections'
     | '/api/datasets'
+    | '/api/feedback'
     | '/api/health'
     | '/api/openapi'
     | '/api/queries'
@@ -632,6 +654,7 @@ export interface FileRouteTypes {
     | '/commons'
     | '/map'
     | '/mcp'
+    | '/privacy'
     | '/robots.txt'
     | '/runtime-config.js'
     | '/sitemap.xml'
@@ -640,6 +663,7 @@ export interface FileRouteTypes {
     | '/api/$'
     | '/api/collections'
     | '/api/datasets'
+    | '/api/feedback'
     | '/api/health'
     | '/api/openapi'
     | '/api/queries'
@@ -686,6 +710,7 @@ export interface RootRouteChildren {
   CommonsRoute: typeof CommonsRouteWithChildren
   MapRoute: typeof MapRoute
   McpRoute: typeof McpRoute
+  PrivacyRoute: typeof PrivacyRoute
   RobotsDottxtRoute: typeof RobotsDottxtRoute
   RuntimeConfigDotjsRoute: typeof RuntimeConfigDotjsRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
@@ -694,6 +719,7 @@ export interface RootRouteChildren {
   ApiSplatRoute: typeof ApiSplatRoute
   ApiCollectionsRoute: typeof ApiCollectionsRouteWithChildren
   ApiDatasetsRoute: typeof ApiDatasetsRouteWithChildren
+  ApiFeedbackRoute: typeof ApiFeedbackRoute
   ApiHealthRoute: typeof ApiHealthRoute
   ApiOpenapiRoute: typeof ApiOpenapiRoute
   ApiQueriesRoute: typeof ApiQueriesRouteWithChildren
@@ -748,6 +774,13 @@ declare module '@tanstack/react-router' {
       path: '/mcp'
       fullPath: '/mcp'
       preLoaderRoute: typeof McpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/robots.txt': {
@@ -818,6 +851,13 @@ declare module '@tanstack/react-router' {
       path: '/api/datasets'
       fullPath: '/api/datasets'
       preLoaderRoute: typeof ApiDatasetsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/feedback': {
+      id: '/api/feedback'
+      path: '/api/feedback'
+      fullPath: '/api/feedback'
+      preLoaderRoute: typeof ApiFeedbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/health': {
@@ -1267,6 +1307,7 @@ const rootRouteChildren: RootRouteChildren = {
   CommonsRoute: CommonsRouteWithChildren,
   MapRoute: MapRoute,
   McpRoute: McpRoute,
+  PrivacyRoute: PrivacyRoute,
   RobotsDottxtRoute: RobotsDottxtRoute,
   RuntimeConfigDotjsRoute: RuntimeConfigDotjsRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
@@ -1277,6 +1318,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiSplatRoute: ApiSplatRoute,
   ApiCollectionsRoute: ApiCollectionsRouteWithChildren,
   ApiDatasetsRoute: ApiDatasetsRouteWithChildren,
+  ApiFeedbackRoute: ApiFeedbackRoute,
   ApiHealthRoute: ApiHealthRoute,
   ApiOpenapiRoute: ApiOpenapiRoute,
   ApiQueriesRoute: ApiQueriesRouteWithChildren,

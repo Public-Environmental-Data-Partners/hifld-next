@@ -125,3 +125,24 @@ supports cross-origin JSON discovery with CORS; MCP calls remain same-origin.
 npm test
 npm run build
 ```
+
+
+### Privacy and analytics
+
+Browser analytics use `cookieless_mode: "always"`, memory-only persistence and no person profiles. Replay, heatmaps, automatic clicks and unsolicited performance/error capture are disabled. Visitor estimates, device/referral summaries, explicit usage events, and the download lifecycle remain available. Search text and URL queries/fragments are removed. DNT, GPC and the footer opt-out are honored. The only new preference cookie is `hifld_analytics=off`, written on an explicit opt-out, with a one-year lifetime.
+
+Cookieless visitor IDs are derived by PostHog from the request IP, user agent, host and calendar day. They are estimates: monthly counts are not comparable to persistent-ID monthly visitors. Do not sum daily uniques and describe them as unique people across a month. Stateless cookieless ingestion must be enabled in **Project settings → Web analytics** before deploying the SDK change, or events are discarded. This project was configured on 2026-11-03 with `cookieless_server_hash_mode: 1`, IP anonymization enabled, and replay/heatmaps disabled. Retain these settings after future project changes.
+
+`api_route_requested` keeps one shared anonymous identity. It records sanitized request URLs and optional self-declared agent provider/client/purpose labels, not raw user agents or client IPs. It cannot measure distinct agents. Client categories and provider labels are heuristics, not verified identities.
+
+Feedback is independent of analytics. `/api/feedback` accepts bounded same-origin JSON, validates affirmative consent and notice version, and stamps consent time on the server. It sends a report with a new random ID and no browsing identity, IP, or geometry to PostHog. The form only closes after an ingestion acknowledgement; failures preserve the report for retry. The existing `PUBLIC_POSTHOG_KEY` and `PUBLIC_POSTHOG_HOST` configure delivery, and missing configuration yields a visible delivery error. Browser tracking opt-outs do not block deliberately submitted feedback.
+
+Download reporting distinguishes `dataset_download_clicked`, `dataset_download_handed_off`, `dataset_download_succeeded`, and `dataset_download_failed`. Sum `received_bytes` for measured transfers; `expected_size_bytes` on a handoff is only planned volume. Native links, external clients, map tiles, and interrupted downloads prevent a complete bandwidth total; use storage/CDN access metrics for authoritative bytes served. Existing download reports and visitor insights should mark the cookieless deployment date as a measurement change.
+
+Operational requirements under [PEDP’s policy](https://www.publicenvirodata.org/privacy-policy):
+
+- Confirm event retention is at most two years in the PostHog account; replay’s 30-day retention is a separate setting. Include exports, backups and retained infrastructure logs in the inventory. This application cannot enforce the account retention contract.
+- Restrict access to feedback and analytics, and verify the PostHog processor agreement and hosting arrangement with the responsible PEDP organization.
+- Handle deletion/withdrawal requests through `hello@publicenvirodata.org`; locate feedback by `reporter_email`, remove matching events and any exports, and document completion. Do not rely on person-profile deletion, since these reports have no person profile.
+- Review the `/privacy` notice and the no-popup configuration against applicable privacy law before deployment. Cookieless is a technical mode, not an automatic legal exemption.
+- These changes do not remove historical cookies from prior releases or erase historical PostHog events. Historical data and retention require a separately scoped review.

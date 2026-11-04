@@ -3,6 +3,7 @@
  */
 
 import posthog from "posthog-js";
+import { analyticsDisabled, withoutUrlQuery } from "./privacy";
 import { runtimeClientConfigFromWindow } from "./runtime-client-config";
 import type { WebMcpErrorCode } from "./webmcp/result";
 
@@ -98,25 +99,13 @@ export interface DatasetQualityFeedbackFeature {
   geometry?: { [propertyName: string]: string | number | boolean | null | readonly string[] | readonly number[] };
 }
 
-export interface DatasetQualityFeedbackInput {
-  reporter_email: string;
-  comment: string;
-  collection_slug: string;
-  dataset_slug: string;
-  file_slug: string;
-  version?: string | number | undefined;
-  source_id?: number | undefined;
-  feature?: DatasetQualityFeedbackFeature | undefined;
-}
-
 type AnalyticsEventProperties =
   | PageViewProperties
   | DownloadAnalyticsContext
   | DownloadSuccessProperties
   | DownloadHandoffProperties
   | DownloadFailureProperties
-  | DatasetMapImportInput
-  | (Omit<DatasetQualityFeedbackInput, "feature"> & { current_url?: string; feature_json?: string });
+  | DatasetMapImportInput;
 
 function compactProperties(properties: AnalyticsEventProperties): PostHogEventProperties {
   return Object.fromEntries(Object.entries(properties).filter(([, value]) => value !== undefined));
@@ -176,7 +165,7 @@ function captureWebMcpEvent(
   eventName: "webmcp_tool_started" | "webmcp_tool_completed" | "webmcp_tool_failed",
   properties: WebMcpAnalyticsProperties,
 ): void {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || analyticsDisabled()) return;
   if (!posthogInitialized) initPostHog();
   if (!posthogInitialized || typeof posthog.capture !== "function") return;
   try {
@@ -227,7 +216,7 @@ function captureDownloadEvent(
   context: DownloadAnalyticsContext,
   properties?: DownloadSuccessProperties | DownloadHandoffProperties | DownloadFailureProperties,
 ) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || analyticsDisabled()) return;
   if (!posthogInitialized) initPostHog();
   if (!posthogInitialized || typeof posthog.capture !== "function") return;
 
@@ -245,7 +234,7 @@ function captureDownloadEvent(
 }
 
 export function initPostHog() {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || analyticsDisabled()) return;
   if (posthogInitialized) return;
   const config = runtimeClientConfigFromWindow();
   if (!config.posthogKey) return;
@@ -253,12 +242,40 @@ export function initPostHog() {
   try {
     posthog.init(config.posthogKey, {
       api_host: config.posthogHost,
+      cookieless_mode: "always",
+      persistence: "memory",
+      person_profiles: "never",
+      disable_session_recording: true,
+      enable_heatmaps: false,
+      capture_dead_clicks: false,
+      rageclick: false,
+      capture_pageleave: false,
+      capture_performance: false,
+      capture_exceptions: false,
+      disable_surveys: true,
+      save_campaign_params: false,
+      property_denylist: ["$search_keyword", "$initial_search_keyword"],
+      before_send: (event) => {
+        if (!event || analyticsDisabled()) return null;
+        const properties = { ...event.properties };
+        for (const key of ["$current_url", "$referrer", "$initial_current_url", "$initial_referrer", "$pathname"]) {
+          const value = properties[key];
+          if (typeof value === "string") properties[key] = withoutUrlQuery(value);
+        }
+        delete properties["$set"];
+        delete properties["$set_once"];
+        delete properties["query"];
+        delete properties["search_query"];
+        const filtered = { ...event, properties };
+        delete filtered.$set;
+        delete filtered.$set_once;
+        delete filtered.$unset;
+        return filtered;
+      },
       // Privacy settings
       autocapture: false, // Disable auto-capture for privacy
       capture_pageview: false, // We'll track pageviews manually
       respect_dnt: true, // Respect Do Not Track
-      // Optional: mask text in session replay
-      session_recording: { maskTextSelector: 'input[type="search"]' },
       loaded: () => {
         if (process.env["NODE_ENV"] === "development") {
           console.log("PostHog initialized");
@@ -275,14 +292,14 @@ export function initPostHog() {
  * Track a page view
  */
 export function trackPageView(path: string, properties?: PageViewProperties) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || analyticsDisabled()) return;
   if (!posthogInitialized) initPostHog();
   if (!posthogInitialized || typeof posthog.capture !== "function") return; // Safety check
 
   try {
     posthog.capture("$pageview", {
-      $current_url: window.location.href,
-      path,
+      $current_url: withoutUrlQuery(window.location.href),
+      path: withoutUrlQuery(path),
       ...properties,
     });
   } catch (error) {
@@ -302,7 +319,7 @@ export function trackSearchQuery(
     queryLength?: number;
   },
 ) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || analyticsDisabled()) return;
   if (!posthogInitialized) initPostHog();
   if (!posthogInitialized || typeof posthog.capture !== "function") return; // Safety check
 
@@ -311,7 +328,6 @@ export function trackSearchQuery(
 
   try {
     posthog.capture("dataset_search", {
-      query: trimmedQuery,
       query_length: properties?.queryLength ?? trimmedQuery.length,
       collection_slug: collectionSlug,
       result_count: resultCount,
@@ -331,9 +347,9 @@ export function trackTagFilter(
   filterKey: string,
   filterValues: string[],
   resultCount: number,
-  searchQuery?: string,
+  _searchQuery?: string,
 ) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || analyticsDisabled()) return;
   if (!posthogInitialized) initPostHog();
   if (!posthogInitialized || typeof posthog.capture !== "function") return; // Safety check
 
@@ -344,7 +360,6 @@ export function trackTagFilter(
       filter_values: filterValues,
       result_count: resultCount,
       is_zero_result: resultCount === 0,
-      search_query: searchQuery,
     });
   } catch (error) {
     console.error("Failed to track tag filter:", error);
@@ -365,7 +380,7 @@ export function trackDownload(
     version?: string | number;
   },
 ) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || analyticsDisabled()) return;
   if (!posthogInitialized) initPostHog();
   if (!posthogInitialized || typeof posthog.capture !== "function") return;
 
@@ -401,7 +416,7 @@ export function trackDownloadFailed(context: DownloadAnalyticsContext, propertie
 }
 
 export function trackDatasetImportedIntoMap(input: DatasetMapImportInput) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || analyticsDisabled()) return;
   if (!posthogInitialized) initPostHog();
   if (!posthogInitialized || typeof posthog.capture !== "function") return;
 
@@ -412,41 +427,11 @@ export function trackDatasetImportedIntoMap(input: DatasetMapImportInput) {
   }
 }
 
-function feedbackFeatureJson(feature: DatasetQualityFeedbackFeature): string {
-  const { geometry: _geometry, ...featureWithoutGeometry } = feature;
-  return JSON.stringify(featureWithoutGeometry);
-}
-
-export function trackDatasetQualityFeedbackSubmitted(input: DatasetQualityFeedbackInput) {
-  if (typeof window === "undefined") return;
-  if (!posthogInitialized) initPostHog();
-  if (!posthogInitialized || typeof posthog.capture !== "function") return;
-
-  try {
-    posthog.capture(
-      "dataset_quality_feedback_submitted",
-      compactProperties({
-        reporter_email: input.reporter_email,
-        comment: input.comment,
-        collection_slug: input.collection_slug,
-        dataset_slug: input.dataset_slug,
-        file_slug: input.file_slug,
-        version: input.version,
-        source_id: input.source_id,
-        current_url: window.location.href,
-        feature_json: input.feature ? feedbackFeatureJson(input.feature) : undefined,
-      }),
-    );
-  } catch (error) {
-    console.error("Failed to track dataset quality feedback:", error);
-  }
-}
-
 /**
  * Track map viewer opened
  */
 export function trackMapViewer(datasetSlug: string, fileSlug: string, collectionSlug: string) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || analyticsDisabled()) return;
   if (!posthogInitialized) initPostHog();
   if (!posthogInitialized || typeof posthog.capture !== "function") return;
 
@@ -465,7 +450,7 @@ export function trackMapViewer(datasetSlug: string, fileSlug: string, collection
  * Track data table opened
  */
 export function trackDataTable(datasetSlug: string, fileSlug: string, collectionSlug: string) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || analyticsDisabled()) return;
   if (!posthogInitialized) initPostHog();
   if (!posthogInitialized || typeof posthog.capture !== "function") return;
 
@@ -491,7 +476,7 @@ export function trackUrlCopied(
     fileSlug?: string;
   },
 ) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || analyticsDisabled()) return;
   if (!posthogInitialized) initPostHog();
   if (!posthogInitialized || typeof posthog.capture !== "function") return;
 
@@ -511,7 +496,7 @@ export function trackUrlCopied(
  * Get PostHog instance (for advanced usage)
  */
 export function getPostHog() {
-  if (typeof window === "undefined") return null;
+  if (typeof window === "undefined" || analyticsDisabled()) return null;
   if (!posthogInitialized) initPostHog();
   return posthog;
 }
