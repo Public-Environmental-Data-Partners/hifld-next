@@ -490,6 +490,7 @@ export function FileFormatTree({
                                 <code className="text-xs bg-muted px-2 py-1 rounded block break-all">{s3Uri}</code>
                                 <div className="flex items-center gap-2 mt-2">
                                   <CopyButton
+                                    urlType="duckdb_config"
                                     value={`SET s3_endpoint='${host}:${port}';\nSET s3_use_ssl=false;\nSET s3_url_style='path';\n\nSELECT * FROM '${s3Uri}';`}
                                     label="Copy DuckDB Config"
                                   />
@@ -967,6 +968,7 @@ function StorageUriDetails({ storageUri }: { storageUri: string }) {
           <code className="text-xs bg-muted px-2 py-1 rounded block break-all">{s3Uri}</code>
           <div className="flex items-center gap-2 mt-1">
             <CopyButton
+              urlType="duckdb_config"
               value={`SET s3_endpoint='${host}:${port}';\nSET s3_use_ssl=false;\nSET s3_url_style='path';\n\nSELECT * FROM '${s3Uri}';`}
               label="Copy DuckDB Config"
             />

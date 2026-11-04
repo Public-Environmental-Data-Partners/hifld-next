@@ -36,6 +36,9 @@ function mockMapWithFeatures(features: unknown[]) {
   };
 }
 
+const trackUiFailure = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/interaction-analytics", () => ({trackUiFailure}));
+
 interface MockMap {
   addLayer: ReturnType<typeof vi.fn>;
   addSource: ReturnType<typeof vi.fn>;
@@ -102,6 +105,7 @@ describe("useMapInitialization helpers", () => {
       buildQueryMvtLayer({ queryId: "q-123", label: "Hospitals", sourceAliases: ["h"], geometryColumn: "geometry", tileTemplate: "https://query.test/tiles/{z}/{x}/{y}.mvt" }),
       buildLoadedMapLayer({ descriptor: { collectionSlug: "c", datasetSlug: "d", fileSlug: "f", formatType: "pmtiles", storageLocationId: 1, version: "v1", sourceId: 2 }, name: "Flood", pmtilesUrl: "https://tiles.test/flood.pmtiles" }),
     ];
+    trackUiFailure.mockClear();
     const onError = vi.fn();
     const container = { current: document.createElement("div") };
     const { unmount } = renderHook(() => useMultiLayerMapInitialization(
@@ -114,6 +118,8 @@ describe("useMapInitialization helpers", () => {
       act(() => fail({ sourceId: source.mapSourceId, error: new Error("Tile download failed") }));
       expect(onError).toHaveBeenCalledWith(expect.objectContaining({ sourceId: source.id, message: "Tile download failed" }));
     }
+    expect(trackUiFailure).toHaveBeenCalledWith("map", "load", expect.objectContaining({dataset_slug: "d", file_slug: "f"}));
+    expect(JSON.stringify(trackUiFailure.mock.calls)).not.toContain("Tile download failed");
     unmount();
   });
 

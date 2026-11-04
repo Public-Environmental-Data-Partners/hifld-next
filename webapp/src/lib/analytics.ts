@@ -458,7 +458,7 @@ export function trackMapViewer(datasetSlug: string, fileSlug: string, collection
 /**
  * Track data table opened
  */
-export function trackDataTable(datasetSlug: string, fileSlug: string, collectionSlug: string) {
+export function trackDataTable(datasetSlug?: string, fileSlug?: string, collectionSlug?: string) {
   if (typeof window === "undefined" || analyticsDisabled()) return;
   if (!posthogInitialized) initPostHog();
   if (!posthogInitialized || typeof posthog.capture !== "function") return;
@@ -480,9 +480,9 @@ export function trackDataTable(datasetSlug: string, fileSlug: string, collection
 export function trackUrlCopied(
   urlType: "storage_uri" | "api_endpoint" | "duckdb_config",
   properties?: {
-    format?: string;
-    datasetSlug?: string;
-    fileSlug?: string;
+    format?: string | undefined;
+    datasetSlug?: string | undefined;
+    fileSlug?: string | undefined;
   },
 ) {
   if (typeof window === "undefined" || analyticsDisabled()) return;

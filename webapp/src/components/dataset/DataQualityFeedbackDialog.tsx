@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import type { DatasetQualityFeedbackFeature } from "@/lib/analytics";
 import { submitDatasetQualityFeedback } from "@/lib/feedback";
+import { trackUiFailure } from "@/lib/interaction-analytics";
 import { FEEDBACK_CONSENT_VERSION, PEDP_PRIVACY_URL } from "@/lib/privacy";
 
 export interface DataQualityFeedbackContext {
@@ -89,6 +90,7 @@ export class DataQualityFeedbackDialog extends React.Component<
         open: false,
       });
     } catch {
+      trackUiFailure("feedback", "request");
       this.setState({
         submitting: false,
         error: "Feedback could not be delivered. Please try again. Your report has been kept here.",

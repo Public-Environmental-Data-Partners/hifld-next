@@ -69,7 +69,7 @@ import {
   parseBreaks,
 } from "@/components/viewer/utils";
 import { WebMcpRuntimeConfigContext } from "@/components/WebMcpProvider";
-import { type DatasetMapImportInput, trackDatasetImportedIntoMap } from "@/lib/analytics";
+import { type DatasetMapImportInput, trackDatasetImportedIntoMap, trackMapViewer } from "@/lib/analytics";
 import type {
   Collection,
   Dataset,
@@ -85,6 +85,7 @@ import {
   getDatasetBySlug,
   getDatasetFileBySlug,
 } from "@/lib/api-client";
+import { trackUiFailure } from "@/lib/interaction-analytics";
 import { createQuery, getQueryBounds, getQueryPage, QueryApiError, type QueryRequest } from "@/lib/query-api";
 import { type MapCatalogLayerInput, useMapWebMcpTools } from "@/lib/webmcp/mapTools";
 import { type PublicToolQueryPage, type QueryMapPresentation, useQueryWebMcpTools } from "@/lib/webmcp/queryTools";
@@ -755,6 +756,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     for (const event of events) {
       trackedSourceDescriptorIdsRef.current.add(event.sourceDescriptorId);
       trackDatasetImportedIntoMap(event.properties);
+      trackMapViewer(event.properties.dataset_slug, event.properties.file_slug, event.properties.collection_slug);
     }
   }, [loadedLayers]);
 
@@ -778,6 +780,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
         .catch((error: Error) => {
           if (searchRequestIdRef.current !== requestId) return;
           setDatasetResults([]);
+          trackUiFailure("search", "request");
           setDatasetSearchError(error.message);
         })
         .finally(() => {

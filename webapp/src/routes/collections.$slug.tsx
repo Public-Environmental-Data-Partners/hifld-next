@@ -11,6 +11,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { trackSearchQuery, trackTagFilter } from "@/lib/analytics";
 import type { DatasetTags, DatasetWithUrls } from "@/lib/api-client";
 import { getCollectionBySlug, getCollectionDatasetsBySlug, getCollectionTagValues } from "@/lib/api-client";
+import { trackUiFailure } from "@/lib/interaction-analytics";
 import { buildDataCatalogJsonLd, pageTitle, seoDescription } from "@/lib/seo";
 
 const SEARCH_DEBOUNCE_MS = 500;
@@ -250,6 +251,7 @@ async function runFilteredDatasetRequest({
     return response;
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
+    if (!fetchArgs.signal.aborted && err.name !== "AbortError") trackUiFailure("search", "request");
     handleFilteredDatasetError(err, fetchArgs.signal, tagFilters, setFilteredDatasets, setFilteredTotal);
     return null;
   } finally {

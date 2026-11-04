@@ -6,10 +6,13 @@ import { useLocation } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { type PageViewProperties, trackPageView } from "@/lib/analytics";
 
+import { resetFailureTracking } from "@/lib/interaction-analytics";
+
 export function usePageTracking() {
   const location = useLocation();
 
   useEffect(() => {
+    resetFailureTracking();
     // Extract route information from pathname
     const properties: PageViewProperties = {};
 

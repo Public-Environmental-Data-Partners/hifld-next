@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { trackUiFailure } from "./interaction-analytics";
 
 export const MAX_QUERY_SQL_BYTES = 8 * 1024;
 export const MAX_QUERY_BODY_BYTES = 64 * 1024;
@@ -347,6 +348,26 @@ function parseInput<Input, Output>(schema: z.ZodType<Output, Input>, input: Inpu
   return result.data;
 }
 
+async function requestQueryResponse<T>(
+  fetcher: QueryFetcher,
+  url: string,
+  init: RequestInit,
+  schema: z.ZodType<T>,
+): Promise<T> {
+  try {
+    const response = await fetcher(url, init);
+    return await parseResponse(response, schema);
+  } catch (error) {
+    if (
+      !init.signal?.aborted &&
+      !((error instanceof Error || error instanceof DOMException) && error.name === "AbortError")
+    ) {
+      trackUiFailure("query", "request", {}, error instanceof QueryApiError ? error.status : undefined);
+    }
+    throw error;
+  }
+}
+
 export async function createQuery(input: QueryRequest, options: QueryFetchOptions = {}): Promise<QueryResult> {
   const request = parseInput(QueryRequestSchema, input);
   const fetcher = options.fetcher ?? fetch;
@@ -356,8 +377,7 @@ export async function createQuery(input: QueryRequest, options: QueryFetchOption
     body: JSON.stringify(request),
   };
   if (options.signal !== undefined) init.signal = options.signal;
-  const response = await fetcher("/api/queries", init);
-  return parseResponse(response, QueryResultSchema);
+  return requestQueryResponse(fetcher, "/api/queries", init, QueryResultSchema);
 }
 
 export async function getQueryPage(
@@ -378,8 +398,7 @@ export async function getQueryPage(
     body: JSON.stringify(request),
   };
   if (options.signal !== undefined) init.signal = options.signal;
-  const response = await fetcher(`/api/queries/${encodeURIComponent(validQueryId)}/pages`, init);
-  return parseResponse(response, QueryPageSchema);
+  return requestQueryResponse(fetcher, `/api/queries/${encodeURIComponent(validQueryId)}/pages`, init, QueryPageSchema);
 }
 
 export async function getQueryBounds(queryId: string, options: QueryPageFetchOptions): Promise<QueryBoundsResult> {
@@ -391,8 +410,12 @@ export async function getQueryBounds(queryId: string, options: QueryPageFetchOpt
     headers: { "X-HIFLD-Query-Token": token },
   };
   if (options.signal !== undefined) init.signal = options.signal;
-  const response = await fetcher(`/api/queries/${encodeURIComponent(validQueryId)}/bounds`, init);
-  return parseResponse(response, QueryBoundsResultSchema);
+  return requestQueryResponse(
+    fetcher,
+    `/api/queries/${encodeURIComponent(validQueryId)}/bounds`,
+    init,
+    QueryBoundsResultSchema,
+  );
 }
 
 export const queryPage = getQueryPage;
