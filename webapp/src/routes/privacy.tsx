@@ -1,12 +1,27 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { PEDP_PRIVACY_URL } from "@/lib/privacy";
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { analyticsDisabled, PEDP_PRIVACY_URL } from "@/lib/privacy";
 
 export const Route = createFileRoute("/privacy")({
   head: () => ({ meta: [{ title: "Privacy & analytics | HIFLD Next" }] }),
   component: Privacy,
 });
 
-function Privacy() {
+export function Privacy() {
+  const [disabled, setDisabled] = useState(false);
+  const [privacySignal, setPrivacySignal] = useState(false);
+  useEffect(() => {
+    setDisabled(analyticsDisabled());
+    setPrivacySignal(navigator.doNotTrack === "1" || Reflect.get(navigator, "globalPrivacyControl") === true);
+  }, []);
+  function toggleAnalytics() {
+    const next = !disabled;
+    // biome-ignore lint/suspicious/noDocumentCookie: This preference must be readable by the server and supported across browsers.
+    document.cookie = `hifld_analytics=${next ? "off" : ""}; Path=/; SameSite=Lax; Max-Age=${next ? 31536000 : 0}${window.location.protocol === "https:" ? "; Secure" : ""}`;
+    setDisabled(next || navigator.doNotTrack === "1" || Reflect.get(navigator, "globalPrivacyControl") === true);
+  }
+
   return (
     <article className="mx-auto w-full max-w-3xl space-y-6 px-6 py-12 text-base leading-relaxed">
       <h1 className="text-3xl font-semibold">Privacy &amp; analytics</h1>
@@ -39,10 +54,13 @@ function Privacy() {
         estimates, and a returning visitor may be counted again on another day.
       </p>
       <p>
-        Use “Turn off analytics” in the footer to object. This saves only your preference in a cookie for one year; it
-        is not a visitor identifier. We also honor Do Not Track and Global Privacy Control. Browser privacy settings may
-        clear your preference. Consented feedback remains available when analytics are off.
+        Use “Turn off analytics” below to object. This saves only your preference in a cookie for one year; it is not a
+        visitor identifier. We also honor Do Not Track and Global Privacy Control. Browser privacy settings may clear
+        your preference. Consented feedback remains available when analytics are off.
       </p>
+      <Button type="button" onClick={toggleAnalytics} disabled={privacySignal} variant="outline">
+        {privacySignal ? "Analytics disabled by browser" : disabled ? "Turn on analytics" : "Turn off analytics"}
+      </Button>
       <h2 className="text-xl font-semibold">Downloads and agent access</h2>
       <p>
         We measure download clicks, browser handoffs, and confirmed completions separately. A handoff is not proof a

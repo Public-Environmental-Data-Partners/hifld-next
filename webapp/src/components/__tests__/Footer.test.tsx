@@ -18,13 +18,8 @@ describe("Footer", () => {
   });
 });
 
-it("links privacy information and remembers an explicit analytics opt-out", async () => {
- const {fireEvent} = await import("@testing-library/react");
- render(<Footer />);
- expect(screen.getByRole("link", {name:"Privacy & analytics"})).toHaveAttribute("href", "/privacy");
- fireEvent.click(screen.getByRole("button", {name:"Turn off analytics"}));
- expect(document.cookie).toContain("hifld_analytics=off");
- expect(screen.getByRole("button", {name:"Turn on analytics"})).toBeInTheDocument();
- fireEvent.click(screen.getByRole("button", {name:"Turn on analytics"}));
- expect(document.cookie).not.toContain("hifld_analytics=off");
+it("links to privacy settings without an analytics button in the footer", () => {
+  render(<Footer />);
+  expect(screen.getByRole("link", {name:"Privacy", exact:true})).toHaveAttribute("href", "/privacy");
+  expect(screen.queryByRole("button", {name:/analytics/i})).not.toBeInTheDocument();
 });

@@ -11,6 +11,16 @@ CATALOG_SQLITE_URL=http://127.0.0.1:8333/published/_catalog/catalog.sqlite npm r
 
 The webapp reads a published SQLite catalog and serves its STAC metadata through same-origin `/api/*` routes. ZIP downloads redirect directly to published storage assets.
 
+For a local preview of the published catalog, set both of these values (for example in a local, ignored `.env.local`):
+
+```dotenv
+CATALOG_RELEASE_POINTER_URL=https://hifld.publicenvirodata.org/storage/_catalog/current.json
+CATALOG_STORAGE_LOCATIONS_JSON={"gcs-hifld-next-datasets-prod":{"type":"gcs","base_url":"https://storage.googleapis.com","bucket":"hifld-next-datasets-prod"}}
+```
+
+The pointer must use the same public origin as the STAC metadata links. The storage registry must match the catalog’s storage slugs; leaving it out hides file sources even when catalog health is ready. For a built preview, run `node --env-file=.env.local .output/server/index.mjs`; set `NITRO_HOST=127.0.0.1`, `NITRO_PORT=3099`, `WEBAPP_PUBLIC_ORIGIN=http://127.0.0.1:3099`, and an empty `PUBLIC_POSTHOG_KEY` in that file to use the local preview without production analytics.
+
+
 ## Production Configuration
 
 Production runs on GKE behind the external Application Load Balancer. Configure a published catalog release pointer:
@@ -129,7 +139,7 @@ npm run build
 
 ### Privacy and analytics
 
-Browser analytics use `cookieless_mode: "always"`, memory-only persistence and no person profiles. Replay, heatmaps, automatic clicks and unsolicited performance/error capture are disabled. Visitor estimates, device/referral summaries, explicit usage events, and the download lifecycle remain available. Dataset search terms are retained to identify unmet dataset demand, including zero-result searches. Terms are normalized for case/spacing and omitted when over 200 characters or matching obvious email, URL, phone, precise-coordinate or common street-address patterns. This is best-effort filtering, not anonymization: names and unusual formats may pass and legitimate queries may be omitted. Omitted text is marked by `query_suppressed: true`; result counts remain available. Query text is only allowed on `dataset_search`, not copied into other events or URLs. URL queries/fragments are removed. DNT, GPC and the footer opt-out are honored. The only new preference cookie is `hifld_analytics=off`, written on an explicit opt-out, with a one-year lifetime.
+Browser analytics use `cookieless_mode: "always"`, memory-only persistence and no person profiles. Replay, heatmaps, automatic clicks and unsolicited performance/error capture are disabled. Visitor estimates, device/referral summaries, explicit usage events, and the download lifecycle remain available. Dataset search terms are retained to identify unmet dataset demand, including zero-result searches. Terms are normalized for case/spacing and omitted when over 200 characters or matching obvious email, URL, phone, precise-coordinate or common street-address patterns. This is best-effort filtering, not anonymization: names and unusual formats may pass and legitimate queries may be omitted. Omitted text is marked by `query_suppressed: true`; result counts remain available. Query text is only allowed on `dataset_search`, not copied into other events or URLs. URL queries/fragments are removed. DNT, GPC and the privacy-page opt-out are honored. The only new preference cookie is `hifld_analytics=off`, written on an explicit opt-out, with a one-year lifetime.
 
 Cookieless visitor IDs are derived by PostHog from the request IP, user agent, host and calendar day. They are estimates: monthly counts are not comparable to persistent-ID monthly visitors. Do not sum daily uniques and describe them as unique people across a month. Stateless cookieless ingestion must be enabled in **Project settings → Web analytics** before deploying the SDK change, or events are discarded. This project was configured on 2026-11-03 with `cookieless_server_hash_mode: 1`, IP anonymization enabled, and replay/heatmaps disabled. Retain these settings after future project changes.
 
