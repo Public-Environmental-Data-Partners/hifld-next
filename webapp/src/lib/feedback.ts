@@ -7,8 +7,9 @@ const PROPERTY_KEY_MAX = 200;
 const PROPERTY_VALUE_MAX = 2000;
 
 const slug = z.string().trim().min(1).max(250);
+export const ReporterEmailSchema = z.email().max(254);
 export const FeedbackSchema = z.object({
-  reporter_email: z.email().max(254),
+  reporter_email: ReporterEmailSchema,
   comment: z.string().trim().min(1).max(5000),
   collection_slug: slug,
   dataset_slug: slug,

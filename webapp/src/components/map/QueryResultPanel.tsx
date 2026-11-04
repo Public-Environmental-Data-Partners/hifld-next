@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trackDataTable } from "@/lib/analytics";
+import { currentDatasetContext } from "@/lib/interaction-analytics";
 import type { QueryCell } from "@/lib/query-api";
 import { MapDataTableColumnHeader } from "./MapDataTableColumnHeader";
 import type { QueryResultState } from "./queryResults";
@@ -25,7 +26,7 @@ export function QueryResultPanel({
 }: QueryResultPanelProps) {
   const { page } = result;
   useEffect(() => {
-    trackDataTable();
+    trackDataTable("query_results", { collectionSlug: currentDatasetContext().collection_slug });
   }, []);
   const rows = useMemo<SelectedFeatureTableRow[]>(
     () =>

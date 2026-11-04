@@ -8,7 +8,8 @@ const { submitDatasetQualityFeedback } = vi.hoisted(() => ({
   submitDatasetQualityFeedback: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/lib/feedback", () => ({
+vi.mock("@/lib/feedback", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/feedback")>()),
   submitDatasetQualityFeedback: (input: DatasetQualityFeedbackInput) =>
     submitDatasetQualityFeedback(input),
 }));
@@ -68,4 +69,18 @@ it("keeps the report editable when delivery fails", async () => {
  expect(await screen.findByRole("alert")).toHaveTextContent("could not be delivered");
  expect(screen.getByLabelText("Comment")).toHaveValue("Missing facility");
  expect(screen.getByRole("button",{name:"Submit feedback"})).toBeEnabled();
+});
+
+it.each(["jörg@example.de", "user.@example.com", "a@b.c"])("shows the inline email error for %s without a delivery attempt", async (email) => {
+ submitDatasetQualityFeedback.mockClear();
+ const user = userEvent.setup();
+ render(<DataQualityFeedbackDialog context={{collectionSlug:"hifld",datasetSlug:"hospitals",fileSlug:"hospitals"}} />);
+ await user.click(screen.getByRole("button",{name:"Report issue"}));
+ await user.type(screen.getByLabelText("Email"), email);
+ await user.type(screen.getByLabelText("Comment"), "Missing facility");
+ await user.click(screen.getByRole("checkbox"));
+ expect(screen.getByText("Enter a valid email address.")).toBeInTheDocument();
+ expect(screen.getByRole("button",{name:"Submit feedback"})).toBeDisabled();
+ expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+ expect(submitDatasetQualityFeedback).not.toHaveBeenCalled();
 });

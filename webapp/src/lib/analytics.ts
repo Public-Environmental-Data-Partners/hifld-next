@@ -458,16 +458,22 @@ export function trackMapViewer(datasetSlug: string, fileSlug: string, collection
 /**
  * Track data table opened
  */
-export function trackDataTable(datasetSlug?: string, fileSlug?: string, collectionSlug?: string) {
+export type DataTableKind = "query_results" | "parquet_preview" | "selected_features";
+
+export function trackDataTable(
+  tableKind: DataTableKind,
+  context: { collectionSlug?: string | undefined; datasetSlug?: string | undefined; fileSlug?: string | undefined },
+) {
   if (typeof window === "undefined" || analyticsDisabled()) return;
   if (!posthogInitialized) initPostHog();
   if (!posthogInitialized || typeof posthog.capture !== "function") return;
 
   try {
     posthog.capture("data_table_opened", {
-      dataset_slug: datasetSlug,
-      file_slug: fileSlug,
-      collection_slug: collectionSlug,
+      table_kind: tableKind,
+      collection_slug: context.collectionSlug,
+      dataset_slug: context.datasetSlug,
+      file_slug: context.fileSlug,
     });
   } catch (error) {
     console.error("Failed to track data table:", error);

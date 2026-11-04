@@ -12,7 +12,7 @@ it("counts table opens and metadata failures without URL or contents", async () 
   byteLengthFromUrl.mockRejectedValue(new Error("private signed URL"));
   render(<ParquetViewerPanel url="https://private.test?token=secret" fileName="file.parquet" onClose={() => {}} />);
   await waitFor(() => expect(trackUiFailure).toHaveBeenCalledWith("table", "load"));
-  expect(trackDataTable).toHaveBeenCalledWith("substations", "substations", "hifld");
+  expect(trackDataTable).toHaveBeenCalledWith("parquet_preview", {collectionSlug: "hifld", datasetSlug: "substations", fileSlug: "substations"});
   expect(JSON.stringify(trackUiFailure.mock.calls)).not.toMatch(/private|secret/);
 });
 it("reports lazy table rendering errors", async () => {

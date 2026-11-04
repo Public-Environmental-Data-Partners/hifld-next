@@ -1044,7 +1044,11 @@ export class FeatureTablePanel extends React.Component<FeatureTablePanelProps, F
       const key = JSON.stringify([feature.collectionSlug, feature.datasetSlug, feature.fileSlug]);
       if (this.trackedTableScopes.has(key)) continue;
       this.trackedTableScopes.add(key);
-      trackDataTable(feature.datasetSlug, feature.fileSlug, feature.collectionSlug);
+      trackDataTable("selected_features", {
+        collectionSlug: feature.collectionSlug,
+        datasetSlug: feature.datasetSlug,
+        fileSlug: feature.fileSlug,
+      });
     }
   }
 

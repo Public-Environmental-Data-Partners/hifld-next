@@ -517,7 +517,7 @@ interface DatasetSearchComboboxProps {
   query: string;
   selectedDataset: DatasetWithUrls | null;
   isLoading: boolean;
-  error: string | null;
+  error: boolean;
   currentDescriptors: SourceDescriptor[];
   collectionSlug: string;
   onQueryChange: (query: string) => void;
@@ -708,7 +708,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
   const [searchDraft, setSearchDraft] = useState("");
   const [datasetResults, setDatasetResults] = useState<DatasetWithUrls[]>([]);
   const [isDatasetSearchLoading, setIsDatasetSearchLoading] = useState(false);
-  const [datasetSearchError, setDatasetSearchError] = useState<string | null>(null);
+  const [datasetSearchError, setDatasetSearchError] = useState(false);
   const [selectedDataset, setSelectedDataset] = useState<DatasetWithUrls | null>(null);
   const [isResolvingSelectedDataset, setIsResolvingSelectedDataset] = useState(false);
   const [selectedFileSlug, setSelectedFileSlug] = useState<string | undefined>(undefined);
@@ -768,7 +768,7 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
     searchRequestIdRef.current = requestId;
     searchTimeoutRef.current = setTimeout(() => {
       setIsDatasetSearchLoading(true);
-      setDatasetSearchError(null);
+      setDatasetSearchError(false);
       void searchDatasetsForMapImport({
         collectionSlug: collection.slug,
         query: searchDraft,
@@ -777,11 +777,11 @@ export function MapWorkspace({ collection, initialLayers, initialLayerKey }: Map
           if (searchRequestIdRef.current !== requestId) return;
           setDatasetResults(response.items);
         })
-        .catch((error: Error) => {
+        .catch(() => {
           if (searchRequestIdRef.current !== requestId) return;
           setDatasetResults([]);
           trackUiFailure("search", "request");
-          setDatasetSearchError(error.message);
+          setDatasetSearchError(true);
         })
         .finally(() => {
           if (searchRequestIdRef.current !== requestId) return;

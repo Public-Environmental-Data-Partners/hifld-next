@@ -72,7 +72,11 @@ export function ParquetViewerPanel({ url, fileName, onClose }: ParquetViewerPane
   useEffect(() => {
     let isActive = true;
     const context = currentDatasetContext();
-    trackDataTable(context.dataset_slug, context.file_slug, context.collection_slug);
+    trackDataTable("parquet_preview", {
+      collectionSlug: context.collection_slug,
+      datasetSlug: context.dataset_slug,
+      fileSlug: context.file_slug,
+    });
     setIsLoading(true);
     setError(null);
     setDataFrame(null);

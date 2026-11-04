@@ -633,7 +633,7 @@ it("counts each catalog table once per panel without feature contents", () => {
   const props = {wasSelectionCapped: false, s2Level: 16, onS2LevelChange: () => {}, onClear: () => {}};
   const feature = selectedFeature("v1.0.0", {NAME: "private"});
   const {rerender} = render(<FeatureTablePanel {...props} features={[feature, feature]} />);
-  expect(trackDataTable).toHaveBeenCalledExactlyOnceWith("hospitals-3", "hospitals-3", "hifld");
+  expect(trackDataTable).toHaveBeenCalledExactlyOnceWith("selected_features", {collectionSlug: "hifld", datasetSlug: "hospitals-3", fileSlug: "hospitals-3"});
   rerender(<FeatureTablePanel {...props} features={[feature, selectedFeature("v1.1.0", {NAME: "private"})]} />);
   expect(trackDataTable).toHaveBeenCalledTimes(1);
 });

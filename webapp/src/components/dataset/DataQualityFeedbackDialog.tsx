@@ -12,7 +12,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import type { DatasetQualityFeedbackFeature } from "@/lib/analytics";
-import { submitDatasetQualityFeedback } from "@/lib/feedback";
+import { ReporterEmailSchema, submitDatasetQualityFeedback } from "@/lib/feedback";
 import { trackUiFailure } from "@/lib/interaction-analytics";
 import { FEEDBACK_CONSENT_VERSION } from "@/lib/privacy";
 
@@ -41,7 +41,7 @@ interface DataQualityFeedbackDialogState {
 }
 
 function isValidEmailAddress(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return ReporterEmailSchema.safeParse(email).success;
 }
 
 export class DataQualityFeedbackDialog extends React.Component<
