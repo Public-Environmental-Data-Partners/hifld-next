@@ -58,3 +58,8 @@ it.each([
  const response=await feedbackHandler(new Request("https://hifld.test/api/feedback",{method:"POST",headers:{origin:"https://hifld.test","content-type":"application/json"},body}));
  expect(response.status).not.toBe(400);
 });
+it("omits selected feature geometry from the request", async () => {
+ const body=JSON.parse(await sentBody({...input,feature:{...feature,geometry:{type:"Point",coordinates:"-77,38"}} as typeof feature}));
+ expect(body.feature).not.toHaveProperty("geometry");
+ expect(body.feature.properties).toEqual({name:"General"});
+});

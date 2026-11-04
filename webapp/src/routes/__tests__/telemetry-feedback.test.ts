@@ -36,3 +36,11 @@ it("accepts same-host HTTPS origins behind a TLS-terminating proxy", async () =>
 it("rejects stale consent wording", async () => {
  expect((await feedbackHandler(request("feedback", {...feedback,consent_version:"old"}))).status).toBe(400);
 });
+it("stores feature context without geometry", async () => {
+ const feature = {id:"layer:1",loadedLayerId:"layer",layerName:"Hospitals",collectionSlug:"hifld",datasetSlug:"hospitals",fileSlug:"hospitals",version:"v1",sourceLayerId:"hospitals",featureId:"1",centroid:{lng:-77,lat:38},properties:{name:"General"},geometry:{type:"Point",coordinates:[-77,38]}};
+ const req = new Request("https://data.test/api/feedback", {method:"POST", headers:{Origin:"https://data.test","Content-Type":"application/json"}, body:JSON.stringify({...feedback,feature})});
+ expect((await feedbackHandler(req)).status).toBe(201);
+ const stored = JSON.parse(String(captureServerEvent.mock.calls[0]?.[1]?.feature_json));
+ expect(stored).not.toHaveProperty("geometry");
+ expect(stored.properties).toEqual({name:"General"});
+});
