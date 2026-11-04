@@ -3,17 +3,16 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-import { trackUrlCopied } from "@/lib/analytics";
+import { trackUrlCopied, type UrlCopiedContext } from "@/lib/analytics";
 import { currentDatasetContext, trackUiFailure } from "@/lib/interaction-analytics";
 
 interface CopyButtonProps {
   value: string;
   label: string;
-  urlType?: "storage_uri" | "api_endpoint" | "duckdb_config";
-  format?: string;
+  analytics: UrlCopiedContext;
 }
 
-export function CopyButton({ value, label, urlType = "storage_uri", format }: CopyButtonProps) {
+export function CopyButton({ value, label, analytics }: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
 
   const [failed, setFailed] = useState(false);
@@ -24,7 +23,12 @@ export function CopyButton({ value, label, urlType = "storage_uri", format }: Co
       await navigator.clipboard.writeText(value);
       setCopied(true);
       const context = currentDatasetContext();
-      trackUrlCopied(urlType, { datasetSlug: context.dataset_slug, fileSlug: context.file_slug, format });
+      trackUrlCopied({
+        ...analytics,
+        collectionSlug: analytics.collectionSlug ?? context.collection_slug,
+        datasetSlug: analytics.datasetSlug ?? context.dataset_slug,
+        fileSlug: analytics.fileSlug ?? context.file_slug,
+      });
       setTimeout(() => setCopied(false), 2000);
     } catch {
       setCopied(false);

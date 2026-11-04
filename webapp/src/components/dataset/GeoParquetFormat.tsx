@@ -71,7 +71,11 @@ export function GeoParquetFormat({
                 </p>
               </div>
               <div className="flex shrink-0 gap-1">
-                <CopyButton value={storageUri} label="Copy" />
+                <CopyButton
+                  value={storageUri}
+                  label="Copy"
+                  analytics={{ urlType: "storage_uri", format: "geoparquet" }}
+                />
               </div>
             </div>
           </div>

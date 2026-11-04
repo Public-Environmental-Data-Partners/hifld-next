@@ -477,14 +477,17 @@ export function trackDataTable(datasetSlug?: string, fileSlug?: string, collecti
 /**
  * Track URL copied
  */
-export function trackUrlCopied(
-  urlType: "storage_uri" | "api_endpoint" | "duckdb_config",
-  properties?: {
-    format?: string | undefined;
-    datasetSlug?: string | undefined;
-    fileSlug?: string | undefined;
-  },
-) {
+export type CopiedUrlType = "download_url" | "storage_uri" | "api_endpoint" | "duckdb_config";
+
+export interface UrlCopiedContext {
+  urlType: CopiedUrlType;
+  format: string;
+  collectionSlug?: string | undefined;
+  datasetSlug?: string | undefined;
+  fileSlug?: string | undefined;
+}
+
+export function trackUrlCopied({ urlType, format, collectionSlug, datasetSlug, fileSlug }: UrlCopiedContext) {
   if (typeof window === "undefined" || analyticsDisabled()) return;
   if (!posthogInitialized) initPostHog();
   if (!posthogInitialized || typeof posthog.capture !== "function") return;
@@ -492,9 +495,10 @@ export function trackUrlCopied(
   try {
     posthog.capture("url_copied", {
       url_type: urlType,
-      format: properties?.format,
-      dataset_slug: properties?.datasetSlug,
-      file_slug: properties?.fileSlug,
+      format,
+      collection_slug: collectionSlug,
+      dataset_slug: datasetSlug,
+      file_slug: fileSlug,
     });
   } catch (error) {
     console.error("Failed to track URL copy:", error);

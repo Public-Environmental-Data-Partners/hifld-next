@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { FeedbackSchema } from "@/lib/feedback";
+import { FEEDBACK_MAX_BODY_BYTES, FeedbackSchema } from "@/lib/feedback";
 import { readBoundedRequestBody } from "@/lib/query-api";
 import { captureServerEvent } from "@/lib/server-analytics";
 
@@ -13,7 +13,7 @@ export async function feedbackHandler(request: Request): Promise<Response> {
   let payload: ReturnType<typeof FeedbackSchema.parse>;
   try {
     if (!request.headers.get("content-type")?.startsWith("application/json")) throw new Error("Invalid content type");
-    const body = await readBoundedRequestBody(request, 32_768);
+    const body = await readBoundedRequestBody(request, FEEDBACK_MAX_BODY_BYTES);
     if (body === null) throw new Error("Request too large");
     payload = FeedbackSchema.parse(JSON.parse(body));
   } catch {
