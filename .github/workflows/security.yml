@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22.23.4
       - run: npm audit --audit-level=high
@@ -32,8 +32,8 @@ jobs:
       run:
         working-directory: ${{ matrix.project }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
           enable-cache: true
@@ -49,8 +49,8 @@ jobs:
       run:
         working-directory: feature-server
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
           enable-cache: true
@@ -86,10 +86,10 @@ jobs:
             context: ops/clickhouse
             file: ops/clickhouse/Dockerfile
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
       - name: Build current image with refreshed base
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
@@ -99,7 +99,7 @@ jobs:
           tags: hifld-security:${{ matrix.name }}
       - name: Scan image packages
         id: scan
-        uses: anchore/scan-action@8576240a41341d866dbd7ebc72cd9fc0ef023f54 # v7.4.2
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           image: hifld-security:${{ matrix.name }}
           fail-build: false
@@ -107,18 +107,18 @@ jobs:
           output-format: sarif
       - name: Upload security findings
         if: ${{ !cancelled() && steps.scan.outputs.sarif != '' }}
-        uses: github/codeql-action/upload-sarif@793b778da9c9275a0f276522b27cb5fc14bba279 # v4
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
           category: container/${{ matrix.name }}
       - name: Preserve scan report
         if: ${{ !cancelled() && steps.scan.outputs.sarif != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: security-${{ matrix.name }}
           path: ${{ steps.scan.outputs.sarif }}
       - name: Block fixable high and critical vulnerabilities
-        uses: anchore/scan-action@8576240a41341d866dbd7ebc72cd9fc0ef023f54 # v7.4.2
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           image: hifld-security:${{ matrix.name }}
           fail-build: true
